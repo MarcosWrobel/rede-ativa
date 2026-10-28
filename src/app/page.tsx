@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { 
@@ -19,6 +20,9 @@ export const revalidate = 30; // Cache dashboard metrics for 30s
 
 export default async function DashboardPage() {
   const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
 
   // Load quick metrics from DB
   const [
