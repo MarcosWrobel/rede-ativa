@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import FaltasClient from "./FaltasClient";
 import { redirect } from "next/navigation";
 
-export const revalidate = 60; // Cache for 60 seconds
+export const dynamic = "force-dynamic";
 
 export default async function FaltasPage() {
   const session = await auth();

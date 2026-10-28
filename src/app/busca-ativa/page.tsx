@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import BuscaAtivaClient from "./BuscaAtivaClient";
 import { redirect } from "next/navigation";
 
-export const revalidate = 0; // Dynamic on-demand
+export const dynamic = "force-dynamic";
 
 export default async function BuscaAtivaPage() {
   const session = await auth();
