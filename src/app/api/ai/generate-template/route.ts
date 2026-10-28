@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { GoogleGenAI } from "@google/genai";
 
 export async function POST(req: Request) {
   try {
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error: "Chave de API do Google Gemini não encontrada.",
+          error: "Chave GEMINI_API_KEY não configurada.",
           missingApiKey: true,
           helpUrl: "https://aistudio.google.com/app/apikey",
         },
@@ -37,20 +38,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // Higienizar chave contra aspas e espaços
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
+    const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
-    const systemInstruction = `Você é um assistente pedagógico do Colégio Estadual Leopoldina B. Pedroso (Paraná).
-Sua missão é transformar a descrição da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para WhatsApp.
+    const systemInstruction = `Você é um assistente pedagógico oficial do Colégio Estadual Leopoldina B. Pedroso (Paraná).
+Sua missão é transformar a solicitação da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para envio via WhatsApp aos pais ou responsáveis.
 
-Regras estritas:
-1. "title": Título curto em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "SOLICITAÇÃO DE ATESTADO").
-2. "prefixText": Texto antes do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}". Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
-3. "suffixText": Texto após o aluno. Polido, acolhedor e terminando com:
+Regras obrigatórias:
+1. "title": Título curto e objetivo em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "SOLICITAÇÃO DE ATESTADO", "CONVOCAÇÃO DE RESPONSÁVEL").
+2. "prefixText": Texto que vem antes da identificação do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}" (que o sistema converte automaticamente em Bom dia!, Boa tarde! ou Boa noite!). Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
+3. "suffixText": Texto que vem depois da identificação do aluno. Texto polido, acolhedor e convidando à parceria da família, finalizando com:
 "Atenciosamente,\\nEquipe Pedagógica — Colégio Leopoldina"
-4. "isAbsenceRelated": booleano (true apenas para faltas/infrequência; false para avisos, notas, convocações, eventos).
+4. "isAbsenceRelated": booleano (true apenas se o assunto for faltas/infrequência/ausência; false para notas, reuniões, convocações, uniforme ou avisos gerais).
 
-Responda OBRIGATORIAMENTE em JSON válido:
+Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
 {
   "title": string,
   "prefixText": string,
@@ -58,75 +59,62 @@ Responda OBRIGATORIAMENTE em JSON válido:
   "isAbsenceRelated": boolean
 }`;
 
-    // Modelos oficiais disponíveis em todas as contas do Google AI Studio
-    const models = ["gemini-1.5-flash", "gemini-2.0-flash"];
+    let responseText: string | null = null;
     let lastError: any = null;
-    let data: any = null;
 
-    for (const model of models) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout max
+    // 1. Tentar primeiro via Interactions API (Recomendada pelo Google) com gemini-3.8-flash
+    try {
+      const interaction = await ai.interactions.create({
+        model: "gemini-3.8-flash",
+        input: `Crie um modelo de mensagem para: "${prompt.trim()}". Responda estritamente no formato JSON especificado.`,
+        system_instruction: systemInstruction,
+        response_format: {
+          type: "text",
+          mime_type: "application/json",
+        },
+      });
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanApiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal,
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    {
-                      text: `Crie um modelo de mensagem para: "${prompt.trim()}". Siga estritamente as regras pedagógicas e responda apenas o JSON solicitado.`,
-                    },
-                  ],
-                },
-              ],
-              generationConfig: {
-                responseMimeType: "application/json",
-                temperature: 0.2,
-              },
-              systemInstruction: {
-                parts: [{ text: systemInstruction }],
-              },
-            }),
+      if (interaction?.output_text) {
+        responseText = interaction.output_text;
+      }
+    } catch (err: any) {
+      lastError = err;
+      console.warn("[GEMINI Interactions API] Falhou, tentando fallback generateContent:", err?.message || err);
+    }
+
+    // 2. Fallback via generateContent com gemini-3.8-flash ou gemini-3.5-flash-lite
+    if (!responseText) {
+      const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-1.5-flash"];
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: `Crie um modelo de mensagem escolar para a seguinte situação: "${prompt.trim()}". Responda estritamente em JSON.`,
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              temperature: 0.2,
+            },
+          });
+
+          if (response?.text) {
+            responseText = response.text;
+            break;
           }
-        );
-
-        clearTimeout(timeoutId);
-
-        const json = await res.json();
-
-        if (!res.ok) {
-          const apiMsg = json?.error?.message || `Erro HTTP ${res.status}`;
-          lastError = new Error(apiMsg);
-          console.warn(`[GEMINI REST] Modelo ${model} falhou: ${apiMsg}`);
-          continue;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`[GEMINI generateContent] Modelo ${model} falhou:`, err?.message || err);
         }
-
-        const candidateText =
-          json?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (candidateText) {
-          data = candidateText;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[GEMINI REST] Erro ao chamar ${model}:`, err?.message || err);
       }
     }
 
-    if (!data) {
-      const msg = lastError?.message || "Não foi possível obter resposta da IA do Google.";
-      return NextResponse.json({ error: msg }, { status: 500 });
+    if (!responseText) {
+      const errorMsg = lastError?.message || "Não foi possível obter resposta da IA do Google.";
+      return NextResponse.json({ error: errorMsg }, { status: 500 });
     }
 
-    // Limpar delimitadores markdown
-    const cleaned = data
+    // Limpar possíveis delimitadores markdown
+    const cleaned = responseText
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/```$/i, "")
@@ -148,9 +136,9 @@ Responda OBRIGATORIAMENTE em JSON válido:
       },
     });
   } catch (error: any) {
-    console.error("Erro na API de IA:", error);
+    console.error("Erro geral na rota de IA:", error);
     return NextResponse.json(
-      { error: error?.message || "Erro interno ao processar requisição com a IA." },
+      { error: error?.message || "Erro interno ao processar modelo com IA." },
       { status: 500 }
     );
   }
