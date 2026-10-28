@@ -14,7 +14,12 @@ import {
   Sunset,
   Moon,
   Info,
-  X
+  X,
+  Wand2,
+  Loader2,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { formatMessage, SchoolShift } from "@/lib/messageFormatter";
 
@@ -38,6 +43,14 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const [lastFocusedField, setLastFocusedField] = useState<"prefix" | "suffix">("prefix");
   const [previewShift, setPreviewShift] = useState<SchoolShift>("TARDE");
 
+  // AI Generator state
+  const [isAiCardOpen, setIsAiCardOpen] = useState(true);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiSuccess, setAiSuccess] = useState("");
+  const [missingApiKey, setMissingApiKey] = useState(false);
+
   const openCreateModal = () => {
     setEditingTemplate(null);
     setFormTitle("");
@@ -46,6 +59,11 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setFormSuffix("Atenciosamente,\nEquipe Pedagógica — Colégio Leopoldina");
     setFormIsAbsence(false);
     setFormError("");
+    setAiPrompt("");
+    setAiError("");
+    setAiSuccess("");
+    setMissingApiKey(false);
+    setIsAiCardOpen(true);
     setLastFocusedField("prefix");
     setIsModalOpen(true);
   };
@@ -58,6 +76,11 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setFormSuffix(t.suffixText);
     setFormIsAbsence(t.isAbsenceRelated);
     setFormError("");
+    setAiPrompt("");
+    setAiError("");
+    setAiSuccess("");
+    setMissingApiKey(false);
+    setIsAiCardOpen(false);
     setLastFocusedField("prefix");
     setIsModalOpen(true);
   };
@@ -67,6 +90,47 @@ export default function ModelosClient({ initialTemplates }: Props) {
       setFormPrefix((prev) => (prev ? `${prev} ${tag}` : tag));
     } else {
       setFormSuffix((prev) => (prev ? `${prev} ${tag}` : tag));
+    }
+  };
+
+  const handleGenerateWithAI = async (promptToUse?: string) => {
+    const text = (promptToUse || aiPrompt).trim();
+    if (!text) {
+      setAiError("Por favor, digite uma descrição para a IA gerar o modelo.");
+      return;
+    }
+
+    setIsGeneratingAI(true);
+    setAiError("");
+    setAiSuccess("");
+    setMissingApiKey(false);
+
+    try {
+      const res = await fetch("/api/ai/generate-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.missingApiKey) {
+          setMissingApiKey(true);
+        }
+        throw new Error(data.error || "Erro ao gerar modelo com IA");
+      }
+
+      if (data.template) {
+        setFormTitle(data.template.title);
+        setFormPrefix(data.template.prefixText);
+        setFormSuffix(data.template.suffixText);
+        setFormIsAbsence(Boolean(data.template.isAbsenceRelated));
+        setAiSuccess("✨ Modelo preenchido automaticamente com IA! Revise os campos abaixo.");
+      }
+    } catch (err: any) {
+      setAiError(err.message || "Erro de conexão com o serviço de IA.");
+    } finally {
+      setIsGeneratingAI(false);
     }
   };
 
@@ -145,10 +209,10 @@ export default function ModelosClient({ initialTemplates }: Props) {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <FileText className="w-6 h-6 text-sky-600" />
-            <span>Modelos de Mensagem Unificados</span>
+            <span>Modelos de Mensagem Padronizados</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Modelos inteligentes sem duplicidade, com adaptação automática ao período (manhã, tarde e noite) e aos dados do aluno.
+            Modelos inteligentes com suporte a criação via <strong>Inteligência Artificial (Google Gemini)</strong> e adaptação automática por período.
           </p>
         </div>
 
@@ -157,19 +221,18 @@ export default function ModelosClient({ initialTemplates }: Props) {
           onClick={openCreateModal}
           className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
         >
-          <Plus className="w-4 h-4" />
-          <span>Novo Modelo de Mensagem</span>
+          <Sparkles className="w-4 h-4 text-amber-300" />
+          <span>Criar Novo Modelo (com IA)</span>
         </button>
       </div>
 
       {/* Info Banner */}
-      <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 text-xs text-sky-900 flex items-start space-x-3">
-        <Sparkles className="w-5 h-5 text-sky-600 flex-shrink-0 mt-0.5" />
+      <div className="bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-xl p-4 text-xs text-slate-800 flex items-start space-x-3 shadow-2xs">
+        <Sparkles className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <p className="font-bold">Como funciona a adaptação por período?</p>
-          <p className="text-sky-800 leading-relaxed">
-            Você não precisa mais criar uma mensagem para o Fundamental, outra para o Médio e outra para o Noturno.
-            Insira a tag <code className="bg-sky-100 text-sky-900 font-mono px-1 py-0.5 rounded font-bold">{"{saudacao}"}</code> e o sistema aplicará automaticamente <strong>Bom dia!</strong>, <strong>Boa tarde!</strong> ou <strong>Boa noite!</strong> dependendo da turma do aluno ou horário de envio.
+          <p className="font-bold text-slate-900">Novo: Criador Inteligente de Modelos com IA</p>
+          <p className="text-slate-600 leading-relaxed">
+            Ao criar um modelo, você pode simplesmente descrever em linguagem comum o que deseja avisar (ex: <em>&ldquo;reunião de pais quinta às 18h30&rdquo;</em>). A IA do <strong>Google Gemini</strong> redige a mensagem com linguagem pedagógica acolhedora e formatação pronta para o WhatsApp.
           </p>
         </div>
       </div>
@@ -238,6 +301,128 @@ export default function ModelosClient({ initialTemplates }: Props) {
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* AI Assistant Generator Card */}
+            <div className="bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-sky-50/80 border border-indigo-200 rounded-xl p-4 shadow-xs space-y-3">
+              <div 
+                className="flex items-center justify-between cursor-pointer select-none"
+                onClick={() => setIsAiCardOpen(!isAiCardOpen)}
+              >
+                <div className="flex items-center space-x-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                    <Wand2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-indigo-950 text-xs block">
+                      Criador Inteligente com IA (Google Gemini)
+                    </span>
+                    <span className="text-[11px] text-indigo-700">
+                      Descreva a mensagem em linguagem natural e a IA redige para você
+                    </span>
+                  </div>
+                </div>
+                <button type="button" className="text-indigo-600 hover:text-indigo-800 p-1">
+                  {isAiCardOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {isAiCardOpen && (
+                <div className="space-y-3 pt-2 border-t border-indigo-100 text-xs">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleGenerateWithAI();
+                        }
+                      }}
+                      placeholder="Ex: Aviso pedindo atestado médico após 2 dias de faltas consecutivas..."
+                      className="flex-1 p-2.5 bg-white border border-indigo-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleGenerateWithAI()}
+                      disabled={isGeneratingAI}
+                      className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition flex items-center justify-center space-x-1.5 shadow-xs disabled:opacity-50"
+                    >
+                      {isGeneratingAI ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Redigindo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <span>Gerar com IA</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Quick Ideas Chips */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider block">
+                      Ideias rápidas para testar:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        "Aviso de entrega de boletins na quinta às 18h30",
+                        "Solicitação de atestado médico para justificar ausências",
+                        "Notificação preventiva de faltas antes do Conselho Tutelar",
+                        "Recado sobre uso obrigatório do uniforme escolar",
+                        "Convite para a Mostra Cultural no sábado de manhã",
+                      ].map((idea) => (
+                        <button
+                          key={idea}
+                          type="button"
+                          onClick={() => {
+                            setAiPrompt(idea);
+                            handleGenerateWithAI(idea);
+                          }}
+                          className="px-2 py-1 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-900 text-[10px] font-medium transition shadow-2xs"
+                        >
+                          + {idea}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Feedback Messages */}
+                  {aiSuccess && (
+                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+                      <Check className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                      <span>{aiSuccess}</span>
+                    </div>
+                  )}
+
+                  {aiError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs space-y-1">
+                      <div className="flex items-center space-x-2 font-bold">
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                        <span>{aiError}</span>
+                      </div>
+                      {missingApiKey && (
+                        <p className="text-[11px] text-rose-600 pl-6">
+                          Para ativar a IA gratuitamente, gere sua chave no{" "}
+                          <a
+                            href="https://aistudio.google.com/app/apikey"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline font-bold inline-flex items-center hover:text-rose-900"
+                          >
+                            Google AI Studio <ExternalLink className="w-3 h-3 ml-0.5" />
+                          </a>{" "}
+                          e adicione como <code>GEMINI_API_KEY</code> na Vercel.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {formError && (
