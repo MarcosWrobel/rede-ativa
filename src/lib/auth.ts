@@ -84,17 +84,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
       // Upsert user in db
       try {
+        const isAdmin = email === "marcos.wrobel@escola.pr.gov.br" || email.includes("marcos") || (process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.toLowerCase().trim());
         const dbUser = await prisma.user.upsert({
           where: { email },
           update: {
             name: user.name || email.split("@")[0],
             image: user.image,
+            ...(isAdmin ? { role: "ADMIN" } : {}),
           },
           create: {
             email,
             name: user.name || email.split("@")[0],
             image: user.image,
-            role: email.includes("marcos") ? "ADMIN" : "PEDAGOGA",
+            role: isAdmin ? "ADMIN" : "PEDAGOGA",
           },
         });
 
@@ -102,7 +104,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           action: "USER_LOGIN",
           entityType: "User",
           entityId: dbUser.id,
-          details: { provider: account?.provider || "credentials", email },
+          details: { provider: account?.provider || "credentials", email, role: dbUser.role },
           user: { id: dbUser.id, name: dbUser.name, email: dbUser.email },
         });
       } catch (err) {
@@ -112,14 +114,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true;
     },
     async session({ session, token }) {
-      if (session.user && token.sub) {
+      if (session.user) {
         try {
+          const email = (session.user.email || "").toLowerCase().trim();
+          const isAdmin = email === "marcos.wrobel@escola.pr.gov.br" || email.includes("marcos") || (process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.toLowerCase().trim());
           const dbUser = await prisma.user.findUnique({
-            where: { email: session.user.email! },
+            where: { email },
           });
           if (dbUser) {
             (session.user as any).id = dbUser.id;
-            (session.user as any).role = dbUser.role;
+            (session.user as any).role = isAdmin ? "ADMIN" : dbUser.role;
+          } else if (isAdmin) {
+            (session.user as any).role = "ADMIN";
           }
         } catch (e) {
           console.error("Session user lookup error:", e);

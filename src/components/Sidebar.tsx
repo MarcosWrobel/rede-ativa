@@ -47,6 +47,12 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
     localStorage.setItem("leopoldina_sidebar_collapsed", String(nextState));
   };
 
+  const userEmail = (currentUser?.email || "").toLowerCase().trim();
+  const isAdmin =
+    currentUser?.role === "ADMIN" ||
+    userEmail === "marcos.wrobel@escola.pr.gov.br" ||
+    userEmail.includes("marcos");
+
   const navLinks = [
     { href: "/busca-ativa", label: "Painel de Envio", icon: Send },
     { href: "/historico", label: "Histórico de Envios", icon: History },
@@ -54,7 +60,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
     { href: "/relatorios", label: "Relatórios & Gráficos", icon: BarChart3 },
     { href: "/alunos", label: "Alunos & Turmas", icon: Users },
     { href: "/modelos", label: "Modelos de Mensagem", icon: FileText },
-    { href: "/auditoria", label: "Trilha de Auditoria", icon: ShieldCheck },
+    ...(isAdmin ? [{ href: "/auditoria", label: "Trilha de Auditoria", icon: ShieldCheck, badge: "ADM" }] : []),
   ];
 
   if (pathname === "/login") return null;
@@ -137,7 +143,14 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
                 />
 
                 {(!collapsed || mobileOpen) && (
-                  <span className="ml-3 truncate">{item.label}</span>
+                  <>
+                    <span className="ml-3 truncate">{item.label}</span>
+                    {"badge" in item && (
+                      <span className="ml-auto text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        {item.badge}
+                      </span>
+                    )}
+                  </>
                 )}
 
                 {/* Floating Tooltip when collapsed */}
@@ -161,8 +174,15 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
                 </div>
                 {(!collapsed || mobileOpen) && (
                   <div className="overflow-hidden">
-                    <div className="text-xs font-bold text-white truncate">
-                      {currentUser.name}
+                    <div className="flex items-center space-x-1.5">
+                      <span className="text-xs font-bold text-white truncate">
+                        {currentUser.name}
+                      </span>
+                      {isAdmin && (
+                        <span className="text-[9px] font-extrabold px-1 rounded bg-amber-400 text-slate-900 leading-tight">
+                          ADM
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-sky-400 font-mono truncate">
                       {currentUser.email}

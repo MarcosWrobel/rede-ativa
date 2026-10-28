@@ -13,7 +13,12 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  X,
+  Check
 } from "lucide-react";
 
 interface Props {
@@ -22,6 +27,7 @@ interface Props {
   currentUser: {
     name: string;
     email: string;
+    role: string;
   };
 }
 
@@ -33,14 +39,38 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
   const [selectedPedagoga, setSelectedPedagoga] = useState("");
   const [selectedReplyFilter, setSelectedReplyFilter] = useState("TODOS");
   
-  // Note modal state
+  // Note modal state (regular pedagoga return notes)
   const [activeModalLog, setActiveModalLog] = useState<any>(null);
   const [noteText, setNoteText] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Admin: Edit modal state
+  const [activeEditLog, setActiveEditLog] = useState<any>(null);
+  const [editForm, setEditForm] = useState({
+    reasonTitle: "",
+    phoneUsed: "",
+    sentByName: "",
+    sentAt: "",
+    guardianReplied: false,
+    replyNotes: "",
+    messageContent: "",
+  });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  // Admin: Delete modal state
+  const [activeDeleteLog, setActiveDeleteLog] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
   // Pagination
   const [page, setPage] = useState(1);
   const pageSize = 30;
+
+  const isAdmin =
+    currentUser.role === "ADMIN" ||
+    currentUser.email.toLowerCase().trim() === "marcos.wrobel@escola.pr.gov.br" ||
+    currentUser.email.toLowerCase().includes("marcos");
 
   // Extract distinct pedagogas from logs
   const pedagogas = useMemo(() => {
@@ -57,7 +87,8 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
       const matchSearch =
         !searchTerm ||
         l.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        l.reasonTitle.toLowerCase().includes(searchTerm.toLowerCase());
+        l.reasonTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (l.phoneUsed && l.phoneUsed.includes(searchTerm));
 
       const matchSegment =
         selectedSegment === "TODOS" || l.student.classGroup.segment === selectedSegment;
@@ -137,6 +168,89 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
     }
   };
 
+  // Open Edit Modal (Admin)
+  const handleOpenEditModal = (log: any) => {
+    setActiveEditLog(log);
+    const dt = new Date(log.sentAt);
+    // Format YYYY-MM-DDTHH:mm
+    const tzOffset = dt.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(dt.getTime() - tzOffset).toISOString().slice(0, 16);
+
+    setEditForm({
+      reasonTitle: log.reasonTitle || "",
+      phoneUsed: log.phoneUsed || "",
+      sentByName: log.sentByName || "",
+      sentAt: localISOTime,
+      guardianReplied: Boolean(log.guardianReplied),
+      replyNotes: log.replyNotes || "",
+      messageContent: log.messageContent || "",
+    });
+    setEditError("");
+  };
+
+  // Save Edit (Admin)
+  const handleSaveEdit = async () => {
+    if (!activeEditLog) return;
+    setIsSavingEdit(true);
+    setEditError("");
+
+    try {
+      const res = await fetch("/api/messages/manage", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: activeEditLog.id,
+          reasonTitle: editForm.reasonTitle,
+          phoneUsed: editForm.phoneUsed,
+          sentByName: editForm.sentByName,
+          sentAt: editForm.sentAt,
+          guardianReplied: editForm.guardianReplied,
+          replyNotes: editForm.replyNotes,
+          messageContent: editForm.messageContent,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao salvar alterações no registro");
+      }
+
+      setLogs((prev) =>
+        prev.map((item) => (item.id === activeEditLog.id ? data.updated : item))
+      );
+      setActiveEditLog(null);
+    } catch (err: any) {
+      setEditError(err.message || "Erro desconhecido ao atualizar");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // Confirm Delete (Admin)
+  const handleConfirmDelete = async () => {
+    if (!activeDeleteLog) return;
+    setIsDeleting(true);
+    setDeleteError("");
+
+    try {
+      const res = await fetch(`/api/messages/manage?id=${activeDeleteLog.id}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao excluir registro");
+      }
+
+      setLogs((prev) => prev.filter((item) => item.id !== activeDeleteLog.id));
+      setActiveDeleteLog(null);
+    } catch (err: any) {
+      setDeleteError(err.message || "Erro desconhecido ao excluir");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Title */}
@@ -145,9 +259,15 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <History className="w-6 h-6 text-sky-600" />
             <span>Histórico de Envios & Retorno dos Pais</span>
+            {isAdmin && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-wider">
+                Modo Administrador
+              </span>
+            )}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Controle de todos os acionamentos com registro de resposta dos responsáveis.
+            {isAdmin && " Como administrador, você pode editar qualquer campo ou excluir registros incorretos."}
           </p>
         </div>
         <div className="text-xs text-slate-500 font-medium">
@@ -163,7 +283,7 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
               type="text"
-              placeholder="Buscar aluno ou motivo..."
+              placeholder="Buscar aluno, motivo, telefone..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -253,9 +373,11 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                 <th className="px-4 py-3">Aluno</th>
                 <th className="px-4 py-3">Turma</th>
                 <th className="px-4 py-3">Motivo</th>
+                <th className="px-4 py-3">Telefone</th>
                 <th className="px-4 py-3">Pedagoga</th>
                 <th className="px-4 py-3 text-center">Retornou?</th>
                 <th className="px-4 py-3">Observações do Retorno</th>
+                {isAdmin && <th className="px-4 py-3 text-center">Ações (ADM)</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -279,6 +401,9 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                       <span className="inline-block px-2 py-0.5 rounded-full font-medium bg-sky-50 text-sky-700 border border-sky-100">
                         {log.reasonTitle}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-slate-500 whitespace-nowrap">
+                      {log.phoneUsed}
                     </td>
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-medium">
                       {log.sentByName}
@@ -321,12 +446,34 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                         </button>
                       </div>
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(log)}
+                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                            title="Editar todos os campos deste registro"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveDeleteLog(log)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                            title="Excluir este registro"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
               {paginatedLogs.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                     Nenhum envio encontrado com os filtros selecionados.
                   </td>
                 </tr>
@@ -361,7 +508,7 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
         </div>
       </div>
 
-      {/* Note modal */}
+      {/* Note modal (Pedagogas) */}
       {activeModalLog && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200">
@@ -401,6 +548,239 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                 className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs"
               >
                 {isUpdating ? "Salvando..." : "Salvar Retorno"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Edit Modal */}
+      {activeEditLog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center space-x-2">
+                <Pencil className="w-5 h-5 text-amber-600" />
+                <h3 className="text-base font-bold text-slate-900">
+                  Editar Registro do Histórico (Admin)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveEditLog(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-700">
+              <span className="font-bold text-slate-900">{activeEditLog.student.name}</span> — Turma: <span className="font-semibold">{activeEditLog.student.classGroup.name}</span>
+            </div>
+
+            {editError && (
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Motivo / Título:
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.reasonTitle}
+                    onChange={(e) => setEditForm({ ...editForm, reasonTitle: e.target.value })}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Pedagoga Responsável:
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.sentByName}
+                    onChange={(e) => setEditForm({ ...editForm, sentByName: e.target.value })}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Telefone Utilizado:
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.phoneUsed}
+                    onChange={(e) => setEditForm({ ...editForm, phoneUsed: e.target.value })}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Data e Hora do Envio:
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editForm.sentAt}
+                    onChange={(e) => setEditForm({ ...editForm, sentAt: e.target.value })}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Status de Retorno:
+                  </label>
+                  <select
+                    value={editForm.guardianReplied ? "SIM" : "NAO"}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, guardianReplied: e.target.value === "SIM" })
+                    }
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                  >
+                    <option value="SIM">Retornou (Sim)</option>
+                    <option value="NAO">Pendente (Não)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">
+                  Observações do Retorno:
+                </label>
+                <textarea
+                  rows={2}
+                  value={editForm.replyNotes}
+                  onChange={(e) => setEditForm({ ...editForm, replyNotes: e.target.value })}
+                  placeholder="Justificativa ou informações adicionais..."
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">
+                  Conteúdo da Mensagem Enviada:
+                </label>
+                <textarea
+                  rows={3}
+                  value={editForm.messageContent}
+                  onChange={(e) => setEditForm({ ...editForm, messageContent: e.target.value })}
+                  placeholder="Texto integral enviado via WhatsApp..."
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white font-mono text-[11px]"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+              <span className="text-[11px] text-slate-400">
+                A alteração será auditada com seu usuário.
+              </span>
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveEditLog(null)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs flex items-center space-x-1"
+                >
+                  {isSavingEdit ? (
+                    "Salvando..."
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Salvar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Delete Confirmation Modal */}
+      {activeDeleteLog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+            <div className="flex items-center space-x-3 text-rose-600 pb-2 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Excluir Registro do Histórico?
+                </h3>
+                <p className="text-xs text-rose-600 font-semibold">
+                  Ação restrita de administrador
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Você está prestes a excluir permanentemente o registro de acionamento do aluno:
+            </p>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div>Aluno: <strong>{activeDeleteLog.student.name}</strong></div>
+              <div>Turma: <strong>{activeDeleteLog.student.classGroup.name}</strong></div>
+              <div>Motivo: <strong>{activeDeleteLog.reasonTitle}</strong></div>
+              <div>Pedagoga: <strong>{activeDeleteLog.sentByName}</strong></div>
+              <div>
+                Data:{" "}
+                <strong>
+                  {new Date(activeDeleteLog.sentAt).toLocaleDateString("pt-BR")}{" "}
+                  {new Date(activeDeleteLog.sentAt).toLocaleTimeString("pt-BR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </strong>
+              </div>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-500 italic">
+              Esta exclusão é registrada na Trilha de Auditoria com seu nome e e-mail institucional.
+            </p>
+
+            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setActiveDeleteLog(null)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs"
+              >
+                {isDeleting ? "Excluindo..." : "Confirmar Exclusão"}
               </button>
             </div>
           </div>

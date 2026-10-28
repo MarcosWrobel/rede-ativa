@@ -59,6 +59,10 @@ export default function AuditoriaClient({ initialLogs }: Props) {
         return <span className="px-2 py-0.5 rounded font-bold bg-red-50 text-red-700 border border-red-200">Inativação de Aluno</span>;
       case "MARK_REPLY":
         return <span className="px-2 py-0.5 rounded font-bold bg-purple-50 text-purple-700 border border-purple-200">Retorno de Responsável</span>;
+      case "UPDATE_MESSAGE_LOG":
+        return <span className="px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-800 border border-amber-200">Edição de Histórico</span>;
+      case "DELETE_MESSAGE_LOG":
+        return <span className="px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200">Exclusão de Histórico</span>;
       case "USER_LOGIN":
         return <span className="px-2 py-0.5 rounded font-bold bg-slate-100 text-slate-700 border border-slate-200">Login no Sistema</span>;
       case "INITIAL_DATABASE_MIGRATION":
