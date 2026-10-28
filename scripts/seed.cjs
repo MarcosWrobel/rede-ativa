@@ -5,7 +5,7 @@ const path = require('path');
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('--- Starting Database Seeding ---');
+  console.log('--- Starting Database Seeding (Optimized Batch Mode) ---');
 
   const rawData = fs.readFileSync(path.join(__dirname, 'extracted_data.json'), 'utf-8');
   const data = JSON.parse(rawData);
@@ -32,7 +32,6 @@ async function main() {
   }
   console.log('Seeded users.');
 
-  // Helper to map pedagoga name in logs to user
   function getUserId(pedagogaName) {
     if (!pedagogaName) return null;
     const lower = pedagogaName.toLowerCase();
@@ -66,7 +65,7 @@ async function main() {
       }
     }
   }
-  console.log(`Seeded ${Object.keys(classGroupMap).length} class groups.`);
+  console.log(`Seeded class groups.`);
 
   // 3. MessageTemplates
   const templateMap = {};
@@ -78,7 +77,10 @@ async function main() {
       const isAbsence = absenceKeywords.some(kw => t.title.toUpperCase().includes(kw));
       const key = `${seg}_${t.title}`;
       if (!templateMap[key]) {
-        const tmpl = await prisma.messageTemplate.create({
+        const existing = await prisma.messageTemplate.findFirst({
+          where: { title: t.title, segment: seg }
+        });
+        const tmpl = existing || await prisma.messageTemplate.create({
           data: {
             title: t.title,
             segment: seg,
@@ -95,12 +97,17 @@ async function main() {
   console.log('Seeded templates.');
 
   // 4. Students
-  const studentMap = {}; // by normalized name
-  let studentCount = 0;
+  // Load all existing students from DB
+  const existingStudents = await prisma.student.findMany();
+  const studentMap = {};
+  for (const s of existingStudents) {
+    studentMap[s.name] = s;
+  }
 
   for (const seg of segments) {
     const students = data[seg].students;
     for (const s of students) {
+      if (studentMap[s.name]) continue;
       const cg = classGroupMap[`${seg}_${s.turma}`] || classGroupMap[s.turma];
       if (!cg) continue;
 
@@ -113,13 +120,16 @@ async function main() {
         },
       });
       studentMap[s.name] = created;
-      studentCount++;
     }
   }
-  console.log(`Seeded ${studentCount} students.`);
+  console.log(`Students verified/seeded.`);
 
-  // 5. Message Logs
-  let logCount = 0;
+  // 5. Message Logs - Batch Insert
+  // Clear any partial logs
+  await prisma.messageLog.deleteMany({});
+  console.log('Cleared existing logs for clean batch insert.');
+
+  const logRecords = [];
   for (const seg of segments) {
     const logs = data[seg].logs;
     for (const l of logs) {
@@ -129,23 +139,27 @@ async function main() {
       const userId = getUserId(l.pedagoga);
       const tmpl = templateMap[`${seg}_${l.reason}`] || templateMap[l.reason];
 
-      await prisma.messageLog.create({
-        data: {
-          studentId: student.id,
-          templateId: tmpl ? tmpl.id : null,
-          reasonTitle: l.reason,
-          messageContent: `Registro histórico importado de ${seg}: ${l.reason}`,
-          phoneUsed: student.phone,
-          sentByUserId: userId,
-          sentByName: l.pedagoga,
-          guardianReplied: l.returned,
-          sentAt: new Date(l.date),
-        },
+      logRecords.push({
+        studentId: student.id,
+        templateId: tmpl ? tmpl.id : null,
+        reasonTitle: l.reason,
+        messageContent: `Registro histórico importado de ${seg}: ${l.reason}`,
+        phoneUsed: student.phone,
+        sentByUserId: userId,
+        sentByName: l.pedagoga,
+        guardianReplied: l.returned,
+        sentAt: new Date(l.date),
       });
-      logCount++;
     }
   }
-  console.log(`Seeded ${logCount} message logs.`);
+
+  // Insert in chunks of 500
+  const chunkSize = 500;
+  for (let i = 0; i < logRecords.length; i += chunkSize) {
+    const chunk = logRecords.slice(i, i + chunkSize);
+    await prisma.messageLog.createMany({ data: chunk });
+    console.log(`Inserted ${Math.min(i + chunkSize, logRecords.length)} / ${logRecords.length} logs.`);
+  }
 
   // 6. Low Attendance Records
   let lowAttCount = 0;
@@ -184,15 +198,15 @@ async function main() {
       action: 'INITIAL_DATABASE_MIGRATION',
       entityType: 'System',
       details: JSON.stringify({
-        description: 'Importação inicial unificada das 3 planilhas de Busca Ativa do Colégio Leopoldina 2026',
-        studentsImported: studentCount,
-        logsImported: logCount,
+        description: 'Migração completa para Neon PostgreSQL - Colégio Leopoldina 2026',
+        studentsImported: Object.keys(studentMap).length,
+        logsImported: logRecords.length,
         lowAttendanceImported: lowAttCount,
       }),
     },
   });
 
-  console.log('--- Database Seeding Finished Successfully! ---');
+  console.log('--- Neon Database Seeding Finished Successfully! ---');
 }
 
 main()
