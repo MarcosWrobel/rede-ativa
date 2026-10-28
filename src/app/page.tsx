@@ -15,6 +15,8 @@ import {
   School
 } from "lucide-react";
 
+export const revalidate = 30; // Cache dashboard metrics for 30s
+
 export default async function DashboardPage() {
   const session = await auth();
 

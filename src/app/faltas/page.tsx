@@ -3,30 +3,65 @@ import { prisma } from "@/lib/prisma";
 import FaltasClient from "./FaltasClient";
 import { redirect } from "next/navigation";
 
+export const revalidate = 60; // Cache for 60 seconds
+
 export default async function FaltasPage() {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
   }
 
-  // 1. Load students with absence counts
+  // 1. Optimized load of absence contacts
   const absenceKeywords = ["FALTOU", "FALTAS", "GAZEOU", "ATRASO", "ATRASOS"];
 
-  // Find all absence logs
-  const absenceLogs = await prisma.messageLog.findMany({
-    where: {
-      OR: absenceKeywords.map((kw) => ({
-        reasonTitle: { contains: kw },
-      })),
-    },
-    include: {
-      student: {
-        include: { classGroup: true },
+  const [absenceLogs, lowAttendance, classGroups] = await Promise.all([
+    prisma.messageLog.findMany({
+      where: {
+        OR: absenceKeywords.map((kw) => ({
+          reasonTitle: { contains: kw },
+        })),
       },
-    },
-  });
+      select: {
+        studentId: true,
+        sentAt: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            classGroupId: true,
+            classGroup: {
+              select: { id: true, name: true, segment: true },
+            },
+          },
+        },
+      },
+    }),
+    prisma.lowAttendanceRecord.findMany({
+      select: {
+        id: true,
+        attendancePercent: true,
+        enrollmentDetail: true,
+        actionsTaken: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            classGroupId: true,
+            classGroup: {
+              select: { id: true, name: true, segment: true },
+            },
+          },
+        },
+      },
+      orderBy: { attendancePercent: "asc" },
+    }),
+    prisma.classGroup.findMany({
+      select: { id: true, name: true, segment: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
-  // Aggregate counts per student
+  // Aggregate counts per student in memory
   const studentCountMap: Record<string, { student: any; count: number; lastDate: Date }> = {};
 
   absenceLogs.forEach((log) => {
@@ -45,21 +80,6 @@ export default async function FaltasPage() {
   });
 
   const rankedAbsences = Object.values(studentCountMap).sort((a, b) => b.count - a.count);
-
-  // 2. Load Low Attendance Records
-  const lowAttendance = await prisma.lowAttendanceRecord.findMany({
-    include: {
-      student: {
-        include: { classGroup: true },
-      },
-    },
-    orderBy: { attendancePercent: "asc" },
-  });
-
-  // 3. Class groups for filter
-  const classGroups = await prisma.classGroup.findMany({
-    orderBy: { name: "asc" },
-  });
 
   return (
     <FaltasClient
