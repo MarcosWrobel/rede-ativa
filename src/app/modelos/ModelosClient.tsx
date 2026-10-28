@@ -123,7 +123,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setMissingApiKey(false);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 14000); // 14s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout max
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -158,7 +158,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
       }
     } catch (err: any) {
       if (err.name === "AbortError") {
-        setAiError("A requisição demorou mais de 14 segundos. Verifique sua chave ou tente novamente.");
+        setAiError("A requisição demorou para responder. Verifique sua chave ou tente novamente.");
       } else {
         setAiError(err.message || "Erro de conexão com o serviço de IA.");
       }
