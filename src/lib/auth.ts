@@ -4,13 +4,32 @@ import Credentials from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
 
+// Higieniza automaticamente variáveis de ambiente se foram coladas com aspas ou prefixo na Vercel
+for (const key of ["NEXTAUTH_URL", "AUTH_URL"]) {
+  if (process.env[key]) {
+    let val = process.env[key]!.trim();
+    val = val.replace(/^NEXTAUTH_URL=/, "").replace(/^AUTH_URL=/, "").trim();
+    val = val.replace(/^["']|["']$/g, "").trim();
+    process.env[key] = val;
+  }
+}
+for (const key of ["AUTH_SECRET", "NEXTAUTH_SECRET"]) {
+  if (process.env[key]) {
+    let val = process.env[key]!.trim();
+    val = val.replace(/^AUTH_SECRET=/, "").replace(/^NEXTAUTH_SECRET=/, "").trim();
+    val = val.replace(/^["']|["']$/g, "").trim();
+    process.env[key] = val;
+  }
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "escola-leopoldina-busca-ativa-secret-key-2026-pr",
   providers: [
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      clientId: (process.env.GOOGLE_CLIENT_ID || "").replace(/^["']|["']$/g, "").trim(),
+      clientSecret: (process.env.GOOGLE_CLIENT_SECRET || "").replace(/^["']|["']$/g, "").trim(),
+      checks: ["state"],
       authorization: {
         params: {
           prompt: "select_account",
