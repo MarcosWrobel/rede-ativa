@@ -38,7 +38,7 @@ export default async function BuscaAtivaPage() {
         phone: true,
         classGroupId: true,
         classGroup: {
-          select: { id: true, name: true, segment: true },
+          select: { id: true, name: true, segment: true, shift: true },
         },
         lowAttendanceRecord: {
           select: { attendancePercent: true, actionsTaken: true },

@@ -14,8 +14,12 @@ import {
   ExternalLink,
   PlusCircle,
   HelpCircle,
-  ShieldCheck
+  ShieldCheck,
+  Sun,
+  Sunset,
+  Moon
 } from "lucide-react";
+import { determineShift, formatMessage, SchoolShift } from "@/lib/messageFormatter";
 
 interface Props {
   classGroups: any[];
@@ -37,6 +41,7 @@ export default function BuscaAtivaClient({
   const [selectedTurmaId, setSelectedTurmaId] = useState<string>("");
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [activeShift, setActiveShift] = useState<SchoolShift>("TARDE");
   const [customMessage, setCustomMessage] = useState<string>("");
   const [customPhone, setCustomPhone] = useState<string>("");
   const [isSending, setIsSending] = useState(false);
@@ -63,7 +68,7 @@ export default function BuscaAtivaClient({
     return initialStudents.find((s) => s.id === selectedStudentId);
   }, [initialStudents, selectedStudentId]);
 
-  // Filtered templates by segment
+  // Filtered templates by segment (sem duplicidades: modelos "TODOS" aparecem sempre)
   const filteredTemplates = useMemo(() => {
     return templates.filter((t) => {
       if (t.segment === "TODOS") return true;
@@ -77,18 +82,15 @@ export default function BuscaAtivaClient({
     return templates.find((t) => t.id === selectedTemplateId);
   }, [templates, selectedTemplateId]);
 
-  // Update preview message when student or template changes
-  const updatePreview = (student: any, template: any) => {
+  // Update preview message when student, template or shift changes
+  const updatePreview = (student: any, template: any, shiftOverride?: SchoolShift) => {
     if (!student || !template) return;
-    const prefix = template.prefixText ? template.prefixText.trim() : "";
-    const suffix = template.suffixText ? template.suffixText.trim() : "";
-    
-    // Assemble formatted message
-    let msg = "";
-    if (prefix) msg += prefix + "\n\n";
-    msg += `*Aluno(a):* ${student.name}\n*Turma:* ${student.classGroup.name}\n\n`;
-    if (suffix) msg += suffix;
-    
+    const shift = shiftOverride || activeShift;
+    const msg = formatMessage(template.prefixText, template.suffixText, {
+      student,
+      pedagogaName: currentUser.name,
+      overrideShift: shift,
+    });
     setCustomMessage(msg);
   };
 
@@ -99,8 +101,10 @@ export default function BuscaAtivaClient({
     const st = initialStudents.find((s) => s.id === studentId);
     if (st) {
       setCustomPhone(st.phone);
+      const detectedShift = determineShift(st);
+      setActiveShift(detectedShift);
       if (selectedTemplate) {
-        updatePreview(st, selectedTemplate);
+        updatePreview(st, selectedTemplate, detectedShift);
       }
     }
   };
@@ -111,6 +115,13 @@ export default function BuscaAtivaClient({
     const tmpl = templates.find((t) => t.id === templateId);
     if (selectedStudent && tmpl) {
       updatePreview(selectedStudent, tmpl);
+    }
+  };
+
+  const handleChangeShift = (newShift: SchoolShift) => {
+    setActiveShift(newShift);
+    if (selectedStudent && selectedTemplate) {
+      updatePreview(selectedStudent, selectedTemplate, newShift);
     }
   };
 
@@ -341,14 +352,58 @@ export default function BuscaAtivaClient({
         {/* Right Column: Live Message Preview & WhatsApp Action */}
         <div className="lg:col-span-7 space-y-5">
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="flex items-center space-x-2">
                 <Edit3 className="w-5 h-5 text-sky-600" />
-                <h2 className="text-base font-bold text-slate-900">Prévia da Mensagem (Editável)</h2>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Prévia da Mensagem (Editável)</h2>
+                  <p className="text-[11px] text-slate-400">Texto adaptado automaticamente ao aluno e período</p>
+                </div>
               </div>
-              <span className="text-xs text-slate-400">
-                Você pode complementar o texto antes de disparar
-              </span>
+
+              {/* Seletor Rápido de Período / Turno */}
+              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto">
+                <span className="text-[11px] font-bold text-slate-500 px-1.5 hidden md:inline">Período:</span>
+                <button
+                  type="button"
+                  onClick={() => handleChangeShift("MANHA")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+                    activeShift === "MANHA"
+                      ? "bg-amber-500 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                  }`}
+                  title="Aplicar saudação de Bom dia (Matutino)"
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                  <span>Manhã</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeShift("TARDE")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+                    activeShift === "TARDE"
+                      ? "bg-sky-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                  }`}
+                  title="Aplicar saudação de Boa tarde (Vespertino)"
+                >
+                  <Sunset className="w-3.5 h-3.5" />
+                  <span>Tarde</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeShift("NOITE")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+                    activeShift === "NOITE"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                  }`}
+                  title="Aplicar saudação de Boa noite (Noturno)"
+                >
+                  <Moon className="w-3.5 h-3.5" />
+                  <span>Noite</span>
+                </button>
+              </div>
             </div>
 
             {/* Textarea */}
