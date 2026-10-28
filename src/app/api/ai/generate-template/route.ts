@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { GoogleGenAI } from "@google/genai";
 
 export async function POST(req: Request) {
   try {
@@ -9,7 +8,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    const { prompt } = await req.json();
+    const body = await req.json();
+    const prompt = body?.prompt;
+
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return NextResponse.json(
         { error: "Por favor, descreva o objetivo da mensagem que deseja gerar." },
@@ -17,7 +18,10 @@ export async function POST(req: Request) {
       );
     }
 
+    // Aceita chave pelo header do cliente OU pela variável de ambiente da Vercel
+    const headerKey = req.headers.get("x-gemini-key")?.trim();
     const apiKey =
+      (headerKey && headerKey.length > 10 ? headerKey : null) ||
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
       process.env.GOOGLE_GENAI_API_KEY;
@@ -25,7 +29,7 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error: "Chave GEMINI_API_KEY não configurada.",
+          error: "Chave de API do Google Gemini não encontrada.",
           missingApiKey: true,
           helpUrl: "https://aistudio.google.com/app/apikey",
         },
@@ -33,19 +37,20 @@ export async function POST(req: Request) {
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    // Higienizar chave contra aspas e espaços
+    const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
 
-    const systemInstruction = `Você é um assistente pedagógico especializado em comunicação escolar oficial por WhatsApp para o Colégio Estadual Leopoldina B. Pedroso (Paraná).
-Sua missão é transformar o pedido da pedagoga em um modelo padronizado e acolhedor de mensagem institucional.
+    const systemInstruction = `Você é um assistente pedagógico do Colégio Estadual Leopoldina B. Pedroso (Paraná).
+Sua missão é transformar a descrição da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para WhatsApp.
 
-Regras obrigatórias de formatação:
-1. "title": Título curto, objetivo e em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "CONVOCAÇÃO DE PAIS", "SOLICITAÇÃO DE ATESTADO").
-2. "prefixText": Texto que antecede a identificação do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}" (que o sistema substitui automaticamente por Bom dia!, Boa tarde! ou Boa noite!). Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
-3. "suffixText": Texto que vem após a identificação do aluno. Deve ser claro, polido, demonstrar parceria entre escola e família e finalizar com:
+Regras estritas:
+1. "title": Título curto em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "SOLICITAÇÃO DE ATESTADO").
+2. "prefixText": Texto antes do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}". Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
+3. "suffixText": Texto após o aluno. Polido, acolhedor e terminando com:
 "Atenciosamente,\\nEquipe Pedagógica — Colégio Leopoldina"
-4. "isAbsenceRelated": booleano. Deve ser true apenas se o assunto for faltas, ausências ou abandono escolar. Deve ser false para convocações, reuniões, eventos, notas, uniforme ou avisos gerais.
+4. "isAbsenceRelated": booleano (true apenas para faltas/infrequência; false para avisos, notas, convocações, eventos).
 
-Responda OBRIGATORIAMENTE em JSON válido com as seguintes chaves exatas:
+Responda OBRIGATORIAMENTE em JSON válido:
 {
   "title": string,
   "prefixText": string,
@@ -53,62 +58,97 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes chaves exatas:
   "isAbsenceRelated": boolean
 }`;
 
-    // Tentar modelos atuais do Google Gemini
-    const modelsToTry = [
-      "gemini-2.5-flash",
-      "gemini-1.5-flash",
-      "gemini-3.8-flash",
-    ];
-
+    // Modelos oficiais disponíveis em todas as contas do Google AI Studio
+    const models = ["gemini-1.5-flash", "gemini-2.0-flash"];
     let lastError: any = null;
-    let responseText: string | null = null;
+    let data: any = null;
 
-    for (const model of modelsToTry) {
+    for (const model of models) {
       try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: `Crie um modelo de mensagem escolar para a seguinte situação: "${prompt.trim()}".`,
-          config: {
-            systemInstruction,
-            responseMimeType: "application/json",
-            temperature: 0.3,
-          },
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout max
 
-        if (response && response.text) {
-          responseText = response.text;
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanApiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: `Crie um modelo de mensagem para: "${prompt.trim()}". Siga estritamente as regras pedagógicas e responda apenas o JSON solicitado.`,
+                    },
+                  ],
+                },
+              ],
+              generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+              },
+              systemInstruction: {
+                parts: [{ text: systemInstruction }],
+              },
+            }),
+          }
+        );
+
+        clearTimeout(timeoutId);
+
+        const json = await res.json();
+
+        if (!res.ok) {
+          const apiMsg = json?.error?.message || `Erro HTTP ${res.status}`;
+          lastError = new Error(apiMsg);
+          console.warn(`[GEMINI REST] Modelo ${model} falhou: ${apiMsg}`);
+          continue;
+        }
+
+        const candidateText =
+          json?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (candidateText) {
+          data = candidateText;
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`[GEMINI] Tentativa com modelo ${model} falhou:`, err?.message || err);
+        console.warn(`[GEMINI REST] Erro ao chamar ${model}:`, err?.message || err);
       }
     }
 
-    if (!responseText) {
-      throw lastError || new Error("Não foi possível gerar o modelo com a IA.");
+    if (!data) {
+      const msg = lastError?.message || "Não foi possível obter resposta da IA do Google.";
+      return NextResponse.json({ error: msg }, { status: 500 });
     }
 
-    // Limpar delimitadores markdown se houver
-    const cleanedJson = responseText
+    // Limpar delimitadores markdown
+    const cleaned = data
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/```$/i, "")
       .trim();
 
-    const parsed = JSON.parse(cleanedJson);
+    const parsed = JSON.parse(cleaned);
 
     return NextResponse.json({
       success: true,
       template: {
         title: String(parsed.title || "NOVO MODELO").toUpperCase().trim(),
-        prefixText: String(parsed.prefixText || "{saudacao}\nPrezados responsáveis, informamos que o(a) aluno(a)").trim(),
-        suffixText: String(parsed.suffixText || "Atenciosamente,\nEquipe Pedagógica — Colégio Leopoldina").trim(),
+        prefixText: String(
+          parsed.prefixText || "{saudacao}\nPrezados responsáveis, informamos que o(a) aluno(a)"
+        ).trim(),
+        suffixText: String(
+          parsed.suffixText || "Atenciosamente,\nEquipe Pedagógica — Colégio Leopoldina"
+        ).trim(),
         isAbsenceRelated: Boolean(parsed.isAbsenceRelated),
       },
     });
   } catch (error: any) {
-    console.error("Erro na rota de IA:", error);
+    console.error("Erro na API de IA:", error);
     return NextResponse.json(
       { error: error?.message || "Erro interno ao processar requisição com a IA." },
       { status: 500 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   FileText, 
   Plus, 
@@ -19,7 +19,8 @@ import {
   Loader2,
   ExternalLink,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Key
 } from "lucide-react";
 import { formatMessage, SchoolShift } from "@/lib/messageFormatter";
 
@@ -50,6 +51,22 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const [aiError, setAiError] = useState("");
   const [aiSuccess, setAiSuccess] = useState("");
   const [missingApiKey, setMissingApiKey] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("leopoldina_gemini_api_key");
+      if (saved) setCustomApiKey(saved);
+    } catch (e) {}
+  }, []);
+
+  const handleSaveCustomKey = (key: string) => {
+    setCustomApiKey(key);
+    try {
+      localStorage.setItem("leopoldina_gemini_api_key", key.trim());
+    } catch (e) {}
+  };
 
   const openCreateModal = () => {
     setEditingTemplate(null);
@@ -105,17 +122,29 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setAiSuccess("");
     setMissingApiKey(false);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 14000); // 14s timeout
+
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (customApiKey && customApiKey.trim().length > 10) {
+        headers["x-gemini-key"] = customApiKey.trim();
+      }
+
       const res = await fetch("/api/ai/generate-template", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        signal: controller.signal,
         body: JSON.stringify({ prompt: text }),
       });
+
+      clearTimeout(timeoutId);
 
       const data = await res.json();
       if (!res.ok) {
         if (data.missingApiKey) {
           setMissingApiKey(true);
+          setShowKeyInput(true);
         }
         throw new Error(data.error || "Erro ao gerar modelo com IA");
       }
@@ -128,7 +157,11 @@ export default function ModelosClient({ initialTemplates }: Props) {
         setAiSuccess("✨ Modelo preenchido automaticamente com IA! Revise os campos abaixo.");
       }
     } catch (err: any) {
-      setAiError(err.message || "Erro de conexão com o serviço de IA.");
+      if (err.name === "AbortError") {
+        setAiError("A requisição demorou mais de 14 segundos. Verifique sua chave ou tente novamente.");
+      } else {
+        setAiError(err.message || "Erro de conexão com o serviço de IA.");
+      }
     } finally {
       setIsGeneratingAI(false);
     }
@@ -390,6 +423,50 @@ export default function ModelosClient({ initialTemplates }: Props) {
                       ))}
                     </div>
                   </div>
+
+                  {/* Chave de API direta (opcional / fallback) */}
+                  <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyInput(!showKeyInput)}
+                      className="text-[10px] text-indigo-700 hover:text-indigo-900 font-bold inline-flex items-center space-x-1"
+                    >
+                      <Key className="w-3 h-3" />
+                      <span>{showKeyInput ? "Ocultar configuração da Chave" : "Configurar / Colar Chave Gemini"}</span>
+                    </button>
+                    {customApiKey && (
+                      <span className="text-[10px] text-emerald-700 font-semibold flex items-center">
+                        <Check className="w-3 h-3 mr-0.5 text-emerald-600" /> Chave configurada
+                      </span>
+                    )}
+                  </div>
+
+                  {showKeyInput && (
+                    <div className="p-2.5 bg-white border border-indigo-200 rounded-lg space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-700 block">
+                        Chave de API do Google AI Studio (caso não tenha reiniciado o deploy na Vercel):
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          value={customApiKey}
+                          onChange={(e) => handleSaveCustomKey(e.target.value)}
+                          placeholder="Cole sua chave AIzaSy..."
+                          className="flex-1 p-1.5 border border-slate-300 rounded text-xs font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveCustomKey(customApiKey)}
+                          className="px-3 py-1 bg-slate-800 text-white rounded text-[11px] font-bold hover:bg-slate-900"
+                        >
+                          Salvar
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        Ao colar aqui, a chave é salva no seu navegador e funciona na hora!
+                      </p>
+                    </div>
+                  )}
 
                   {/* Feedback Messages */}
                   {aiSuccess && (
