@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String       @id @default(cuid())
+  name          String
+  email         String       @unique
+  image         String?
+  role          String       @default("PEDAGOGA") // ADMIN | PEDAGOGA
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  messageLogs   MessageLog[] @relation("SentByUser")
+  repliedLogs   MessageLog[] @relation("RepliedByUser")
+  auditLogs     AuditLog[]
+}
+
+model ClassGroup {
+  id        String    @id @default(cuid())
+  name      String    @unique // e.g. "6º 1", "1º ADM", "2º Série"
+  segment   String    // FUNDAMENTAL | MEDIO | NOTURNO
+  shift     String    @default("MANHA") // MANHA | TARDE | NOITE
+  createdAt DateTime  @default(now())
+
+  students  Student[]
+}
+
+model Student {
+  id                   String                @id @default(cuid())
+  name                 String
+  guardianName         String?
+  phone                String                // e.g. "42988189394"
+  classGroupId         String
+  classGroup           ClassGroup            @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  active               Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  messageLogs          MessageLog[]
+  lowAttendanceRecord  LowAttendanceRecord?
+}
+
+model MessageTemplate {
+  id               String       @id @default(cuid())
+  title            String       // e.g. "ALUNO FALTOU"
+  segment          String       @default("TODOS") // TODOS | FUNDAMENTAL | MEDIO | NOTURNO
+  prefixText       String       // Text before student name
+  suffixText       String       // Text after student name
+  isAbsenceRelated Boolean      @default(false)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+
+  messageLogs      MessageLog[]
+}
+
+model MessageLog {
+  id              String           @id @default(cuid())
+  studentId       String
+  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  templateId      String?
+  template        MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  reasonTitle     String
+  messageContent  String
+  phoneUsed       String
+  sentByUserId    String?
+  sentByUser      User?            @relation("SentByUser", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  sentByName      String           // Stored snapshot of pedagoga name
+  guardianReplied Boolean          @default(false)
+  replyNotes      String?
+  repliedAt       DateTime?
+  repliedByUserId String?
+  repliedByUser   User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
+  sentAt          DateTime         @default(now())
+}
+
+model LowAttendanceRecord {
+  id                String   @id @default(cuid())
+  studentId         String   @unique
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attendancePercent Float    // e.g. 51.15
+  enrollmentDetail  String?  // e.g. "Matrícula única"
+  actionsTaken      String?  // e.g. "4 buscas SERP - ENCAMINHAR CT"
+  updatedAt         DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userEmail  String
+  userName   String
+  action     String   // SEND_MESSAGE | CREATE_STUDENT | UPDATE_STUDENT | DELETE_STUDENT | MARK_REPLY | TEMPLATE_CHANGE | LOGIN
+  entityType String   // Student | MessageLog | MessageTemplate | LowAttendance
+  entityId   String?
+  details    String?  // JSON string with previous/new state or description
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}
