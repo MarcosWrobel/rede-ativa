@@ -14,8 +14,8 @@ export default async function LoginPage() {
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         {/* Header Institucional */}
         <div className="bg-gradient-to-r from-sky-800 to-sky-700 p-8 text-white text-center">
-          <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-xs border border-white/20 shadow-inner">
-            <GraduationCap className="w-10 h-10 text-white" />
+          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 p-2 shadow-lg border border-white/40">
+            <img src="/logo.svg" alt="Colégio Estadual Leopoldina" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Colégio Estadual Leopoldina</h1>
           <p className="text-sky-100 text-sm mt-1">Sistema de Busca Ativa & Comunicação Escolar</p>

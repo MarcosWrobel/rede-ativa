@@ -86,8 +86,8 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
             onClick={() => setMobileOpen(false)}
             className="flex items-center space-x-3 overflow-hidden group"
           >
-            <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold flex-shrink-0 group-hover:bg-sky-500 transition shadow-sm">
-              <GraduationCap className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 flex-shrink-0 shadow-sm border border-slate-700 group-hover:scale-105 transition">
+              <img src="/logo.svg" alt="Colégio Leopoldina" className="w-full h-full object-contain" />
             </div>
             {(!collapsed || mobileOpen) && (
               <div className="transition-opacity duration-200">
