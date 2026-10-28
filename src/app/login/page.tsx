@@ -1,5 +1,5 @@
 import { signIn } from "@/lib/auth";
-import { GraduationCap, ShieldCheck, Mail, ArrowRight } from "lucide-react";
+import { GraduationCap, ShieldCheck, Mail, ArrowRight, AlertCircle } from "lucide-react";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 
@@ -8,6 +8,10 @@ export default async function LoginPage() {
   if (session?.user) {
     redirect("/busca-ativa");
   }
+
+  const hasGoogleAuth = Boolean(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+  );
 
   const devUsers = [
     { name: "Marcos Wrobel", email: "marcos.wrobel@escola.pr.gov.br", role: "ADMIN (Resp. Técnico)" },
@@ -37,50 +41,62 @@ export default async function LoginPage() {
             <div>
               <p className="font-semibold">Protegido por Autenticação Institucional</p>
               <p className="mt-0.5 text-amber-800">
-                Apenas contas autorizadas terminadas em <strong>@escola.pr.gov.br</strong> têm acesso aos dados dos alunos.
+                Acesso restrito a contas autorizadas <strong>@escola.pr.gov.br</strong>.
               </p>
             </div>
           </div>
 
           {/* Google Login Form */}
-          <form
-            action={async () => {
-              "use server";
-              await signIn("google", { redirectTo: "/busca-ativa" });
-            }}
-          >
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center space-x-3 py-3 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold shadow-sm hover:shadow transition"
+          {hasGoogleAuth ? (
+            <form
+              action={async () => {
+                "use server";
+                await signIn("google", { redirectTo: "/busca-ativa" });
+              }}
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-              <span>Entrar com Google @escola</span>
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center space-x-3 py-3 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold shadow-sm hover:shadow transition"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Entrar com Google @escola</span>
+              </button>
+            </form>
+          ) : (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-sky-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-slate-800">Modo de Homologação Institucional Ativo</p>
+                <p className="mt-0.5 text-slate-500">
+                  Selecione seu perfil institucional abaixo para entrar no sistema. As credenciais do Google Cloud podem ser vinculadas a qualquer momento.
+                </p>
+              </div>
+            </div>
+          )}
 
-          {/* Dev Quick Selector */}
-          <div className="pt-4 border-t border-slate-100">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">
-              Ou selecione um perfil pedagógico para teste:
+          {/* Institutional Fast Selector */}
+          <div className="pt-2 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5 text-center">
+              Selecione sua conta institucional para acessar:
             </p>
-            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
               {devUsers.map((u) => (
                 <form
                   key={u.email}
@@ -94,15 +110,16 @@ export default async function LoginPage() {
                 >
                   <button
                     type="submit"
-                    className="w-full flex items-center justify-between p-2.5 rounded-lg border border-slate-200 hover:border-sky-400 hover:bg-sky-50/50 text-left transition group"
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl border border-slate-200 hover:border-sky-400 hover:bg-sky-50 text-left transition group shadow-2xs"
                   >
                     <div>
                       <div className="text-xs font-bold text-slate-800 group-hover:text-sky-700">
                         {u.name}
                       </div>
                       <div className="text-[11px] text-slate-500">{u.role}</div>
+                      <div className="text-[10px] text-sky-600 font-mono">{u.email}</div>
                     </div>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 transition" />
+                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-sky-600 transition" />
                   </button>
                 </form>
               ))}

@@ -5,6 +5,8 @@ import { prisma } from "./prisma";
 import { logAudit } from "./audit";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: true,
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "escola-leopoldina-busca-ativa-secret-key-2026-pr",
   providers: [
     ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
       ? [
@@ -14,7 +16,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           }),
         ]
       : []),
-    // Provedor para homologação/desenvolvimento local (ou quando Google OAuth ainda não foi configurado no console)
+    // Provedor institucional para homologação e login rápido das pedagogas
     Credentials({
       id: "escola-dev-auth",
       name: "Login Institucional (@escola.pr.gov.br)",
@@ -89,12 +91,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: session.user.email! },
-        });
-        if (dbUser) {
-          (session.user as any).id = dbUser.id;
-          (session.user as any).role = dbUser.role;
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { email: session.user.email! },
+          });
+          if (dbUser) {
+            (session.user as any).id = dbUser.id;
+            (session.user as any).role = dbUser.role;
+          }
+        } catch (e) {
+          console.error("Session user lookup error:", e);
         }
       }
       return session;
