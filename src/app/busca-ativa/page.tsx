@@ -41,7 +41,7 @@ export default async function BuscaAtivaPage() {
           select: { id: true, name: true, segment: true, shift: true },
         },
         lowAttendanceRecord: {
-          select: { attendancePercent: true, actionsTaken: true },
+          select: { attendancePercent: true, actionsTaken: true, enrollmentDetail: true },
         },
         messageLogs: {
           take: 3,

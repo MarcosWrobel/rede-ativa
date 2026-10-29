@@ -35,6 +35,7 @@ model ClassGroup {
 
 model Student {
   id                   String                @id @default(cuid())
+  cgm                  String?               @unique // Cadastro Geral de Matrícula (SEED-PR)
   name                 String
   guardianName         String?
   phone                String                // e.g. "42988189394"

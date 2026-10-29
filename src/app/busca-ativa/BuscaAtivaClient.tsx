@@ -291,9 +291,21 @@ export default function BuscaAtivaClient({
                   <div className="mt-2 p-2 bg-amber-100 border border-amber-300 rounded-lg text-amber-900 font-medium flex items-start space-x-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <span>Atenção: Aluno em Busca Ativa / Conselho Tutelar!</span>
-                      <div className="text-[11px] font-normal mt-0.5">
-                        Freq: <strong>{selectedStudent.lowAttendanceRecord.attendancePercent}%</strong> | {selectedStudent.lowAttendanceRecord.actionsTaken}
+                      <span>Atenção: Aluno em Acompanhamento de Frequência!</span>
+                      <div className="text-[11px] font-normal mt-0.5 space-y-0.5">
+                        <div>
+                          Freq Geral: <strong>{selectedStudent.lowAttendanceRecord.attendancePercent}%</strong> 
+                          {selectedStudent.lowAttendanceRecord.enrollmentDetail && (
+                            <span className="text-amber-800 font-mono text-[10px] block mt-0.5">
+                              {selectedStudent.lowAttendanceRecord.enrollmentDetail}
+                            </span>
+                          )}
+                        </div>
+                        {selectedStudent.lowAttendanceRecord.actionsTaken && (
+                          <div className="text-slate-700 italic">
+                            {selectedStudent.lowAttendanceRecord.actionsTaken}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

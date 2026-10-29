@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Sincronizador Power BI - Colégio Leopoldina",
+  "version": "1.0.0",
+  "description": "Extrai dados de frequência e infrequência do Power BI para o Sistema de Busca Ativa.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sincronizador Leopoldina"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://app.powerbi.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://app.powerbi.com/*"],
+      "js": ["interceptor.js"],
+      "world": "MAIN",
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://app.powerbi.com/*"],
+      "js": ["content.js"],
+      "world": "ISOLATED",
+      "all_frames": false,
+      "run_at": "document_idle"
+    }
+  ]
+}
