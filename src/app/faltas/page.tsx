@@ -43,6 +43,10 @@ export default async function FaltasPage() {
         attendancePercent: true,
         enrollmentDetail: true,
         actionsTaken: true,
+        serpProtocol: true,
+        serpStatus: true,
+        serpOpenedAt: true,
+        serpDetails: true,
         student: {
           select: {
             id: true,

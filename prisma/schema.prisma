@@ -83,13 +83,17 @@ model MessageLog {
 }
 
 model LowAttendanceRecord {
-  id                String   @id @default(cuid())
-  studentId         String   @unique
-  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  attendancePercent Float    // e.g. 51.15
-  enrollmentDetail  String?  // e.g. "Matrícula única"
-  actionsTaken      String?  // e.g. "4 buscas SERP - ENCAMINHAR CT"
-  updatedAt         DateTime @updatedAt
+  id                String    @id @default(cuid())
+  studentId         String    @unique
+  student           Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attendancePercent Float     // e.g. 51.15
+  enrollmentDetail  String?   // e.g. "Matrícula única"
+  actionsTaken      String?   // e.g. "4 buscas SERP - ENCAMINHAR CT"
+  serpProtocol      String?   // Número da Ficha SERP/FICAI
+  serpStatus        String?   // "CONSELHO_TUTELAR" | "EM_ACOMPANHAMENTO" | "MINISTERIO_PUBLICO" | "ARQUIVADO"
+  serpOpenedAt      DateTime? // Data de abertura no SERP
+  serpDetails       String?   // Histórico de buscas ativas e anotações do SERP
+  updatedAt         DateTime  @updatedAt
 }
 
 model AuditLog {

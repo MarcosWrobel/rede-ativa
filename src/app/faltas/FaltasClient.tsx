@@ -45,7 +45,9 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
   const [selectedShift, setSelectedShift] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
   const [selectedRiskRange, setSelectedRiskRange] = useState<"TODOS" | "CRITICO" | "ATENCAO" | "REGULAR">("TODOS");
-  const [selectedActionStatus, setSelectedActionStatus] = useState<"TODOS" | "COM_ACAO" | "SEM_ACAO">("TODOS");
+  const [selectedActionStatus, setSelectedActionStatus] = useState<
+    "TODOS" | "COM_ACAO" | "SEM_ACAO" | "CONSELHO_TUTELAR" | "MINISTERIO_PUBLICO" | "EM_ACOMPANHAMENTO"
+  >("TODOS");
   const [sortBy, setSortBy] = useState<"MENOR_FREQ" | "MAIOR_FREQ" | "MAIOR_QUEDA" | "NOME_AZ" | "NOME_ZA">("MENOR_FREQ");
   
   // Controle de Visualização
@@ -103,6 +105,7 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
     let regular = 0;
     let sumPercent = 0;
     let comAcao = 0;
+    let conselhoTutelar = 0;
 
     recordsList.forEach((rec) => {
       const p = rec.attendancePercent;
@@ -110,6 +113,9 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
       if (p < 75) critico++;
       else if (p < 85) atencao++;
       else regular++;
+
+      const isCt = rec.serpStatus === "CONSELHO_TUTELAR" || (rec.actionsTaken && rec.actionsTaken.toUpperCase().includes("CONSELHO"));
+      if (isCt) conselhoTutelar++;
 
       if (rec.actionsTaken && rec.actionsTaken.trim().length > 0) {
         comAcao++;
@@ -123,6 +129,7 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
       regular,
       mediaGeral: +(sumPercent / total).toFixed(1),
       comAcao,
+      conselhoTutelar,
     };
   }, [recordsList]);
 
@@ -162,11 +169,18 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
       else if (selectedRiskRange === "ATENCAO") matchRisk = p >= 75 && p < 85;
       else if (selectedRiskRange === "REGULAR") matchRisk = p >= 85;
 
-      // Status de Ações
+      // Status de Ações & SERP
       let matchAction = true;
       const hasAction = !!rec.actionsTaken && rec.actionsTaken.trim().length > 0;
       if (selectedActionStatus === "COM_ACAO") matchAction = hasAction;
       else if (selectedActionStatus === "SEM_ACAO") matchAction = !hasAction;
+      else if (selectedActionStatus === "CONSELHO_TUTELAR") {
+        matchAction = rec.serpStatus === "CONSELHO_TUTELAR" || (rec.actionsTaken && rec.actionsTaken.toUpperCase().includes("CONSELHO"));
+      } else if (selectedActionStatus === "MINISTERIO_PUBLICO") {
+        matchAction = rec.serpStatus === "MINISTERIO_PUBLICO" || (rec.actionsTaken && rec.actionsTaken.toUpperCase().includes("MINIST"));
+      } else if (selectedActionStatus === "EM_ACOMPANHAMENTO") {
+        matchAction = rec.serpStatus === "EM_ACOMPANHAMENTO";
+      }
 
       return matchSearch && matchSegment && matchShift && matchTurma && matchRisk && matchAction;
     });
@@ -517,10 +531,10 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
             </div>
             <div>
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                Ações SERP / CT
+                Conselho Tutelar
               </span>
               <strong className="text-lg sm:text-xl font-black text-purple-800 leading-none">
-                {kpis.comAcao} registros
+                {kpis.conselhoTutelar} casos
               </strong>
             </div>
           </div>
@@ -678,7 +692,10 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
                 className="border border-slate-300 rounded-md py-1 px-2 bg-slate-50 text-xs"
               >
                 <option value="TODOS">Todos os Casos</option>
-                <option value="COM_ACAO">Com Encaminhamento Registrado</option>
+                <option value="CONSELHO_TUTELAR">🏛️ Encaminhado Conselho Tutelar</option>
+                <option value="MINISTERIO_PUBLICO">⚖️ Ministério Público</option>
+                <option value="EM_ACOMPANHAMENTO">📋 Em Acompanhamento SERP</option>
+                <option value="COM_ACAO">Com Ações / Encaminhamento</option>
                 <option value="SEM_ACAO">Sem Encaminhamento Registrado</option>
               </select>
             </div>
@@ -879,15 +896,47 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
 
                         {/* Medidas Adotadas (SERP / CT) */}
                         <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"}`}>
-                          {rec.actionsTaken ? (
-                            <div className="text-xs text-slate-800 bg-amber-50/50 p-1.5 rounded-lg border border-amber-200/60 font-medium">
-                              {rec.actionsTaken}
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">
-                              Nenhuma ação registrada
-                            </span>
-                          )}
+                          <div className="space-y-1">
+                            {rec.serpStatus && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {rec.serpStatus === "CONSELHO_TUTELAR" && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-red-100 text-red-800 border border-red-200">
+                                    🏛️ Conselho Tutelar
+                                  </span>
+                                )}
+                                {rec.serpStatus === "MINISTERIO_PUBLICO" && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
+                                    ⚖️ Ministério Público
+                                  </span>
+                                )}
+                                {rec.serpStatus === "EM_ACOMPANHAMENTO" && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                    📋 Acompanhamento SERP
+                                  </span>
+                                )}
+                                {rec.serpStatus === "ARQUIVADO" && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                                    📁 Arquivado
+                                  </span>
+                                )}
+                                {rec.serpProtocol && (
+                                  <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-1 py-0.2 rounded">
+                                    #{rec.serpProtocol}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {rec.actionsTaken ? (
+                              <div className="text-xs text-slate-800 bg-amber-50/50 p-1.5 rounded-lg border border-amber-200/60 font-medium">
+                                {rec.actionsTaken}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">
+                                Nenhuma ação registrada
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Ações: Editar Medidas + Disparar Busca Ativa */}
