@@ -62,46 +62,87 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
     let responseText: string | null = null;
     let lastErrorMsg = "";
 
-    // Chama a Interactions API com gemini-3.8-flash, SEM retries lentos e com timeout de 8s
-    try {
-      const interaction = await ai.interactions.create(
-        {
-          model: "gemini-3.8-flash",
-          input: `Crie um modelo de mensagem para: "${prompt.trim()}". Responda estritamente no formato JSON especificado.`,
-          system_instruction: systemInstruction,
-          response_format: {
-            type: "text",
-            mime_type: "application/json",
-          },
-        },
-        {
-          retries: { strategy: "none" },
-          timeout_ms: 9000,
-        }
-      );
+    // 1. Cascata de modelos via Interactions API (resiliente contra picos de demanda no 3.8-flash)
+    // Modelos leves como 3.5-flash-lite e flash-latest têm alta disponibilidade e não sofrem com spikes de capacidade
+    const interactionModels = [
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+      "gemini-3.8-flash",
+    ];
 
-      if (interaction?.output_text) {
-        responseText = interaction.output_text;
+    for (const model of interactionModels) {
+      try {
+        const interaction = await ai.interactions.create(
+          {
+            model: model as any,
+            input: `Crie um modelo de mensagem para: "${prompt.trim()}". Responda estritamente no formato JSON especificado.`,
+            system_instruction: systemInstruction,
+            response_format: {
+              type: "text",
+              mime_type: "application/json",
+            },
+          },
+          {
+            retries: { strategy: "none" },
+            timeout_ms: 6000, // 6 segundos de tolerância por modelo
+          }
+        );
+
+        if (interaction?.output_text) {
+          responseText = interaction.output_text;
+          break;
+        }
+      } catch (err: any) {
+        lastErrorMsg = err?.message || String(err);
+        if (err?.body) {
+          try {
+            const parsed = JSON.parse(err.body);
+            const detail = Array.isArray(parsed)
+              ? parsed[0]?.error?.message
+              : parsed?.error?.message;
+            if (detail) lastErrorMsg = detail;
+          } catch (e) {}
+        }
+
+        // Se a chave for declaradamente inválida, interrompe imediatamente sem testar outros modelos
+        if (lastErrorMsg.includes("API key not valid")) {
+          break;
+        }
+
+        console.warn(`[GEMINI Interactions] Modelo ${model} indisponível ou em pico de demanda (${lastErrorMsg}). Tentando próximo modelo...`);
       }
-    } catch (err: any) {
-      lastErrorMsg = err?.message || String(err);
-      if (err?.body) {
-        try {
-          const parsed = JSON.parse(err.body);
-          const detail = Array.isArray(parsed)
-            ? parsed[0]?.error?.message
-            : parsed?.error?.message;
-          if (detail) lastErrorMsg = detail;
-        } catch (e) {}
-      }
-      console.warn("[GEMINI Interactions API] Erro:", lastErrorMsg);
     }
 
-    // Se a chave for inválida ou não retornar texto, responder imediatamente
+    // 2. Se a Interactions API estiver sob manutenção geral, recorrer ao endpoint clássico generateContent
+    if (!responseText && !lastErrorMsg.includes("API key not valid")) {
+      const fallbackModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+      for (const model of fallbackModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: `Crie um modelo de mensagem escolar para: "${prompt.trim()}". Responda estritamente no formato JSON com as chaves: title, prefixText, suffixText, isAbsenceRelated.`,
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              temperature: 0.2,
+            },
+          });
+
+          if (response?.text) {
+            responseText = response.text;
+            break;
+          }
+        } catch (err: any) {
+          lastErrorMsg = err?.message || String(err);
+          console.warn(`[GEMINI generateContent] Modelo ${model} falhou:`, lastErrorMsg);
+        }
+      }
+    }
+
     if (!responseText) {
       return NextResponse.json(
         {
-          error: `Google Gemini: ${lastErrorMsg || "Não foi possível obter resposta da IA."}`,
+          error: `Google Gemini: ${lastErrorMsg || "Os servidores da IA estão com alta demanda temporária. Tente novamente em instantes."}`,
           missingApiKey: lastErrorMsg.includes("API key not valid"),
         },
         { status: 400 }
