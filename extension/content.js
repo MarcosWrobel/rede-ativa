@@ -209,14 +209,14 @@
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token'], (res) => {
         if (inputUrl) {
-          inputUrl.value = res.leopoldina_server_url || 'https://busca-ativa-lepoldina.vercel.app';
+          inputUrl.value = res.leopoldina_server_url || 'https://busca-ativa-leopoldina.vercel.app';
         }
         if (inputToken) {
           inputToken.value = res.leopoldina_sync_token || 'leopoldina-frequencia-2026-secret-sync';
         }
       });
     } else {
-      if (inputUrl) inputUrl.value = 'https://busca-ativa-lepoldina.vercel.app';
+      if (inputUrl) inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
       if (inputToken) inputToken.value = 'leopoldina-frequencia-2026-secret-sync';
     }
 
@@ -234,7 +234,7 @@
 
     document.getElementById('leo-cfg-btn-vercel')?.addEventListener('click', () => {
       if (inputUrl) {
-        inputUrl.value = 'https://busca-ativa-lepoldina.vercel.app';
+        inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
         salvarConfigs();
       }
     });
@@ -499,7 +499,7 @@
 
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
-    const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-lepoldina.vercel.app').replace(/\/+$/, '');
+    const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app').replace(/\/+$/, '');
     const token = inputToken?.value?.trim() || 'leopoldina-frequencia-2026-secret-sync';
 
     const lista = Array.from(alunosCapturados.values());

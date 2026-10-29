@@ -27,10 +27,11 @@ export default async function FaltasPage() {
         student: {
           select: {
             id: true,
+            cgm: true,
             name: true,
             classGroupId: true,
             classGroup: {
-              select: { id: true, name: true, segment: true },
+              select: { id: true, name: true, segment: true, shift: true },
             },
           },
         },
@@ -45,10 +46,13 @@ export default async function FaltasPage() {
         student: {
           select: {
             id: true,
+            cgm: true,
             name: true,
+            phone: true,
+            guardianName: true,
             classGroupId: true,
             classGroup: {
-              select: { id: true, name: true, segment: true },
+              select: { id: true, name: true, segment: true, shift: true },
             },
           },
         },
@@ -56,7 +60,7 @@ export default async function FaltasPage() {
       orderBy: { attendancePercent: "asc" },
     }),
     prisma.classGroup.findMany({
-      select: { id: true, name: true, segment: true },
+      select: { id: true, name: true, segment: true, shift: true },
       orderBy: { name: "asc" },
     }),
   ]);
