@@ -66,11 +66,11 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
     let lastErrorMsg = "";
 
     // Modelos vigentes na API do Google (2026).
-    // gemini-3.5-flash-lite é o modelo oficial rápido e com alta disponibilidade na cota gratuita.
+    // gemini-3.5-flash é o modelo principal confirmado como ativo e funcional.
     const modelsToTry = [
-      "gemini-3.5-flash-lite",
-      "gemini-flash-latest",
       "gemini-3.5-flash",
+      "gemini-flash-latest",
+      "gemini-3.5-flash-lite",
       "gemini-3.8-flash",
     ];
 
@@ -87,6 +87,9 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
             systemInstruction,
             responseMimeType: "application/json",
             temperature: 0.2,
+            thinkingConfig: {
+              thinkingLevel: "low" as any,
+            },
             abortSignal: abortController.signal,
           },
         });

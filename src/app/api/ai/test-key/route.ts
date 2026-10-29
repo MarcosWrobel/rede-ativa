@@ -42,9 +42,9 @@ export async function POST(req: Request) {
 
     const startTime = Date.now();
     const candidateModels = [
-      "gemini-3.5-flash-lite",
-      "gemini-flash-latest",
       "gemini-3.5-flash",
+      "gemini-flash-latest",
+      "gemini-3.5-flash-lite",
     ];
 
     let respondingModel = "";
@@ -56,6 +56,11 @@ export async function POST(req: Request) {
         const res = await ai.models.generateContent({
           model,
           contents: "Responda apenas com a palavra: OK",
+          config: {
+            thinkingConfig: {
+              thinkingLevel: "low" as any,
+            },
+          },
         });
 
         if (res?.text) {
