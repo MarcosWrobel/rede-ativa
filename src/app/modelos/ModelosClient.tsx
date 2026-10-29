@@ -53,6 +53,8 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const [missingApiKey, setMissingApiKey] = useState(false);
   const [customApiKey, setCustomApiKey] = useState("");
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [isTestingKey, setIsTestingKey] = useState(false);
+  const [testKeyResult, setTestKeyResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -66,6 +68,41 @@ export default function ModelosClient({ initialTemplates }: Props) {
     try {
       localStorage.setItem("leopoldina_gemini_api_key", key.trim());
     } catch (e) {}
+  };
+
+  const handleTestKey = async () => {
+    setIsTestingKey(true);
+    setTestKeyResult(null);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (customApiKey && customApiKey.trim().length > 10) {
+        headers["x-gemini-key"] = customApiKey.trim();
+      }
+      const res = await fetch("/api/ai/test-key", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ apiKey: customApiKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestKeyResult({
+          ok: true,
+          message: `✨ ${data.message} Modelo: ${data.respondingModel} respondeu em ${data.durationMs}ms (Origem: ${data.source.replace(/_/g, " ")}, chave ${data.maskedKey})`,
+        });
+      } else {
+        setTestKeyResult({
+          ok: false,
+          message: data.error || "Falha ao validar chave com o Google.",
+        });
+      }
+    } catch (err: any) {
+      setTestKeyResult({
+        ok: false,
+        message: err.message || "Erro ao conectar com servidor de teste.",
+      });
+    } finally {
+      setIsTestingKey(false);
+    }
   };
 
   const openCreateModal = () => {
@@ -461,10 +498,44 @@ export default function ModelosClient({ initialTemplates }: Props) {
                         >
                           Salvar
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleTestKey}
+                          disabled={isTestingKey}
+                          className="px-3 py-1 bg-indigo-600 text-white rounded text-[11px] font-bold hover:bg-indigo-700 flex items-center space-x-1 disabled:opacity-50"
+                        >
+                          {isTestingKey ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                              <span>Testando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 mr-1 text-amber-300" />
+                              <span>Testar Chave</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                       <p className="text-[10px] text-slate-500">
-                        Ao colar aqui, a chave é salva no seu navegador e funciona na hora!
+                        Ao colar e salvar aqui, a chave é armazenada no seu navegador e sobrepõe a Vercel na hora!
                       </p>
+                      {testKeyResult && (
+                        <div
+                          className={`mt-2 p-2 rounded text-xs border flex items-start space-x-1.5 ${
+                            testKeyResult.ok
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                              : "bg-rose-50 border-rose-200 text-rose-800"
+                          }`}
+                        >
+                          {testKeyResult.ok ? (
+                            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                          )}
+                          <span className="leading-snug">{testKeyResult.message}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
