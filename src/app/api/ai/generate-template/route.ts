@@ -62,34 +62,36 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
     let responseText: string | null = null;
     let lastErrorMsg = "";
 
-    // 1. Cascata de modelos via Interactions API (resiliente contra picos de demanda no 3.8-flash)
-    // Modelos leves como 3.5-flash-lite e flash-latest têm alta disponibilidade e não sofrem com spikes de capacidade
-    const interactionModels = [
+    // Modelos vigentes na API do Google (2026).
+    // gemini-3.5-flash-lite é o modelo oficial rápido e com alta disponibilidade na cota gratuita.
+    const modelsToTry = [
       "gemini-3.5-flash-lite",
       "gemini-flash-latest",
+      "gemini-3.5-flash",
       "gemini-3.8-flash",
     ];
 
-    for (const model of interactionModels) {
+    // 1. Tentativa via models.generateContent com timeout de 15s por modelo
+    for (const model of modelsToTry) {
       try {
-        const interaction = await ai.interactions.create(
-          {
-            model: model as any,
-            input: `Crie um modelo de mensagem para: "${prompt.trim()}". Responda estritamente no formato JSON especificado.`,
-            system_instruction: systemInstruction,
-            response_format: {
-              type: "text",
-              mime_type: "application/json",
-            },
-          },
-          {
-            retries: { strategy: "none" },
-            timeout_ms: 6000, // 6 segundos de tolerância por modelo
-          }
-        );
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 15000);
 
-        if (interaction?.output_text) {
-          responseText = interaction.output_text;
+        const response = await ai.models.generateContent({
+          model,
+          contents: `Crie um modelo de mensagem institucional escolar para WhatsApp sobre o seguinte assunto: "${prompt.trim()}". Responda estritamente em JSON com as chaves "title", "prefixText", "suffixText", "isAbsenceRelated".`,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            temperature: 0.2,
+            abortSignal: abortController.signal,
+          },
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response?.text) {
+          responseText = response.text;
           break;
         }
       } catch (err: any) {
@@ -104,52 +106,52 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
           } catch (e) {}
         }
 
-        // Se a chave for declaradamente inválida, interrompe imediatamente sem testar outros modelos
-        if (lastErrorMsg.includes("API key not valid")) {
+        // Se a chave API for comprovadamente inválida, interrompe sem testar outros modelos
+        if (lastErrorMsg.toLowerCase().includes("api key not valid") || lastErrorMsg.includes("403 Forbidden")) {
           break;
         }
 
-        console.warn(`[GEMINI Interactions] Modelo ${model} indisponível ou em pico de demanda (${lastErrorMsg}). Tentando próximo modelo...`);
+        console.warn(`[GEMINI generateContent] Modelo ${model} falhou: ${lastErrorMsg}. Tentando próximo...`);
       }
     }
 
-    // 2. Se a Interactions API estiver sob manutenção geral, recorrer ao endpoint clássico generateContent
-    if (!responseText && !lastErrorMsg.includes("API key not valid")) {
-      const fallbackModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
-      for (const model of fallbackModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents: `Crie um modelo de mensagem escolar para: "${prompt.trim()}". Responda estritamente no formato JSON com as chaves: title, prefixText, suffixText, isAbsenceRelated.`,
-            config: {
-              systemInstruction,
-              responseMimeType: "application/json",
-              temperature: 0.2,
-            },
-          });
-
-          if (response?.text) {
-            responseText = response.text;
-            break;
+    // 2. Se generateContent não respondeu, tentar via Interactions API com gemini-3.5-flash-lite
+    if (!responseText && !lastErrorMsg.toLowerCase().includes("api key not valid")) {
+      try {
+        const interaction = await ai.interactions.create(
+          {
+            model: "gemini-3.5-flash-lite",
+            input: `Crie um modelo de mensagem institucional para: "${prompt.trim()}". Responda estritamente em JSON.`,
+            system_instruction: systemInstruction,
+          },
+          {
+            retries: { strategy: "none" },
+            timeout_ms: 15000,
           }
-        } catch (err: any) {
-          lastErrorMsg = err?.message || String(err);
-          console.warn(`[GEMINI generateContent] Modelo ${model} falhou:`, lastErrorMsg);
+        );
+
+        if (interaction?.output_text) {
+          responseText = interaction.output_text;
         }
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        console.warn("[GEMINI Interactions] Falhou:", msg);
+        if (!lastErrorMsg) lastErrorMsg = msg;
       }
     }
 
     if (!responseText) {
+      const isKeyError = lastErrorMsg.toLowerCase().includes("api key not valid");
       return NextResponse.json(
         {
-          error: `Google Gemini: ${lastErrorMsg || "Os servidores da IA estão com alta demanda temporária. Tente novamente em instantes."}`,
-          missingApiKey: lastErrorMsg.includes("API key not valid"),
+          error: `Google Gemini: ${lastErrorMsg || "Serviço de IA indisponível temporariamente. Tente novamente."}`,
+          missingApiKey: isKeyError,
         },
         { status: 400 }
       );
     }
 
-    // Limpar possíveis delimitadores markdown
+    // Limpar delimitadores markdown caso existam
     const cleaned = responseText
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")

@@ -123,7 +123,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setMissingApiKey(false);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout max
+    const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s timeout max
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
