@@ -93,6 +93,7 @@ export default function AtaEditorModal({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSuccessMsg, setAiSuccessMsg] = useState<{ type: "success" | "warning"; text: string } | null>(null);
   const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [hasServerKey, setHasServerKey] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [isTestingApiKey, setIsTestingApiKey] = useState(false);
   const [keyTestStatus, setKeyTestStatus] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -127,12 +128,19 @@ export default function AtaEditorModal({
   const [isDeletingAdmin, setIsDeletingAdmin] = useState(false);
   const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  // Carrega chave Gemini salva no navegador
+  // Carrega chave Gemini salva no navegador e checa chave no servidor
   useEffect(() => {
     try {
       const saved = localStorage.getItem("leopoldina_gemini_api_key");
       if (saved) setGeminiApiKey(saved);
     } catch (e) {}
+
+    fetch("/api/ai/test-key")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.hasServerKey) setHasServerKey(true);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSaveGeminiKey = (val: string) => {
@@ -1689,14 +1697,22 @@ export default function AtaEditorModal({
                         type="button"
                         onClick={() => setShowKeyModal(!showKeyModal)}
                         className={`inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-2xs cursor-pointer ${
-                          geminiApiKey
+                          hasServerKey
                             ? "bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                            : geminiApiKey
+                            ? "bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100"
                             : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
                         }`}
-                        title="Configurar chave da API Google Gemini para correção ortográfica e formalização"
+                        title="Status e configuração da IA Google Gemini"
                       >
                         <Key className="w-3.5 h-3.5" />
-                        <span>{geminiApiKey ? "Chave IA Ativa" : "Configurar IA"}</span>
+                        <span>
+                          {hasServerKey
+                            ? "IA Ativa (Servidor)"
+                            : geminiApiKey
+                            ? "Chave IA Ativa"
+                            : "Configurar IA"}
+                        </span>
                       </button>
 
                       <button
@@ -1725,9 +1741,18 @@ export default function AtaEditorModal({
                           ✕
                         </button>
                       </div>
-                      <p className="text-[11px] text-slate-500">
-                        Informe sua chave do Google Gemini (gratuita em <code>aistudio.google.com</code>). Ela é salva no seu navegador e utilizada para corrigir erros ortográficos, concordância e sintaxe na formalização da ata.
-                      </p>
+                      {hasServerKey ? (
+                        <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[11px] font-medium flex items-center space-x-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>
+                            A chave da API Gemini está configurada nas variáveis de ambiente do servidor (Vercel/.env) e ativa para toda a equipe. Não é necessário preencher nada abaixo.
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500">
+                          Informe sua chave do Google Gemini (gratuita em <code>aistudio.google.com</code>). Ela é salva no seu navegador e utilizada para corrigir erros ortográficos, concordância e sintaxe na formalização da ata.
+                        </p>
+                      )}
                       <div className="flex gap-2">
                         <input
                           type="password"

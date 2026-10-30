@@ -5,6 +5,25 @@ import { GoogleGenAI } from "@google/genai";
 export const maxDuration = 30;
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  try {
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
+
+    const envKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.GOOGLE_GENAI_API_KEY;
+
+    return NextResponse.json({
+      hasServerKey: Boolean(envKey && envKey.trim().length > 10),
+      maskedKey: envKey && envKey.trim().length > 10 ? `${envKey.trim().slice(0, 6)}...${envKey.trim().slice(-4)}` : null,
+    });
+  } catch {
+    return NextResponse.json({ hasServerKey: false });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
