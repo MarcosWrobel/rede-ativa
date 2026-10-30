@@ -74,18 +74,18 @@ export default async function FaltasPage() {
         id: true,
         title: true,
         segment: true,
-        shift: true,
-        reasonType: true,
         prefixText: true,
         suffixText: true,
+        isAbsenceRelated: true,
       },
     }),
   ]);
 
-  // Aggregate counts per student in memory
+  // Aggregate counts per student in memory safely
   const studentCountMap: Record<string, { student: any; count: number; lastDate: Date }> = {};
 
   absenceLogs.forEach((log) => {
+    if (!log.student || !log.student.classGroup) return;
     const sId = log.studentId;
     if (!studentCountMap[sId]) {
       studentCountMap[sId] = {
@@ -101,11 +101,12 @@ export default async function FaltasPage() {
   });
 
   const rankedAbsences = Object.values(studentCountMap).sort((a, b) => b.count - a.count);
+  const validLowAttendance = lowAttendance.filter((rec) => rec.student && rec.student.classGroup);
 
   return (
     <FaltasClient
       rankedAbsences={rankedAbsences}
-      lowAttendance={lowAttendance}
+      lowAttendance={validLowAttendance}
       classGroups={classGroups}
       templates={templates}
       currentUser={{

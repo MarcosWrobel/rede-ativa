@@ -176,7 +176,7 @@ export default function FaltasClient({
       templates.find(
         (t) =>
           (t.segment === "TODOS" || t.segment === studentSegment) &&
-          (t.reasonType === "FALTOU" ||
+          (t.isAbsenceRelated ||
             t.title.toLowerCase().includes("falta") ||
             t.title.toLowerCase().includes("frequência") ||
             t.title.toLowerCase().includes("busca ativa"))
@@ -1662,7 +1662,7 @@ export default function FaltasClient({
                   <option value="">-- Mensagem Personalizada / Sem Modelo --</option>
                   {templates.map((tpl) => (
                     <option key={tpl.id} value={tpl.id}>
-                      [{tpl.reasonType || "GERAL"}] {tpl.title}
+                      [{tpl.isAbsenceRelated ? "FALTA" : tpl.segment || "GERAL"}] {tpl.title}
                     </option>
                   ))}
                 </select>
