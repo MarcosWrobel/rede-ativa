@@ -34,8 +34,8 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 lg:px-8">
-      {/* Left: Mobile Toggle & Page Title */}
+    <header className="h-14 bg-white border-b border-slate-200 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 lg:px-8">
+      {/* Left: Mobile Toggle & Brand / Breadcrumb */}
       <div className="flex items-center space-x-3">
         <button
           type="button"
@@ -46,13 +46,11 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
           <Menu className="w-5 h-5" />
         </button>
 
-        <div>
-          <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight">
-            {currentInfo.title}
-          </h1>
-          <p className="text-xs text-slate-500 hidden sm:block">
-            {currentInfo.subtitle}
-          </p>
+        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500">
+          <GraduationCap className="w-4 h-4 text-sky-600 hidden sm:block" />
+          <span className="text-slate-400 hidden sm:inline">Colégio Leopoldina</span>
+          <span className="text-slate-300 hidden sm:inline">/</span>
+          <span className="text-slate-700 font-bold">{currentInfo.title}</span>
         </div>
       </div>
 
