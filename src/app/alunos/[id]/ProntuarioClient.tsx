@@ -72,6 +72,7 @@ export default function ProntuarioClient({
   const [minutes, setMinutes] = useState<any[]>(initialMinutes);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [isAtaEditorOpen, setIsAtaEditorOpen] = useState(false);
+  const [editingMinute, setEditingMinute] = useState<any | null>(null);
 
   // Modal: Novo Contato
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -956,7 +957,10 @@ export default function ProntuarioClient({
               </div>
               <button
                 type="button"
-                onClick={() => setIsAtaEditorOpen(true)}
+                onClick={() => {
+                  setEditingMinute(null);
+                  setIsAtaEditorOpen(true);
+                }}
                 className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
               >
                 <Plus className="w-4 h-4 text-sky-400" />
@@ -1019,16 +1023,32 @@ export default function ProntuarioClient({
                           </p>
                         </div>
 
-                        {isFinal && (
-                          <Link
-                            href={`/atas/${m.id}/imprimir`}
-                            target="_blank"
-                            className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition"
-                            title="Imprimir Via A4 Oficial"
+                        <div className="flex items-center space-x-2">
+                          {isFinal && (
+                            <Link
+                              href={`/atas/${m.id}/imprimir`}
+                              target="_blank"
+                              className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition"
+                              title="Imprimir Via A4 Oficial"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </Link>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMinute(m);
+                              setIsAtaEditorOpen(true);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
+                              !isFinal && !isVoid
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                : "border border-slate-200 bg-white hover:bg-slate-100 text-slate-700"
+                            }`}
                           >
-                            <Printer className="w-4 h-4" />
-                          </Link>
-                        )}
+                            {!isFinal && !isVoid ? "Editar / Lavrar" : "Detalhes / Adendo"}
+                          </button>
+                        </div>
                       </div>
 
                       <p className="text-slate-700 leading-relaxed font-serif bg-white p-3 rounded-xl border border-slate-100">
@@ -1514,9 +1534,11 @@ export default function ProntuarioClient({
       {/* Modal do Novo Livro Oficial de Atas Pedagógicas */}
       <AtaEditorModal
         isOpen={isAtaEditorOpen}
-        onClose={() => setIsAtaEditorOpen(false)}
-        onSaved={async () => {
+        onClose={() => {
           setIsAtaEditorOpen(false);
+          setEditingMinute(null);
+        }}
+        onSaved={async () => {
           try {
             const res = await fetch(`/api/atas?studentId=${student.id}`);
             const data = await res.json();
@@ -1536,6 +1558,7 @@ export default function ProntuarioClient({
           },
         ]}
         preSelectedStudentId={student.id}
+        existingMinute={editingMinute}
       />
     </div>
   );

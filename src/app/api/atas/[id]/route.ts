@@ -6,22 +6,56 @@ import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
+function sanitizeUpdateBody(raw: any) {
+  if (!raw || typeof raw !== "object") return raw;
+  const cleaned = { ...raw };
+
+  if (typeof cleaned.subject === "string") {
+    cleaned.subject = cleaned.subject.trim() || "Atendimento Pedagógico";
+    if (cleaned.subject.length < 2) cleaned.subject = "Atendimento Pedagógico";
+  }
+
+  if (Array.isArray(cleaned.participants)) {
+    cleaned.participants = cleaned.participants
+      .filter((p: any) => p && (p.name?.trim() || p.signatureData || p.signatureMode === "REFUSED" || p.id))
+      .map((p: any) => {
+        const trimmedName = (p.name || "").trim();
+        return {
+          ...p,
+          name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
+        };
+      });
+  }
+
+  if (Array.isArray(cleaned.actionItems)) {
+    cleaned.actionItems = cleaned.actionItems
+      .filter((a: any) => a && typeof a.description === "string" && a.description.trim().length >= 2)
+      .map((a: any) => ({
+        ...a,
+        description: a.description.trim(),
+        dueDate: a.dueDate && String(a.dueDate).trim() !== "" ? a.dueDate : null,
+      }));
+  }
+
+  return cleaned;
+}
+
 const updateMinuteDraftSchema = z.object({
   category: z.string().optional(),
   isConfidential: z.boolean().optional(),
   attendedAt: z.string().optional(),
-  subject: z.string().min(2).optional(),
+  subject: z.string().min(2, "Assunto deve ter ao menos 2 caracteres").optional(),
   rawNotes: z.string().optional().nullable(),
   summary: z.string().optional(),
   agreementsSummary: z.string().optional().nullable(),
-  studentIds: z.array(z.string()).min(1).optional(),
+  studentIds: z.array(z.string()).min(1, "Vincule pelo menos um estudante").optional(),
   participants: z
     .array(
       z.object({
         id: z.string().optional(),
         role: z.string(),
         studentId: z.string().optional().nullable(),
-        name: z.string().min(2),
+        name: z.string().min(2, "Informe o nome do participante"),
         kinship: z.string().optional().nullable(),
         documentType: z.string().optional().nullable(),
         documentNumber: z.string().optional().nullable(),
@@ -30,6 +64,7 @@ const updateMinuteDraftSchema = z.object({
         signatureMode: z.string().default("PENDING"),
         signatureData: z.string().optional().nullable(),
         signedAt: z.string().optional().nullable(),
+        clearSignature: z.boolean().optional(),
         biometricVerified: z.boolean().optional(),
         biometricDeviceType: z.string().optional().nullable(),
         refusalReason: z.string().optional().nullable(),
@@ -41,7 +76,7 @@ const updateMinuteDraftSchema = z.object({
     .array(
       z.object({
         id: z.string().optional(),
-        description: z.string().min(2),
+        description: z.string().min(2, "Informe a descrição do encaminhamento"),
         responsible: z.string(),
         dueDate: z.string().optional().nullable(),
         status: z.string().default("PENDING"),
@@ -132,7 +167,7 @@ export async function PATCH(
     }
 
     const rawBody = await req.json();
-    const parsed = updateMinuteDraftSchema.safeParse(rawBody);
+    const parsed = updateMinuteDraftSchema.safeParse(sanitizeUpdateBody(rawBody));
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
@@ -159,50 +194,76 @@ export async function PATCH(
       });
     }
 
-    // Se informou participants, preserva assinaturas mobile recém-coletadas caso o front-end envie rascunho anterior
+    // Se informou participants, preserva id, mobileSignToken e assinaturas mobile recém-coletadas
     if (data.participants) {
       const existingParticipants = await prisma.pedagogicalMinuteParticipant.findMany({
         where: { minuteId: id },
       });
 
-      await prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
-      await prisma.pedagogicalMinuteParticipant.createMany({
-        data: data.participants.map((p, idx) => {
-          // Se o participante já tinha assinatura salva no banco (ex: via QR Code móvel), não perde!
-          const match =
-            (p.id && existingParticipants.find((ep) => ep.id === p.id)) ||
-            existingParticipants.find((ep) => ep.name.trim() === p.name.trim()) ||
-            existingParticipants[idx];
+      const usedIds = new Set<string>();
 
-          const sigData = p.signatureData || match?.signatureData || null;
-          const sigMode = sigData ? (p.signatureMode !== "PENDING" ? p.signatureMode : match?.signatureMode || "SCREEN_CANVAS") : p.signatureMode || "PENDING";
-          const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
+      const participantsToCreate = data.participants.map((p) => {
+        const match =
+          (p.id && existingParticipants.find((ep) => ep.id === p.id && !usedIds.has(ep.id))) ||
+          existingParticipants.find(
+            (ep) => !usedIds.has(ep.id) && ep.name.trim().toLowerCase() === p.name.trim().toLowerCase()
+          ) ||
+          (existingParticipants.length === 1 && data.participants?.length === 1 && !usedIds.has(existingParticipants[0].id)
+            ? existingParticipants[0]
+            : undefined);
 
-          const bioVerified = p.biometricVerified ?? match?.biometricVerified ?? false;
-          const bioDevice = p.biometricDeviceType || match?.biometricDeviceType || null;
-          const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
+        if (match?.id) {
+          usedIds.add(match.id);
+        }
 
-          return {
-            minuteId: id,
-            role: p.role,
-            studentId: p.studentId || null,
-            name: p.name,
-            kinship: p.kinship || null,
-            documentType: p.documentType || null,
-            documentNumber: p.documentNumber || null,
-            documentVerifiedByStaff: p.documentVerifiedByStaff,
-            phone: p.phone || null,
-            signatureMode: sigMode,
-            signatureData: sigData,
-            signedAt,
-            biometricVerified: bioVerified,
-            biometricDeviceType: bioDevice,
-            biometricAuthTime: bioTime,
-            refusalReason: p.refusalReason || null,
-            witnessName: p.witnessName || null,
-          };
-        }),
+        const shouldClear = Boolean(p.clearSignature);
+        const isRefused = p.signatureMode === "REFUSED";
+
+        const sigData = shouldClear || isRefused ? null : (p.signatureData || match?.signatureData || null);
+        const sigMode = isRefused
+          ? "REFUSED"
+          : sigData
+            ? p.signatureMode !== "PENDING"
+              ? p.signatureMode
+              : match?.signatureMode || "SCREEN_CANVAS"
+            : "PENDING";
+        const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
+
+        const bioVerified = shouldClear || isRefused ? false : (p.biometricVerified ?? match?.biometricVerified ?? false);
+        const bioDevice = shouldClear || isRefused ? null : (p.biometricDeviceType || match?.biometricDeviceType || null);
+        const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
+
+        return {
+          ...(match?.id ? { id: match.id } : {}),
+          minuteId: id,
+          role: p.role,
+          studentId: p.studentId || null,
+          name: p.name,
+          kinship: p.kinship || null,
+          documentType: p.documentType || null,
+          documentNumber: p.documentNumber || null,
+          documentVerifiedByStaff: p.documentVerifiedByStaff,
+          phone: p.phone || null,
+          signatureMode: sigMode,
+          signatureData: sigData,
+          signedAt,
+          signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
+          mobileSignToken: sigData || shouldClear || isRefused ? null : (match?.mobileSignToken || null),
+          mobileSignExpiresAt: sigData || shouldClear || isRefused ? null : (match?.mobileSignExpiresAt || null),
+          biometricVerified: bioVerified,
+          biometricDeviceType: bioDevice,
+          biometricAuthTime: bioTime,
+          refusalReason: isRefused ? (p.refusalReason || null) : null,
+          witnessName: isRefused ? (p.witnessName || null) : null,
+        };
       });
+
+      await prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
+      if (participantsToCreate.length > 0) {
+        await prisma.pedagogicalMinuteParticipant.createMany({
+          data: participantsToCreate,
+        });
+      }
     }
 
     // Se informou actionItems, atualiza

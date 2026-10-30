@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, ShieldCheck, FileCheck2, Lock } from "lucide-react";
+import { Printer, ArrowLeft, ShieldCheck } from "lucide-react";
 
 interface Props {
   minute: any;
@@ -13,9 +14,14 @@ export default function PrintPageClient({ minute }: Props) {
   const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N";
   const attendedDate = new Date(minute.attendedAt);
 
-  const verificationUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/validar/ata/${minute.verificationCode}`
-    : `https://registro-leopoldina.vercel.app/validar/ata/${minute.verificationCode}`;
+  const [origin, setOrigin] = useState("https://registro-leopoldina.vercel.app");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  const verificationUrl = `${origin}/validar/ata/${minute.verificationCode}`;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

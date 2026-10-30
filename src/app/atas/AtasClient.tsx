@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   FileText,
   UserCheck,
+  Trash2,
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 
@@ -39,6 +40,8 @@ export default function AtasClient({
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingMinute, setEditingMinute] = useState<any | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchMinutes = useCallback(async () => {
     setLoading(true);
@@ -64,6 +67,46 @@ export default function AtasClient({
   useEffect(() => {
     fetchMinutes();
   }, [fetchMinutes]);
+
+  const [finalizingId, setFinalizingId] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  const handleDeleteDraft = async (id: string) => {
+    setDeletingId(id);
+    setListError(null);
+    try {
+      const res = await fetch(`/api/atas/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao descartar rascunho");
+      setConfirmDeleteId(null);
+      await fetchMinutes();
+    } catch (e: any) {
+      setListError(e.message || "Erro ao descartar rascunho.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleQuickFinalize = async (m: any) => {
+    setListError(null);
+    if (!m.summary || m.summary.trim().length < 10) {
+      setEditingMinute(m);
+      setIsCreateModalOpen(true);
+      return;
+    }
+
+    setFinalizingId(m.id);
+    try {
+      const res = await fetch(`/api/atas/${m.id}/finalize`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao lavrar ata");
+      await fetchMinutes();
+    } catch (e: any) {
+      setListError(e.message || "Erro ao lavrar ata.");
+    } finally {
+      setFinalizingId(null);
+    }
+  };
 
   const finalizedCount = minutes.filter((m) => m.status === "FINALIZED").length;
   const draftCount = minutes.filter((m) => m.status === "DRAFT").length;
@@ -202,6 +245,13 @@ export default function AtasClient({
         </div>
       </div>
 
+      {listError && (
+        <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{listError}</span>
+        </div>
+      )}
+
       {/* Lista de Atas */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
         {loading ? (
@@ -220,6 +270,8 @@ export default function AtasClient({
               const isFinal = m.status === "FINALIZED";
               const isVoid = m.status === "VOIDED";
               const ataNumStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
+              const isReadyToQuickFinalize =
+                !isFinal && !isVoid && m.summary && m.summary.trim().length >= 10 && m.students?.length > 0;
 
               return (
                 <div
@@ -297,16 +349,59 @@ export default function AtasClient({
                     )}
 
                     {!isFinal && !isVoid ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingMinute(m);
-                          setIsCreateModalOpen(true);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
-                      >
-                        Editar / Lavrar
-                      </button>
+                      <>
+                        {isReadyToQuickFinalize && (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickFinalize(m)}
+                            disabled={finalizingId === m.id}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <FileCheck2 className="w-3.5 h-3.5" />
+                            <span>{finalizingId === m.id ? "Lavrando..." : "Lavrar Ata"}</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMinute(m);
+                            setIsCreateModalOpen(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition cursor-pointer"
+                        >
+                          Editar / Lavrar
+                        </button>
+
+                        {confirmDeleteId === m.id ? (
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDraft(m.id)}
+                              disabled={deletingId === m.id}
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
+                            >
+                              {deletingId === m.id ? "..." : "Confirmar"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-2 py-1.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-[11px] cursor-pointer"
+                            >
+                              Não
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(m.id)}
+                            className="p-2 rounded-xl border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="Descartar rascunho"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -314,7 +409,7 @@ export default function AtasClient({
                           setEditingMinute(m);
                           setIsCreateModalOpen(true);
                         }}
-                        className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition"
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition cursor-pointer"
                       >
                         Ver Detalhes / Adendo
                       </button>
@@ -333,10 +428,9 @@ export default function AtasClient({
         onClose={() => {
           setIsCreateModalOpen(false);
           setEditingMinute(null);
+          fetchMinutes();
         }}
         onSaved={() => {
-          setIsCreateModalOpen(false);
-          setEditingMinute(null);
           fetchMinutes();
         }}
         availableStudents={availableStudents}

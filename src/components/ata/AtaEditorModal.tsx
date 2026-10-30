@@ -18,12 +18,15 @@ import {
   Share2,
   Users,
   Search,
-  Filter,
   ArrowRight,
   ArrowLeft,
   X,
   Check,
-  Calendar,
+  ShieldCheck,
+  FilePlus2,
+  Ban,
+  RotateCcw,
+  ExternalLink,
 } from "lucide-react";
 
 interface StudentOption {
@@ -61,120 +64,137 @@ export default function AtaEditorModal({
   preSelectedStudentId,
   existingMinute,
 }: Props) {
-  // Controle de Etapa do Bimodal:
-  // Step 1: Seleção de Estudantes, Turmas e Natureza
-  // Step 2: Redação Assistida por IA, Encaminhamentos e Assinaturas
   const [step, setStep] = useState<1 | 2>(1);
 
   // Filtros de Pesquisa de Alunos (Passo 1)
   const [studentSearch, setStudentSearch] = useState("");
   const [selectedTurmaFilter, setSelectedTurmaFilter] = useState("TODAS");
+  const [step1Error, setStep1Error] = useState<string | null>(null);
 
-  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>(() => {
-    if (existingMinute?.students) {
-      return existingMinute.students.map((s: any) => s.studentId);
-    }
-    return preSelectedStudentId ? [preSelectedStudentId] : [];
-  });
-
-  const [category, setCategory] = useState(
-    existingMinute?.category || "ACOMPANHAMENTO_PEDAGOGICO"
-  );
-  const [isConfidential, setIsConfidential] = useState(
-    existingMinute?.isConfidential || false
-  );
-  const [subject, setSubject] = useState(
-    existingMinute?.subject || "Atendimento Pedagógico e Alinhamento de Frequência"
-  );
-  const [rawNotes, setRawNotes] = useState(existingMinute?.rawNotes || "");
-  const [summary, setSummary] = useState(existingMinute?.summary || "");
-  const [agreementsSummary, setAgreementsSummary] = useState(
-    existingMinute?.agreementsSummary || ""
-  );
-
-  // Participantes
-  const [participants, setParticipants] = useState<any[]>(() => {
-    if (existingMinute?.participants && existingMinute.participants.length > 0) {
-      return existingMinute.participants;
-    }
-    const stud = availableStudents.find((s) => s.id === preSelectedStudentId);
-    if (stud?.guardianName) {
-      return [
-        {
-          role: "RESPONSAVEL",
-          name: stud.guardianName,
-          kinship: "Mãe/Pai",
-          documentType: "CPF",
-          documentNumber: "",
-          documentVerifiedByStaff: true,
-          phone: stud.phone || "",
-          signatureMode: "PENDING",
-          signatureData: null,
-          refusalReason: "",
-          witnessName: "",
-        },
-      ];
-    }
-    return [];
-  });
-
-  // Encaminhamentos
-  const [actionItems, setActionItems] = useState<any[]>(() => {
-    if (existingMinute?.actionItems) {
-      return existingMinute.actionItems.map((a: any) => ({
-        description: a.description,
-        responsible: a.responsible,
-        dueDate: a.dueDate ? a.dueDate.slice(0, 10) : "",
-      }));
-    }
-    return [];
-  });
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [category, setCategory] = useState("ACOMPANHAMENTO_PEDAGOGICO");
+  const [isConfidential, setIsConfidential] = useState(false);
+  const [subject, setSubject] = useState("Atendimento Pedagógico e Alinhamento de Frequência");
+  const [rawNotes, setRawNotes] = useState("");
+  const [summary, setSummary] = useState("");
+  const [agreementsSummary, setAgreementsSummary] = useState("");
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [actionItems, setActionItems] = useState<any[]>([]);
 
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingFinal, setSavingFinal] = useState(false);
+  const [draftSavedMsg, setDraftSavedMsg] = useState<string | null>(null);
   const [activeSignParticipantIndex, setActiveSignParticipantIndex] = useState<number | null>(null);
+  const [activeRefusalIndex, setActiveRefusalIndex] = useState<number | null>(null);
+  const [refusalDraftReason, setRefusalDraftReason] = useState("");
+  const [refusalDraftWitness, setRefusalDraftWitness] = useState("Equipe Pedagógica");
   const [qrModalInfo, setQrModalInfo] = useState<{ url: string; name: string } | null>(null);
   const [finalizedAta, setFinalizedAta] = useState<any | null>(null);
-  const [minuteId, setMinuteId] = useState<string | null>(existingMinute?.id || null);
+  const [minuteId, setMinuteId] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
-  // Sincroniza rascunho existente
+  // Estados exclusivos para visualização de Ata já Lavrada (Adendo / Cancelamento / Ações)
+  const [viewMinuteData, setViewMinuteData] = useState<any | null>(null);
+  const [addendumText, setAddendumText] = useState("");
+  const [savingAddendum, setSavingAddendum] = useState(false);
+  const [showVoidForm, setShowVoidForm] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [savingVoid, setSavingVoid] = useState(false);
+  const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // Inicializa / reseta o modal sempre que abrir ou trocar de ata
   useEffect(() => {
+    if (!isOpen) return;
+
+    setFinalizeError(null);
+    setStep1Error(null);
+    setAiError(null);
+    setDraftSavedMsg(null);
+    setQrModalInfo(null);
+    setActiveSignParticipantIndex(null);
+    setActiveRefusalIndex(null);
+    setFinalizedAta(null);
+    setAddendumText("");
+    setShowVoidForm(false);
+    setVoidReason("");
+    setPostFinalizeMsg(null);
+
     if (existingMinute) {
+      if (existingMinute.status === "FINALIZED" || existingMinute.status === "VOIDED") {
+        setViewMinuteData(existingMinute);
+        setMinuteId(existingMinute.id);
+        return;
+      }
+
+      setViewMinuteData(null);
       setMinuteId(existingMinute.id || null);
-      if (existingMinute.students) {
-        setSelectedStudentIds(existingMinute.students.map((s: any) => s.studentId));
-      }
-      if (existingMinute.category) setCategory(existingMinute.category);
-      if (existingMinute.isConfidential !== undefined) setIsConfidential(existingMinute.isConfidential);
-      if (existingMinute.subject) setSubject(existingMinute.subject);
-      if (existingMinute.rawNotes !== undefined) setRawNotes(existingMinute.rawNotes || "");
-      if (existingMinute.summary !== undefined) setSummary(existingMinute.summary || "");
-      if (existingMinute.agreementsSummary !== undefined) setAgreementsSummary(existingMinute.agreementsSummary || "");
-      if (existingMinute.participants) setParticipants(existingMinute.participants);
-      if (existingMinute.actionItems) {
-        setActionItems(
-          existingMinute.actionItems.map((a: any) => ({
-            description: a.description,
-            responsible: a.responsible,
-            dueDate: a.dueDate ? a.dueDate.slice(0, 10) : "",
-          }))
-        );
-      }
-      // Se já está editando um rascunho com aluno, abre direto no passo 2
-      setStep(2);
+      setSelectedStudentIds(
+        existingMinute.students ? existingMinute.students.map((s: any) => s.studentId) : []
+      );
+      setCategory(existingMinute.category || "ACOMPANHAMENTO_PEDAGOGICO");
+      setIsConfidential(Boolean(existingMinute.isConfidential));
+      setSubject(existingMinute.subject || "Atendimento Pedagógico e Alinhamento de Frequência");
+      setRawNotes(existingMinute.rawNotes || "");
+      setSummary(existingMinute.summary || "");
+      setAgreementsSummary(existingMinute.agreementsSummary || "");
+      setParticipants(existingMinute.participants || []);
+      setActionItems(
+        existingMinute.actionItems
+          ? existingMinute.actionItems.map((a: any) => ({
+              id: a.id,
+              description: a.description,
+              responsible: a.responsible,
+              dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : "",
+              status: a.status || "PENDING",
+            }))
+          : []
+      );
+      setStep(existingMinute.students?.length > 0 ? 2 : 1);
     } else {
+      setViewMinuteData(null);
       setMinuteId(null);
-      setSelectedStudentIds(preSelectedStudentId ? [preSelectedStudentId] : []);
-      setSummary("");
+      setCategory("ACOMPANHAMENTO_PEDAGOGICO");
+      setIsConfidential(false);
+      setSubject("Atendimento Pedagógico e Alinhamento de Frequência");
       setRawNotes("");
+      setSummary("");
       setAgreementsSummary("");
-      setFinalizedAta(null);
-      setStep(preSelectedStudentId ? 2 : 1);
+      setActionItems([]);
+
+      if (preSelectedStudentId) {
+        setSelectedStudentIds([preSelectedStudentId]);
+        const stud = availableStudents.find((s) => s.id === preSelectedStudentId);
+        if (stud?.guardianName) {
+          setParticipants([
+            {
+              role: "RESPONSAVEL",
+              name: stud.guardianName,
+              kinship: "Mãe/Pai",
+              documentType: "CPF",
+              documentNumber: "",
+              documentVerifiedByStaff: true,
+              phone: stud.phone || "",
+              signatureMode: "PENDING",
+              signatureData: null,
+              refusalReason: "",
+              witnessName: "",
+            },
+          ]);
+        } else {
+          setParticipants([]);
+        }
+        setStep(2);
+      } else {
+        setSelectedStudentIds([]);
+        setParticipants([]);
+        setStep(1);
+      }
     }
-  }, [existingMinute, preSelectedStudentId]);
+  }, [isOpen, existingMinute, preSelectedStudentId, availableStudents]);
 
   // Lista única de turmas para filtro
   const turmasList = useMemo(() => {
@@ -203,6 +223,7 @@ export default function AtaEditorModal({
 
   // Toggle de seleção do aluno
   const handleToggleStudent = (student: StudentOption) => {
+    setStep1Error(null);
     const isSelected = selectedStudentIds.includes(student.id);
     let nextIds: string[];
 
@@ -211,7 +232,6 @@ export default function AtaEditorModal({
     } else {
       nextIds = [...selectedStudentIds, student.id];
 
-      // Se o aluno tiver responsável e ainda não estiver na lista de participantes, sugere adicionar
       if (student.guardianName && !participants.some((p) => p.name === student.guardianName)) {
         setParticipants((prev) => [
           ...prev,
@@ -245,7 +265,7 @@ export default function AtaEditorModal({
         if (data.minute?.participants) {
           setParticipants(data.minute.participants);
           const currentPart = data.minute.participants.find(
-            (p: any) => p.name === qrModalInfo.name
+            (p: any) => p.name === qrModalInfo.name || p.signatureData
           );
           if (currentPart?.signatureData) {
             setQrModalInfo(null);
@@ -261,6 +281,7 @@ export default function AtaEditorModal({
 
   // Ditado por voz nativo pt-BR
   const toggleSpeechRecognition = () => {
+    setAiError(null);
     if (isListening) {
       setIsListening(false);
       return;
@@ -270,7 +291,7 @@ export default function AtaEditorModal({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Seu navegador não possui suporte para reconhecimento de voz nativo.");
+      setAiError("Seu navegador não possui suporte para reconhecimento de voz nativo.");
       return;
     }
 
@@ -292,16 +313,16 @@ export default function AtaEditorModal({
       };
 
       recognition.start();
-    } catch (e: any) {
-      console.warn("Erro ao iniciar voz:", e);
+    } catch {
       setIsListening(false);
     }
   };
 
   // Formalização IA com Gemini
   const handleFormalizeWithAi = async () => {
+    setAiError(null);
     if (!rawNotes.trim()) {
-      alert("Digite tópicos ou use o microfone antes de solicitar a formalização com IA.");
+      setAiError("Digite tópicos rápidos acima ou use o microfone antes de clicar em Formalizar com IA.");
       return;
     }
 
@@ -349,156 +370,293 @@ export default function AtaEditorModal({
         }
       }
     } catch (err: any) {
-      alert(err.message || "Erro ao formalizar minuta");
+      setAiError(err.message || "Erro ao formalizar minuta com IA.");
     } finally {
       setIsAiLoading(false);
     }
   };
 
-  // Salvar Rascunho
+  // Monta payload limpo e higienizado para envio à API
+  const buildSanitizedPayload = () => {
+    const cleanSubject = subject.trim().length >= 2 ? subject.trim() : "Atendimento Pedagógico";
+
+    const cleanParticipants = participants
+      .filter((p) => p && (p.name?.trim() || p.signatureData || p.signatureMode === "REFUSED" || p.id))
+      .map((p) => {
+        const trimmedName = (p.name || "").trim();
+        return {
+          ...p,
+          name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
+        };
+      });
+
+    const cleanActions = actionItems
+      .filter((a) => a && typeof a.description === "string" && a.description.trim().length >= 2)
+      .map((a) => ({
+        ...a,
+        description: a.description.trim(),
+        dueDate: a.dueDate && String(a.dueDate).trim() !== "" ? a.dueDate : null,
+      }));
+
+    return {
+      category,
+      isConfidential,
+      subject: cleanSubject,
+      rawNotes,
+      summary,
+      agreementsSummary,
+      studentIds: selectedStudentIds,
+      participants: cleanParticipants,
+      actionItems: cleanActions,
+    };
+  };
+
+  // Função interna de persistência de rascunho (sem interferir em estados de loading externos)
+  const saveDraftInternal = async () => {
+    const payload = buildSanitizedPayload();
+    const targetId = minuteId || existingMinute?.id;
+    const url = targetId ? `/api/atas/${targetId}` : "/api/atas";
+    const method = targetId ? "PATCH" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Erro ao salvar rascunho da ata.");
+    }
+
+    if (data.minute?.id) {
+      setMinuteId(data.minute.id);
+      if (data.minute.participants) {
+        setParticipants(data.minute.participants);
+      }
+    }
+
+    return data.minute;
+  };
+
+  // Botão "Salvar Rascunho"
   const handleSaveDraft = async () => {
     if (selectedStudentIds.length === 0) {
-      const msg = "Selecione pelo menos um estudante para vincular a esta ata.";
-      setFinalizeError(msg);
-      alert(msg);
+      setStep(1);
+      setStep1Error("Selecione pelo menos um estudante para vincular a esta ata.");
       return null;
     }
 
     setSaving(true);
     setFinalizeError(null);
+    setDraftSavedMsg(null);
     try {
-      const payload = {
-        category,
-        isConfidential,
-        subject,
-        rawNotes,
-        summary,
-        agreementsSummary,
-        studentIds: selectedStudentIds,
-        participants,
-        actionItems,
-      };
-
-      const targetId = minuteId || existingMinute?.id;
-      const url = targetId ? `/api/atas/${targetId}` : "/api/atas";
-      const method = targetId ? "PATCH" : "POST";
-
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao salvar rascunho");
-
-      if (data.minute?.id) {
-        setMinuteId(data.minute.id);
-        if (data.minute.participants) {
-          setParticipants(data.minute.participants);
-        }
-      }
-
-      return data.minute;
+      const saved = await saveDraftInternal();
+      setDraftSavedMsg("Rascunho salvo com sucesso!");
+      onSaved();
+      setTimeout(() => setDraftSavedMsg(null), 4000);
+      return saved;
     } catch (err: any) {
-      setFinalizeError(err.message || "Erro ao salvar");
+      setFinalizeError(err.message || "Erro ao salvar rascunho.");
       return null;
     } finally {
       setSaving(false);
     }
   };
 
-  // Lavrar Oficialmente
+  // Botão "Lavrar Ata Oficial (Imutável)" — direto, sem window.confirm bloqueável
   const handleFinalize = async () => {
     setFinalizeError(null);
+    setDraftSavedMsg(null);
 
     if (selectedStudentIds.length === 0) {
       setStep(1);
-      const msg = "Selecione pelo menos um estudante antes de lavrar a ata.";
-      setFinalizeError(msg);
+      setStep1Error("Selecione pelo menos um estudante antes de lavrar a ata.");
       return;
     }
 
     if (!summary || summary.trim().length < 10) {
-      const msg = "É necessário preencher o texto formal da ata (mínimo de 10 caracteres) antes da lavratura oficial.";
-      setFinalizeError(msg);
+      if (rawNotes && rawNotes.trim().length >= 10) {
+        setFinalizeError(
+          'O campo "Texto Formal da Ata" está vazio. Clique em "Formalizar com IA" acima para gerar o texto oficial a partir das suas notas rápidas, ou digite o texto formal diretamente.'
+        );
+      } else {
+        setFinalizeError(
+          "É necessário preencher o Texto Formal da Ata (mínimo de 10 caracteres) antes da lavratura oficial."
+        );
+      }
       return;
     }
 
-    let confirmed = true;
+    setSavingFinal(true);
     try {
-      confirmed = window.confirm(
-        "CONFIRMAÇÃO JURÍDICA: Deseja lavrar esta Ata Pedagógica agora?\n\nApós a lavratura, ela receberá número sequencial anual oficial, hash SHA-256 e ficará 100% imutável (qualquer alteração futura só poderá ser feita via Adendo 'Em tempo')."
-      );
-    } catch {
-      confirmed = true;
-    }
-    if (!confirmed) return;
+      let targetId = minuteId || existingMinute?.id;
 
-    setSaving(true);
-    try {
-      // 1. Salva rascunho primeiro
-      const savedMinute = await handleSaveDraft();
-      if (!savedMinute) {
-        throw new Error("Não foi possível salvar o rascunho da ata antes da lavratura.");
+      // Se a ata ainda não foi criada no banco, cria o rascunho inicial primeiro
+      if (!targetId) {
+        const created = await saveDraftInternal();
+        if (!created?.id) {
+          throw new Error("Não foi possível registrar os dados iniciais da ata.");
+        }
+        targetId = created.id;
       }
 
-      // 2. Chama lavratura definitiva
-      const res = await fetch(`/api/atas/${savedMinute.id}/finalize`, {
+      // Envia o payload atualizado direto para o endpoint atômico de lavratura oficial
+      const payload = buildSanitizedPayload();
+      const res = await fetch(`/api/atas/${targetId}/finalize`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Erro ao lavrar ata no servidor.");
+        throw new Error(data.error || "Erro ao lavrar ata oficial no servidor.");
       }
 
       setFinalizedAta(data.minute);
       onSaved();
     } catch (err: any) {
       console.error("[handleFinalize] Erro:", err);
-      const msg = err.message || "Erro desconhecido ao lavrar ata.";
-      setFinalizeError(msg);
+      setFinalizeError(err.message || "Erro inesperado ao lavrar ata.");
     } finally {
-      setSaving(false);
+      setSavingFinal(false);
     }
   };
 
   // Gerar QR Code para participante assinar no celular
   const handleGenerateMobileSign = async (index: number) => {
-    const part = participants[index];
-    const currentId = minuteId || existingMinute?.id;
-
-    if (!currentId || !part.id) {
-      const saved = await handleSaveDraft();
-      if (!saved) return;
-      const partId = saved.participants[index]?.id;
-      if (partId) {
-        generateTokenForParticipant(saved.id, partId, part.name);
-      }
+    setFinalizeError(null);
+    if (selectedStudentIds.length === 0) {
+      setFinalizeError("Vincule pelo menos um estudante antes de gerar o QR Code de assinatura.");
       return;
     }
-    generateTokenForParticipant(currentId, part.id, part.name);
-  };
 
-  const generateTokenForParticipant = async (targetMinuteId: string, participantId: string, name: string) => {
+    setSaving(true);
     try {
-      const res = await fetch(`/api/atas/${targetMinuteId}/sign-token`, {
+      // Sempre sincroniza o rascunho para garantir que o participante exista no banco
+      const saved = await saveDraftInternal();
+      if (!saved) return;
+
+      const part = saved.participants?.[index] || saved.participants?.find((p: any) => p.name === participants[index]?.name);
+      if (!part?.id) {
+        throw new Error("Informe o nome do participante antes de gerar o QR Code.");
+      }
+
+      const res = await fetch(`/api/atas/${saved.id}/sign-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participantId }),
+        body: JSON.stringify({ participantId: part.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao gerar token de assinatura");
+
+      setMinuteId(saved.id);
+      setQrModalInfo({ url: data.signUrl, name: part.name });
+      onSaved();
+    } catch (err: any) {
+      setFinalizeError(err.message || "Erro ao gerar link de assinatura móvel.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handlers de Ata Já Lavrada (Adendo, Status de Ação, Tornar Sem Efeito)
+  const handleAddAddendum = async () => {
+    if (!viewMinuteData?.id) return;
+    if (addendumText.trim().length < 5) {
+      setPostFinalizeMsg({ type: "err", text: "O texto do aditamento deve ter pelo menos 5 caracteres." });
+      return;
+    }
+
+    setSavingAddendum(true);
+    setPostFinalizeMsg(null);
+    try {
+      const res = await fetch(`/api/atas/${viewMinuteData.id}/addendums`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: addendumText.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao registrar aditamento");
+
+      setViewMinuteData((prev: any) => ({
+        ...prev,
+        addendums: [...(prev.addendums || []), data.addendum],
+      }));
+      setAddendumText("");
+      setPostFinalizeMsg({ type: "ok", text: 'Termo de aditamento ("Em tempo") registrado e selado com sucesso!' });
+      onSaved();
+    } catch (err: any) {
+      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao salvar adendo." });
+    } finally {
+      setSavingAddendum(false);
+    }
+  };
+
+  const handleToggleActionStatus = async (actionItem: any) => {
+    if (!viewMinuteData?.id || !actionItem?.id) return;
+    const nextStatus = actionItem.status === "COMPLETED" ? "PENDING" : "COMPLETED";
+    try {
+      const res = await fetch(`/api/atas/${viewMinuteData.id}/actions/${actionItem.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      setMinuteId(targetMinuteId);
-      setQrModalInfo({ url: data.signUrl, name });
+      setViewMinuteData((prev: any) => ({
+        ...prev,
+        actionItems: prev.actionItems.map((a: any) => (a.id === actionItem.id ? data.actionItem : a)),
+      }));
+      onSaved();
     } catch (err: any) {
-      alert(err.message || "Erro ao gerar link de assinatura");
+      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao atualizar encaminhamento." });
     }
   };
 
-  // Se já lavrou com sucesso, mostra tela de conclusão com atalhos
+  const handleVoidMinute = async () => {
+    if (!viewMinuteData?.id) return;
+    if (voidReason.trim().length < 10) {
+      setPostFinalizeMsg({
+        type: "err",
+        text: "A justificativa para tornar a ata sem efeito deve ter no mínimo 10 caracteres.",
+      });
+      return;
+    }
+
+    setSavingVoid(true);
+    setPostFinalizeMsg(null);
+    try {
+      const res = await fetch(`/api/atas/${viewMinuteData.id}/void`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: voidReason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao tornar ata sem efeito");
+
+      setViewMinuteData((prev: any) => ({
+        ...prev,
+        status: "VOIDED",
+        voidReason: voidReason.trim(),
+        voidedAt: data.minute.voidedAt,
+        voidedByName: data.minute.voidedByName,
+      }));
+      setShowVoidForm(false);
+      setPostFinalizeMsg({ type: "ok", text: "Averbação de cancelamento registrada no Livro Oficial." });
+      onSaved();
+    } catch (err: any) {
+      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao cancelar ata." });
+    } finally {
+      setSavingVoid(false);
+    }
+  };
+
+  // ============================================================================
+  // TELA A: CELEBRAÇÃO DE ATA RECÉM-LAVRADA COM SUCESSO
+  // ============================================================================
   if (finalizedAta) {
     const cleanNum = String(finalizedAta.ataNumber).padStart(3, "0");
     const cleanYear = finalizedAta.year;
@@ -508,42 +666,45 @@ export default function AtaEditorModal({
         isOpen={isOpen}
         onClose={onClose}
         title="Ata Pedagógica Lavrada com Sucesso"
-        maxWidthClass="max-w-2xl"
+        maxWidthClass="max-w-3xl"
       >
-        <div className="text-center py-6 space-y-4">
+        <div className="text-center py-6 space-y-5">
           <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-            <FileCheck2 className="w-8 h-8" />
+            <FileCheck2 className="w-9 h-9" />
           </div>
 
           <div>
-            <span className="inline-block px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200 uppercase tracking-wide">
-              Documento Oficial Registrado
+            <span className="inline-block px-3.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-extrabold border border-emerald-200 uppercase tracking-wide">
+              Documento Oficial Registrado no Livro {cleanYear}
             </span>
-            <h3 className="text-2xl font-black text-slate-900 mt-2">
+            <h3 className="text-3xl font-black text-slate-900 mt-2">
               Ata Pedagógica nº {cleanNum}/{cleanYear}
             </h3>
             <p className="text-xs text-slate-500 font-mono mt-1">
-              Código de Validação: {finalizedAta.verificationCode}
+              Código Público de Validação: <strong>{finalizedAta.verificationCode}</strong>
             </p>
           </div>
 
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left text-xs space-y-2">
-            <p className="font-bold text-slate-700">Integridade Criptográfica (SHA-256):</p>
-            <p className="font-mono text-[10px] text-slate-600 break-all bg-white p-2.5 rounded-xl border border-slate-200">
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left text-xs space-y-2 max-w-2xl mx-auto">
+            <p className="font-bold text-slate-700 flex items-center space-x-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>Selo de Integridade Criptográfica (SHA-256 — Lei nº 14.063/2020):</span>
+            </p>
+            <p className="font-mono text-[11px] text-slate-700 break-all bg-white p-3 rounded-xl border border-slate-200">
               {finalizedAta.contentHash}
             </p>
-            <p className="text-[11px] text-slate-500">
-              Lavrado por: <strong>{finalizedAta.authorName}</strong> em{" "}
+            <p className="text-xs text-slate-500">
+              Lavrado com fé pública por <strong>{finalizedAta.authorName}</strong> em{" "}
               {new Date(finalizedAta.finalizedAt).toLocaleString("pt-BR")}.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <a
               href={`/atas/${finalizedAta.id}/imprimir`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-sm"
+              className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition shadow-sm"
             >
               <Printer className="w-4 h-4 text-amber-400" />
               <span>Imprimir / Salvar PDF Oficial A4</span>
@@ -552,11 +713,11 @@ export default function AtaEditorModal({
             {finalizedAta.agreementsSummary && (
               <a
                 href={`https://wa.me/?text=${encodeURIComponent(
-                  `*Colégio Estadual Leopoldina B. Pedroso*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse o link seguro: ${window.location.origin}/validar/ata/${finalizedAta.verificationCode}`
+                  `*Colégio Estadual Leopoldina B. Pedroso*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
+                className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition shadow-sm"
               >
                 <Share2 className="w-4 h-4" />
                 <span>Enviar Combinados via WhatsApp</span>
@@ -566,9 +727,9 @@ export default function AtaEditorModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              className="px-5 py-3 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-extrabold transition cursor-pointer"
             >
-              Concluir
+              Concluir e Fechar
             </button>
           </div>
         </div>
@@ -576,35 +737,359 @@ export default function AtaEditorModal({
     );
   }
 
+  // ============================================================================
+  // TELA B: CONSULTA DE ATA JÁ LAVRADA (IMUTÁVEL) + ADENDOS ("EM TEMPO")
+  // ============================================================================
+  if (viewMinuteData) {
+    const cleanNum = String(viewMinuteData.ataNumber || 0).padStart(3, "0");
+    const isVoid = viewMinuteData.status === "VOIDED";
+
+    return (
+      <AtaDialog
+        isOpen={isOpen}
+        onClose={onClose}
+        title={
+          isVoid
+            ? `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} (Tornada Sem Efeito)`
+            : `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} — Documento Oficial Imutável`
+        }
+        description="Registro selado criptograficamente (SHA-256). Conforme a Lei nº 14.063/2020, o texto original é inalterável, admitindo-se apenas Termos de Aditamento ('Em tempo')."
+      >
+        <div className="space-y-5 text-xs">
+          {isVoid && (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+              <p className="font-black text-sm flex items-center space-x-1.5">
+                <Ban className="w-4 h-4 text-rose-600" />
+                <span>ATA TORNADA SEM EFEITO POR AVERBAÇÃO OFICIAL</span>
+              </p>
+              <p>
+                <strong>Motivo:</strong> {viewMinuteData.voidReason}
+              </p>
+              {viewMinuteData.voidedByName && (
+                <p className="text-[11px] text-rose-600">
+                  Averbado por {viewMinuteData.voidedByName} em{" "}
+                  {viewMinuteData.voidedAt ? new Date(viewMinuteData.voidedAt).toLocaleString("pt-BR") : ""}
+                </p>
+              )}
+            </div>
+          )}
+
+          {postFinalizeMsg && (
+            <div
+              className={`p-3.5 rounded-2xl border flex items-center space-x-2 ${
+                postFinalizeMsg.type === "ok"
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : "bg-rose-50 border-rose-200 text-rose-800"
+              }`}
+            >
+              {postFinalizeMsg.type === "ok" ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span className="font-bold">{postFinalizeMsg.text}</span>
+            </div>
+          )}
+
+          <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
+            {/* Coluna Esquerda: Texto Oficial + Adendos */}
+            <div className="lg:col-span-7 space-y-4">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Assunto / Pauta</span>
+                    <h3 className="text-base font-black text-slate-900">{viewMinuteData.subject}</h3>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-mono text-[11px] font-bold text-slate-700">
+                    {viewMinuteData.verificationCode}
+                  </span>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200 rounded-xl font-serif text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
+                  {viewMinuteData.summary}
+                </div>
+
+                {viewMinuteData.agreementsSummary && (
+                  <div className="p-3 bg-sky-50/70 border border-sky-200 rounded-xl">
+                    <span className="font-extrabold text-sky-900 block mb-0.5">Síntese dos Combinados:</span>
+                    <p className="text-slate-700">{viewMinuteData.agreementsSummary}</p>
+                  </div>
+                )}
+
+                <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200 flex flex-wrap justify-between gap-2">
+                  <span>
+                    Lavrada por: <strong>{viewMinuteData.authorName}</strong> ({viewMinuteData.authorEmail})
+                  </span>
+                  <span>
+                    Em:{" "}
+                    {viewMinuteData.finalizedAt
+                      ? new Date(viewMinuteData.finalizedAt).toLocaleString("pt-BR")
+                      : new Date(viewMinuteData.attendedAt).toLocaleString("pt-BR")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Termos de Aditamento ("Em tempo") */}
+              <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-3">
+                <h4 className="font-extrabold text-slate-900 text-sm flex items-center space-x-1.5">
+                  <FilePlus2 className="w-4 h-4 text-sky-600" />
+                  <span>Termos de Aditamento / Retificação (&quot;Em tempo&quot;)</span>
+                </h4>
+
+                {viewMinuteData.addendums?.length > 0 ? (
+                  <div className="space-y-2.5">
+                    {viewMinuteData.addendums.map((add: any, i: number) => (
+                      <div key={add.id || i} className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl space-y-1">
+                        <p className="font-serif text-slate-800 text-xs leading-relaxed">
+                          <strong>Em tempo ({i + 1}):</strong> {add.content}
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          Por {add.authorName} em {new Date(add.createdAt).toLocaleString("pt-BR")} • Hash:{" "}
+                          {add.addendumHash?.slice(0, 20)}...
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-400 italic">Nenhum termo de aditamento registrado nesta ata.</p>
+                )}
+
+                {!isVoid && (
+                  <div className="pt-2 space-y-2 border-t border-slate-100">
+                    <label className="font-bold text-slate-700 block">
+                      Lavrar novo adendo (&quot;Em tempo&quot;) sem alterar o texto original:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={addendumText}
+                      onChange={(e) => setAddendumText(e.target.value)}
+                      placeholder="Ex.: Em tempo, retifica-se o prazo de entrega do atestado médico para o dia..."
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white text-slate-800"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleAddAddendum}
+                        disabled={savingAddendum}
+                        className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition disabled:opacity-50 cursor-pointer"
+                      >
+                        {savingAddendum ? "Registrando adendo..." : "Registrar Termo de Aditamento"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Coluna Direita: Alunos, Assinaturas, Encaminhamentos e Ações */}
+            <div className="lg:col-span-5 space-y-4 mt-4 lg:mt-0">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <h4 className="font-extrabold text-slate-900 text-sm">Estudante(s) & Presentes</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {viewMinuteData.students?.map((s: any) => (
+                    <span
+                      key={s.studentId}
+                      className="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-900 font-bold text-xs"
+                    >
+                      {s.studentNameSnapshot} {s.classNameSnapshot ? `(${s.classNameSnapshot})` : ""}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-slate-200">
+                  {viewMinuteData.participants?.map((p: any, i: number) => (
+                    <div
+                      key={p.id || i}
+                      className="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between gap-2"
+                    >
+                      <div>
+                        <p className="font-bold text-slate-900">{p.name}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {p.role} {p.documentNumber ? `• Doc: ${p.documentNumber}` : ""}
+                        </p>
+                      </div>
+                      {p.signatureData ? (
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-[11px]">
+                          {p.biometricVerified ? "✓ Biometria" : "✓ Assinado"}
+                        </span>
+                      ) : p.signatureMode === "REFUSED" ? (
+                        <span className="px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 font-bold text-[11px]">
+                          Recusa registrada
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-semibold text-[11px]">
+                          Presença atestada
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Encaminhamentos */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                <h4 className="font-extrabold text-slate-900 text-sm">Encaminhamentos & Prazos</h4>
+                {viewMinuteData.actionItems?.length > 0 ? (
+                  viewMinuteData.actionItems.map((act: any) => {
+                    const done = act.status === "COMPLETED";
+                    return (
+                      <div
+                        key={act.id}
+                        className="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between gap-2"
+                      >
+                        <div>
+                          <p className={`font-bold ${done ? "line-through text-slate-400" : "text-slate-800"}`}>
+                            {act.description}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Resp: {act.responsible}
+                            {act.dueDate ? ` • Prazo: ${new Date(act.dueDate).toLocaleDateString("pt-BR")}` : ""}
+                          </p>
+                        </div>
+                        {!isVoid && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActionStatus(act)}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-[11px] cursor-pointer transition ${
+                              done
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-slate-900 text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            {done ? "✓ Concluído" : "Concluir"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-slate-400 italic">Sem encaminhamentos pendentes.</p>
+                )}
+              </div>
+
+              {/* Hash e Averbação de Cancelamento */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <span className="font-bold text-slate-700 block">Hash SHA-256 Original:</span>
+                <p className="font-mono text-[10px] text-slate-600 break-all bg-white p-2 rounded-lg border border-slate-200">
+                  {viewMinuteData.contentHash}
+                </p>
+
+                {!isVoid && (
+                  <div className="pt-2">
+                    {!showVoidForm ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowVoidForm(true)}
+                        className="text-rose-600 hover:text-rose-700 font-bold text-[11px] flex items-center space-x-1 cursor-pointer"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Tornar esta Ata Sem Efeito (Averbação de Cancelamento)</span>
+                      </button>
+                    ) : (
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2 mt-1">
+                        <label className="font-bold text-rose-900 block">
+                          Justificativa oficial para tornar a ata sem efeito (mín. 10 caracteres):
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={voidReason}
+                          onChange={(e) => setVoidReason(e.target.value)}
+                          placeholder="Informe o motivo administrativo/pedagógico..."
+                          className="w-full p-2 border border-rose-300 rounded-lg bg-white text-slate-800"
+                        />
+                        <div className="flex justify-end space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowVoidForm(false)}
+                            className="px-3 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleVoidMinute}
+                            disabled={savingVoid}
+                            className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                          >
+                            {savingVoid ? "Averbando..." : "Confirmar Cancelamento"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-200">
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`/atas/${viewMinuteData.id}/imprimir`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold transition"
+              >
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>Imprimir / PDF Oficial A4</span>
+              </a>
+              {viewMinuteData.verificationCode && (
+                <a
+                  href={`/validar/ata/${viewMinuteData.verificationCode}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold transition"
+                >
+                  <ExternalLink className="w-4 h-4 text-sky-600" />
+                  <span>Página de Validação Pública</span>
+                </a>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-800 font-extrabold transition cursor-pointer"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      </AtaDialog>
+    );
+  }
+
+  // ============================================================================
+  // TELA C: EDITOR BIMODAL DE NOVA ATA OU RASCUNHO EM ABERTO
+  // ============================================================================
   return (
     <AtaDialog
       isOpen={isOpen}
       onClose={onClose}
-      title={
-        existingMinute?.status === "FINALIZED"
-          ? `Ata Pedagógica nº ${String(existingMinute.ataNumber).padStart(3, "0")}/${existingMinute.year} (Oficial Imutável)`
-          : "Lavratura de Ata do Atendimento Pedagógico"
-      }
+      title="Lavratura de Ata do Atendimento Pedagógico"
       description="Substitui o caderno manuscrito com fé pública institucional, validade jurídica (Lei nº 14.063/2020) e integração ao Prontuário 360º."
-      maxWidthClass="max-w-[96vw] lg:max-w-[1440px]"
+      maxWidthClass="max-w-[98vw] 2xl:max-w-[1560px]"
     >
-      <div className="space-y-6 text-xs">
+      <div className="space-y-5 text-xs">
         {/* WIZARD BIMODAL: NAVEGAÇÃO DE PASSOS */}
         <div className="flex items-center justify-between border-b border-slate-200 pb-3">
           <div className="flex items-center space-x-3">
             <button
               type="button"
               onClick={() => setStep(1)}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-bold transition cursor-pointer ${
                 step === 1
                   ? "bg-slate-900 text-white shadow-2xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
+              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[11px]">
                 1
               </span>
-              <span>Alunos & Pauta ({selectedStudentIds.length} selecionado{selectedStudentIds.length !== 1 ? "s" : ""})</span>
+              <span>
+                Alunos & Pauta ({selectedStudentIds.length} selecionado
+                {selectedStudentIds.length !== 1 ? "s" : ""})
+              </span>
             </button>
 
             <ArrowRight className="w-4 h-4 text-slate-300" />
@@ -613,25 +1098,26 @@ export default function AtaEditorModal({
               type="button"
               onClick={() => {
                 if (selectedStudentIds.length === 0) {
-                  alert("Selecione pelo menos um estudante antes de avançar para a redação.");
+                  setStep1Error("Selecione pelo menos um estudante no catálogo antes de avançar para a redação.");
                   return;
                 }
+                setStep1Error(null);
                 setStep(2);
               }}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-bold transition cursor-pointer ${
                 step === 2
                   ? "bg-slate-900 text-white shadow-2xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
+              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[11px]">
                 2
               </span>
               <span>Redação Oficial & Assinaturas</span>
             </button>
           </div>
 
-          <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+          <span className="text-xs text-slate-500 font-semibold hidden sm:inline">
             Etapa {step} de 2
           </span>
         </div>
@@ -641,10 +1127,16 @@ export default function AtaEditorModal({
         {/* ============================================================== */}
         {step === 1 && (
           <div className="space-y-4">
+            {step1Error && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center space-x-2 font-bold">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{step1Error}</span>
+              </div>
+            )}
+
             <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
               {/* COLUNA ESQUERDA: DADOS DA PAUTA + ESTUDANTES VINCULADOS (5 colunas) */}
               <div className="lg:col-span-5 space-y-4">
-                {/* Card de Pauta e Categoria */}
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
                   <div className="space-y-1">
                     <label className="font-extrabold text-slate-900 block text-sm">
@@ -677,7 +1169,7 @@ export default function AtaEditorModal({
                   </div>
 
                   <div className="pt-1">
-                    <label className="flex items-center space-x-2.5 cursor-pointer p-2 rounded-xl bg-rose-50/70 border border-rose-200">
+                    <label className="flex items-center space-x-2.5 cursor-pointer p-2.5 rounded-xl bg-rose-50/70 border border-rose-200">
                       <input
                         type="checkbox"
                         checked={isConfidential}
@@ -706,7 +1198,8 @@ export default function AtaEditorModal({
 
                   {selectedStudentIds.length === 0 ? (
                     <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
-                      Nenhum estudante selecionado ainda.<br />
+                      Nenhum estudante selecionado ainda.
+                      <br />
                       Pesquise e clique nos estudantes no catálogo ao lado para vinculá-los.
                     </div>
                   ) : (
@@ -743,9 +1236,10 @@ export default function AtaEditorModal({
                     type="button"
                     onClick={() => {
                       if (selectedStudentIds.length === 0) {
-                        alert("Selecione pelo menos um estudante antes de avançar.");
+                        setStep1Error("Selecione pelo menos um estudante antes de avançar.");
                         return;
                       }
+                      setStep1Error(null);
                       setStep(2);
                     }}
                     disabled={selectedStudentIds.length === 0}
@@ -773,7 +1267,6 @@ export default function AtaEditorModal({
                   </span>
                 </div>
 
-                {/* Filtros em destaque */}
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
                   <div className="sm:col-span-8 relative">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -811,7 +1304,6 @@ export default function AtaEditorModal({
                   </div>
                 </div>
 
-                {/* Lista Ampla de Alunos com altura aumentada h-[460px] */}
                 <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white h-[460px] overflow-y-auto divide-y divide-slate-100 shadow-2xs">
                   {filteredStudents.length === 0 ? (
                     <div className="p-12 text-center text-slate-400 text-sm">
@@ -852,7 +1344,11 @@ export default function AtaEditorModal({
                               </div>
                               <p className="text-xs text-slate-500 mt-0.5">
                                 {s.cgm ? <span className="font-mono mr-2">CGM: {s.cgm}</span> : null}
-                                {s.guardianName ? <span>Resp: <strong className="text-slate-600">{s.guardianName}</strong></span> : null}
+                                {s.guardianName ? (
+                                  <span>
+                                    Resp: <strong className="text-slate-600">{s.guardianName}</strong>
+                                  </span>
+                                ) : null}
                               </p>
                             </div>
                           </div>
@@ -874,12 +1370,11 @@ export default function AtaEditorModal({
               </div>
             </div>
 
-            {/* Rodapé do Passo 1 */}
             <div className="flex items-center justify-between pt-3 border-t border-slate-200">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition"
+                className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition cursor-pointer"
               >
                 Cancelar
               </button>
@@ -888,9 +1383,10 @@ export default function AtaEditorModal({
                 type="button"
                 onClick={() => {
                   if (selectedStudentIds.length === 0) {
-                    alert("Selecione pelo menos um estudante antes de avançar.");
+                    setStep1Error("Selecione pelo menos um estudante antes de avançar.");
                     return;
                   }
+                  setStep1Error(null);
                   setStep(2);
                 }}
                 className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs transition shadow-sm flex items-center space-x-2 cursor-pointer"
@@ -937,11 +1433,9 @@ export default function AtaEditorModal({
               </button>
             </div>
 
-            {/* Layout em 2 Colunas lado a lado no Desktop */}
             <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
               {/* COLUNA ESQUERDA: IA, TEXTO FORMAL E COMBINADOS (6 colunas) */}
               <div className="lg:col-span-6 space-y-4">
-                {/* Assistente IA Gemini e Voz */}
                 <div className="border border-sky-100 bg-sky-50/50 p-4 rounded-2xl space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-extrabold text-sky-900 text-xs flex items-center space-x-1.5">
@@ -959,7 +1453,11 @@ export default function AtaEditorModal({
                             : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                         }`}
                       >
-                        {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-sky-600" />}
+                        {isListening ? (
+                          <MicOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Mic className="w-3.5 h-3.5 text-sky-600" />
+                        )}
                         <span>{isListening ? "Gravando voz..." : "Ditado por Voz"}</span>
                       </button>
 
@@ -975,6 +1473,13 @@ export default function AtaEditorModal({
                     </div>
                   </div>
 
+                  {aiError && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold text-xs flex items-center space-x-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{aiError}</span>
+                    </div>
+                  )}
+
                   <textarea
                     rows={3}
                     value={rawNotes}
@@ -988,14 +1493,17 @@ export default function AtaEditorModal({
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="font-extrabold text-slate-900 block text-xs">
-                      Texto Formal da Ata (Norma Culta / ECA-safe):
+                      Texto Formal da Ata (Norma Culta / ECA-safe): <span className="text-rose-600">*</span>
                     </label>
                     <span className="text-[11px] text-slate-400">Revisável pela servidora antes de lavrar</span>
                   </div>
                   <textarea
                     rows={9}
                     value={summary}
-                    onChange={(e) => setSummary(e.target.value)}
+                    onChange={(e) => {
+                      setSummary(e.target.value);
+                      if (finalizeError) setFinalizeError(null);
+                    }}
                     placeholder="O texto formal da ata será gerado pela IA ou redigido diretamente aqui..."
                     className="w-full p-3.5 border border-slate-300 rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs"
                   />
@@ -1018,16 +1526,13 @@ export default function AtaEditorModal({
 
               {/* COLUNA DIREITA: ENCAMINHAMENTOS E PARTICIPANTES/ASSINATURAS (6 colunas) */}
               <div className="lg:col-span-6 space-y-4 mt-4 lg:mt-0">
-                {/* Encaminhamentos & Prazos */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="font-extrabold text-slate-800 block text-xs">
                         Encaminhamentos & Prazos da Ata:
                       </label>
-                      <p className="text-[11px] text-slate-500">
-                        Alimenta os lembretes do Prontuário 360º
-                      </p>
+                      <p className="text-[11px] text-slate-500">Alimenta os lembretes do Prontuário 360º</p>
                     </div>
                     <button
                       type="button"
@@ -1046,12 +1551,15 @@ export default function AtaEditorModal({
 
                   {actionItems.length === 0 ? (
                     <div className="text-center py-3 text-slate-400 text-xs italic">
-                      Nenhum encaminhamento registrado. Clique em "+ Adicionar Ação" se houver combinados com prazo.
+                      Nenhum encaminhamento registrado. Clique em &quot;+ Adicionar Ação&quot; se houver combinados com prazo.
                     </div>
                   ) : (
                     <div className="space-y-2">
                       {actionItems.map((act, idx) => (
-                        <div key={idx} className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
+                        <div
+                          key={idx}
+                          className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs"
+                        >
                           <input
                             type="text"
                             placeholder="Descrição da ação pactuada..."
@@ -1090,7 +1598,7 @@ export default function AtaEditorModal({
                           <button
                             type="button"
                             onClick={() => setActionItems((prev) => prev.filter((_, i) => i !== idx))}
-                            className="text-slate-400 hover:text-rose-600 p-1"
+                            className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1196,7 +1704,7 @@ export default function AtaEditorModal({
                             <button
                               type="button"
                               onClick={() => setParticipants((prev) => prev.filter((_, i) => i !== idx))}
-                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md"
+                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md cursor-pointer"
                               title="Remover participante"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1209,7 +1717,7 @@ export default function AtaEditorModal({
                             <label className="flex items-center space-x-1.5 cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={p.documentVerifiedByStaff}
+                                checked={Boolean(p.documentVerifiedByStaff)}
                                 onChange={(e) => {
                                   const copy = [...participants];
                                   copy[idx].documentVerifiedByStaff = e.target.checked;
@@ -1225,24 +1733,67 @@ export default function AtaEditorModal({
 
                           <div className="flex items-center space-x-1.5">
                             {p.signatureData ? (
-                              <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>
-                                  {p.biometricVerified
-                                    ? "Assinado com Biometria"
-                                    : "Assinado Digitalmente"}
+                              <div className="flex items-center space-x-1.5">
+                                <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>
+                                    {p.biometricVerified ? "Assinado com Biometria" : "Assinado Digitalmente"}
+                                  </span>
                                 </span>
-                              </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const copy = [...participants];
+                                    copy[idx] = {
+                                      ...copy[idx],
+                                      signatureData: null,
+                                      signatureMode: "PENDING",
+                                      biometricVerified: false,
+                                      clearSignature: true,
+                                    };
+                                    setParticipants(copy);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                                  title="Refazer assinatura"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             ) : p.signatureMode === "REFUSED" ? (
-                              <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
-                                <AlertCircle className="w-3.5 h-3.5" />
-                                <span>Recusou-se a assinar</span>
-                              </span>
+                              <div className="flex items-center space-x-1.5">
+                                <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
+                                  <AlertCircle className="w-3.5 h-3.5" />
+                                  <span>Recusou-se a assinar</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const copy = [...participants];
+                                    copy[idx] = {
+                                      ...copy[idx],
+                                      signatureMode: "PENDING",
+                                      refusalReason: "",
+                                      witnessName: "",
+                                      clearSignature: true,
+                                    };
+                                    setParticipants(copy);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                                  title="Cancelar recusa"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             ) : (
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => setActiveSignParticipantIndex(idx)}
+                                  onClick={() => {
+                                    setActiveRefusalIndex(null);
+                                    setActiveSignParticipantIndex(
+                                      activeSignParticipantIndex === idx ? null : idx
+                                    );
+                                  }}
                                   className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
                                 >
                                   Assinar na Tela
@@ -1250,7 +1801,8 @@ export default function AtaEditorModal({
                                 <button
                                   type="button"
                                   onClick={() => handleGenerateMobileSign(idx)}
-                                  className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer"
+                                  disabled={saving}
+                                  className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                                 >
                                   <QrCode className="w-3.5 h-3.5" />
                                   <span>QR Celular (Biometria)</span>
@@ -1258,15 +1810,10 @@ export default function AtaEditorModal({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const reason = prompt("Informe o motivo da recusa de assinatura (para constar na ata):");
-                                    if (reason !== null) {
-                                      const witness = prompt("Nome da testemunha escolar presente:");
-                                      const copy = [...participants];
-                                      copy[idx].signatureMode = "REFUSED";
-                                      copy[idx].refusalReason = reason;
-                                      copy[idx].witnessName = witness || "Equipe Pedagógica";
-                                      setParticipants(copy);
-                                    }
+                                    setActiveSignParticipantIndex(null);
+                                    setRefusalDraftReason(p.refusalReason || "");
+                                    setRefusalDraftWitness(p.witnessName || "Equipe Pedagógica");
+                                    setActiveRefusalIndex(activeRefusalIndex === idx ? null : idx);
                                   }}
                                   className="px-2 py-1 rounded-lg border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs transition cursor-pointer"
                                 >
@@ -1277,6 +1824,56 @@ export default function AtaEditorModal({
                           </div>
                         </div>
 
+                        {/* Formulário inline de Recusa (sem window.prompt!) */}
+                        {activeRefusalIndex === idx && (
+                          <div className="p-3 bg-rose-50/80 border border-rose-200 rounded-xl space-y-2 mt-2">
+                            <p className="font-bold text-rose-900 text-xs">
+                              Registro de Recusa de Assinatura (com fé pública):
+                            </p>
+                            <input
+                              type="text"
+                              value={refusalDraftReason}
+                              onChange={(e) => setRefusalDraftReason(e.target.value)}
+                              placeholder="Motivo alegado para a recusa..."
+                              className="w-full p-2 border border-rose-300 rounded-lg bg-white text-xs"
+                            />
+                            <input
+                              type="text"
+                              value={refusalDraftWitness}
+                              onChange={(e) => setRefusalDraftWitness(e.target.value)}
+                              placeholder="Nome da testemunha escolar presente..."
+                              className="w-full p-2 border border-rose-300 rounded-lg bg-white text-xs"
+                            />
+                            <div className="flex justify-end space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => setActiveRefusalIndex(null)}
+                                className="px-3 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 font-bold text-xs cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const copy = [...participants];
+                                  copy[idx] = {
+                                    ...copy[idx],
+                                    signatureMode: "REFUSED",
+                                    signatureData: null,
+                                    refusalReason: refusalDraftReason.trim() || "Recusou-se a assinar presencialmente",
+                                    witnessName: refusalDraftWitness.trim() || "Equipe Pedagógica",
+                                  };
+                                  setParticipants(copy);
+                                  setActiveRefusalIndex(null);
+                                }}
+                                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer"
+                              >
+                                Confirmar Termo de Recusa
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Canvas de Assinatura em tela */}
                         {activeSignParticipantIndex === idx && !p.signatureData && (
                           <div className="pt-2">
@@ -1284,15 +1881,22 @@ export default function AtaEditorModal({
                               signerName={p.name || "Participante"}
                               onSave={(dataUrl) => {
                                 const copy = [...participants];
-                                copy[idx].signatureData = dataUrl;
-                                copy[idx].signatureMode = "SCREEN_CANVAS";
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  signatureData: dataUrl,
+                                  signatureMode: "SCREEN_CANVAS",
+                                  clearSignature: false,
+                                };
                                 setParticipants(copy);
                                 setActiveSignParticipantIndex(null);
                               }}
                               onClear={() => {
                                 const copy = [...participants];
-                                copy[idx].signatureData = null;
-                                copy[idx].signatureMode = "PENDING";
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  signatureData: null,
+                                  signatureMode: "PENDING",
+                                };
                                 setParticipants(copy);
                               }}
                             />
@@ -1310,7 +1914,7 @@ export default function AtaEditorModal({
                       Aponte a câmera do celular para assinar com Biometria
                     </h4>
                     <p className="text-xs text-sky-700">
-                      Participante: <strong>{qrModalInfo.name}</strong>
+                      Participante: <strong>{qrModalInfo.name}</strong> (aguardando assinatura em tempo real...)
                     </p>
                     <div className="flex justify-center p-2 bg-white rounded-xl border border-sky-200 w-fit mx-auto shadow-sm">
                       <img
@@ -1321,9 +1925,7 @@ export default function AtaEditorModal({
                         className="w-36 h-36"
                       />
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono break-all">
-                      {qrModalInfo.url}
-                    </p>
+                    <p className="text-[11px] text-slate-500 font-mono break-all">{qrModalInfo.url}</p>
                     <button
                       type="button"
                       onClick={() => setQrModalInfo(null)}
@@ -1336,13 +1938,21 @@ export default function AtaEditorModal({
               </div>
             </div>
 
+            {/* Feedback de Rascunho Salvo */}
+            {draftSavedMsg && (
+              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center space-x-2 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{draftSavedMsg}</span>
+              </div>
+            )}
+
             {/* Aviso de Erro Visual na Lavratura */}
             {finalizeError && (
-              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start space-x-2">
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start space-x-2.5">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
-                  <strong className="font-bold text-xs">Não foi possível lavrar a ata:</strong>
-                  <p className="text-[11px] leading-relaxed">{finalizeError}</p>
+                  <strong className="font-bold text-xs">Atenção antes de lavrar a ata:</strong>
+                  <p className="text-xs leading-relaxed">{finalizeError}</p>
                 </div>
               </div>
             )}
@@ -1353,7 +1963,7 @@ export default function AtaEditorModal({
                 <button
                   type="button"
                   onClick={() => setStep(1)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 transition flex items-center space-x-1"
+                  className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition flex items-center space-x-1.5 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Voltar aos Alunos</span>
@@ -1361,30 +1971,30 @@ export default function AtaEditorModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3 py-2 rounded-xl text-slate-500 hover:text-slate-800 font-medium transition"
+                  className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-800 font-medium text-xs transition cursor-pointer"
                 >
-                  Cancelar
+                  Fechar
                 </button>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2.5">
                 <button
                   type="button"
                   onClick={handleSaveDraft}
-                  disabled={saving}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold transition disabled:opacity-50"
+                  disabled={saving || savingFinal}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
                 >
-                  {saving ? "Salvando..." : "Salvar Rascunho"}
+                  {saving ? "Salvando rascunho..." : "Salvar Rascunho"}
                 </button>
 
                 <button
                   type="button"
                   onClick={handleFinalize}
-                  disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold transition shadow-sm disabled:opacity-50 flex items-center space-x-1.5 cursor-pointer"
+                  disabled={saving || savingFinal}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
                 >
                   <FileCheck2 className="w-4 h-4 text-emerald-200" />
-                  <span>{saving ? "Lavrando..." : "Lavrar Ata Oficial (Imutável)"}</span>
+                  <span>{savingFinal ? "Lavrando Ata Oficial..." : "Lavrar Ata Oficial (Imutável)"}</span>
                 </button>
               </div>
             </div>
