@@ -69,6 +69,20 @@ export default function AuditoriaClient({ initialLogs }: Props) {
         return <span className="px-2 py-0.5 rounded font-bold bg-orange-50 text-orange-800 border border-orange-200">Revogação Equipe</span>;
       case "UPDATE_LOW_ATTENDANCE":
         return <span className="px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Sincronização / Faltas</span>;
+      case "GENERATE_DOSSIER":
+        return <span className="px-2 py-0.5 rounded font-bold bg-slate-900 text-white">Emissão Dossiê PDF</span>;
+      case "CREATE_JUSTIFICATION":
+        return <span className="px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">Registro de Atestado</span>;
+      case "DELETE_JUSTIFICATION":
+        return <span className="px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-800 border border-rose-200">Exclusão de Atestado</span>;
+      case "CREATE_IN_PERSON_ATTENDANCE":
+        return <span className="px-2 py-0.5 rounded font-bold bg-purple-50 text-purple-800 border border-purple-200">Ata Presencial</span>;
+      case "DELETE_IN_PERSON_ATTENDANCE":
+        return <span className="px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-800 border border-rose-200">Exclusão Ata Presencial</span>;
+      case "CREATE_STUDENT_CONTACT":
+      case "UPDATE_STUDENT_CONTACT":
+      case "DELETE_STUDENT_CONTACT":
+        return <span className="px-2 py-0.5 rounded font-bold bg-sky-50 text-sky-800 border border-sky-200">Contato Familiar</span>;
       case "INITIAL_DATABASE_MIGRATION":
         return <span className="px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Migração Inicial</span>;
       default:

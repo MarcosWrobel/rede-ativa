@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { safeQueryList } from "@/lib/safePhase3Queries";
 import FaltasClient from "./FaltasClient";
 import { redirect } from "next/navigation";
 
@@ -11,15 +12,43 @@ export default async function FaltasPage() {
     redirect("/login");
   }
 
-  // 1. Optimized load of absence contacts
-  const absenceKeywords = ["FALTOU", "FALTAS", "GAZEOU", "ATRASO", "ATRASOS"];
+  // Contabiliza tanto comunicados vinculados a modelos marcados como "Relacionado a Faltas" (isAbsenceRelated)
+  // quanto registros históricos migrados sem vínculo de modelo que contenham termos de ausência no motivo.
+  const absenceKeywords = [
+    "FALTOU",
+    "FALTAS",
+    "GAZEOU",
+    "ATRASO",
+    "ATRASOS",
+    "INFREQU",
+    "AUSÊNCIA",
+    "AUSENCIA",
+    "BUSCA ATIVA",
+  ];
 
-  const [absenceLogs, lowAttendance, classGroups, templates] = await Promise.all([
+  const recentCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+
+  const [
+    absenceLogs,
+    lowAttendance,
+    classGroups,
+    templates,
+    recentJustifications,
+    allContacts,
+    recentSnapshots,
+  ] = await Promise.all([
     prisma.messageLog.findMany({
       where: {
-        OR: absenceKeywords.map((kw) => ({
-          reasonTitle: { contains: kw },
-        })),
+        OR: [
+          { template: { isAbsenceRelated: true } },
+          ...absenceKeywords.map((kw) => ({
+            templateId: null,
+            reasonTitle: { contains: kw, mode: "insensitive" as const },
+          })),
+          ...absenceKeywords.slice(0, 5).map((kw) => ({
+            reasonTitle: { contains: kw, mode: "insensitive" as const },
+          })),
+        ],
       },
       select: {
         studentId: true,
@@ -29,6 +58,8 @@ export default async function FaltasPage() {
             id: true,
             cgm: true,
             name: true,
+            phone: true,
+            guardianName: true,
             classGroupId: true,
             classGroup: {
               select: { id: true, name: true, segment: true, shift: true },
@@ -79,9 +110,54 @@ export default async function FaltasPage() {
         isAbsenceRelated: true,
       },
     }),
+    safeQueryList(() =>
+      prisma.absenceJustification.findMany({
+        where: { endDate: { gte: recentCutoff } },
+        orderBy: { endDate: "desc" },
+      })
+    ),
+    safeQueryList(() =>
+      prisma.studentContact.findMany({
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+      })
+    ),
+    safeQueryList(() =>
+      prisma.attendanceSnapshot.findMany({
+        orderBy: { recordedAt: "desc" },
+      })
+    ),
   ]);
 
-  // Aggregate counts per student in memory safely
+  const justMap = new Map<string, any[]>();
+  recentJustifications.forEach((j: any) => {
+    const arr = justMap.get(j.studentId) || [];
+    arr.push(j);
+    justMap.set(j.studentId, arr);
+  });
+
+  const contactsMap = new Map<string, any[]>();
+  allContacts.forEach((c: any) => {
+    const arr = contactsMap.get(c.studentId) || [];
+    arr.push(c);
+    contactsMap.set(c.studentId, arr);
+  });
+
+  const snapshotsMap = new Map<string, any[]>();
+  recentSnapshots.forEach((sn: any) => {
+    const arr = snapshotsMap.get(sn.studentId) || [];
+    if (arr.length < 3) {
+      arr.push(sn);
+      snapshotsMap.set(sn.studentId, arr);
+    }
+  });
+
+  const enrichStudent = (st: any) => ({
+    ...st,
+    justifications: justMap.get(st.id) || [],
+    contacts: contactsMap.get(st.id) || [],
+    snapshots: snapshotsMap.get(st.id) || [],
+  });
+
   const studentCountMap: Record<string, { student: any; count: number; lastDate: Date }> = {};
 
   absenceLogs.forEach((log) => {
@@ -89,7 +165,7 @@ export default async function FaltasPage() {
     const sId = log.studentId;
     if (!studentCountMap[sId]) {
       studentCountMap[sId] = {
-        student: log.student,
+        student: enrichStudent(log.student),
         count: 0,
         lastDate: log.sentAt,
       };
@@ -101,7 +177,12 @@ export default async function FaltasPage() {
   });
 
   const rankedAbsences = Object.values(studentCountMap).sort((a, b) => b.count - a.count);
-  const validLowAttendance = lowAttendance.filter((rec) => rec.student && rec.student.classGroup);
+  const validLowAttendance = lowAttendance
+    .filter((rec) => rec.student && rec.student.classGroup)
+    .map((rec) => ({
+      ...rec,
+      student: enrichStudent(rec.student),
+    }));
 
   return (
     <FaltasClient

@@ -127,3 +127,36 @@ body {
     color: #64748b;
   }
 }
+
+/* Modern Web Guidance: dialog & light-dismiss-a-dialog */
+dialog:modal {
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: min(94vw, 38rem);
+  width: 100%;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(2px);
+}
+
+/* Formatação A4 limpa para impressão de Dossiê Individual e Relatórios */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

@@ -39,30 +39,34 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 print:bg-white flex">
       {/* Sidebar */}
-      <Sidebar
-        currentUser={currentUser}
-        mobileOpen={mobileOpen}
-        setMobileOpen={setMobileOpen}
-      />
+      <div className="print:hidden">
+        <Sidebar
+          currentUser={currentUser}
+          mobileOpen={mobileOpen}
+          setMobileOpen={setMobileOpen}
+        />
+      </div>
 
       {/* Main Content Area */}
       <div
-        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
+        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 print:pl-0 ${
           collapsed ? "lg:pl-20" : "lg:pl-64"
         }`}
       >
-        <TopHeader
-          currentUser={currentUser}
-          onOpenMobile={() => setMobileOpen(true)}
-        />
+        <div className="print:hidden">
+          <TopHeader
+            currentUser={currentUser}
+            onOpenMobile={() => setMobileOpen(true)}
+          />
+        </div>
 
-        <main className="flex-1 max-w-[1800px] w-full mx-auto p-3 sm:p-5 lg:p-6">
+        <main className="flex-1 max-w-[1800px] w-full mx-auto p-3 sm:p-5 lg:p-6 print:p-0 print:max-w-none">
           {children}
         </main>
 
-        <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
+        <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500 print:hidden">
           Colégio Estadual Leopoldina B. Pedroso — Sistema de Busca Ativa & Comunicação Escolar 2026. Protegido por autenticação institucional @escola.pr.gov.br.
         </footer>
       </div>

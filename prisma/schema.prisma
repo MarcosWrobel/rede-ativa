@@ -31,6 +31,8 @@ model ClassGroup {
   createdAt DateTime  @default(now())
 
   students  Student[]
+
+  @@index([segment, shift])
 }
 
 model Student {
@@ -47,6 +49,13 @@ model Student {
 
   messageLogs          MessageLog[]
   lowAttendanceRecord  LowAttendanceRecord?
+  contacts             StudentContact[]
+  justifications       AbsenceJustification[]
+  inPersonAttendances  InPersonAttendance[]
+  attendanceSnapshots  AttendanceSnapshot[]
+
+  @@index([classGroupId, active])
+  @@index([name])
 }
 
 model MessageTemplate {
@@ -60,6 +69,9 @@ model MessageTemplate {
   createdAt        DateTime     @default(now())
 
   messageLogs      MessageLog[]
+
+  @@index([active, segment])
+  @@index([isAbsenceRelated])
 }
 
 model MessageLog {
@@ -80,6 +92,12 @@ model MessageLog {
   repliedByUserId String?
   repliedByUser   User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
   sentAt          DateTime         @default(now())
+
+  @@index([sentAt(sort: Desc)])
+  @@index([studentId, sentAt(sort: Desc)])
+  @@index([guardianReplied])
+  @@index([sentByName])
+  @@index([reasonTitle])
 }
 
 model LowAttendanceRecord {
@@ -94,6 +112,9 @@ model LowAttendanceRecord {
   serpOpenedAt      DateTime? // Data de abertura no SERP
   serpDetails       String?   // Histórico de buscas ativas e anotações do SERP
   updatedAt         DateTime  @updatedAt
+
+  @@index([attendancePercent])
+  @@index([serpStatus])
 }
 
 model AuditLog {
@@ -108,4 +129,70 @@ model AuditLog {
   details    String?  // JSON string with previous/new state or description
   ipAddress  String?
   createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([action])
+}
+
+model AttendanceSnapshot {
+  id                    String   @id @default(cuid())
+  studentId             String
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  referenceWeek         String   // e.g. "2026-W44"
+  attendancePercent     Float
+  weeklyPercent         Float?
+  previousWeeklyPercent Float?
+  recordedAt            DateTime @default(now())
+
+  @@unique([studentId, referenceWeek])
+  @@index([studentId, recordedAt(sort: Desc)])
+}
+
+model StudentContact {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name          String
+  kinship       String   @default("RESPONSAVEL") // MAE | PAI | AVOS | TIOS | IRMAOS | RECADO | PROPRIO_ALUNO | RESPONSAVEL
+  phone         String
+  isPrimary     Boolean  @default(false)
+  whatsappValid Boolean  @default(true)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId, isPrimary])
+}
+
+model AbsenceJustification {
+  id             String   @id @default(cuid())
+  studentId      String
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type           String   @default("ATESTADO_MEDICO") // ATESTADO_MEDICO | ATESTADO_ODONTOLOGICO | DECLARACAO_COMPARECIMENTO | JUSTIFICATIVA_FAMILIAR | DISPENSA_LEGAL
+  startDate      DateTime
+  endDate        DateTime
+  cidCode        String?
+  notes          String?
+  createdByName  String
+  createdByEmail String
+  createdAt      DateTime @default(now())
+
+  @@index([studentId, endDate(sort: Desc)])
+  @@index([startDate, endDate])
+}
+
+model InPersonAttendance {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attendedAt      DateTime @default(now())
+  guardianPresent String
+  subject         String
+  summary         String
+  agreements      String?
+  recordedByName  String
+  recordedByEmail String
+  createdAt       DateTime @default(now())
+
+  @@index([studentId, attendedAt(sort: Desc)])
 }

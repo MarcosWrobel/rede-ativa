@@ -1,9 +1,19 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getSyncCorsHeaders } from "@/lib/cors";
+import { serpSyncItemSchema, formatZodError } from "@/lib/schemas";
+import {
+  buildStudentLookupMaps,
+  normalizeSerpStatus,
+  normalizeStudentName,
+} from "@/lib/studentMatcher";
+
+export const maxDuration = 60;
 
 function verifySyncToken(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -64,16 +74,22 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const fichas = body.fichas || body.alunos || [];
+    const rawList = body?.fichas || body?.alunos || [];
+    const parsedList = z
+      .array(serpSyncItemSchema)
+      .min(1, "Nenhuma ficha do SERP fornecida para sincronização.")
+      .safeParse(rawList);
 
-    if (!Array.isArray(fichas) || fichas.length === 0) {
+    if (!parsedList.success) {
       return NextResponse.json(
-        { error: "Nenhuma ficha do SERP fornecida para sincronização." },
+        { error: formatZodError(parsedList.error) },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    // 2. Carrega estudantes do banco para indexação rápida
+    const fichas = parsedList.data;
+
+    // 2. Carrega estudantes do banco em 1 query leve
     const allStudents = await prisma.student.findMany({
       select: {
         id: true,
@@ -82,45 +98,27 @@ export async function POST(req: Request) {
       },
     });
 
-    const cgmMap = new Map<string, string>();
-    const nameMap = new Map<string, { id: string; hasCgm: boolean }>();
+    const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
 
-    allStudents.forEach((s) => {
-      if (s.cgm) {
-        cgmMap.set(s.cgm.trim(), s.id);
+    const pendingCgmUpdates = new Map<string, string>();
+    const batchRecords = new Map<
+      string,
+      {
+        id: string;
+        studentId: string;
+        protocoloStr: string | null;
+        statusEnum: string;
+        dataAbertura: Date | null;
+        detailsStr: string | null;
+        actionSummary: string;
       }
-      const norm = s.name
-        .toUpperCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      nameMap.set(norm, { id: s.id, hasCgm: !!s.cgm });
-    });
-
-    let atualizados = 0;
-    let cgmVinculados = 0;
-    let conselhoTutelarCount = 0;
+    >();
     const naoEncontrados: Array<{ nome: string; cgm?: string; protocolo?: string }> = [];
 
-    const normalizarStatus = (raw?: string): string => {
-      const s = (raw || "").toUpperCase();
-      if (s.includes("CONSELHO") || s.includes("CT")) return "CONSELHO_TUTELAR";
-      if (s.includes("MINIST") || s.includes("PROMOTOR") || s.includes("MP")) return "MINISTERIO_PUBLICO";
-      if (s.includes("ARQUIV") || s.includes("NORMALIZ")) return "ARQUIVADO";
-      return "EM_ACOMPANHAMENTO";
-    };
-
-    // 3. Processamento das Fichas
+    // 3. Pareamento em memória e deduplicação por studentId
     for (const item of fichas) {
-      const cgmClean = (item.cgm || "").toString().trim();
-      const rawName = (item.nome || "")
-        .toUpperCase()
-        .replace(/\s*-\s*\d+.*$/, "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+      const cgmClean = String(item.cgm ?? "").trim();
+      const rawName = normalizeStudentName(item.nome);
 
       let studentId: string | undefined = cgmClean ? cgmMap.get(cgmClean) : undefined;
 
@@ -129,25 +127,17 @@ export async function POST(req: Request) {
         if (studentByName) {
           studentId = studentByName.id;
 
-          if (!studentByName.hasCgm && cgmClean) {
-            try {
-              await prisma.student.update({
-                where: { id: studentId },
-                data: { cgm: cgmClean },
-              });
-              cgmMap.set(cgmClean, studentId);
-              studentByName.hasCgm = true;
-              cgmVinculados++;
-            } catch (err) {
-              console.warn(`[SERP-SYNC] Erro ao gravar CGM ${cgmClean}:`, err);
-            }
+          if (!studentByName.hasCgm && cgmClean && !usedCgms.has(cgmClean)) {
+            pendingCgmUpdates.set(studentId, cgmClean);
+            usedCgms.add(cgmClean);
+            cgmMap.set(cgmClean, studentId);
+            studentByName.hasCgm = true;
           }
         }
       }
 
       if (studentId) {
-        const statusEnum = normalizarStatus(item.status || item.situacao);
-        if (statusEnum === "CONSELHO_TUTELAR") conselhoTutelarCount++;
+        const statusEnum = normalizeSerpStatus(item.status || item.situacao);
 
         let dataAbertura: Date | null = null;
         if (item.dataAbertura) {
@@ -155,7 +145,10 @@ export async function POST(req: Request) {
           if (!isNaN(parsed.getTime())) dataAbertura = parsed;
         }
 
-        const protocoloStr = item.numeroFicha || item.protocolo || null;
+        const rawProt = item.numeroFicha ?? item.protocolo;
+        const protocoloStr = rawProt !== undefined && rawProt !== null && String(rawProt).trim()
+          ? String(rawProt).trim()
+          : null;
         const acoesDesc = item.acoesRealizadas || item.motivo || item.observacoes || "";
         const actionSummary = [
           protocoloStr ? `Ficha SERP #${protocoloStr}` : "Ficha SERP Ativa",
@@ -163,6 +156,8 @@ export async function POST(req: Request) {
             ? "ENCAMINHADO CONSELHO TUTELAR"
             : statusEnum === "MINISTERIO_PUBLICO"
             ? "MINISTÉRIO PÚBLICO"
+            : statusEnum === "ARQUIVADO"
+            ? "ARQUIVADO"
             : "EM ACOMPANHAMENTO",
           acoesDesc ? `(${acoesDesc})` : null,
         ]
@@ -170,42 +165,101 @@ export async function POST(req: Request) {
           .join(" - ");
 
         const detailsStr =
-          typeof item.detalhes === "object"
+          typeof item.detalhes === "object" && item.detalhes !== null
             ? JSON.stringify(item.detalhes)
             : item.detalhes || acoesDesc || null;
 
-        await prisma.lowAttendanceRecord.upsert({
-          where: { studentId },
-          update: {
-            serpProtocol: protocoloStr,
-            serpStatus: statusEnum,
-            serpOpenedAt: dataAbertura,
-            serpDetails: detailsStr,
-            actionsTaken: actionSummary,
-          },
-          create: {
-            studentId,
-            attendancePercent: 70.0,
-            enrollmentDetail: "Importado do SERP (Rede de Proteção)",
-            serpProtocol: protocoloStr,
-            serpStatus: statusEnum,
-            serpOpenedAt: dataAbertura,
-            serpDetails: detailsStr,
-            actionsTaken: actionSummary,
-          },
+        batchRecords.set(studentId, {
+          id: crypto.randomUUID(),
+          studentId,
+          protocoloStr,
+          statusEnum,
+          dataAbertura,
+          detailsStr,
+          actionSummary,
         });
-
-        atualizados++;
       } else {
+        const rawProt = item.numeroFicha ?? item.protocolo;
         naoEncontrados.push({
-          nome: item.nome,
-          cgm: item.cgm,
-          protocolo: item.numeroFicha || item.protocolo,
+          nome: item.nome || "",
+          cgm: cgmClean || undefined,
+          protocolo: rawProt ? String(rawProt) : undefined,
         });
       }
     }
 
-    // 4. Registro na Trilha de Auditoria com IP
+    // 4. Atualiza CGMs novos em transação única
+    let cgmVinculados = 0;
+    if (pendingCgmUpdates.size > 0) {
+      const updates = Array.from(pendingCgmUpdates.entries());
+      const CHUNK = 100;
+      for (let i = 0; i < updates.length; i += CHUNK) {
+        const slice = updates.slice(i, i + CHUNK);
+        await prisma.$transaction(
+          slice.map(([id, cgm]) =>
+            prisma.student.update({
+              where: { id },
+              data: { cgm },
+            })
+          )
+        );
+        cgmVinculados += slice.length;
+      }
+    }
+
+    // 5. Bulk Upsert via SQL parametrizado em blocos de 250 linhas
+    const rowsToUpsert = Array.from(batchRecords.values());
+    const BATCH_SIZE = 250;
+    const defaultEnrollment = "Importado do SERP (Rede de Proteção)";
+
+    for (let i = 0; i < rowsToUpsert.length; i += BATCH_SIZE) {
+      const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
+      const values = chunk.map(
+        (r) =>
+          Prisma.sql`(
+            ${r.id},
+            ${r.studentId},
+            ${70.0},
+            ${defaultEnrollment},
+            ${r.protocoloStr},
+            ${r.statusEnum},
+            ${r.dataAbertura},
+            ${r.detailsStr},
+            ${r.actionSummary},
+            NOW()
+          )`
+      );
+
+      await prisma.$executeRaw`
+        INSERT INTO "LowAttendanceRecord" (
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "serpProtocol",
+          "serpStatus",
+          "serpOpenedAt",
+          "serpDetails",
+          "actionsTaken",
+          "updatedAt"
+        )
+        VALUES ${Prisma.join(values)}
+        ON CONFLICT ("studentId") DO UPDATE SET
+          "serpProtocol" = EXCLUDED."serpProtocol",
+          "serpStatus" = EXCLUDED."serpStatus",
+          "serpOpenedAt" = EXCLUDED."serpOpenedAt",
+          "serpDetails" = EXCLUDED."serpDetails",
+          "actionsTaken" = EXCLUDED."actionsTaken",
+          "updatedAt" = NOW()
+      `;
+    }
+
+    const atualizados = rowsToUpsert.length;
+    const conselhoTutelarCount = rowsToUpsert.filter(
+      (r) => r.statusEnum === "CONSELHO_TUTELAR"
+    ).length;
+
+    // 6. Registro na Trilha de Auditoria com IP
     await logAudit({
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "SerpSync",

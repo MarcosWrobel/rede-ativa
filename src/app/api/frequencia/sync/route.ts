@@ -1,9 +1,19 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getSyncCorsHeaders } from "@/lib/cors";
+import { frequenciaSyncSchema, formatZodError } from "@/lib/schemas";
+import {
+  buildStudentLookupMaps,
+  normalizeStudentName,
+  parseAttendancePercent,
+} from "@/lib/studentMatcher";
+import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
+
+export const maxDuration = 60;
 
 function verifySyncToken(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -63,17 +73,18 @@ export async function POST(req: Request) {
       }
     }
 
-    const body = await req.json();
-    const { alunos } = body;
-
-    if (!Array.isArray(alunos) || alunos.length === 0) {
+    const rawBody = await req.json();
+    const parsedBody = frequenciaSyncSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
       return NextResponse.json(
-        { error: "Nenhum aluno fornecido para sincronização." },
+        { error: formatZodError(parsedBody.error) },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    // 2. Carrega todos os estudantes para mapas em memória
+    const { alunos } = parsedBody.data;
+
+    // 2. Carrega todos os estudantes em 1 query leve
     const allStudents = await prisma.student.findMany({
       select: {
         id: true,
@@ -82,37 +93,27 @@ export async function POST(req: Request) {
       },
     });
 
-    const cgmMap = new Map<string, string>();
-    const nameMap = new Map<string, { id: string; hasCgm: boolean }>();
+    const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
 
-    allStudents.forEach((s) => {
-      if (s.cgm) {
-        cgmMap.set(s.cgm.trim(), s.id);
+    const pendingCgmUpdates = new Map<string, string>(); // studentId -> cgm
+    const batchRecords = new Map<
+      string,
+      {
+        id: string;
+        snapshotId: string;
+        studentId: string;
+        percent: number;
+        weeklyPercent: number | null;
+        previousWeeklyPercent: number | null;
+        detail: string;
       }
-      const norm = s.name
-        .toUpperCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      nameMap.set(norm, { id: s.id, hasCgm: !!s.cgm });
-    });
-
-    let atualizados = 0;
-    let cgmVinculados = 0;
-    let emRiscoCount = 0;
+    >();
     const naoEncontrados: Array<{ nome: string; cgm?: string; turma?: string }> = [];
 
-    // 3. Processamento dos estudantes
+    // 3. Pareamento em memória (O(N)) e preparação dos lotes deduplicados
     for (const item of alunos) {
-      const cgmClean = (item.cgm || "").trim();
-      const rawName = (item.nome || "")
-        .toUpperCase()
-        .replace(/\s*-\s*\d+.*$/, "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+      const cgmClean = String(item.cgm ?? "").trim();
+      const rawName = normalizeStudentName(item.nome);
 
       let studentId: string | undefined = cgmClean ? cgmMap.get(cgmClean) : undefined;
 
@@ -121,65 +122,130 @@ export async function POST(req: Request) {
         if (studentByName) {
           studentId = studentByName.id;
 
-          if (!studentByName.hasCgm && cgmClean) {
-            try {
-              await prisma.student.update({
-                where: { id: studentId },
-                data: { cgm: cgmClean },
-              });
-              cgmMap.set(cgmClean, studentId);
-              studentByName.hasCgm = true;
-              cgmVinculados++;
-            } catch (err) {
-              console.warn(`[SYNC] Aviso ao vincular CGM ${cgmClean} ao aluno ${studentId}:`, err);
-            }
+          if (!studentByName.hasCgm && cgmClean && !usedCgms.has(cgmClean)) {
+            pendingCgmUpdates.set(studentId, cgmClean);
+            usedCgms.add(cgmClean);
+            cgmMap.set(cgmClean, studentId);
+            studentByName.hasCgm = true;
           }
         }
       }
 
       if (studentId) {
-        const pctStr = (item.mediaGeral || "").replace("%", "").replace(",", ".").trim();
-        const percent = parseFloat(pctStr);
-
-        if (!isNaN(percent)) {
-          if (percent < 75) {
-            emRiscoCount++;
-          }
-
+        const percent = parseAttendancePercent(item.mediaGeral);
+        if (percent !== null) {
+          const semAtual = item.semanaAtual !== undefined && item.semanaAtual !== null ? String(item.semanaAtual).trim() : "";
+          const semAnt = item.semanaAnterior !== undefined && item.semanaAnterior !== null ? String(item.semanaAnterior).trim() : "";
+          const weeklyPercent = parseAttendancePercent(semAtual);
+          const previousWeeklyPercent = parseAttendancePercent(semAnt);
           const detail = [
             cgmClean ? `CGM: ${cgmClean}` : null,
-            item.semanaAtual ? `Semana Atual: ${item.semanaAtual}` : null,
-            item.semanaAnterior ? `Semana Anterior: ${item.semanaAnterior}` : null,
+            semAtual ? `Semana Atual: ${semAtual}` : null,
+            semAnt ? `Semana Anterior: ${semAnt}` : null,
           ]
             .filter(Boolean)
             .join(" | ");
 
-          await prisma.lowAttendanceRecord.upsert({
-            where: { studentId },
-            update: {
-              attendancePercent: percent,
-              enrollmentDetail: detail,
-            },
-            create: {
-              studentId,
-              attendancePercent: percent,
-              enrollmentDetail: detail,
-              actionsTaken: "Importado do Power BI (PRESENTE NA ESCOLA)",
-            },
+          batchRecords.set(studentId, {
+            id: crypto.randomUUID(),
+            snapshotId: crypto.randomUUID(),
+            studentId,
+            percent,
+            weeklyPercent,
+            previousWeeklyPercent,
+            detail,
           });
-
-          atualizados++;
         }
       } else {
         naoEncontrados.push({
-          nome: item.nome,
-          cgm: item.cgm,
-          turma: item.turma,
+          nome: item.nome || "",
+          cgm: cgmClean || undefined,
+          turma: item.turma || undefined,
         });
       }
     }
 
-    // 4. Registrar na Trilha de Auditoria com IP
+    // 4. Atualiza CGMs novos em transação única (quando aplicável)
+    let cgmVinculados = 0;
+    if (pendingCgmUpdates.size > 0) {
+      const updates = Array.from(pendingCgmUpdates.entries());
+      const CHUNK = 100;
+      for (let i = 0; i < updates.length; i += CHUNK) {
+        const slice = updates.slice(i, i + CHUNK);
+        await prisma.$transaction(
+          slice.map(([id, cgm]) =>
+            prisma.student.update({
+              where: { id },
+              data: { cgm },
+            })
+          )
+        );
+        cgmVinculados += slice.length;
+      }
+    }
+
+    // 5. Bulk Upsert via SQL parametrizado em blocos de 250 linhas (~150ms para toda a escola)
+    const rowsToUpsert = Array.from(batchRecords.values());
+    const BATCH_SIZE = 250;
+    const defaultAction = "Importado do Power BI (PRESENTE NA ESCOLA)";
+    const referenceWeek = getIsoWeekKey(new Date());
+
+    for (let i = 0; i < rowsToUpsert.length; i += BATCH_SIZE) {
+      const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
+      const values = chunk.map(
+        (r) =>
+          Prisma.sql`(${r.id}, ${r.studentId}, ${r.percent}, ${r.detail}, ${defaultAction}, NOW())`
+      );
+
+      await prisma.$executeRaw`
+        INSERT INTO "LowAttendanceRecord" (
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "actionsTaken",
+          "updatedAt"
+        )
+        VALUES ${Prisma.join(values)}
+        ON CONFLICT ("studentId") DO UPDATE SET
+          "attendancePercent" = EXCLUDED."attendancePercent",
+          "enrollmentDetail" = EXCLUDED."enrollmentDetail",
+          "updatedAt" = NOW()
+      `;
+
+      // 5b. Preserva série histórica semanal (AttendanceSnapshot) por estudante/semana ISO
+      try {
+        const snapshotValues = chunk.map(
+          (r) =>
+            Prisma.sql`(${r.snapshotId}, ${r.studentId}, ${referenceWeek}, ${r.percent}, ${r.weeklyPercent}, ${r.previousWeeklyPercent}, NOW())`
+        );
+
+        await prisma.$executeRaw`
+          INSERT INTO "AttendanceSnapshot" (
+            "id",
+            "studentId",
+            "referenceWeek",
+            "attendancePercent",
+            "weeklyPercent",
+            "previousWeeklyPercent",
+            "recordedAt"
+          )
+          VALUES ${Prisma.join(snapshotValues)}
+          ON CONFLICT ("studentId", "referenceWeek") DO UPDATE SET
+            "attendancePercent" = EXCLUDED."attendancePercent",
+            "weeklyPercent" = EXCLUDED."weeklyPercent",
+            "previousWeeklyPercent" = EXCLUDED."previousWeeklyPercent",
+            "recordedAt" = NOW()
+        `;
+      } catch (snapErr: any) {
+        console.warn("[frequencia/sync] Aviso ao gravar AttendanceSnapshot:", snapErr?.message);
+      }
+    }
+
+    const atualizados = rowsToUpsert.length;
+    const emRiscoCount = rowsToUpsert.filter((r) => r.percent < 75).length;
+
+    // 6. Registrar na Trilha de Auditoria com IP
     await logAudit({
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "LowAttendanceRecord",

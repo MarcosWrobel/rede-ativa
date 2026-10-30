@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { isBootstrapAdminEmail, requireAdmin } from "@/lib/permissions";
+import { formatZodError, userCreateSchema } from "@/lib/schemas";
 
 export async function GET() {
   try {
@@ -32,16 +33,15 @@ export async function POST(req: Request) {
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
-    const rawEmail = String(body.email || "").toLowerCase().trim();
-    const rawName = String(body.name || "").trim();
-    const role = body.role === "ADMIN" ? "ADMIN" : "PEDAGOGA";
-
-    if (!rawEmail || !rawEmail.endsWith("@escola.pr.gov.br")) {
+    const parsed = userCreateSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Informe um e-mail institucional válido terminado em @escola.pr.gov.br." },
+        { error: formatZodError(parsed.error) },
         { status: 400 }
       );
     }
+
+    const { email: rawEmail, name: rawName, role } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { email: rawEmail } });
     if (existing) {

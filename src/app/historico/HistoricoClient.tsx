@@ -1,28 +1,27 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { 
-  History, 
-  Search, 
-  Filter, 
-  CheckCircle2, 
-  Clock, 
-  MessageSquare, 
-  Phone, 
-  User, 
-  Calendar,
+import { useState, useEffect, useRef } from "react";
+import {
+  History,
+  Search,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Pencil,
   Trash2,
   AlertTriangle,
   X,
-  Check
+  Check,
+  Loader2,
+  RotateCcw,
+  Calendar,
 } from "lucide-react";
+import { isBootstrapAdminEmail } from "@/lib/roles";
 
 interface Props {
   initialLogs: any[];
+  initialTotal: number;
+  pedagogas: string[];
   classGroups: any[];
   currentUser: {
     name: string;
@@ -31,14 +30,32 @@ interface Props {
   };
 }
 
-export default function HistoricoClient({ initialLogs, classGroups, currentUser }: Props) {
+export default function HistoricoClient({
+  initialLogs,
+  initialTotal,
+  pedagogas,
+  classGroups,
+  currentUser,
+}: Props) {
   const [logs, setLogs] = useState<any[]>(initialLogs);
+  const [total, setTotal] = useState<number>(initialTotal);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // Filters
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
   const [selectedPedagoga, setSelectedPedagoga] = useState("");
   const [selectedReplyFilter, setSelectedReplyFilter] = useState("TODOS");
-  
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const pageSize = 30;
+  const [refreshTick, setRefreshTick] = useState(0);
+
   // Note modal state (regular pedagoga return notes)
   const [activeModalLog, setActiveModalLog] = useState<any>(null);
   const [noteText, setNoteText] = useState("");
@@ -63,53 +80,96 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  // Pagination
-  const [page, setPage] = useState(1);
-  const pageSize = 30;
-
   const isAdmin =
-    currentUser.role === "ADMIN" ||
-    currentUser.email.toLowerCase().trim() === "marcos.wrobel@escola.pr.gov.br";
+    currentUser.role === "ADMIN" || isBootstrapAdminEmail(currentUser.email);
 
-  // Extract distinct pedagogas from logs
-  const pedagogas = useMemo(() => {
-    const set = new Set<string>();
-    initialLogs.forEach((l) => {
-      if (l.sentByName) set.add(l.sentByName);
-    });
-    return Array.from(set).sort();
-  }, [initialLogs]);
+  // Debounce search input (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
-  // Filter logs
-  const filteredLogs = useMemo(() => {
-    return logs.filter((l) => {
-      const matchSearch =
-        !searchTerm ||
-        l.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        l.reasonTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (l.phoneUsed && l.phoneUsed.includes(searchTerm));
+  // Fetch server-paginated logs whenever filters or page change (skipping initial SSR state)
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
 
-      const matchSegment =
-        selectedSegment === "TODOS" || l.student.classGroup.segment === selectedSegment;
+    const controller = new AbortController();
+    const fetchPage = async () => {
+      setIsLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(pageSize),
+        });
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (selectedSegment !== "TODOS") params.set("segment", selectedSegment);
+        if (selectedTurma) params.set("classGroupId", selectedTurma);
+        if (selectedPedagoga) params.set("pedagoga", selectedPedagoga);
+        if (selectedReplyFilter !== "TODOS") params.set("replied", selectedReplyFilter);
+        if (dateFrom) params.set("dateFrom", dateFrom);
+        if (dateTo) params.set("dateTo", dateTo);
 
-      const matchTurma = !selectedTurma || l.student.classGroup.id === selectedTurma;
+        const res = await fetch(`/api/messages?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setLogs(data.logs || []);
+        setTotal(typeof data.total === "number" ? data.total : 0);
+      } catch (err: any) {
+        if (err?.name !== "AbortError") {
+          console.error("Erro ao consultar histórico paginado:", err);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    };
 
-      const matchPedagoga = !selectedPedagoga || l.sentByName === selectedPedagoga;
+    fetchPage();
+    return () => controller.abort();
+  }, [
+    page,
+    pageSize,
+    debouncedSearch,
+    selectedSegment,
+    selectedTurma,
+    selectedPedagoga,
+    selectedReplyFilter,
+    dateFrom,
+    dateTo,
+    refreshTick,
+  ]);
 
-      const matchReply =
-        selectedReplyFilter === "TODOS" ||
-        (selectedReplyFilter === "SIM" && l.guardianReplied) ||
-        (selectedReplyFilter === "NAO" && !l.guardianReplied);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-      return matchSearch && matchSegment && matchTurma && matchPedagoga && matchReply;
-    });
-  }, [logs, searchTerm, selectedSegment, selectedTurma, selectedPedagoga, selectedReplyFilter]);
+  const hasActiveFilters =
+    Boolean(searchTerm.trim()) ||
+    selectedSegment !== "TODOS" ||
+    Boolean(selectedTurma) ||
+    Boolean(selectedPedagoga) ||
+    selectedReplyFilter !== "TODOS" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
 
-  const totalPages = Math.ceil(filteredLogs.length / pageSize) || 1;
-  const paginatedLogs = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredLogs.slice(start, start + pageSize);
-  }, [filteredLogs, page, pageSize]);
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setDebouncedSearch("");
+    setSelectedSegment("TODOS");
+    setSelectedTurma("");
+    setSelectedPedagoga("");
+    setSelectedReplyFilter("TODOS");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  };
 
   // Toggle guardian reply
   const handleToggleReply = async (log: any) => {
@@ -241,8 +301,16 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
         throw new Error(data.error || "Erro ao excluir registro");
       }
 
+      const remainingOnPage = logs.length - 1;
       setLogs((prev) => prev.filter((item) => item.id !== activeDeleteLog.id));
+      setTotal((prev) => Math.max(0, prev - 1));
       setActiveDeleteLog(null);
+
+      if (remainingOnPage === 0 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        setRefreshTick((t) => t + 1);
+      }
     } catch (err: any) {
       setDeleteError(err.message || "Erro desconhecido ao excluir");
     } finally {
@@ -265,12 +333,15 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
             )}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Controle de todos os acionamentos com registro de resposta dos responsáveis.
+            Busca paginada em todo o acervo histórico de acionamentos e retornos dos responsáveis.
             {isAdmin && " Como administrador, você pode editar qualquer campo ou excluir registros incorretos."}
           </p>
         </div>
-        <div className="text-xs text-slate-500 font-medium">
-          Exibindo <strong>{filteredLogs.length}</strong> registros
+        <div className="flex items-center space-x-2 text-xs text-slate-500 font-medium">
+          {isLoading && <Loader2 className="w-4 h-4 animate-spin text-sky-600" />}
+          <span>
+            Total encontrado: <strong>{total.toLocaleString("pt-BR")}</strong> registros
+          </span>
         </div>
       </div>
 
@@ -279,10 +350,10 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
           {/* Search Input */}
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar aluno, motivo, telefone..."
+              placeholder="Buscar aluno, CGM, motivo, fone..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -360,6 +431,51 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
             <option value="NAO">Pendente (Não)</option>
           </select>
         </div>
+
+        {/* Date Range Row */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center space-x-1 font-semibold text-slate-600">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>Período:</span>
+            </span>
+            <label className="inline-flex items-center space-x-1.5 text-slate-600">
+              <span>De</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setPage(1);
+                }}
+                className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-slate-50 focus:bg-white font-mono text-xs"
+              />
+            </label>
+            <label className="inline-flex items-center space-x-1.5 text-slate-600">
+              <span>Até</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setPage(1);
+                }}
+                className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-slate-50 focus:bg-white font-mono text-xs"
+              />
+            </label>
+          </div>
+
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Limpar Filtros</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Table */}
@@ -379,8 +495,8 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                 {isAdmin && <th className="px-4 py-3 text-center">Ações (ADM)</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {paginatedLogs.map((log) => {
+            <tbody className={`divide-y divide-slate-100 transition-opacity ${isLoading ? "opacity-60" : "opacity-100"}`}>
+              {logs.map((log) => {
                 const dt = new Date(log.sentAt);
                 return (
                   <tr key={log.id} className="hover:bg-slate-50/70 transition">
@@ -470,7 +586,7 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
                   </tr>
                 );
               })}
-              {paginatedLogs.length === 0 && (
+              {logs.length === 0 && !isLoading && (
                 <tr>
                   <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                     Nenhum envio encontrado com os filtros selecionados.
@@ -484,22 +600,23 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
         {/* Pagination Bar */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
           <div>
-            Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+            Página <strong>{page}</strong> de <strong>{totalPages}</strong> • Exibindo{" "}
+            <strong>{logs.length}</strong> de <strong>{total.toLocaleString("pt-BR")}</strong> registros
           </div>
           <div className="flex items-center space-x-2">
             <button
               type="button"
-              disabled={page <= 1}
+              disabled={page <= 1 || isLoading}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40"
+              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40 hover:bg-slate-100 transition"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               type="button"
-              disabled={page >= totalPages}
+              disabled={page >= totalPages || isLoading}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40"
+              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40 hover:bg-slate-100 transition"
             >
               <ChevronRight className="w-4 h-4" />
             </button>

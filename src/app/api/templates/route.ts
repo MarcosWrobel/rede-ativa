@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
 
 export async function GET(req: Request) {
   try {
@@ -32,16 +33,20 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const { title, segment, prefixText, suffixText, isAbsenceRelated } = await req.json();
-    if (!title) return NextResponse.json({ error: "Título obrigatório" }, { status: 400 });
+    const parsed = templateCreateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
+
+    const { title, segment, prefixText, suffixText, isAbsenceRelated } = parsed.data;
 
     const template = await prisma.messageTemplate.create({
       data: {
-        title: title.trim().toUpperCase(),
-        segment: segment || "TODOS",
-        prefixText: prefixText || "",
-        suffixText: suffixText || "",
-        isAbsenceRelated: Boolean(isAbsenceRelated),
+        title: title.toUpperCase(),
+        segment,
+        prefixText,
+        suffixText,
+        isAbsenceRelated,
       },
     });
 
@@ -69,18 +74,22 @@ export async function PUT(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = await req.json();
-    if (!id) return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
+    const parsed = templateUpdateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
+
+    const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = parsed.data;
 
     const template = await prisma.messageTemplate.update({
       where: { id },
       data: {
-        title: title ? title.trim().toUpperCase() : undefined,
-        segment: segment !== undefined ? segment : undefined,
-        prefixText: prefixText !== undefined ? prefixText : undefined,
-        suffixText: suffixText !== undefined ? suffixText : undefined,
-        isAbsenceRelated: isAbsenceRelated !== undefined ? Boolean(isAbsenceRelated) : undefined,
-        active: active !== undefined ? Boolean(active) : undefined,
+        title: title ? title.toUpperCase() : undefined,
+        segment,
+        prefixText,
+        suffixText,
+        isAbsenceRelated,
+        active,
       },
     });
 

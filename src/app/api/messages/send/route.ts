@@ -2,18 +2,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { formatZodError, messageSendSchema } from "@/lib/schemas";
+import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 
 export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const body = await req.json();
-    const { studentId, templateId, reasonTitle, messageContent, customPhone } = body;
-
-    if (!studentId || !reasonTitle || !messageContent) {
-      return NextResponse.json({ error: "Dados incompletos" }, { status: 400 });
+    const parsed = messageSendSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
+
+    const { studentId, templateId, reasonTitle, messageContent, customPhone } = parsed.data;
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -24,11 +26,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Aluno não encontrado" }, { status: 404 });
     }
 
-    // Clean phone number
-    const rawPhone = customPhone || student.phone;
-    let digits = rawPhone.replace(/\D/g, "");
-    if (digits.startsWith("5555")) digits = digits.slice(2);
-    if (!digits.startsWith("55")) digits = "55" + digits;
+    const digits = normalizeWhatsAppPhone(customPhone || student.phone);
+    if (!digits || digits.length < 10) {
+      return NextResponse.json({ error: "Telefone inválido para envio no WhatsApp" }, { status: 400 });
+    }
 
     const sentByName = authCheck.userName;
 

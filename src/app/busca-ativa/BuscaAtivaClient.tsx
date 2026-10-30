@@ -1,30 +1,37 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { 
-  Send, 
-  User, 
-  Phone, 
-  Users, 
-  AlertTriangle, 
-  CheckCircle, 
-  Clock, 
-  Edit3, 
-  Sparkles,
+import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
+import {
+  Send,
+  Phone,
+  AlertTriangle,
+  CheckCircle,
+  Edit3,
   ExternalLink,
-  PlusCircle,
   HelpCircle,
   ShieldCheck,
   Sun,
   Sunset,
-  Moon
+  Moon,
+  Stethoscope,
+  UserCheck,
+  FileText,
+  PhoneOff,
 } from "lucide-react";
 import { determineShift, formatMessage, SchoolShift } from "@/lib/messageFormatter";
+import {
+  getActiveJustification,
+  KINSHIP_LABELS,
+  JUSTIFICATION_TYPE_LABELS,
+} from "@/lib/pedagogicalClassifier";
 
 interface Props {
   classGroups: any[];
   templates: any[];
   initialStudents: any[];
+  initialSelectedStudentId?: string;
+  initialCustomPhone?: string;
   currentUser: {
     name: string;
     email: string;
@@ -35,18 +42,32 @@ export default function BuscaAtivaClient({
   classGroups,
   templates,
   initialStudents,
+  initialSelectedStudentId = "",
+  initialCustomPhone = "",
   currentUser,
 }: Props) {
   const [selectedSegment, setSelectedSegment] = useState<string>("TODOS");
   const [selectedTurmaId, setSelectedTurmaId] = useState<string>("");
-  const [selectedStudentId, setSelectedStudentId] = useState<string>("");
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(initialSelectedStudentId);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [activeShift, setActiveShift] = useState<SchoolShift>("TARDE");
   const [customMessage, setCustomMessage] = useState<string>("");
   const [customPhone, setCustomPhone] = useState<string>("");
+  const [selectedGuardianName, setSelectedGuardianName] = useState<string>("");
   const [isSending, setIsSending] = useState(false);
   const [lastSentSuccess, setLastSentSuccess] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
+
+  // Inicializa aluno vindo via URL (?studentId=...&phone=...)
+  useEffect(() => {
+    if (!initialSelectedStudentId) return;
+    const st = initialStudents.find((s) => s.id === initialSelectedStudentId);
+    if (st) {
+      setCustomPhone(initialCustomPhone || st.phone || "");
+      setSelectedGuardianName(st.guardianName || "");
+      setActiveShift(determineShift(st));
+    }
+  }, [initialSelectedStudentId, initialCustomPhone, initialStudents]);
 
   // Filtered turmas by segment
   const filteredClassGroups = useMemo(() => {
@@ -68,7 +89,12 @@ export default function BuscaAtivaClient({
     return initialStudents.find((s) => s.id === selectedStudentId);
   }, [initialStudents, selectedStudentId]);
 
-  // Filtered templates by segment (sem duplicidades: modelos "TODOS" aparecem sempre)
+  const activeJustification = useMemo(
+    () => (selectedStudent ? getActiveJustification(selectedStudent.justifications) : null),
+    [selectedStudent]
+  );
+
+  // Filtered templates by segment
   const filteredTemplates = useMemo(() => {
     return templates.filter((t) => {
       if (t.segment === "TODOS") return true;
@@ -82,12 +108,21 @@ export default function BuscaAtivaClient({
     return templates.find((t) => t.id === selectedTemplateId);
   }, [templates, selectedTemplateId]);
 
-  // Update preview message when student, template or shift changes
-  const updatePreview = (student: any, template: any, shiftOverride?: SchoolShift) => {
+  // Update preview message when student, template, contact or shift changes
+  const updatePreview = (
+    student: any,
+    template: any,
+    shiftOverride?: SchoolShift,
+    guardianOverride?: string
+  ) => {
     if (!student || !template) return;
     const shift = shiftOverride || activeShift;
+    const effectiveStudent = {
+      ...student,
+      guardianName: guardianOverride !== undefined ? guardianOverride : selectedGuardianName || student.guardianName,
+    };
     const msg = formatMessage(template.prefixText, template.suffixText, {
-      student,
+      student: effectiveStudent,
       pedagogaName: currentUser.name,
       overrideShift: shift,
     });
@@ -101,11 +136,20 @@ export default function BuscaAtivaClient({
     const st = initialStudents.find((s) => s.id === studentId);
     if (st) {
       setCustomPhone(st.phone);
+      setSelectedGuardianName(st.guardianName || "");
       const detectedShift = determineShift(st);
       setActiveShift(detectedShift);
       if (selectedTemplate) {
-        updatePreview(st, selectedTemplate, detectedShift);
+        updatePreview(st, selectedTemplate, detectedShift, st.guardianName || "");
       }
+    }
+  };
+
+  const handleSelectContactOption = (phone: string, guardianName: string) => {
+    setCustomPhone(phone);
+    setSelectedGuardianName(guardianName);
+    if (selectedStudent && selectedTemplate) {
+      updatePreview(selectedStudent, selectedTemplate, activeShift, guardianName);
     }
   };
 
@@ -159,7 +203,6 @@ export default function BuscaAtivaClient({
         whatsappUrl: data.whatsappUrl,
       });
 
-      // Open WhatsApp Web automatically
       window.open(data.whatsappUrl, "_blank");
     } catch (err: any) {
       setErrorMessage(err.message || "Erro ao processar envio.");
@@ -251,31 +294,121 @@ export default function BuscaAtivaClient({
                 className="w-full text-sm border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 font-medium transition"
               >
                 <option value="">-- Escolha um aluno na lista --</option>
-                {filteredStudents.map((st) => (
-                  <option key={st.id} value={st.id}>
-                    {st.name} — {st.classGroup.name}
-                  </option>
-                ))}
+                {filteredStudents.map((st) => {
+                  const hasActiveJust = getActiveJustification(st.justifications) !== null;
+                  return (
+                    <option key={st.id} value={st.id}>
+                      {hasActiveJust ? "🩺 " : ""}
+                      {st.name} — {st.classGroup.name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
             {/* Student Context Card if selected */}
             {selectedStudent && (
-              <div className="p-3.5 bg-sky-50/60 border border-sky-200 rounded-xl space-y-2 text-xs">
-                <div className="flex justify-between items-start">
+              <div className="p-3.5 bg-sky-50/60 border border-sky-200 rounded-xl space-y-2.5 text-xs">
+                <div className="flex justify-between items-start gap-2">
                   <div>
                     <span className="font-bold text-slate-900 text-sm block">
                       {selectedStudent.name}
                     </span>
                     <span className="text-slate-600">
-                      Turma: <strong>{selectedStudent.classGroup.name}</strong> • Responsável: <strong>{selectedStudent.guardianName || "Não informado"}</strong>
+                      Turma: <strong>{selectedStudent.classGroup.name}</strong> • Responsável:{" "}
+                      <strong>{selectedGuardianName || selectedStudent.guardianName || "Não informado"}</strong>
                     </span>
+                  </div>
+
+                  <div className="flex items-center space-x-1 shrink-0">
+                    <Link
+                      href={`/alunos/${selectedStudent.id}`}
+                      className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold text-[10px]"
+                      title="Abrir Prontuário 360º"
+                    >
+                      <UserCheck className="w-3 h-3" />
+                      <span>360º</span>
+                    </Link>
+                    <Link
+                      href={`/alunos/${selectedStudent.id}/dossie`}
+                      className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[10px]"
+                      title="Emitir Dossiê PDF"
+                    >
+                      <FileText className="w-3 h-3" />
+                      <span>PDF</span>
+                    </Link>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 pt-1 border-t border-sky-100">
+                {/* Alerta de Atestado Médico Vigente (PED-03) */}
+                {activeJustification && (
+                  <div className="p-2.5 bg-emerald-100 border border-emerald-300 rounded-lg text-emerald-950 flex items-start space-x-2">
+                    <Stethoscope className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-extrabold">
+                        🩺 Atenção: Atestado / Justificativa Vigente!
+                      </strong>
+                      <span className="text-[11px] block">
+                        {JUSTIFICATION_TYPE_LABELS[activeJustification.type] || activeJustification.type} válido de{" "}
+                        <strong>{new Date(activeJustification.startDate).toLocaleDateString("pt-BR")}</strong> até{" "}
+                        <strong>{new Date(activeJustification.endDate).toLocaleDateString("pt-BR")}</strong>.
+                        {activeJustification.notes ? ` (${activeJustification.notes})` : ""}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Seletor Rápido de Múltiplos Contatos (PED-04) */}
+                {selectedStudent.contacts?.length > 0 && (
+                  <div className="pt-1.5 border-t border-sky-100 space-y-1.5">
+                    <span className="text-[11px] font-bold text-sky-900 block">
+                      Escolher destinatário familiar:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectContactOption(
+                            selectedStudent.phone,
+                            selectedStudent.guardianName || ""
+                          )
+                        }
+                        className={`px-2 py-1 rounded-md text-[11px] font-bold border transition ${
+                          customPhone === selectedStudent.phone
+                            ? "bg-sky-600 text-white border-sky-600"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        Principal ({selectedStudent.phone})
+                      </button>
+
+                      {selectedStudent.contacts.map((c: any) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => handleSelectContactOption(c.phone, c.name)}
+                          className={`inline-flex items-center space-x-1 px-2 py-1 rounded-md text-[11px] font-bold border transition ${
+                            customPhone === c.phone
+                              ? "bg-sky-600 text-white border-sky-600"
+                              : c.whatsappValid
+                              ? "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                              : "bg-rose-50 text-rose-800 border-rose-200"
+                          }`}
+                          title={c.whatsappValid ? c.name : `${c.name} — Número sinalizado sem WhatsApp`}
+                        >
+                          {!c.whatsappValid && <PhoneOff className="w-3 h-3" />}
+                          <span>
+                            {KINSHIP_LABELS[c.kinship] || c.kinship}: {c.name.split(" ")[0]} ({c.phone})
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-2 pt-1.5 border-t border-sky-100">
                   <Phone className="w-3.5 h-3.5 text-sky-600" />
-                  <span className="text-slate-600">Contato:</span>
+                  <span className="text-slate-600">Número de envio:</span>
                   <input
                     type="text"
                     value={customPhone}
@@ -294,7 +427,7 @@ export default function BuscaAtivaClient({
                       <span>Atenção: Aluno em Acompanhamento de Frequência!</span>
                       <div className="text-[11px] font-normal mt-0.5 space-y-0.5">
                         <div>
-                          Freq Geral: <strong>{selectedStudent.lowAttendanceRecord.attendancePercent}%</strong> 
+                          Freq Geral: <strong>{selectedStudent.lowAttendanceRecord.attendancePercent}%</strong>
                           {selectedStudent.lowAttendanceRecord.enrollmentDetail && (
                             <span className="text-amber-800 font-mono text-[10px] block mt-0.5">
                               {selectedStudent.lowAttendanceRecord.enrollmentDetail}
@@ -348,9 +481,11 @@ export default function BuscaAtivaClient({
                   >
                     <span>{t.title}</span>
                     {t.isAbsenceRelated && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        isSelected ? "bg-white/20 text-white" : "bg-red-50 text-red-600"
-                      }`}>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                          isSelected ? "bg-white/20 text-white" : "bg-red-50 text-red-600"
+                        }`}
+                      >
                         Falta
                       </span>
                     )}
@@ -477,7 +612,7 @@ export default function BuscaAtivaClient({
             </div>
           </div>
 
-          {/* Quick Instructions Guide (migrated from Como Utilizar in the spreadsheet) */}
+          {/* Quick Instructions Guide */}
           <div className="bg-sky-50/50 rounded-xl border border-sky-100 p-5 text-xs text-sky-950 space-y-2.5">
             <h3 className="font-bold text-sky-900 flex items-center space-x-1.5 text-sm">
               <HelpCircle className="w-4 h-4 text-sky-700" />
@@ -485,7 +620,7 @@ export default function BuscaAtivaClient({
             </h3>
             <ol className="list-decimal list-inside space-y-1 text-slate-700 leading-relaxed">
               <li><strong>Escolha o Turno e Turma</strong>: Use os botões no topo para filtrar Fundamental, Médio ou Noturno.</li>
-              <li><strong>Selecione o Aluno</strong>: O sistema busca o contato e exibe alertas caso o aluno já tenha contatos recentes ou esteja em acompanhamento pelo Conselho Tutelar.</li>
+              <li><strong>Selecione o Aluno</strong>: O sistema alerta automaticamente caso haja 🩺 <strong>Atestado Médico Vigente</strong> e permite alternar entre os telefones da Mãe, Pai ou Recado.</li>
               <li><strong>Defina o Motivo</strong>: Clique no modelo desejado (Aluno Faltou, Sair Mais Cedo, Muitas Faltas, Tarefa, etc.). O texto é gerado com os dados do aluno.</li>
               <li><strong>Envie com 1 Clique</strong>: Ao clicar no botão verde, o sistema salva o registro atômico com seu usuário institucional e abre a conversa do WhatsApp imediatamente.</li>
             </ol>

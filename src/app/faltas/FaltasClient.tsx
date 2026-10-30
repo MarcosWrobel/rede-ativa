@@ -36,9 +36,19 @@ import {
   Moon,
   Info,
   Sparkles,
-  Key
+  Key,
+  Stethoscope,
+  FileText,
+  UserCheck,
+  PhoneOff
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
+import {
+  detectAbruptDrop,
+  getActiveJustification,
+  KINSHIP_LABELS,
+  JUSTIFICATION_TYPE_LABELS,
+} from "@/lib/pedagogicalClassifier";
 
 interface Props {
   rankedAbsences: any[];
@@ -66,7 +76,9 @@ export default function FaltasClient({
   const [selectedSegment, setSelectedSegment] = useState("TODOS");
   const [selectedShift, setSelectedShift] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
-  const [selectedRiskRange, setSelectedRiskRange] = useState<"TODOS" | "CRITICO" | "ATENCAO" | "REGULAR">("TODOS");
+  const [selectedRiskRange, setSelectedRiskRange] = useState<
+    "TODOS" | "CRITICO" | "ATENCAO" | "REGULAR" | "QUEDA_ABRUPTA"
+  >("TODOS");
   const [selectedActionStatus, setSelectedActionStatus] = useState<
     "TODOS" | "COM_ACAO" | "SEM_ACAO" | "CONSELHO_TUTELAR" | "MINISTERIO_PUBLICO" | "EM_ACOMPANHAMENTO"
   >("TODOS");
@@ -304,7 +316,16 @@ export default function FaltasClient({
   const kpis = useMemo(() => {
     const total = recordsList.length;
     if (total === 0) {
-      return { total: 0, critico: 0, atencao: 0, regular: 0, mediaGeral: 0, comAcao: 0 };
+      return {
+        total: 0,
+        critico: 0,
+        atencao: 0,
+        regular: 0,
+        mediaGeral: 0,
+        comAcao: 0,
+        conselhoTutelar: 0,
+        quedasAbruptas: 0,
+      };
     }
 
     let critico = 0;
@@ -313,6 +334,7 @@ export default function FaltasClient({
     let sumPercent = 0;
     let comAcao = 0;
     let conselhoTutelar = 0;
+    let quedasAbruptas = 0;
 
     recordsList.forEach((rec) => {
       const p = rec.attendancePercent;
@@ -320,6 +342,17 @@ export default function FaltasClient({
       if (p < 75) critico++;
       else if (p < 85) atencao++;
       else regular++;
+
+      const d = parseDetail(rec.enrollmentDetail);
+      const wAtual = d.semanaAtual ? parseFloat(d.semanaAtual.replace("%", "").replace(",", ".")) : null;
+      const wAnt = d.semanaAnterior ? parseFloat(d.semanaAnterior.replace("%", "").replace(",", ".")) : null;
+      const drop = detectAbruptDrop({
+        attendancePercent: p,
+        weeklyPercent: wAtual !== null && Number.isFinite(wAtual) ? wAtual : null,
+        previousWeeklyPercent: wAnt !== null && Number.isFinite(wAnt) ? wAnt : null,
+        snapshots: rec.student?.snapshots || [],
+      });
+      if (drop.isAbruptDrop) quedasAbruptas++;
 
       const isCt = rec.serpStatus === "CONSELHO_TUTELAR" || (rec.actionsTaken && rec.actionsTaken.toUpperCase().includes("CONSELHO"));
       if (isCt) conselhoTutelar++;
@@ -337,6 +370,7 @@ export default function FaltasClient({
       mediaGeral: +(sumPercent / total).toFixed(1),
       comAcao,
       conselhoTutelar,
+      quedasAbruptas,
     };
   }, [recordsList]);
 
@@ -369,12 +403,26 @@ export default function FaltasClient({
       const matchShift = selectedShift === "TODOS" || st.classGroup.shift === selectedShift;
       const matchTurma = !selectedTurma || st.classGroupId === selectedTurma;
 
-      // Faixa de Risco
+      // Faixa de Risco & Queda Abrupta
       const p = rec.attendancePercent;
       let matchRisk = true;
       if (selectedRiskRange === "CRITICO") matchRisk = p < 75;
       else if (selectedRiskRange === "ATENCAO") matchRisk = p >= 75 && p < 85;
       else if (selectedRiskRange === "REGULAR") matchRisk = p >= 85;
+      else if (selectedRiskRange === "QUEDA_ABRUPTA") {
+        const wAtual = detailInfo.semanaAtual
+          ? parseFloat(detailInfo.semanaAtual.replace("%", "").replace(",", "."))
+          : null;
+        const wAnt = detailInfo.semanaAnterior
+          ? parseFloat(detailInfo.semanaAnterior.replace("%", "").replace(",", "."))
+          : null;
+        matchRisk = detectAbruptDrop({
+          attendancePercent: p,
+          weeklyPercent: wAtual !== null && Number.isFinite(wAtual) ? wAtual : null,
+          previousWeeklyPercent: wAnt !== null && Number.isFinite(wAnt) ? wAnt : null,
+          snapshots: st.snapshots || [],
+        }).isAbruptDrop;
+      }
 
       // Status de Ações & SERP
       let matchAction = true;
@@ -899,6 +947,7 @@ export default function FaltasClient({
               { id: "TODOS", label: "Todas as Faixas" },
               { id: "CRITICO", label: `🚨 Risco Crítico (<75%) (${kpis.critico})` },
               { id: "ATENCAO", label: `⚠️ Em Atenção (75-85%) (${kpis.atencao})` },
+              { id: "QUEDA_ABRUPTA", label: `📉 Queda Abrupta (${kpis.quedasAbruptas})` },
               { id: "REGULAR", label: `✅ Regular (≥85%) (${kpis.regular})` },
             ].map((chip) => {
               const isSelected = selectedRiskRange === chip.id;
@@ -912,7 +961,7 @@ export default function FaltasClient({
                   }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
                     isSelected
-                      ? chip.id === "CRITICO"
+                      ? chip.id === "CRITICO" || chip.id === "QUEDA_ABRUPTA"
                         ? "bg-red-600 text-white shadow-2xs"
                         : chip.id === "ATENCAO"
                         ? "bg-amber-600 text-white shadow-2xs"
@@ -1056,8 +1105,46 @@ export default function FaltasClient({
 
                         {/* Nome do Estudante & CGM */}
                         <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"}`}>
-                          <div className="font-bold text-slate-900 tracking-tight leading-snug">
-                            {rec.student.name}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Link
+                              href={`/alunos/${rec.student.id}`}
+                              className="font-bold text-slate-900 hover:text-sky-700 hover:underline tracking-tight leading-snug"
+                            >
+                              {rec.student.name}
+                            </Link>
+                            {(() => {
+                              const activeJust = getActiveJustification(rec.student.justifications);
+                              if (!activeJust) return null;
+                              return (
+                                <span
+                                  title={`Atestado vigente até ${new Date(activeJust.endDate).toLocaleDateString("pt-BR")}`}
+                                  className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px]"
+                                >
+                                  <Stethoscope className="w-3 h-3" />
+                                  <span>Atestado</span>
+                                </span>
+                              );
+                            })()}
+                            {(() => {
+                              const wAtual = d.semanaAtual ? parseFloat(d.semanaAtual.replace("%", "").replace(",", ".")) : null;
+                              const wAnt = d.semanaAnterior ? parseFloat(d.semanaAnterior.replace("%", "").replace(",", ".")) : null;
+                              const drop = detectAbruptDrop({
+                                attendancePercent: percent,
+                                weeklyPercent: wAtual !== null && Number.isFinite(wAtual) ? wAtual : null,
+                                previousWeeklyPercent: wAnt !== null && Number.isFinite(wAnt) ? wAnt : null,
+                                snapshots: rec.student.snapshots || [],
+                              });
+                              if (!drop.isAbruptDrop) return null;
+                              return (
+                                <span
+                                  title={drop.reason || "Queda abrupta recente"}
+                                  className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]"
+                                >
+                                  <TrendingDown className="w-3 h-3" />
+                                  <span>Queda Abrupta</span>
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="flex items-center space-x-2 text-[11px] text-slate-500 font-mono mt-0.5">
                             {cgm && (
@@ -1188,8 +1275,24 @@ export default function FaltasClient({
                           </div>
                         </td>
 
-                        {/* Ações: Editar Medidas + Disparar Busca Ativa */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right space-x-1.5 whitespace-nowrap`}>
+                        {/* Ações: Prontuário + Dossiê PDF + Editar Medidas + Disparar Busca Ativa */}
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right space-x-1 whitespace-nowrap`}>
+                          <Link
+                            href={`/alunos/${rec.student.id}`}
+                            className="inline-flex items-center p-1.5 text-slate-500 hover:text-sky-700 hover:bg-sky-50 rounded transition align-middle"
+                            title="Abrir Prontuário 360º (Contatos, Atestados e Atas)"
+                          >
+                            <UserCheck className="w-4 h-4" />
+                          </Link>
+
+                          <Link
+                            href={`/alunos/${rec.student.id}/dossie`}
+                            className="inline-flex items-center p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition align-middle"
+                            title="Emitir Dossiê Individual em PDF (Conselho Tutelar / SERP)"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </Link>
+
                           <button
                             type="button"
                             onClick={() => {
@@ -1197,7 +1300,7 @@ export default function FaltasClient({
                               setPercentText(String(rec.attendancePercent));
                               setActionText(rec.actionsTaken || "");
                             }}
-                            className="p-1 text-slate-500 hover:text-sky-600 rounded transition"
+                            className="p-1.5 text-slate-500 hover:text-sky-600 rounded transition align-middle"
                             title="Editar Medidas / Frequência"
                           >
                             <Edit3 className="w-4 h-4" />
@@ -1206,7 +1309,7 @@ export default function FaltasClient({
                           <button
                             type="button"
                             onClick={() => handleOpenMessageDrawer(rec, false)}
-                            className="inline-flex items-center space-x-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold border border-sky-200 transition shadow-2xs"
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold border border-sky-200 transition shadow-2xs align-middle"
                             title="Enviar Mensagem / Busca Ativa com dados de frequência"
                           >
                             <Send className="w-3 h-3 text-sky-600" />
@@ -1293,7 +1396,20 @@ export default function FaltasClient({
                         {index > 2 && <span className="text-slate-400">{index + 1}º</span>}
                       </td>
                       <td className="p-3 font-semibold text-slate-900">
-                        {item.student.name}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Link
+                            href={`/alunos/${item.student.id}`}
+                            className="hover:text-sky-700 hover:underline font-bold"
+                          >
+                            {item.student.name}
+                          </Link>
+                          {getActiveJustification(item.student.justifications) && (
+                            <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px]">
+                              <Stethoscope className="w-3 h-3" />
+                              <span>Atestado Vigente</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-medium">
@@ -1306,7 +1422,15 @@ export default function FaltasClient({
                       <td className="p-3 text-slate-500">
                         {new Date(item.lastDate).toLocaleDateString("pt-BR")}
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                        <Link
+                          href={`/alunos/${item.student.id}/dossie`}
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition"
+                          title="Emitir Dossiê PDF"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>PDF</span>
+                        </Link>
                         <button
                           type="button"
                           onClick={() => handleOpenMessageDrawer(item, true)}
@@ -1623,6 +1747,68 @@ export default function FaltasClient({
                   </div>
                 )}
               </div>
+
+              {/* Alerta de Atestado Vigente no Drawer (PED-03) */}
+              {(() => {
+                const activeJust = getActiveJustification(activeStudentData.student.justifications);
+                if (!activeJust) return null;
+                return (
+                  <div className="p-3 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-950 flex items-start space-x-2 text-xs">
+                    <Stethoscope className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-extrabold">
+                        🩺 Estudante com Atestado / Justificativa Vigente!
+                      </strong>
+                      <span>
+                        {JUSTIFICATION_TYPE_LABELS[activeJust.type] || activeJust.type} válido até{" "}
+                        <strong>{new Date(activeJust.endDate).toLocaleDateString("pt-BR")}</strong>.
+                        {activeJust.notes ? ` (${activeJust.notes})` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Seletor Rápido de Múltiplos Contatos no Drawer (PED-04) */}
+              {activeStudentData.student.contacts?.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-slate-700 block">
+                    Contatos Cadastrados da Família:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setCustomPhone(activeStudentData.student.phone || "")}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                        customPhone === activeStudentData.student.phone
+                          ? "bg-sky-600 text-white border-sky-600"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Principal ({activeStudentData.student.phone})
+                    </button>
+                    {activeStudentData.student.contacts.map((c: any) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCustomPhone(c.phone)}
+                        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          customPhone === c.phone
+                            ? "bg-sky-600 text-white border-sky-600"
+                            : c.whatsappValid
+                            ? "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                            : "bg-rose-50 text-rose-800 border-rose-200"
+                        }`}
+                      >
+                        {!c.whatsappValid && <PhoneOff className="w-3 h-3" />}
+                        <span>
+                          {KINSHIP_LABELS[c.kinship] || c.kinship}: {c.name.split(" ")[0]} ({c.phone})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Informações de Contato do Responsável */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

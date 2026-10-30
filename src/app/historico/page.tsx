@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
+const INITIAL_PAGE_SIZE = 30;
+
 export default async function HistoricoPage() {
   const session = await auth();
   if (!session?.user) {
@@ -14,9 +16,9 @@ export default async function HistoricoPage() {
 
   const isAdmin = checkIsAdmin(session);
 
-  const [logs, classGroups] = await Promise.all([
+  const [logs, totalCount, classGroups, pedagogaRows] = await Promise.all([
     prisma.messageLog.findMany({
-      take: 400,
+      take: INITIAL_PAGE_SIZE,
       orderBy: { sentAt: "desc" },
       include: {
         student: {
@@ -24,14 +26,26 @@ export default async function HistoricoPage() {
         },
       },
     }),
+    prisma.messageLog.count(),
     prisma.classGroup.findMany({
       orderBy: { name: "asc" },
     }),
+    prisma.messageLog.findMany({
+      distinct: ["sentByName"],
+      select: { sentByName: true },
+      orderBy: { sentByName: "asc" },
+    }),
   ]);
+
+  const pedagogas = pedagogaRows
+    .map((r) => r.sentByName)
+    .filter((name): name is string => Boolean(name && name.trim()));
 
   return (
     <HistoricoClient
       initialLogs={logs}
+      initialTotal={totalCount}
+      pedagogas={pedagogas}
       classGroups={classGroups}
       currentUser={{
         name: session.user.name || "Pedagoga",

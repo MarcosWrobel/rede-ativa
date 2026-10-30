@@ -189,8 +189,10 @@ export function formatMessage(
 
     // 3. Normalização automática de saudações legadas estáticas no início do texto
     // Ex: "Boa tarde!\n", "Boa noite!\n", "Bom dia!\n", "Boa tarde, senhores pais"
-    res = res.replace(/^(Boa tarde|Boa noite|Bom dia)!?/i, greeting);
-    res = res.replace(/^(Boa tarde|Boa noite|Bom dia),/i, `${greeting.replace("!", "")},`);
+    res = res.replace(/^(Boa tarde|Boa noite|Bom dia)([!,]?)/i, (_, _greet, punct) => {
+      if (punct === ",") return `${greeting.replace("!", "")},`;
+      return greeting;
+    });
 
     return res;
   };

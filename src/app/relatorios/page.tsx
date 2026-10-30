@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getReportsSummary } from "@/lib/reportsAggregator";
 import RelatoriosClient from "./RelatoriosClient";
 import { redirect } from "next/navigation";
 
@@ -11,22 +11,7 @@ export default async function RelatoriosPage() {
     redirect("/login");
   }
 
-  // Optimized lightweight fetch for aggregations
-  const logs = await prisma.messageLog.findMany({
-    select: {
-      id: true,
-      reasonTitle: true,
-      sentByName: true,
-      guardianReplied: true,
-      student: {
-        select: {
-          classGroup: {
-            select: { segment: true },
-          },
-        },
-      },
-    },
-  });
+  const initialSummary = await getReportsSummary({ segment: "TODOS" });
 
-  return <RelatoriosClient allLogs={logs} />;
+  return <RelatoriosClient initialSummary={initialSummary} />;
 }

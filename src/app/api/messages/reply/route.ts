@@ -2,16 +2,19 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { formatZodError, messageReplySchema } from "@/lib/schemas";
 
 export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const { logId, guardianReplied, replyNotes } = await req.json();
-    if (!logId) {
-      return NextResponse.json({ error: "ID do log ausente" }, { status: 400 });
+    const rawBody = await req.json();
+    const parsed = messageReplySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
+    const { logId, guardianReplied, replyNotes } = parsed.data;
 
     const previous = await prisma.messageLog.findUnique({
       where: { id: logId },

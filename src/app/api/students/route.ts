@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { formatZodError, studentCreateSchema, studentUpdateSchema } from "@/lib/schemas";
 
 export async function GET(req: Request) {
   try {
@@ -40,18 +41,19 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const { name, guardianName, phone, classGroupId } = await req.json();
-    if (!name || !phone || !classGroupId) {
-      return NextResponse.json({ error: "Nome, telefone e turma são obrigatórios" }, { status: 400 });
+    const parsed = studentCreateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
+    const { name, guardianName, phone, classGroupId } = parsed.data;
     const cleanDigits = phone.replace(/\D/g, "");
-    const formattedName = name.trim().toUpperCase();
+    const formattedName = name.toUpperCase();
 
     const student = await prisma.student.create({
       data: {
         name: formattedName,
-        guardianName: guardianName ? guardianName.trim() : "Responsável",
+        guardianName: guardianName?.trim() || "Responsável",
         phone: cleanDigits,
         classGroupId,
       },
@@ -87,8 +89,12 @@ export async function PUT(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const { id, name, guardianName, phone, classGroupId } = await req.json();
-    if (!id) return NextResponse.json({ error: "ID ausente" }, { status: 400 });
+    const parsed = studentUpdateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
+
+    const { id, name, guardianName, phone, classGroupId } = parsed.data;
 
     const previous = await prisma.student.findUnique({
       where: { id },
@@ -96,13 +102,14 @@ export async function PUT(req: Request) {
     });
 
     const cleanDigits = phone ? phone.replace(/\D/g, "") : previous?.phone;
-    const formattedName = name ? name.trim().toUpperCase() : previous?.name;
+    const formattedName = name ? name.toUpperCase() : previous?.name;
 
     const student = await prisma.student.update({
       where: { id },
       data: {
         name: formattedName,
-        guardianName: guardianName !== undefined ? guardianName.trim() : previous?.guardianName,
+        guardianName:
+          guardianName !== undefined ? (guardianName ? guardianName.trim() : null) : previous?.guardianName,
         phone: cleanDigits,
         classGroupId: classGroupId || previous?.classGroupId,
       },
