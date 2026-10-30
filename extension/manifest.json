@@ -42,6 +42,16 @@
         "*://*.redeprotecao.seed.pr.gov.br/*",
         "*://redeprotecao.seed.pr.gov.br/*"
       ],
+      "js": ["serp-bridge.js"],
+      "world": "MAIN",
+      "all_frames": false,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.redeprotecao.seed.pr.gov.br/*",
+        "*://redeprotecao.seed.pr.gov.br/*"
+      ],
       "js": ["serp-content.js"],
       "world": "ISOLATED",
       "all_frames": false,

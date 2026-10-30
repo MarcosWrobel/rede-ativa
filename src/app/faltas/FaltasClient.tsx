@@ -397,6 +397,17 @@ export default function FaltasClient({ rankedAbsences, lowAttendance, classGroup
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Botão de Download da Extensão */}
+          <a
+            href="/extensao-leopoldina.zip"
+            download="extensao-leopoldina.zip"
+            title="Baixar instalador da Extensão Chrome para outros computadores"
+            className="px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
+          >
+            <Download className="w-4 h-4 text-purple-600" />
+            <span>Baixar Extensão (.ZIP)</span>
+          </a>
+
           {/* Botão de Importação Power BI */}
           <button
             type="button"
