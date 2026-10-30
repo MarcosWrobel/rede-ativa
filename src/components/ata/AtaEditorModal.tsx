@@ -586,7 +586,7 @@ export default function AtaEditorModal({
           : "Lavratura de Ata do Atendimento Pedagógico"
       }
       description="Substitui o caderno manuscrito com fé pública institucional, validade jurídica (Lei nº 14.063/2020) e integração ao Prontuário 360º."
-      maxWidthClass="max-w-5xl"
+      maxWidthClass="max-w-[96vw] lg:max-w-[1440px]"
     >
       <div className="space-y-6 text-xs">
         {/* WIZARD BIMODAL: NAVEGAÇÃO DE PASSOS */}
@@ -641,189 +641,236 @@ export default function AtaEditorModal({
         {/* ============================================================== */}
         {step === 1 && (
           <div className="space-y-4">
-            {/* Pauta e Categoria no Topo */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <div className="md:col-span-8 space-y-1">
-                <label className="font-extrabold text-slate-900 block">
-                  Assunto / Pauta do Atendimento:
-                </label>
-                <input
-                  type="text"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  placeholder="Ex.: Comparecimento da família para alinhamento pedagógico e faltas"
-                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 focus:outline-sky-500"
-                />
-              </div>
+            <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
+              {/* COLUNA ESQUERDA: DADOS DA PAUTA + ESTUDANTES VINCULADOS (5 colunas) */}
+              <div className="lg:col-span-5 space-y-4">
+                {/* Card de Pauta e Categoria */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="space-y-1">
+                    <label className="font-extrabold text-slate-900 block text-sm">
+                      Assunto / Pauta do Atendimento:
+                    </label>
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="Ex.: Comparecimento da família para alinhamento pedagógico e faltas"
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm focus:outline-sky-500 shadow-2xs"
+                    />
+                  </div>
 
-              <div className="md:col-span-4 space-y-1">
-                <label className="font-bold text-slate-700 block">
-                  Natureza / Categoria:
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="md:col-span-12 pt-1 flex items-center justify-between">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isConfidential}
-                    onChange={(e) => setIsConfidential(e.target.checked)}
-                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-4 h-4"
-                  />
-                  <span className="font-bold text-rose-700 flex items-center space-x-1">
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Sigilo Reforçado (ECA / Proteção à Intimidade)</span>
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {/* Painel Amplo de Seleção de Estudantes */}
-            <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
-                <div>
-                  <h3 className="font-extrabold text-slate-900 text-sm flex items-center space-x-1.5">
-                    <Users className="w-4 h-4 text-sky-600" />
-                    <span>Selecione os Estudantes Vinculados a esta Ata</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Pesquise por nome, CGM ou responsável. Você pode marcar múltiplos alunos em atendimentos conjuntos.
-                  </p>
-                </div>
-
-                {/* Chips dos alunos já selecionados */}
-                <div className="text-[11px] font-bold text-slate-700">
-                  {selectedStudentIds.length} selecionado{selectedStudentIds.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-
-              {/* Alunos Selecionados (Pills de Remoção Rápida) */}
-              {selectedStudentIds.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 p-2.5 bg-sky-50/70 border border-sky-200 rounded-2xl">
-                  <span className="font-bold text-sky-900 text-[11px] mr-1">Vinculados:</span>
-                  {selectedStudentIds.map((id) => {
-                    const s = availableStudents.find((item) => item.id === id);
-                    if (!s) return null;
-                    return (
-                      <span
-                        key={id}
-                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-white text-sky-900 border border-sky-300 font-bold text-xs shadow-2xs"
-                      >
-                        <span>{s.name}</span>
-                        {s.classGroupName && (
-                          <span className="text-[10px] text-sky-600">({s.classGroupName})</span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleToggleStudent(s)}
-                          className="hover:text-rose-600 p-0.5 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Barra de Busca e Filtro de Turma */}
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-8 relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    placeholder="Filtrar por nome do aluno, CGM ou responsável..."
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:outline-sky-500 text-xs"
-                  />
-                  {studentSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setStudentSearch("")}
-                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700 block text-xs">
+                      Natureza / Categoria da Ata:
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm shadow-2xs"
                     >
-                      <X className="w-4 h-4" />
-                    </button>
+                      {CATEGORIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="pt-1">
+                    <label className="flex items-center space-x-2.5 cursor-pointer p-2 rounded-xl bg-rose-50/70 border border-rose-200">
+                      <input
+                        type="checkbox"
+                        checked={isConfidential}
+                        onChange={(e) => setIsConfidential(e.target.checked)}
+                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="font-bold text-rose-800 text-xs flex items-center space-x-1.5">
+                        <Lock className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Sigilo Reforçado (ECA / Proteção à Intimidade)</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Card de Alunos Vinculados */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-slate-900 text-sm flex items-center space-x-1.5">
+                      <Users className="w-4 h-4 text-sky-600" />
+                      <span>Alunos Vinculados nesta Ata</span>
+                    </span>
+                    <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                      {selectedStudentIds.length} selecionado{selectedStudentIds.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  {selectedStudentIds.length === 0 ? (
+                    <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
+                      Nenhum estudante selecionado ainda.<br />
+                      Pesquise e clique nos estudantes no catálogo ao lado para vinculá-los.
+                    </div>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                      {selectedStudentIds.map((id) => {
+                        const s = availableStudents.find((item) => item.id === id);
+                        if (!s) return null;
+                        return (
+                          <div
+                            key={id}
+                            className="flex items-center justify-between p-2.5 bg-sky-50/60 border border-sky-200 rounded-xl"
+                          >
+                            <div>
+                              <p className="font-extrabold text-sky-950 text-xs">{s.name}</p>
+                              <p className="text-[11px] text-sky-700">
+                                Turma: {s.classGroupName || "Sem Turma"} {s.cgm ? `• CGM: ${s.cgm}` : ""}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudent(s)}
+                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition cursor-pointer"
+                              title="Remover estudante"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedStudentIds.length === 0) {
+                        alert("Selecione pelo menos um estudante antes de avançar.");
+                        return;
+                      }
+                      setStep(2);
+                    }}
+                    disabled={selectedStudentIds.length === 0}
+                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold text-xs transition shadow-2xs flex items-center justify-center space-x-2 cursor-pointer mt-2"
+                  >
+                    <span>Avançar para Redação & Assinatura</span>
+                    <ArrowRight className="w-4 h-4 text-sky-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* COLUNA DIREITA: CATÁLOGO DE BUSCA E SELEÇÃO DE ALUNOS (7 colunas) */}
+              <div className="lg:col-span-7 space-y-3 mt-4 lg:mt-0">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-sm">
+                      Catálogo Geral de Alunos da Escola
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Encontre e marque os alunos. Suporta múltiplos alunos em atas conjuntas.
+                    </p>
+                  </div>
+                  <span className="text-xs text-slate-600 font-medium">
+                    Exibindo <strong>{filteredStudents.length}</strong> de {availableStudents.length}
+                  </span>
+                </div>
+
+                {/* Filtros em destaque */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                  <div className="sm:col-span-8 relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                    <input
+                      type="text"
+                      placeholder="Pesquisar por nome do aluno, CGM ou responsável..."
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:outline-sky-500 text-sm shadow-2xs"
+                    />
+                    {studentSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearch("")}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-4">
+                    <select
+                      value={selectedTurmaFilter}
+                      onChange={(e) => setSelectedTurmaFilter(e.target.value)}
+                      className="w-full py-2.5 px-3 border border-slate-300 rounded-xl bg-white font-semibold text-slate-700 text-sm shadow-2xs"
+                    >
+                      <option value="TODAS">Todas as Turmas ({availableStudents.length})</option>
+                      {turmasList.map((t) => (
+                        <option key={t} value={t}>
+                          Turma: {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Lista Ampla de Alunos com altura aumentada h-[460px] */}
+                <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white h-[460px] overflow-y-auto divide-y divide-slate-100 shadow-2xs">
+                  {filteredStudents.length === 0 ? (
+                    <div className="p-12 text-center text-slate-400 text-sm">
+                      Nenhum estudante encontrado para os termos pesquisados.
+                    </div>
+                  ) : (
+                    filteredStudents.map((s) => {
+                      const isSelected = selectedStudentIds.includes(s.id);
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => handleToggleStudent(s)}
+                          className={`p-3.5 flex items-center justify-between cursor-pointer transition select-none ${
+                            isSelected
+                              ? "bg-sky-50/90 border-l-4 border-l-sky-600"
+                              : "hover:bg-slate-50/80 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3.5">
+                            <div
+                              className={`w-5 h-5 rounded-md border flex items-center justify-center transition shrink-0 ${
+                                isSelected
+                                  ? "bg-sky-600 border-sky-600 text-white"
+                                  : "border-slate-300 bg-white"
+                              }`}
+                            >
+                              {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            </div>
+
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <p className="text-sm font-extrabold text-slate-900">{s.name}</p>
+                                {s.classGroupName && (
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold">
+                                    {s.classGroupName}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {s.cgm ? <span className="font-mono mr-2">CGM: {s.cgm}</span> : null}
+                                {s.guardianName ? <span>Resp: <strong className="text-slate-600">{s.guardianName}</strong></span> : null}
+                              </p>
+                            </div>
+                          </div>
+
+                          {isSelected ? (
+                            <span className="text-xs font-black uppercase px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800">
+                              Vinculado
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400 hover:text-sky-600 font-medium">
+                              + Vincular
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
-
-                <div className="sm:col-span-4">
-                  <select
-                    value={selectedTurmaFilter}
-                    onChange={(e) => setSelectedTurmaFilter(e.target.value)}
-                    className="w-full py-2.5 px-3 border border-slate-300 rounded-xl bg-white font-semibold text-slate-700 text-xs"
-                  >
-                    <option value="TODAS">Todas as Turmas ({availableStudents.length})</option>
-                    {turmasList.map((t) => (
-                      <option key={t} value={t}>
-                        Turma: {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Grid Amplo de Alunos para Seleção com 1 Clique */}
-              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white max-h-72 overflow-y-auto divide-y divide-slate-100">
-                {filteredStudents.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400">
-                    Nenhum estudante encontrado com os filtros atuais.
-                  </div>
-                ) : (
-                  filteredStudents.map((s) => {
-                    const isSelected = selectedStudentIds.includes(s.id);
-                    return (
-                      <div
-                        key={s.id}
-                        onClick={() => handleToggleStudent(s)}
-                        className={`p-3 flex items-center justify-between cursor-pointer transition ${
-                          isSelected
-                            ? "bg-sky-50/80 font-bold"
-                            : "hover:bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div
-                            className={`w-5 h-5 rounded-md border flex items-center justify-center transition ${
-                              isSelected
-                                ? "bg-sky-600 border-sky-600 text-white"
-                                : "border-slate-300 bg-white"
-                            }`}
-                          >
-                            {isSelected && <Check className="w-3.5 h-3.5" />}
-                          </div>
-
-                          <div>
-                            <p className="text-xs font-extrabold text-slate-900">{s.name}</p>
-                            <p className="text-[11px] text-slate-500">
-                              Turma: <strong>{s.classGroupName || "Sem Turma"}</strong>
-                              {s.cgm ? ` • CGM: ${s.cgm}` : ""}
-                              {s.guardianName ? ` • Resp: ${s.guardianName}` : ""}
-                            </p>
-                          </div>
-                        </div>
-
-                        {isSelected && (
-                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
-                            Vinculado
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
               </div>
             </div>
 
@@ -832,7 +879,7 @@ export default function AtaEditorModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 transition"
+                className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition"
               >
                 Cancelar
               </button>
@@ -846,7 +893,7 @@ export default function AtaEditorModal({
                   }
                   setStep(2);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs transition shadow-sm flex items-center space-x-2 cursor-pointer"
+                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs transition shadow-sm flex items-center space-x-2 cursor-pointer"
               >
                 <span>Avançar para Redação & Assinatura</span>
                 <ArrowRight className="w-4 h-4 text-sky-400" />
@@ -859,406 +906,435 @@ export default function AtaEditorModal({
         {/* ETAPA 2: REDAÇÃO OFICIAL, IA, ENCAMINHAMENTOS E ASSINATURAS    */}
         {/* ============================================================== */}
         {step === 2 && (
-          <div className="space-y-5">
-            {/* Resumo do Aluno e Pauta Selecionados */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Pauta e Aluno(s):</span>
-                <p className="font-extrabold text-xs text-slate-900">
-                  {subject} •{" "}
-                  {availableStudents
-                    .filter((s) => selectedStudentIds.includes(s.id))
-                    .map((s) => s.name)
-                    .join(", ")}
-                </p>
+          <div className="space-y-4">
+            {/* Barra de Resumo Topo */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                    Pauta e Aluno(s) Vinculados:
+                  </span>
+                  <p className="font-extrabold text-sm text-slate-900">
+                    {subject || "Sem assunto"} •{" "}
+                    <span className="text-sky-700 font-semibold">
+                      {availableStudents
+                        .filter((s) => selectedStudentIds.includes(s.id))
+                        .map((s) => s.name)
+                        .join(", ")}
+                    </span>
+                  </p>
+                </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="text-sky-600 hover:text-sky-700 font-bold text-xs flex items-center space-x-1 cursor-pointer"
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-sky-600 font-bold text-xs flex items-center space-x-1.5 cursor-pointer shadow-2xs"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Alterar alunos / pauta</span>
               </button>
             </div>
 
-            {/* Bloco de Notas Rápidas e IA */}
-            <div className="border border-sky-100 bg-sky-50/40 p-4 rounded-2xl space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-extrabold text-sky-900 flex items-center space-x-1.5">
-                  <Sparkles className="w-4 h-4 text-sky-600" />
-                  <span>Assistente de Formalização Pedagógica (Gemini AI + Voz)</span>
-                </span>
+            {/* Layout em 2 Colunas lado a lado no Desktop */}
+            <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
+              {/* COLUNA ESQUERDA: IA, TEXTO FORMAL E COMBINADOS (6 colunas) */}
+              <div className="lg:col-span-6 space-y-4">
+                {/* Assistente IA Gemini e Voz */}
+                <div className="border border-sky-100 bg-sky-50/50 p-4 rounded-2xl space-y-2.5 shadow-2xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-extrabold text-sky-900 text-xs flex items-center space-x-1.5">
+                      <Sparkles className="w-4 h-4 text-sky-600" />
+                      <span>Formalização Pedagógica (Gemini AI + Voz)</span>
+                    </span>
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={toggleSpeechRecognition}
-                    className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold transition shadow-2xs cursor-pointer ${
-                      isListening
-                        ? "bg-rose-600 text-white animate-pulse"
-                        : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-sky-600" />}
-                    <span>{isListening ? "Gravando voz..." : "Ditado por Voz"}</span>
-                  </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={toggleSpeechRecognition}
+                        className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold transition shadow-2xs cursor-pointer text-xs ${
+                          isListening
+                            ? "bg-rose-600 text-white animate-pulse"
+                            : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-sky-600" />}
+                        <span>{isListening ? "Gravando voz..." : "Ditado por Voz"}</span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={handleFormalizeWithAi}
-                    disabled={isAiLoading}
-                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{isAiLoading ? "Formalizando..." : "Formalizar com IA"}</span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={handleFormalizeWithAi}
+                        disabled={isAiLoading}
+                        className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer text-xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>{isAiLoading ? "Formalizando..." : "Formalizar com IA"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={rawNotes}
+                    onChange={(e) => setRawNotes(e.target.value)}
+                    placeholder="Digite tópicos rápidos da conversa ou use o microfone. A IA redigirá na íntegra a ata formal em norma culta e respeitando o ECA."
+                    className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs"
+                  />
                 </div>
-              </div>
 
-              <textarea
-                rows={3}
-                value={rawNotes}
-                onChange={(e) => setRawNotes(e.target.value)}
-                placeholder="Digite tópicos rápidos da conversa ou use o microfone. A IA redigirá na íntegra a ata formal em norma culta e respeitando o ECA."
-                className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500"
-              />
-            </div>
+                {/* Texto Formal da Ata */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-extrabold text-slate-900 block text-xs">
+                      Texto Formal da Ata (Norma Culta / ECA-safe):
+                    </label>
+                    <span className="text-[11px] text-slate-400">Revisável pela servidora antes de lavrar</span>
+                  </div>
+                  <textarea
+                    rows={9}
+                    value={summary}
+                    onChange={(e) => setSummary(e.target.value)}
+                    placeholder="O texto formal da ata será gerado pela IA ou redigido diretamente aqui..."
+                    className="w-full p-3.5 border border-slate-300 rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs"
+                  />
+                </div>
 
-            {/* Texto Formal da Ata */}
-            <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-extrabold text-slate-900 block">
-                    Texto Formal da Ata (Norma Culta / ECA-safe):
+                {/* Síntese dos Combinados */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block text-xs">
+                    Síntese dos Combinados e Prazos Acordados:
                   </label>
-                  <span className="text-[10px] text-slate-400">Revisável pela pedagoga antes de lavrar</span>
-                </div>
-                <textarea
-                  rows={5}
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  placeholder="O texto formal da ata será gerado pela IA ou digitado diretamente aqui..."
-                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-800 leading-relaxed font-serif text-[13px] focus:outline-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  Síntese dos Combinados e Prazos Acordados:
-                </label>
-                <input
-                  type="text"
-                  value={agreementsSummary}
-                  onChange={(e) => setAgreementsSummary(e.target.value)}
-                  placeholder="Ex.: Responsável entregará atestado até sexta-feira e aluno realizará trabalhos de compensação."
-                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800"
-                />
-              </div>
-            </div>
-
-            {/* Encaminhamentos Estruturados */}
-            <div className="space-y-2 border-t border-slate-100 pt-3">
-              <div className="flex items-center justify-between">
-                <label className="font-extrabold text-slate-800">
-                  Encaminhamentos & Prazos da Ata (Gera lembretes no Prontuário):
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActionItems((prev) => [
-                      ...prev,
-                      { description: "", responsible: "FAMILIA", dueDate: "" },
-                    ])
-                  }
-                  className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Adicionar Ação</span>
-                </button>
-              </div>
-
-              {actionItems.map((act, idx) => (
-                <div key={idx} className="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
                   <input
                     type="text"
-                    placeholder="Descrição da ação pactuada..."
-                    value={act.description}
-                    onChange={(e) => {
-                      const copy = [...actionItems];
-                      copy[idx].description = e.target.value;
-                      setActionItems(copy);
-                    }}
-                    className="flex-1 p-1.5 border border-slate-300 rounded-lg bg-white"
+                    value={agreementsSummary}
+                    onChange={(e) => setAgreementsSummary(e.target.value)}
+                    placeholder="Ex.: Responsável entregará atestado até sexta-feira e aluno realizará trabalhos de compensação."
+                    className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 text-xs shadow-2xs"
                   />
-                  <select
-                    value={act.responsible}
-                    onChange={(e) => {
-                      const copy = [...actionItems];
-                      copy[idx].responsible = e.target.value;
-                      setActionItems(copy);
-                    }}
-                    className="p-1.5 border border-slate-300 rounded-lg bg-white font-semibold"
-                  >
-                    <option value="FAMILIA">Família</option>
-                    <option value="ESTUDANTE">Estudante</option>
-                    <option value="ESCOLA">Escola</option>
-                    <option value="REDE_PROTECAO">Rede / CT</option>
-                  </select>
-                  <input
-                    type="date"
-                    value={act.dueDate}
-                    onChange={(e) => {
-                      const copy = [...actionItems];
-                      copy[idx].dueDate = e.target.value;
-                      setActionItems(copy);
-                    }}
-                    className="p-1.5 border border-slate-300 rounded-lg bg-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setActionItems((prev) => prev.filter((_, i) => i !== idx))}
-                    className="text-slate-400 hover:text-rose-600 p-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
-              ))}
-            </div>
-
-            {/* Participantes & Coleta Híbrida de Assinaturas */}
-            <div className="space-y-3 border-t border-slate-100 pt-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="font-extrabold text-slate-800 block">
-                    Presentes e Coleta de Assinatura:
-                  </label>
-                  <p className="text-[10px] text-slate-500">
-                    A servidora logada assina eletronicamente com fé pública ao lavrar. Colha a assinatura dos demais abaixo.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setParticipants((prev) => [
-                      ...prev,
-                      {
-                        role: "RESPONSAVEL",
-                        name: "",
-                        kinship: "Mãe/Pai",
-                        documentType: "CPF",
-                        documentNumber: "",
-                        documentVerifiedByStaff: true,
-                        phone: "",
-                        signatureMode: "PENDING",
-                        signatureData: null,
-                        refusalReason: "",
-                        witnessName: "",
-                      },
-                    ])
-                  }
-                  className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Adicionar Presente</span>
-                </button>
               </div>
 
-              <div className="space-y-3">
-                {participants.map((p, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5"
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                      <div className="md:col-span-3">
-                        <select
-                          value={p.role}
-                          onChange={(e) => {
-                            const copy = [...participants];
-                            copy[idx].role = e.target.value;
-                            setParticipants(copy);
-                          }}
-                          className="w-full p-2 border border-slate-300 rounded-xl bg-white font-semibold"
-                        >
-                          <option value="RESPONSAVEL">Responsável Legal</option>
-                          <option value="ESTUDANTE">Estudante</option>
-                          <option value="PROFESSOR">Professor(a)</option>
-                          <option value="EQUIPE_ESCOLAR">Equipe Escolar</option>
-                          <option value="REDE_EXTERNA">Rede de Proteção / CT</option>
-                          <option value="TESTEMUNHA">Testemunha Presencial</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-4">
-                        <input
-                          type="text"
-                          placeholder="Nome completo..."
-                          value={p.name}
-                          onChange={(e) => {
-                            const copy = [...participants];
-                            copy[idx].name = e.target.value;
-                            setParticipants(copy);
-                          }}
-                          className="w-full p-2 border border-slate-300 rounded-xl bg-white font-medium"
-                        />
-                      </div>
-
-                      <div className="md:col-span-3">
-                        <input
-                          type="text"
-                          placeholder="Nº Doc (CPF / RG)..."
-                          value={p.documentNumber || ""}
-                          onChange={(e) => {
-                            const copy = [...participants];
-                            copy[idx].documentNumber = e.target.value;
-                            setParticipants(copy);
-                          }}
-                          className="w-full p-2 border border-slate-300 rounded-xl bg-white font-medium"
-                        />
-                      </div>
-
-                      <div className="md:col-span-2 flex items-center justify-end space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => setParticipants((prev) => prev.filter((_, i) => i !== idx))}
-                          className="text-slate-400 hover:text-rose-600 p-1"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+              {/* COLUNA DIREITA: ENCAMINHAMENTOS E PARTICIPANTES/ASSINATURAS (6 colunas) */}
+              <div className="lg:col-span-6 space-y-4 mt-4 lg:mt-0">
+                {/* Encaminhamentos & Prazos */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="font-extrabold text-slate-800 block text-xs">
+                        Encaminhamentos & Prazos da Ata:
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        Alimenta os lembretes do Prontuário 360º
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActionItems((prev) => [
+                          ...prev,
+                          { description: "", responsible: "FAMILIA", dueDate: "" },
+                        ])
+                      }
+                      className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Adicionar Ação</span>
+                    </button>
+                  </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
-                      <div className="flex items-center space-x-2">
-                        <label className="flex items-center space-x-1.5 cursor-pointer">
+                  {actionItems.length === 0 ? (
+                    <div className="text-center py-3 text-slate-400 text-xs italic">
+                      Nenhum encaminhamento registrado. Clique em "+ Adicionar Ação" se houver combinados com prazo.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {actionItems.map((act, idx) => (
+                        <div key={idx} className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
                           <input
-                            type="checkbox"
-                            checked={p.documentVerifiedByStaff}
+                            type="text"
+                            placeholder="Descrição da ação pactuada..."
+                            value={act.description}
                             onChange={(e) => {
-                              const copy = [...participants];
-                              copy[idx].documentVerifiedByStaff = e.target.checked;
-                              setParticipants(copy);
+                              const copy = [...actionItems];
+                              copy[idx].description = e.target.value;
+                              setActionItems(copy);
                             }}
-                            className="rounded border-slate-300 text-sky-600"
+                            className="flex-1 p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
                           />
-                          <span className="text-[11px] text-slate-600 font-medium">
-                            Documento conferido presencialmente (Fé Pública)
-                          </span>
-                        </label>
-                      </div>
+                          <select
+                            value={act.responsible}
+                            onChange={(e) => {
+                              const copy = [...actionItems];
+                              copy[idx].responsible = e.target.value;
+                              setActionItems(copy);
+                            }}
+                            className="p-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-xs"
+                          >
+                            <option value="FAMILIA">Família</option>
+                            <option value="ESTUDANTE">Estudante</option>
+                            <option value="ESCOLA">Escola</option>
+                            <option value="REDE_PROTECAO">Rede / CT</option>
+                          </select>
+                          <input
+                            type="date"
+                            value={act.dueDate}
+                            onChange={(e) => {
+                              const copy = [...actionItems];
+                              copy[idx].dueDate = e.target.value;
+                              setActionItems(copy);
+                            }}
+                            className="p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setActionItems((prev) => prev.filter((_, i) => i !== idx))}
+                            className="text-slate-400 hover:text-rose-600 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-                      <div className="flex items-center space-x-2">
-                        {p.signatureData ? (
-                          <span className="inline-flex items-center space-x-1 text-emerald-600 font-bold text-[11px] bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>
-                              {p.biometricVerified
-                                ? "Assinado com Biometria"
-                                : "Assinado Digitalmente"}
-                            </span>
-                          </span>
-                        ) : p.signatureMode === "REFUSED" ? (
-                          <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-[11px] bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>Recusou-se a assinar</span>
-                          </span>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setActiveSignParticipantIndex(idx)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] shadow-2xs transition"
-                            >
-                              Assinar na Tela
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleGenerateMobileSign(idx)}
-                              className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-[11px] transition flex items-center space-x-1"
-                            >
-                              <QrCode className="w-3 h-3" />
-                              <span>QR Celular (Biometria)</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const reason = prompt("Informe o motivo da recusa de assinatura (para constar na ata):");
-                                if (reason !== null) {
-                                  const witness = prompt("Nome da testemunha escolar presente:");
-                                  const copy = [...participants];
-                                  copy[idx].signatureMode = "REFUSED";
-                                  copy[idx].refusalReason = reason;
-                                  copy[idx].witnessName = witness || "Equipe Pedagógica";
-                                  setParticipants(copy);
-                                }
+                {/* Participantes & Coleta de Assinatura */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="font-extrabold text-slate-800 block text-xs">
+                        Presentes e Coleta de Assinatura:
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        A servidora logada assina eletronicamente com fé pública ao lavrar. Colha a assinatura dos demais abaixo.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParticipants((prev) => [
+                          ...prev,
+                          {
+                            role: "RESPONSAVEL",
+                            name: "",
+                            kinship: "Mãe/Pai",
+                            documentType: "CPF",
+                            documentNumber: "",
+                            documentVerifiedByStaff: true,
+                            phone: "",
+                            signatureMode: "PENDING",
+                            signatureData: null,
+                            refusalReason: "",
+                            witnessName: "",
+                          },
+                        ])
+                      }
+                      className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Adicionar Presente</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {participants.map((p, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 shadow-2xs"
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                          <div className="md:col-span-4">
+                            <select
+                              value={p.role}
+                              onChange={(e) => {
+                                const copy = [...participants];
+                                copy[idx].role = e.target.value;
+                                setParticipants(copy);
                               }}
-                              className="px-2.5 py-1 rounded-lg border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-[11px] transition"
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-semibold text-xs"
                             >
-                              Recusa
+                              <option value="RESPONSAVEL">Responsável Legal</option>
+                              <option value="ESTUDANTE">Estudante</option>
+                              <option value="PROFESSOR">Professor(a)</option>
+                              <option value="EQUIPE_ESCOLAR">Equipe Escolar</option>
+                              <option value="REDE_EXTERNA">Rede de Proteção / CT</option>
+                              <option value="TESTEMUNHA">Testemunha Presencial</option>
+                            </select>
+                          </div>
+
+                          <div className="md:col-span-4">
+                            <input
+                              type="text"
+                              placeholder="Nome completo..."
+                              value={p.name}
+                              onChange={(e) => {
+                                const copy = [...participants];
+                                copy[idx].name = e.target.value;
+                                setParticipants(copy);
+                              }}
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs"
+                            />
+                          </div>
+
+                          <div className="md:col-span-3">
+                            <input
+                              type="text"
+                              placeholder="Nº Doc (CPF / RG)..."
+                              value={p.documentNumber || ""}
+                              onChange={(e) => {
+                                const copy = [...participants];
+                                copy[idx].documentNumber = e.target.value;
+                                setParticipants(copy);
+                              }}
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs"
+                            />
+                          </div>
+
+                          <div className="md:col-span-1 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setParticipants((prev) => prev.filter((_, i) => i !== idx))}
+                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md"
+                              title="Remover participante"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
-                          </>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                          <div className="flex items-center space-x-2">
+                            <label className="flex items-center space-x-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={p.documentVerifiedByStaff}
+                                onChange={(e) => {
+                                  const copy = [...participants];
+                                  copy[idx].documentVerifiedByStaff = e.target.checked;
+                                  setParticipants(copy);
+                                }}
+                                className="rounded border-slate-300 text-sky-600"
+                              />
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                Documento conferido presencialmente (Fé Pública)
+                              </span>
+                            </label>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5">
+                            {p.signatureData ? (
+                              <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>
+                                  {p.biometricVerified
+                                    ? "Assinado com Biometria"
+                                    : "Assinado Digitalmente"}
+                                </span>
+                              </span>
+                            ) : p.signatureMode === "REFUSED" ? (
+                              <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
+                                <AlertCircle className="w-3.5 h-3.5" />
+                                <span>Recusou-se a assinar</span>
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveSignParticipantIndex(idx)}
+                                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                                >
+                                  Assinar na Tela
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleGenerateMobileSign(idx)}
+                                  className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer"
+                                >
+                                  <QrCode className="w-3.5 h-3.5" />
+                                  <span>QR Celular (Biometria)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const reason = prompt("Informe o motivo da recusa de assinatura (para constar na ata):");
+                                    if (reason !== null) {
+                                      const witness = prompt("Nome da testemunha escolar presente:");
+                                      const copy = [...participants];
+                                      copy[idx].signatureMode = "REFUSED";
+                                      copy[idx].refusalReason = reason;
+                                      copy[idx].witnessName = witness || "Equipe Pedagógica";
+                                      setParticipants(copy);
+                                    }
+                                  }}
+                                  className="px-2 py-1 rounded-lg border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs transition cursor-pointer"
+                                >
+                                  Recusa
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Canvas de Assinatura em tela */}
+                        {activeSignParticipantIndex === idx && !p.signatureData && (
+                          <div className="pt-2">
+                            <SignatureCanvas
+                              signerName={p.name || "Participante"}
+                              onSave={(dataUrl) => {
+                                const copy = [...participants];
+                                copy[idx].signatureData = dataUrl;
+                                copy[idx].signatureMode = "SCREEN_CANVAS";
+                                setParticipants(copy);
+                                setActiveSignParticipantIndex(null);
+                              }}
+                              onClear={() => {
+                                const copy = [...participants];
+                                copy[idx].signatureData = null;
+                                copy[idx].signatureMode = "PENDING";
+                                setParticipants(copy);
+                              }}
+                            />
+                          </div>
                         )}
                       </div>
-                    </div>
-
-                    {/* Canvas de Assinatura em tela */}
-                    {activeSignParticipantIndex === idx && !p.signatureData && (
-                      <div className="pt-2">
-                        <SignatureCanvas
-                          signerName={p.name || "Participante"}
-                          onSave={(dataUrl) => {
-                            const copy = [...participants];
-                            copy[idx].signatureData = dataUrl;
-                            copy[idx].signatureMode = "SCREEN_CANVAS";
-                            setParticipants(copy);
-                            setActiveSignParticipantIndex(null);
-                          }}
-                          onClear={() => {
-                            const copy = [...participants];
-                            copy[idx].signatureData = null;
-                            copy[idx].signatureMode = "PENDING";
-                            setParticipants(copy);
-                          }}
-                        />
-                      </div>
-                    )}
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                {/* Modal QR Code para Assinar no Celular */}
+                {qrModalInfo && (
+                  <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl space-y-3 text-center shadow-sm">
+                    <h4 className="font-extrabold text-sky-900 text-sm">
+                      Aponte a câmera do celular para assinar com Biometria
+                    </h4>
+                    <p className="text-xs text-sky-700">
+                      Participante: <strong>{qrModalInfo.name}</strong>
+                    </p>
+                    <div className="flex justify-center p-2 bg-white rounded-xl border border-sky-200 w-fit mx-auto shadow-sm">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
+                          qrModalInfo.url
+                        )}`}
+                        alt="QR Code Assinatura"
+                        className="w-36 h-36"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono break-all">
+                      {qrModalInfo.url}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setQrModalInfo(null)}
+                      className="px-4 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Fechar QR Code
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Modal QR Code para Assinar no Celular */}
-            {qrModalInfo && (
-              <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl space-y-3 text-center">
-                <h4 className="font-extrabold text-sky-900 text-sm">
-                  Aponte a câmera do celular para assinar com Biometria
-                </h4>
-                <p className="text-xs text-sky-700">
-                  Participante: <strong>{qrModalInfo.name}</strong>
-                </p>
-                <div className="flex justify-center p-2 bg-white rounded-xl border border-sky-200 w-fit mx-auto shadow-sm">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
-                      qrModalInfo.url
-                    )}`}
-                    alt="QR Code Assinatura"
-                    className="w-36 h-36"
-                  />
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono break-all">
-                  {qrModalInfo.url}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setQrModalInfo(null)}
-                  className="px-4 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs"
-                >
-                  Fechar QR Code
-                </button>
-              </div>
-            )}
 
             {/* Aviso de Erro Visual na Lavratura */}
             {finalizeError && (

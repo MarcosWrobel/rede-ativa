@@ -18,7 +18,7 @@ export default function AtaDialog({
   title,
   description,
   children,
-  maxWidthClass = "max-w-4xl",
+  maxWidthClass = "max-w-[98vw] 2xl:max-w-[1560px]",
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
 
@@ -77,11 +77,11 @@ export default function AtaDialog({
       aria-labelledby="dialog-title"
       className={`p-0 bg-transparent backdrop:bg-slate-900/60 backdrop:backdrop-blur-xs overscroll-contain w-full ${maxWidthClass} mx-auto my-auto rounded-3xl shadow-2xl open:animate-in open:fade-in open:zoom-in-95 border border-slate-200/80 focus:outline-none`}
     >
-      <div className="bg-white rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white rounded-3xl overflow-hidden flex flex-col max-h-[96vh]">
         {/* Cabeçalho */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
           <div>
-            <h2 id="dialog-title" className="text-base font-extrabold text-slate-900">
+            <h2 id="dialog-title" className="text-xl font-black text-slate-900 tracking-tight">
               {title}
             </h2>
             {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
@@ -89,7 +89,7 @@ export default function AtaDialog({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
@@ -97,7 +97,7 @@ export default function AtaDialog({
         </div>
 
         {/* Corpo com scroll */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-5">{children}</div>
+        <div className="p-5 lg:p-7 overflow-y-auto flex-1 space-y-6">{children}</div>
       </div>
     </dialog>
   );
