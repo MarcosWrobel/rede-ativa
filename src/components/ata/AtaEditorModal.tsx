@@ -121,8 +121,40 @@ export default function AtaEditorModal({
   const [activeSignParticipantIndex, setActiveSignParticipantIndex] = useState<number | null>(null);
   const [qrModalInfo, setQrModalInfo] = useState<{ url: string; name: string } | null>(null);
   const [finalizedAta, setFinalizedAta] = useState<any | null>(null);
-
   const [minuteId, setMinuteId] = useState<string | null>(existingMinute?.id || null);
+
+  // Atualiza estados quando existingMinute mudar (ex.: ao clicar em "Editar / Lavrar" num rascunho existente)
+  useEffect(() => {
+    if (existingMinute) {
+      setMinuteId(existingMinute.id || null);
+      if (existingMinute.students) {
+        setSelectedStudentIds(existingMinute.students.map((s: any) => s.studentId));
+      }
+      if (existingMinute.category) setCategory(existingMinute.category);
+      if (existingMinute.isConfidential !== undefined) setIsConfidential(existingMinute.isConfidential);
+      if (existingMinute.subject) setSubject(existingMinute.subject);
+      if (existingMinute.rawNotes !== undefined) setRawNotes(existingMinute.rawNotes || "");
+      if (existingMinute.summary !== undefined) setSummary(existingMinute.summary || "");
+      if (existingMinute.agreementsSummary !== undefined) setAgreementsSummary(existingMinute.agreementsSummary || "");
+      if (existingMinute.participants) setParticipants(existingMinute.participants);
+      if (existingMinute.actionItems) {
+        setActionItems(
+          existingMinute.actionItems.map((a: any) => ({
+            description: a.description,
+            responsible: a.responsible,
+            dueDate: a.dueDate ? a.dueDate.slice(0, 10) : "",
+          }))
+        );
+      }
+    } else {
+      setMinuteId(null);
+      setSelectedStudentIds(preSelectedStudentId ? [preSelectedStudentId] : []);
+      setSummary("");
+      setRawNotes("");
+      setAgreementsSummary("");
+      setFinalizedAta(null);
+    }
+  }, [existingMinute, preSelectedStudentId]);
 
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
@@ -302,21 +334,25 @@ export default function AtaEditorModal({
     if (!summary || summary.trim().length < 10) {
       const msg = "É necessário preencher o texto formal da ata (mínimo de 10 caracteres) antes da lavratura oficial.";
       setFinalizeError(msg);
-      alert(msg);
       return;
     }
 
     if (selectedStudentIds.length === 0) {
       const msg = "Selecione pelo menos um estudante vinculado antes de lavrar a ata.";
       setFinalizeError(msg);
-      alert(msg);
       return;
     }
 
-    const confirm = window.confirm(
-      "CONFIRMAÇÃO JURÍDICA: Deseja lavrar esta Ata Pedagógica agora?\n\nApós a lavratura, ela receberá número sequencial anual oficial, hash SHA-256 e ficará 100% imutável (qualquer alteração futura só poderá ser feita via Adendo 'Em tempo')."
-    );
-    if (!confirm) return;
+    // Usamos try/catch seguro sem depender exclusivamente do confirm bloqueante do browser
+    let confirmed = true;
+    try {
+      confirmed = window.confirm(
+        "CONFIRMAÇÃO JURÍDICA: Deseja lavrar esta Ata Pedagógica agora?\n\nApós a lavratura, ela receberá número sequencial anual oficial, hash SHA-256 e ficará 100% imutável (qualquer alteração futura só poderá ser feita via Adendo 'Em tempo')."
+      );
+    } catch {
+      confirmed = true;
+    }
+    if (!confirmed) return;
 
     setSaving(true);
     try {
@@ -342,7 +378,6 @@ export default function AtaEditorModal({
       console.error("[handleFinalize] Erro:", err);
       const msg = err.message || "Erro desconhecido ao lavrar ata.";
       setFinalizeError(msg);
-      alert(`Falha na lavratura: ${msg}`);
     } finally {
       setSaving(false);
     }
