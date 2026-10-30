@@ -1,14 +1,15 @@
 /**
- * Parser e Higienizador Oficial de Relatórios do SERE (Sistema Estadual de Registro Escolar - SEED/PR)
- * Suporta:
- * 1. Relatório "Relação de Alunos por Turma" exportado em CSV (1 ou múltiplos turnos de uma só vez)
- * 2. Planilhas CSV tabulares genéricas (CGM, Nome, Turma, Turno, Telefone, Responsável)
- * 3. Autodetecção de codificação UTF-8 e Windows-1252 / ISO-8859-1 (padrão Celepar/Crystal Reports)
- * 4. Deduplicação automática de dupla matrícula técnica (NEM EPT + Ensino Médio Profissional)
- * 5. Identificação automática de Programas Complementares (Aluno Monitor, Mais Aprendizagem, AEE, CELEM, etc.)
- * 6. Tratamento de movimentações SERE (Matriculado, Concluinte, Sem Frequência, Remanejado, Reclassificado, Transferido)
+ * Parser Universal de Arquivos do SERE (Sistema Estadual de Registro Escolar - SEED/PR)
+ * Suporta diretamente:
+ * 1. Planilhas Excel (.xls BIFF8, .xlsx XML, .html table do SERE) via SheetJS
+ * 2. Relatórios em PDF (.pdf) exportados do SERE via 'unpdf' (WASM/JavaScript puro)
+ * 3. Arquivos CSV/TXT (.csv, .txt) com autodetecção UTF-8 e Windows-1252
+ * 
+ * Executa deduplicação de dupla matriz técnica, filtragem de programas complementares
+ * e mapeamento de turnos e séries automaticamente.
  */
 
+import * as XLSX from "xlsx";
 import { normalizeStudentName } from "./studentMatcher";
 
 export type SchoolSegment = "FUNDAMENTAL" | "MEDIO" | "NOTURNO";
@@ -66,9 +67,14 @@ export interface SereParseResult {
   warnings: string[];
 }
 
+export interface RawFileInput {
+  fileName: string;
+  buffer: ArrayBuffer;
+  textContent?: string;
+}
+
 /**
- * Decodifica ArrayBuffer tentando UTF-8 estrito primeiro e caindo para Windows-1252 (Latin-1)
- * caso o arquivo do SERE/Celepar contenha bytes acentuados legados.
+ * Decodifica texto tentando UTF-8 estrito primeiro e caindo para Windows-1252 (Latin-1).
  */
 export function decodeCsvBuffer(buffer: ArrayBuffer): string {
   try {
@@ -80,7 +86,7 @@ export function decodeCsvBuffer(buffer: ArrayBuffer): string {
 }
 
 /**
- * Detecta o delimitador predominante (vírgula ou ponto-e-vírgula) fora de aspas.
+ * Detecta o delimitador CSV fora de aspas.
  */
 export function detectCsvDelimiter(text: string): "," | ";" {
   const sampleLines = text.split(/\r?\n/).slice(0, 25);
@@ -104,7 +110,7 @@ export function detectCsvDelimiter(text: string): "," | ";" {
 }
 
 /**
- * Parser CSV compatível com RFC 4180 (suporta campos entre aspas com vírgulas internas).
+ * Parser CSV compatível com RFC 4180.
  */
 export function parseCsvRows(text: string, delimiter?: "," | ";"): string[][] {
   const sep = delimiter || detectCsvDelimiter(text);
@@ -161,19 +167,193 @@ export function parseCsvRows(text: string, delimiter?: "," | ";"): string[][] {
 }
 
 /**
- * Higieniza o telefone vindo do SERE para dígitos puros com DDD (ex: "(42)98839-3454" -> "42988393454").
- * Retorna "" caso ausente ou inválido, permitindo o cadastro do aluno sem travar o lote.
+ * Extrai grade tabular de linhas a partir de planilhas Excel (.xls, .xlsx) ou HTML do SERE.
+ */
+export function parseExcelBufferToRows(buffer: ArrayBuffer): string[][] {
+  try {
+    const wb = XLSX.read(buffer, { type: "array", cellDates: false });
+    const allRows: string[][] = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const sheet = wb.Sheets[sheetName];
+      if (!sheet) continue;
+      const rawRows = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        raw: false,
+        defval: "",
+      }) as any[][];
+
+      for (const r of rawRows) {
+        if (!Array.isArray(r)) continue;
+        allRows.push(
+          r.map((c) => (c === null || c === undefined ? "" : String(c).trim()))
+        );
+      }
+    }
+
+    return allRows;
+  } catch (err) {
+    console.warn("[sereParser] Falha ao processar arquivo com XLSX:", err);
+    return [];
+  }
+}
+
+/**
+ * Converte texto extraído de PDF em linhas tabulares equivalentes ao SERE.
+ */
+export function parsePdfTextToRows(pdfText: string): string[][] {
+  const lines = pdfText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows: string[][] = [];
+
+  for (const line of lines) {
+    // 1. Linha de cabeçalho de turma: "Curso: ... Seriação: ... Turno: ... Turma: ..."
+    if (/Curso\s*:/i.test(line) && /Seria[cç][aã]o\s*:/i.test(line)) {
+      const parts: string[] = ["", ""];
+      const cMatch = line.match(/Curso\s*:\s*(.*?)(?=\s+Seria|$)/i);
+      if (cMatch) parts.push(`Curso: ${cMatch[1].trim()}`);
+
+      const sMatch = line.match(/Seria[cç][aã]o\s*:\s*(.*?)(?=\s+Turno|$)/i);
+      if (sMatch) parts.push(`Seriação: ${sMatch[1].trim()}`);
+
+      const tMatch = line.match(/Turno\s*:\s*(.*?)(?=\s+Turma|$)/i);
+      if (tMatch) parts.push(`Turno: ${tMatch[1].trim()}`);
+
+      const trMatch = line.match(/Turma\s*:\s*(.*?)(?=$)/i);
+      if (trMatch) parts.push(`Turma: ${trMatch[1].trim()}`);
+
+      rows.push(parts);
+      continue;
+    }
+
+    // 2. Linha de cabeçalho da escola ou relatório
+    if (/SECRETARIA DE ESTADO|GOVERNO DO ESTADO|RELA[CÇ][AÃ]O DE ALUNOS/i.test(line)) {
+      rows.push([line]);
+      continue;
+    }
+
+    // 3. Linha de dados do estudante
+    const studentRegex =
+      /^\s*(?:\d{1,3}\s+)?(\d{7,11})\s+([A-ZÀ-Ú\s]+?)\s+(\d{2}\/\d{2}\/\d{4})(?:\s+(\d{1,2}))?(?:\s+([MF]))?\s+(.*)$/i;
+    const sm = line.match(studentRegex);
+    if (sm) {
+      const [, cgm, name, birthDate, age, sex, remainder] = sm;
+
+      // Telefone com DDD entre parênteses
+      let phone = "";
+      const phoneMatch = remainder.match(/\(\d{2}\)\s*\d{4,5}[-\s]?\d{4}/);
+      if (phoneMatch) {
+        phone = phoneMatch[0];
+      }
+
+      // Situação de matrícula
+      let situacao = "Matriculado";
+      const sitMatch = remainder.match(
+        /\b(Matriculad\w*|Concluint\w*|Reclassificad\w*|Remanejad\w*|Transferid\w*|Desistent\w*|Abandon\w*|Cancelad\w*|Sem(?:\s+Frequ[eê]ncia)?)\b/i
+      );
+      if (sitMatch) {
+        situacao = sitMatch[0].trim();
+      }
+
+      // Data de Matrícula (última data DD/MM/YYYY na linha)
+      let enrollmentDate = "";
+      const dateMatches = [...remainder.matchAll(/\b(\d{2}\/\d{2}\/\d{4})\b/g)];
+      if (dateMatches.length > 0) {
+        enrollmentDate = dateMatches[dateMatches.length - 1][1];
+      }
+
+      // Mapeia nas colunas padrão SERE:
+      // [ '', '', N, CGM, Nome, DataNasc, '', Idade, Sexo, Telefone, RG, '', CPF, '', '', Situação, '', DataMatricula ]
+      const rowArr: string[] = new Array(18).fill("");
+      rowArr[3] = cgm;
+      rowArr[4] = name.trim();
+      rowArr[5] = birthDate;
+      rowArr[7] = age || "";
+      rowArr[8] = sex || "";
+      rowArr[9] = phone;
+      rowArr[15] = situacao;
+      rowArr[17] = enrollmentDate;
+      rows.push(rowArr);
+      continue;
+    }
+
+    rows.push([line]);
+  }
+
+  return rows;
+}
+
+/**
+ * Converte um buffer de arquivo em linhas de texto ou matriz tabular,
+ * suportando PDF, Excel (.xls/.xlsx), HTML e CSV.
+ */
+export async function extractRowsFromFile(file: RawFileInput): Promise<string[][]> {
+  const fileNameLower = file.fileName.toLowerCase();
+  const bytes = new Uint8Array(file.buffer);
+
+  // 1. Detecção de PDF (pela extensão ou magic bytes %PDF-)
+  const isPdf =
+    fileNameLower.endsWith(".pdf") ||
+    (bytes.length >= 5 &&
+      bytes[0] === 0x25 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x44 &&
+      bytes[3] === 0x46 &&
+      bytes[4] === 0x2d);
+
+  if (isPdf) {
+    try {
+      const { extractText } = await import("unpdf");
+      const res = await extractText(bytes);
+      const fullText = Array.isArray(res.text) ? res.text.join("\n") : String(res.text || "");
+      return parsePdfTextToRows(fullText);
+    } catch (err) {
+      console.warn("[sereParser] Falha ao extrair texto do PDF:", err);
+    }
+  }
+
+  // 2. Detecção de Excel (.xls BIFF8, .xlsx PK-zip)
+  const isXls =
+    fileNameLower.endsWith(".xls") ||
+    fileNameLower.endsWith(".xlsx") ||
+    (bytes.length >= 8 &&
+      bytes[0] === 0xd0 &&
+      bytes[1] === 0xcf &&
+      bytes[2] === 0x11 &&
+      bytes[3] === 0xe0) ||
+    (bytes.length >= 4 &&
+      bytes[0] === 0x50 &&
+      bytes[1] === 0x4b &&
+      bytes[2] === 0x03 &&
+      bytes[3] === 0x04);
+
+  if (isXls) {
+    const excelRows = parseExcelBufferToRows(file.buffer);
+    if (excelRows.length > 0) return excelRows;
+  }
+
+  // 3. Fallback: Texto / CSV / HTML
+  const text = file.textContent || decodeCsvBuffer(file.buffer);
+
+  // Se o conteúdo começar com tags HTML (comum em arquivos .xls gerados como tabela HTML no SERE)
+  if (/<table|<html|<body/i.test(text)) {
+    const htmlRows = parseExcelBufferToRows(file.buffer);
+    if (htmlRows.length > 0) return htmlRows;
+  }
+
+  return parseCsvRows(text);
+}
+
+/**
+ * Higieniza o telefone para dígitos com DDD.
  */
 export function cleanSerePhone(raw?: string | null): string {
   if (!raw) return "";
   let digits = raw.replace(/\D/g, "");
   if (!digits || /^0+$/.test(digits)) return "";
 
-  // Remove prefixo 55 caso já tenha vindo com DDI
   if (digits.startsWith("55") && digits.length >= 12) {
     digits = digits.slice(2);
   }
-  // Remove zero inicial de operadora/DDD (ex: 042988393454 -> 42988393454)
   if (digits.startsWith("0") && (digits.length === 11 || digits.length === 12)) {
     digits = digits.slice(1);
   }
@@ -183,7 +363,7 @@ export function cleanSerePhone(raw?: string | null): string {
 }
 
 /**
- * Converte data DD/MM/YYYY em timestamp numérico para desempate cronológico de matrículas.
+ * Converte data DD/MM/YYYY em timestamp numérico.
  */
 export function parseBrDateToTimestamp(raw?: string | null): number {
   if (!raw) return 0;
@@ -210,7 +390,6 @@ export function classifySereSituacao(raw?: string | null): SereStatusCategory {
   if (norm.startsWith("CONCLUINTE") || norm.startsWith("APROVAD")) {
     return "CONCLUINTE";
   }
-  // No SERE, "Sem Frequência" / "Sem Movimentação" frequentemente é truncado para "Sem" na coluna CSV
   if (norm === "SEM" || norm.startsWith("SEM ") || norm.includes("INFREQUEN")) {
     return "SEM_FREQUENCIA";
   }
@@ -234,8 +413,7 @@ export function classifySereSituacao(raw?: string | null): SereStatusCategory {
 }
 
 /**
- * Converte o nome invertido padrão SERE (ex: "LEOPOLDINA B PEDROSO, C E PROFA-EF M PRO")
- * em um formato legível institucional (ex: "Colégio Estadual Profa. Leopoldina B. Pedroso").
+ * Converte nome invertido do SERE em nome legível institucional.
  */
 export function formatSereSchoolName(raw: string): string {
   const trimmed = raw.trim().replace(/\s+/g, " ");
@@ -286,8 +464,7 @@ export function formatSereSchoolName(raw: string): string {
 }
 
 /**
- * Detecta se o curso do SERE é um Programa Complementar / Contraturno / Monitoria / AEE,
- * que não deve sobrescrever a turma regular do aluno por padrão.
+ * Identifica se é um Programa Complementar / Contraturno.
  */
 export function isComplementarySereCourse(cursoRaw: string, seriacaoRaw: string): boolean {
   const c = cursoRaw
@@ -389,7 +566,7 @@ export function mapSereShift(turnoRaw: string): SchoolShift {
 
   if (norm.includes("NOIT") || norm.includes("NOTURN")) return "NOITE";
   if (norm.includes("TARD") || norm.includes("VESPERT")) return "TARDE";
-  return "MANHA"; // Manhã ou Integral operam saudação matutina como base
+  return "MANHA";
 }
 
 export function mapSereSegment(
@@ -447,7 +624,6 @@ function buildBaseTurmaName(params: {
 
   const techAbbr = detectTechnicalAbbreviation(cursoRaw);
 
-  // Curso Técnico Integrado ou Subsequente (ex: "1º ADM", "2º DS")
   if (techAbbr && gradeNum) {
     const suffixShift = shift === "NOITE" ? " Not" : "";
     return {
@@ -457,7 +633,6 @@ function buildBaseTurmaName(params: {
     };
   }
 
-  // Ensino Fundamental (ex: "6º 1", "7º A")
   if (segment === "FUNDAMENTAL" && gradeNum) {
     return {
       baseName: `${gradeNum}º ${turmaCode}`,
@@ -466,7 +641,6 @@ function buildBaseTurmaName(params: {
     };
   }
 
-  // Ensino Noturno Regular (ex: "1º Série", ou "1º Série A" / "1º Série 2" se múltiplas)
   if (shift === "NOITE" && gradeNum) {
     return {
       baseName: `${gradeNum}º Série`,
@@ -475,7 +649,6 @@ function buildBaseTurmaName(params: {
     };
   }
 
-  // Ensino Médio Diurno Regular (ex: "1º 2", "1º A")
   if (gradeNum) {
     return {
       baseName: `${gradeNum}º ${turmaCode}`,
@@ -492,9 +665,6 @@ function buildBaseTurmaName(params: {
   };
 }
 
-/**
- * Extrai metadados da escola no cabeçalho superior do relatório SERE.
- */
 function extractSchoolMetadata(rows: string[][]): SereSchoolMetadata | null {
   let city = "";
   let rawSchoolName = "";
@@ -670,11 +840,11 @@ const STATUS_PRIORITY: Record<SereStatusCategory, number> = {
 };
 
 /**
- * Processa 1 ou mais arquivos CSV (do SERE ou planilha tabular) e retorna turmas estruturadas,
- * deduplicadas e prontas para revisão visual antes da gravação em lote.
+ * Processa linhas tabulares (extraídas de XLS, XLSX, PDF, HTML ou CSV) e retorna
+ * turmas estruturadas e deduplicadas.
  */
-export function parseSereFiles(
-  files: Array<{ fileName: string; content: string }>
+export function parseSereRows(
+  fileSections: Array<{ fileName: string; rows: string[][] }>
 ): SereParseResult {
   const rawSections: Array<{
     sourceFile: string;
@@ -686,8 +856,7 @@ export function parseSereFiles(
   const warnings: string[] = [];
   let isTabularFallback = false;
 
-  for (const file of files) {
-    const rows = parseCsvRows(file.content);
+  for (const { fileName, rows } of fileSections) {
     if (rows.length === 0) continue;
 
     const meta = extractSchoolMetadata(rows);
@@ -695,7 +864,6 @@ export function parseSereFiles(
       detectedSchoolMeta = meta;
     }
 
-    // Verifica se o arquivo possui blocos "Curso: ... Seriação: ..." do SERE
     const hasSereSections = rows.some((r) => parseTurmaHeaderRow(r) !== null);
 
     if (hasSereSections) {
@@ -709,7 +877,6 @@ export function parseSereFiles(
       for (const row of rows) {
         const header = parseTurmaHeaderRow(row);
         if (header) {
-          // Verifica se já existe seção idêntica aberta (ex: quebra de página da mesma turma)
           const existingSame = rawSections.find(
             (s) =>
               s.header.curso === header.curso &&
@@ -721,7 +888,7 @@ export function parseSereFiles(
             currentSection = existingSame;
           } else {
             currentSection = {
-              sourceFile: file.fileName,
+              sourceFile: fileName,
               header,
               studentsMap: new Map(),
             };
@@ -738,14 +905,12 @@ export function parseSereFiles(
 
         if (!currentSection) continue;
 
-        // Ignora rodapés de página ("Página 1 de 14") ou linhas em branco
         const joined = row.join("").trim();
         if (!joined || /P[aá]gina\s+\d+\s+de/i.test(row.join(" "))) continue;
 
         const rawCgm = (row[colMap.cgmIdx] || "").replace(/\D/g, "");
         const rawName = (row[colMap.nameIdx] || "").replace(/\s+/g, " ").trim().toUpperCase();
 
-        // Linha válida de aluno no SERE possui CGM numérico (>= 5 dígitos) e Nome
         if (!rawName || rawName.length < 3 || rawCgm.length < 5) continue;
 
         const situacaoRaw = (row[colMap.situacaoIdx] || "").trim() || "Matriculado";
@@ -775,22 +940,19 @@ export function parseSereFiles(
         }
       }
     } else {
-      // Fallback: Planilha CSV Tabular (ex: colunas Nome, Turma, Telefone, CGM, Turno, Responsável)
-      const parsedTabular = parseTabularCsvFallback(rows, file.fileName);
+      const parsedTabular = parseTabularCsvFallback(rows, fileName);
       if (parsedTabular.length > 0) {
         isTabularFallback = true;
         rawSections.push(...parsedTabular);
       } else {
         warnings.push(
-          `Não foi possível identificar cabeçalhos do SERE ou colunas de alunos no arquivo "${file.fileName}".`
+          `Não foi possível identificar cabeçalhos do SERE ou colunas de alunos no arquivo "${fileName}".`
         );
       }
     }
   }
 
-  // Etapa 2: Deduplicação automática de Dupla Matrícula Técnica do SERE
-  // Ex: "NEM EPT IF TEC ADMINISTR-ET GN" (Página 9) + "NOVO ENSINO MEDIO-PROFISSIONAL" (Página 10)
-  // com os mesmos alunos na mesma série e turno.
+  // Deduplicação de Dupla Matrícula Técnica (ex: NEM EPT + Ensino Médio Profissional)
   const mergedIndices = new Set<number>();
   const mergedCounts = new Map<number, number>();
 
@@ -824,7 +986,6 @@ export function parseSereFiles(
 
       const minSize = Math.min(activeA.length, activeB.length);
       if (overlap / minSize >= 0.8) {
-        // Escolhe como principal a seção que possui sigla técnica específica (ex: ADM, DS)
         const abbrA = detectTechnicalAbbreviation(secA.header.curso);
         const abbrB = detectTechnicalAbbreviation(secB.header.curso);
 
@@ -844,13 +1005,12 @@ export function parseSereFiles(
         mergedCounts.set(primaryIdx, (mergedCounts.get(primaryIdx) || 0) + activeB.length);
 
         if (primaryIdx === j) {
-          break; // i foi absorvido em j; segue para o próximo i
+          break;
         }
       }
     }
   }
 
-  // Etapa 3: Construção das turmas e desambiguação de nomes sugeridos
   const survivingSections = rawSections
     .map((sec, idx) => ({ sec, idx }))
     .filter(({ idx }) => !mergedIndices.has(idx));
@@ -893,7 +1053,6 @@ export function parseSereFiles(
     };
   });
 
-  // Conta quantas turmas regulares compartilham o mesmo baseName (ex: duas turmas "1º ADM" ou duas "1º Série")
   const baseNameCounts = new Map<string, number>();
   for (const dt of draftTurmas) {
     if (!dt.isComplementary) {
@@ -931,7 +1090,6 @@ export function parseSereFiles(
     };
   });
 
-  // Etapa 4: Coleta consolidada de alunos Transferidos/Desistentes (que não estejam ativos em outra turma)
   const activeKeysGlobal = new Set<string>();
   for (const t of turmas) {
     if (!t.selectedByDefault) continue;
@@ -972,9 +1130,33 @@ export function parseSereFiles(
 }
 
 /**
- * Fallback para planilhas tabulares simples (ex: exportadas do Excel por outras secretarias)
- * com cabeçalho contendo Nome, Turma e opcionalmente CGM, Telefone, Turno e Responsável.
+ * Função unificada assíncrona: recebe arquivos brutos (.xls, .xlsx, .pdf, .csv)
+ * e devolve o resultado estruturado.
  */
+export async function parseSereRawFiles(files: RawFileInput[]): Promise<SereParseResult> {
+  const sections: Array<{ fileName: string; rows: string[][] }> = [];
+
+  for (const file of files) {
+    const rows = await extractRowsFromFile(file);
+    sections.push({ fileName: file.fileName, rows });
+  }
+
+  return parseSereRows(sections);
+}
+
+/**
+ * Função síncrona mantida para compatibilidade com CSV já decodificado.
+ */
+export function parseSereFiles(
+  files: Array<{ fileName: string; content: string }>
+): SereParseResult {
+  const sections = files.map((f) => ({
+    fileName: f.fileName,
+    rows: parseCsvRows(f.content),
+  }));
+  return parseSereRows(sections);
+}
+
 function parseTabularCsvFallback(
   rows: string[][],
   sourceFile: string
@@ -1120,9 +1302,7 @@ export interface ConsolidatedImportPreview {
 }
 
 /**
- * Consolida e deduplica globalmente os alunos das turmas selecionadas pelo usuário,
- * resolvendo casos em que um estudante aparece em mais de um turno/arquivo (mantendo
- * turmas regulares acima de complementares e a matrícula mais recente).
+ * Consolida e deduplica globalmente os alunos das turmas selecionadas pelo usuário.
  */
 export function consolidateSelectedStudents(
   parsed: SereParseResult,
@@ -1208,7 +1388,6 @@ export function consolidateSelectedStudents(
           enrollmentTimestamp: s.enrollmentTimestamp,
         });
       } else {
-        // Prioriza turma regular sobre complementar; em empate, matrícula mais recente
         const preferNew =
           (existing.isComplementary && !t.isComplementary) ||
           (existing.isComplementary === t.isComplementary &&
@@ -1259,4 +1438,3 @@ export function consolidateSelectedStudents(
     },
   };
 }
-

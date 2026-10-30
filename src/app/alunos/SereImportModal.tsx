@@ -17,8 +17,7 @@ import {
 import ModalDialog from "@/components/ModalDialog";
 import {
   consolidateSelectedStudents,
-  decodeCsvBuffer,
-  parseSereFiles,
+  parseSereRawFiles,
   type SchoolSegment,
   type SchoolShift,
   type SereParseResult,
@@ -115,16 +114,21 @@ export default function SereImportModal({
   };
 
   const processFiles = async (fileList: FileList | File[]) => {
-    const files = Array.from(fileList).filter(
-      (f) =>
-        f.name.toLowerCase().endsWith(".csv") ||
-        f.name.toLowerCase().endsWith(".txt") ||
+    const validExtensions = [".xls", ".xlsx", ".pdf", ".csv", ".txt"];
+    const files = Array.from(fileList).filter((f) => {
+      const lower = f.name.toLowerCase();
+      return (
+        validExtensions.some((ext) => lower.endsWith(ext)) ||
+        f.type.includes("sheet") ||
+        f.type.includes("excel") ||
+        f.type.includes("pdf") ||
         f.type.includes("csv") ||
         f.type.includes("text")
-    );
+      );
+    });
 
     if (files.length === 0) {
-      setErrorMsg("Selecione um ou mais arquivos .CSV exportados do SERE.");
+      setErrorMsg("Selecione um ou mais arquivos em formato Excel (.xls, .xlsx), PDF ou CSV exportados do SERE.");
       return;
     }
 
@@ -133,21 +137,21 @@ export default function SereImportModal({
     setImportSummary(null);
 
     try {
-      const decodedFiles = await Promise.all(
+      const rawInputs = await Promise.all(
         files.map(async (f) => {
           const buffer = await f.arrayBuffer();
           return {
             fileName: f.name,
-            content: decodeCsvBuffer(buffer),
+            buffer,
           };
         })
       );
 
-      const parsed = parseSereFiles(decodedFiles);
+      const parsed = await parseSereRawFiles(rawInputs);
       if (parsed.turmas.length === 0) {
         setErrorMsg(
           parsed.warnings[0] ||
-            "Nenhuma turma ou aluno encontrado nos arquivos enviados. Verifique se o relatório do SERE foi exportado no formato CSV."
+            "Nenhuma turma ou aluno encontrado nos arquivos enviados. Verifique se o relatório do SERE corresponde à 'Relação de Alunos por Turma' em XLS, PDF ou CSV."
         );
         setParseResult(null);
         setLoadedFileNames([]);
@@ -289,7 +293,7 @@ export default function SereImportModal({
       onClose={handleClose}
       size="xl"
       title="Importação em Lote de Alunos (SERE / SEED-PR)"
-      subtitle="Cadastre ou atualize turmas e estudantes de qualquer escola estadual diretamente pelos relatórios CSV por turno do SERE."
+      subtitle="Cadastre ou atualize turmas e estudantes de qualquer escola estadual diretamente pelos relatórios em Excel (.xls/.xlsx), PDF ou CSV por turno do SERE."
     >
       <div className="space-y-4 text-xs">
         {errorMsg && (
@@ -425,10 +429,10 @@ export default function SereImportModal({
                 </li>
                 <li>
                   Gere o relatório por turno (<strong>Manhã</strong>, <strong>Tarde</strong> e{" "}
-                  <strong>Noite</strong>) escolhendo o formato de saída <strong>CSV</strong>.
+                  <strong>Noite</strong>) escolhendo o formato de saída <strong>XLS (Excel)</strong> ou <strong>PDF</strong>.
                 </li>
                 <li>
-                  Selecione <strong>todos os arquivos de turno de uma só vez</strong> abaixo. O sistema cria as turmas, limpa telefones, filtra transferidos/remanejados e mescla matrículas duplas do Ensino Técnico automaticamente!
+                  Selecione <strong>todos os arquivos de turno (.xls, .pdf ou .csv) de uma só vez</strong> abaixo. O sistema cria as turmas, extrai CGMs e telefones, filtra transferidos/remanejados e mescla matrículas duplas do Ensino Técnico automaticamente!
                 </li>
               </ol>
             </details>
@@ -466,10 +470,10 @@ export default function SereImportModal({
                       htmlFor="sere-csv-upload"
                       className="font-bold text-slate-900 text-sm block cursor-pointer"
                     >
-                      Selecione ou arraste os arquivos CSV do SERE (Manhã, Tarde, Noite)
+                      Selecione ou arraste os arquivos do SERE (XLS, PDF ou CSV)
                     </label>
                     <p className="text-slate-500 mt-0.5">
-                      Aceita 1 ou múltiplos arquivos <code>.csv</code> simultaneamente (também aceita planilha CSV simples com Nome, Turma e Telefone).
+                      Suporte nativo a <strong>.xls (Excel)</strong>, <strong>.pdf</strong> e <strong>.csv</strong>. Pode enviar múltiplos turnos simultaneamente (Manhã, Tarde, Noite).
                     </p>
                   </div>
                 </div>
@@ -480,7 +484,7 @@ export default function SereImportModal({
                   id="sere-csv-upload"
                   type="file"
                   multiple
-                  accept=".csv,.txt,text/csv"
+                  accept=".xls,.xlsx,.pdf,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv"
                   onChange={(e) => {
                     if (e.target.files?.length) {
                       processFiles(e.target.files);

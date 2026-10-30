@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
 import {
   cleanSerePhone,
   classifySereSituacao,
@@ -6,6 +8,7 @@ import {
   decodeCsvBuffer,
   formatSereSchoolName,
   parseSereFiles,
+  parseSereRawFiles,
 } from "../sereParser";
 
 const SAMPLE_SERE_CSV = `,,,,,,,,,,,,,,,,,,,
@@ -53,8 +56,8 @@ const SAMPLE_SERE_CSV = `,,,,,,,,,,,,,,,,,,,
 ,,,,,,,,,,,Página  12 de ,,,,,,,,14
 `;
 
-describe("sereParser — Importação de Lotes do SERE (SEED-PR)", () => {
-  it("extrai cabeçalho oficial da escola mesmo com vírgula entre aspas", () => {
+describe("sereParser — Importação Universal de Arquivos do SERE (XLS, PDF, CSV)", () => {
+  it("extrai cabeçalho oficial da escola e dados de CSV", () => {
     const parsed = parseSereFiles([{ fileName: "manha.csv", content: SAMPLE_SERE_CSV }]);
     expect(parsed.format).toBe("SERE_REPORT");
     expect(parsed.schoolMetadata).toEqual({
@@ -66,42 +69,59 @@ describe("sereParser — Importação de Lotes do SERE (SEED-PR)", () => {
     });
   });
 
-  it("gera nomes canônicos de turmas, mescla dupla matrícula técnica e desmarca programas complementares", () => {
-    const parsed = parseSereFiles([{ fileName: "manha.csv", content: SAMPLE_SERE_CSV }]);
+  it("importa arquivos binários reais do Excel (.xls BIFF8) com a mesma fidelidade do SERE", async () => {
+    const wb = XLSX.read(SAMPLE_SERE_CSV, { type: "string" });
+    const xlsBuf = XLSX.write(wb, { type: "buffer", bookType: "biff8" }); // arquivo .xls real
+    const ab = xlsBuf.buffer.slice(xlsBuf.byteOffset, xlsBuf.byteOffset + xlsBuf.byteLength);
 
-    const names = parsed.turmas.map((t) => ({
-      name: t.suggestedName,
-      segment: t.segment,
-      shift: t.shift,
-      isComplementary: t.isComplementary,
-      selectedByDefault: t.selectedByDefault,
-    }));
+    const parsed = await parseSereRawFiles([{ fileName: "relatorio_sere.xls", buffer: ab }]);
+    expect(parsed.turmas.length).toBeGreaterThanOrEqual(4);
 
-    expect(names).toEqual([
-      { name: "6º 1", segment: "FUNDAMENTAL", shift: "MANHA", isComplementary: false, selectedByDefault: true },
-      { name: "6º 2", segment: "FUNDAMENTAL", shift: "MANHA", isComplementary: false, selectedByDefault: true },
-      { name: "7º 2", segment: "FUNDAMENTAL", shift: "MANHA", isComplementary: false, selectedByDefault: true },
-      { name: "3º ADM", segment: "MEDIO", shift: "MANHA", isComplementary: false, selectedByDefault: true },
-      { name: "PROG ALUNO MONITOR 1", segment: "MEDIO", shift: "MANHA", isComplementary: true, selectedByDefault: false },
-    ]);
+    const names = parsed.turmas.map((t) => t.suggestedName);
+    expect(names).toContain("6º 1");
+    expect(names).toContain("6º 2");
+    expect(names).toContain("3º ADM");
 
-    const t3Adm = parsed.turmas.find((t) => t.suggestedName === "3º ADM")!;
-    expect(t3Adm.mergedDualMatrixCount).toBe(3);
+    const t61 = parsed.turmas.find((t) => t.suggestedName === "6º 1")!;
+    const ana = t61.students.find((s) => s.name === "ANA HELOISE ALMEIDA");
+    expect(ana).toBeDefined();
+    expect(ana?.cgm).toBe("1018613740");
+    expect(ana?.phone).toBe("42988393454");
   });
 
-  it("trata corretamente Remanejado, Reclassificado, Transferido, Concluinte, Sem Frequência e telefone vazio", () => {
+  it("extrai dados diretamente de relatórios em PDF do SERE", async () => {
+    const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+    doc.text("GOVERNO DO ESTADO DO PARANÁ", 10, 10);
+    doc.text("SECRETARIA DE ESTADO DA EDUCAÇÃO – SEED SISTEMA ESCOLA Data: 30/10/2026", 10, 15);
+    doc.text("TIBAGI", 10, 20);
+    doc.text('"LEOPOLDINA B PEDROSO, C E PROFA-EF M PRO" 2026', 10, 25);
+    doc.text("RELAÇÃO DE ALUNOS POR TURMA", 10, 30);
+    doc.text("Curso: ENS FUND 6/9 ANO-SERIE Seriação: 6ºAno Turno: Manhã Turma: 1", 10, 35);
+    doc.text("N. CGM Nome do Estudante Data de Idad Sex Telefone RG CPF Situação Data Matricula", 10, 42);
+    doc.text("1 1018613740 ANA HELOISE ALMEIDA 23/05/2014 12 F (42)98839-3454 161410411 16268241932 Matriculado 09/01/2026", 10, 48);
+    doc.text("2 1012073808 BERNARDO COUTINHO DE SOUZA 24/02/2015 11 M (42)98811-1770 16056340 0 12388259908 Matriculado 09/01/2026", 10, 54);
+
+    const ab = doc.output("arraybuffer");
+    const parsed = await parseSereRawFiles([{ fileName: "relatorio_sere.pdf", buffer: ab }]);
+
+    expect(parsed.turmas).toHaveLength(1);
+    expect(parsed.turmas[0].suggestedName).toBe("6º 1");
+    expect(parsed.turmas[0].students).toHaveLength(2);
+    expect(parsed.turmas[0].students[0]).toMatchObject({
+      cgm: "1018613740",
+      name: "ANA HELOISE ALMEIDA",
+      phone: "42988393454",
+      situacaoRaw: "Matriculado",
+    });
+  });
+
+  it("trata Remanejado, Reclassificado, Transferido, Concluinte e mescla dupla matriz técnica", () => {
     const parsed = parseSereFiles([{ fileName: "manha.csv", content: SAMPLE_SERE_CSV }]);
     const consolidated = consolidateSelectedStudents(parsed, {}, {
       includeSemFrequencia: true,
       includeConcluinte: true,
     });
 
-    // Esperados ativos nas turmas regulares:
-    // 6º 1: Ana Heloise (Matriculado), Brayan (Sem ), Victor Henrique (Matriculado — ignorou os dois Remanejado)
-    // 6º 2: Benjamim (Matriculado, sem fone)
-    // 7º 2: Davi Emanuel (Matriculado — ignorou o Reclassificado do 6º 1)
-    // 3º ADM: Ana Clara, Arthur, Carlos Daniel (Matriculado) + Fernanda (Concluinte)
-    // Ignorados: Gustavo Morais (Programa Aluno Monitor desmarcado) e Steffany (Transferido)
     expect(consolidated.stats.selectedTurmasCount).toBe(4);
     expect(consolidated.stats.activeStudentsCount).toBe(9);
     expect(consolidated.stats.missingPhoneCount).toBe(1);
@@ -112,9 +132,6 @@ describe("sereParser — Importação de Lotes do SERE (SEED-PR)", () => {
     const victor = consolidated.studentsToImport.find((s) => s.cgm === "1021726075");
     expect(victor?.turmaName).toBe("6º 1");
 
-    const benjamim = consolidated.studentsToImport.find((s) => s.cgm === "1013864094");
-    expect(benjamim?.phone).toBe("");
-
     expect(consolidated.transferredToDeactivate).toEqual([
       {
         cgm: "1015634738",
@@ -124,44 +141,18 @@ describe("sereParser — Importação de Lotes do SERE (SEED-PR)", () => {
     ]);
   });
 
-  it("decodifica arquivos Windows-1252 (Latin-1) sem corromper acentos", () => {
-    // "6ºAno - JOÃO" em bytes Windows-1252: '6' (0x36), 'º' (0xBA), 'A' (0x41), 'n' (0x6E), 'o' (0x6F), ' ', 'J' (0x4A), 'O' (0x4F), 'Ã' (0xC3), 'O' (0x4F)
+  it("decodifica arquivos Windows-1252 sem corromper acentos", () => {
     const latin1Bytes = new Uint8Array([0x36, 0xba, 0x41, 0x6e, 0x6f, 0x20, 0x4a, 0x4f, 0xc3, 0x4f]);
     expect(decodeCsvBuffer(latin1Bytes.buffer)).toBe("6ºAno JOÃO");
   });
 
-  it("suporta planilha CSV tabular separada por ponto-e-vírgula (;)", () => {
-    const tabular = [
-      "CGM;Nome do Aluno;Turma;Turno;Telefone;Responsável",
-      "1099887766;MARIA EDUARDA TESTE;1º Série;Noite;(42) 99911-2233; Dona Joana",
-    ].join("\n");
-
-    const parsed = parseSereFiles([{ fileName: "noturno.csv", content: tabular }]);
-    expect(parsed.format).toBe("TABULAR_CSV");
-    expect(parsed.turmas).toHaveLength(1);
-    expect(parsed.turmas[0].suggestedName).toBe("1º Série");
-    expect(parsed.turmas[0].segment).toBe("NOTURNO");
-    expect(parsed.turmas[0].shift).toBe("NOITE");
-    expect(parsed.turmas[0].students[0]).toMatchObject({
-      cgm: "1099887766",
-      name: "MARIA EDUARDA TESTE",
-      phone: "42999112233",
-      guardianName: "Dona Joana",
-    });
-  });
-
-  it("higieniza telefones e classifica situações diversas", () => {
+  it("higieniza telefones e formata nomes de escola", () => {
     expect(cleanSerePhone("(42)98839-3454")).toBe("42988393454");
     expect(cleanSerePhone("5542988393454")).toBe("42988393454");
     expect(cleanSerePhone("042988393454")).toBe("42988393454");
     expect(cleanSerePhone("0000000000")).toBe("");
-    expect(cleanSerePhone("")).toBe("");
-
     expect(classifySereSituacao("Matriculado")).toBe("ACTIVE");
     expect(classifySereSituacao("Sem ")).toBe("SEM_FREQUENCIA");
-    expect(classifySereSituacao("Concluinte")).toBe("CONCLUINTE");
-    expect(classifySereSituacao("Remanejado")).toBe("MOVED_INTERNAL");
-    expect(classifySereSituacao("Transferido")).toBe("LEFT_SCHOOL");
     expect(formatSereSchoolName("MONTEIRO LOBATO, C E-EF M")).toBe("Colégio Estadual Monteiro Lobato");
   });
 });

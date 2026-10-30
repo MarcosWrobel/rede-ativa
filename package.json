@@ -17,12 +17,15 @@
     "@google/genai": "^2.31.0",
     "@prisma/client": "^6.4.0",
     "clsx": "^2.1.1",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.63.0",
     "next": "^16.4.3",
     "next-auth": "^5.0.0-beta.32",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwind-merge": "^3.7.0",
+    "unpdf": "^1.9.1",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
