@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 
 const submitSignSchema = z.object({
   signatureData: z.string().min(20, "Traço de assinatura inválido"),
+  biometricVerified: z.boolean().default(false),
+  biometricDeviceType: z.string().optional().nullable(),
 });
 
 export async function GET(
@@ -90,6 +92,9 @@ export async function POST(
         signatureData: parsed.data.signatureData,
         signedAt: now,
         signerIp: ip,
+        biometricVerified: parsed.data.biometricVerified,
+        biometricDeviceType: parsed.data.biometricDeviceType || null,
+        biometricAuthTime: parsed.data.biometricVerified ? now : null,
         mobileSignToken: null, // Queima o token de uso único
         mobileSignExpiresAt: null,
       },

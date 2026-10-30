@@ -798,7 +798,11 @@ export default function AtaEditorModal({
                     {p.signatureData ? (
                       <span className="inline-flex items-center space-x-1 text-emerald-600 font-bold text-[11px] bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Assinado Digitalmente</span>
+                        <span>
+                          {p.biometricVerified
+                            ? "Assinado com Biometria"
+                            : "Assinado Digitalmente"}
+                        </span>
                       </span>
                     ) : p.signatureMode === "REFUSED" ? (
                       <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-[11px] bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">

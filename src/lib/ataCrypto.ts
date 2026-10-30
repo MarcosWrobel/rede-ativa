@@ -14,6 +14,7 @@ export interface MinuteParticipantPayload {
   documentNumber?: string | null;
   signatureMode: string;
   signatureData?: string | null;
+  biometricVerified?: boolean;
   refusalReason?: string | null;
 }
 
@@ -67,6 +68,7 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
         doc: (p.documentNumber || "").replace(/\D/g, ""),
         mode: p.signatureMode,
         hasSig: Boolean(p.signatureData),
+        bio: Boolean(p.biometricVerified),
         refusal: p.refusalReason?.trim() || "",
       })),
     actionItems: [...(payload.actionItems || [])]

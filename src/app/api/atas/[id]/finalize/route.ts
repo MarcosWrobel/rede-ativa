@@ -92,6 +92,7 @@ export async function POST(
           documentNumber: p.documentNumber,
           signatureMode: p.signatureMode,
           signatureData: p.signatureData,
+          biometricVerified: p.biometricVerified,
           refusalReason: p.refusalReason,
         })),
         actionItems: minute.actionItems.map((a) => ({

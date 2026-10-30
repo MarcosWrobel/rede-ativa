@@ -197,6 +197,7 @@ export default function PrintPageClient({ minute }: Props) {
                 <p className="text-xs font-bold text-slate-900">{p.name}</p>
                 <p className="text-[10px] text-slate-500 uppercase">
                   {p.role} {p.documentNumber ? `• Doc: ${p.documentNumber}` : ""}
+                  {p.biometricVerified ? " • Autenticação Biométrica FIDO2" : ""}
                 </p>
               </div>
             ))}

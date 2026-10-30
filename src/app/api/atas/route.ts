@@ -29,6 +29,8 @@ const createMinuteDraftSchema = z.object({
         phone: z.string().optional().nullable(),
         signatureMode: z.string().default("PENDING"),
         signatureData: z.string().optional().nullable(),
+        biometricVerified: z.boolean().default(false),
+        biometricDeviceType: z.string().optional().nullable(),
         refusalReason: z.string().optional().nullable(),
         witnessName: z.string().optional().nullable(),
       })
@@ -203,6 +205,9 @@ export async function POST(req: Request) {
             signatureMode: p.signatureMode || "PENDING",
             signatureData: p.signatureData || null,
             signedAt: p.signatureData ? new Date() : null,
+            biometricVerified: p.biometricVerified || false,
+            biometricDeviceType: p.biometricDeviceType || null,
+            biometricAuthTime: p.biometricVerified ? new Date() : null,
             refusalReason: p.refusalReason || null,
             witnessName: p.witnessName || null,
           })),

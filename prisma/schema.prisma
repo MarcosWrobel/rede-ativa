@@ -340,6 +340,9 @@ model PedagogicalMinuteParticipant {
   
   mobileSignToken         String?           @unique // Token temporário para assinar pelo celular via QR Code
   mobileSignExpiresAt     DateTime?
+  biometricVerified       Boolean           @default(false) // Validação biométrica local do aparelho (WebAuthn/FIDO2)
+  biometricDeviceType     String?           // Ex: "FIDO2_PASSKEY_PLATFORM" (TouchID/FaceID/Biometria Android)
+  biometricAuthTime       DateTime?         // Registro do instante da autenticação biométrica local
 
   createdAt               DateTime          @default(now())
 

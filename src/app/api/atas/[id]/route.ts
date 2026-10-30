@@ -30,6 +30,8 @@ const updateMinuteDraftSchema = z.object({
         signatureMode: z.string().default("PENDING"),
         signatureData: z.string().optional().nullable(),
         signedAt: z.string().optional().nullable(),
+        biometricVerified: z.boolean().optional(),
+        biometricDeviceType: z.string().optional().nullable(),
         refusalReason: z.string().optional().nullable(),
         witnessName: z.string().optional().nullable(),
       })
@@ -176,6 +178,10 @@ export async function PATCH(
           const sigMode = sigData ? (p.signatureMode !== "PENDING" ? p.signatureMode : match?.signatureMode || "SCREEN_CANVAS") : p.signatureMode || "PENDING";
           const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
 
+          const bioVerified = p.biometricVerified ?? match?.biometricVerified ?? false;
+          const bioDevice = p.biometricDeviceType || match?.biometricDeviceType || null;
+          const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
+
           return {
             minuteId: id,
             role: p.role,
@@ -189,6 +195,9 @@ export async function PATCH(
             signatureMode: sigMode,
             signatureData: sigData,
             signedAt,
+            biometricVerified: bioVerified,
+            biometricDeviceType: bioDevice,
+            biometricAuthTime: bioTime,
             refusalReason: p.refusalReason || null,
             witnessName: p.witnessName || null,
           };
