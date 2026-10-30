@@ -47,20 +47,35 @@ export default function PrintPageClient({ minute }: Props) {
 
       {/* Folha Oficial A4 */}
       <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200 shadow-sm text-slate-900 font-serif space-y-6 print:border-none print:shadow-none print:p-0 print:m-0">
-        {/* Cabeçalho Oficial SEED-PR */}
-        <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1">
-          <p className="font-sans text-[11px] font-bold tracking-wider uppercase text-slate-600">
-            Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
-          </p>
-          <p className="font-sans text-[11px] font-bold text-slate-600">
-            Núcleo Regional de Educação de {minute.school.nre}
-          </p>
-          <h1 className="font-sans text-base font-black uppercase tracking-tight text-slate-900">
-            {minute.school.name}
-          </h1>
-          <p className="font-sans text-[10px] text-slate-500">
-            INEP: {minute.school.inepCode || "41042730"} • {minute.school.city} - {minute.school.state}
-          </p>
+        {/* Cabeçalho Oficial SEED-PR com Brasão / Logo Oficial */}
+        <div className="border-b-2 border-slate-900 pb-4 space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 flex items-center justify-center">
+              <img
+                src="/logo.svg"
+                alt="Brasão do Colégio Estadual Leopoldina B. Pedroso"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div className="flex-1 text-center space-y-0.5">
+              <p className="font-sans text-[11px] font-bold tracking-wider uppercase text-slate-600">
+                Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
+              </p>
+              <p className="font-sans text-[11px] font-bold text-slate-600">
+                Núcleo Regional de Educação de {minute.school.nre}
+              </p>
+              <h1 className="font-sans text-base sm:text-lg font-black uppercase tracking-tight text-slate-900">
+                {minute.school.name}
+              </h1>
+              <p className="font-sans text-[10px] text-slate-500">
+                INEP: {minute.school.inepCode || "41042730"} • {minute.school.city} - {minute.school.state}
+              </p>
+            </div>
+            {/* Espaçador simétrico para centralizar o texto em relação ao logo */}
+            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 hidden sm:flex items-center justify-center opacity-0 pointer-events-none">
+              <img src="/logo.svg" alt="" className="w-full h-full object-contain" />
+            </div>
+          </div>
         </div>
 
         {/* Título da Ata */}
@@ -71,6 +86,23 @@ export default function PrintPageClient({ minute }: Props) {
           <p className="font-sans text-xs font-bold text-slate-600">
             Pauta: {minute.subject}
           </p>
+          {minute.finalizedAt && (
+            <p className="font-sans text-[11px] font-extrabold text-emerald-800 bg-emerald-50 py-1 px-3 rounded-full border border-emerald-200 inline-block">
+              Lavrada eletronicamente em:{" "}
+              {new Date(minute.finalizedAt).toLocaleDateString("pt-BR", {
+                weekday: "long",
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+              })}{" "}
+              às{" "}
+              {new Date(minute.finalizedAt).toLocaleTimeString("pt-BR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </p>
+          )}
           {isVoid && (
             <p className="font-sans text-xs font-black text-rose-600 uppercase border border-rose-300 bg-rose-50 p-2 rounded-lg">
               AVISO: ATA TORNADA SEM EFEITO ADMINISTRATIVO EM {new Date(minute.voidedAt).toLocaleDateString("pt-BR")}.
@@ -100,7 +132,11 @@ export default function PrintPageClient({ minute }: Props) {
           <p>
             Aos {attendedDate.getDate()} dias do mês de{" "}
             {attendedDate.toLocaleDateString("pt-BR", { month: "long" })} de{" "}
-            {attendedDate.getFullYear()}, nas dependências da Equipe Pedagógica deste
+            {attendedDate.getFullYear()}
+            {minute.attendedAt
+              ? ` (início do atendimento às ${attendedDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })})`
+              : ""}
+            , nas dependências da Equipe Pedagógica deste
             estabelecimento de ensino, lavrou-se a presente ata referente ao atendimento
             supracitado.
           </p>
@@ -240,9 +276,20 @@ export default function PrintPageClient({ minute }: Props) {
               <p className="font-mono text-[9px] text-slate-600 break-all">
                 Hash SHA-256: {minute.contentHash}
               </p>
-              <p className="text-[10px] text-slate-600">
-                Código de Verificação: <strong className="font-mono text-slate-900">{minute.verificationCode}</strong>
-              </p>
+              <div className="flex flex-wrap gap-x-4 text-[10px] text-slate-600">
+                <p>
+                  Código de Verificação: <strong className="font-mono text-slate-900">{minute.verificationCode}</strong>
+                </p>
+                {minute.finalizedAt && (
+                  <p>
+                    Lavratura Oficial:{" "}
+                    <strong className="text-slate-900">
+                      {new Date(minute.finalizedAt).toLocaleDateString("pt-BR")} às{" "}
+                      {new Date(minute.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    </strong>
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="text-center flex-shrink-0">

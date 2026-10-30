@@ -722,8 +722,17 @@ export default function AtaEditorModal({
         maxWidthClass="max-w-3xl"
       >
         <div className="text-center py-6 space-y-5">
-          <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-            <FileCheck2 className="w-9 h-9" />
+          <div className="flex items-center justify-center space-x-3 mx-auto">
+            <div className="w-14 h-14 shrink-0 flex items-center justify-center">
+              <img
+                src="/logo.svg"
+                alt="Brasão do Colégio"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center shadow-inner">
+              <FileCheck2 className="w-7 h-7" />
+            </div>
           </div>
 
           <div>
@@ -733,6 +742,11 @@ export default function AtaEditorModal({
             <h3 className="text-3xl font-black text-slate-900 mt-2">
               Ata Pedagógica nº {cleanNum}/{cleanYear}
             </h3>
+            {finalizedAta.finalizedAt && (
+              <p className="text-xs font-extrabold text-emerald-800 mt-1">
+                Lavrada em {new Date(finalizedAta.finalizedAt).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })} às {new Date(finalizedAta.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </p>
+            )}
             <p className="text-xs text-slate-500 font-mono mt-1">
               Código Público de Validação: <strong>{finalizedAta.verificationCode}</strong>
             </p>
@@ -874,10 +888,12 @@ export default function AtaEditorModal({
                     Lavrada por: <strong>{viewMinuteData.authorName}</strong> ({viewMinuteData.authorEmail})
                   </span>
                   <span>
-                    Em:{" "}
-                    {viewMinuteData.finalizedAt
-                      ? new Date(viewMinuteData.finalizedAt).toLocaleString("pt-BR")
-                      : new Date(viewMinuteData.attendedAt).toLocaleString("pt-BR")}
+                    Lavratura:{" "}
+                    <strong>
+                      {viewMinuteData.finalizedAt
+                        ? `${new Date(viewMinuteData.finalizedAt).toLocaleDateString("pt-BR")} às ${new Date(viewMinuteData.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+                        : `${new Date(viewMinuteData.attendedAt).toLocaleDateString("pt-BR")} às ${new Date(viewMinuteData.attendedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`}
+                    </strong>
                   </span>
                 </div>
               </div>

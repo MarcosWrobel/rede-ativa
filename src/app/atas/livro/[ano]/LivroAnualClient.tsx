@@ -38,19 +38,31 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
       <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200 shadow-sm text-slate-900 font-serif space-y-12 print:border-none print:shadow-none print:p-0 print:m-0">
         {/* TERMO DE ABERTURA */}
         <div className="min-h-[500px] flex flex-col justify-between border-b-2 border-slate-900 pb-10 page-break-after">
-          <div className="text-center space-y-2">
-            <p className="font-sans text-xs font-bold tracking-wider uppercase text-slate-600">
-              Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
-            </p>
-            <p className="font-sans text-xs font-bold text-slate-600">
-              Núcleo Regional de Educação de {school.nre}
-            </p>
-            <h1 className="font-sans text-xl font-black uppercase text-slate-900 mt-2">
-              {school.name}
-            </h1>
-            <p className="font-sans text-xs text-slate-500">
-              INEP: {school.inepCode} • {school.city} - {school.state}
-            </p>
+          <div className="flex items-center justify-between gap-4 border-b border-slate-300 pb-4">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 flex items-center justify-center">
+              <img
+                src="/logo.svg"
+                alt="Brasão do Colégio Estadual Leopoldina B. Pedroso"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div className="flex-1 text-center space-y-1">
+              <p className="font-sans text-xs font-bold tracking-wider uppercase text-slate-600">
+                Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
+              </p>
+              <p className="font-sans text-xs font-bold text-slate-600">
+                Núcleo Regional de Educação de {school.nre}
+              </p>
+              <h1 className="font-sans text-xl font-black uppercase text-slate-900">
+                {school.name}
+              </h1>
+              <p className="font-sans text-xs text-slate-500">
+                INEP: {school.inepCode} • {school.city} - {school.state}
+              </p>
+            </div>
+            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 hidden sm:flex items-center justify-center opacity-0 pointer-events-none">
+              <img src="/logo.svg" alt="" className="w-full h-full object-contain" />
+            </div>
           </div>
 
           <div className="my-12 text-center space-y-4">
@@ -156,8 +168,16 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
                 </div>
               )}
 
-              <div className="font-sans text-[11px] text-slate-500 flex items-center justify-between pt-2">
-                <span>Lavrada por: {m.authorName}</span>
+              <div className="font-sans text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 pt-2">
+                <span>
+                  Lavrada por: <strong>{m.authorName}</strong>
+                  {m.finalizedAt && (
+                    <>
+                      {" "}em {new Date(m.finalizedAt).toLocaleDateString("pt-BR")} às{" "}
+                      {new Date(m.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    </>
+                  )}
+                </span>
                 <span className="font-mono text-[9px]">Hash: {m.contentHash?.slice(0, 24)}...</span>
               </div>
             </div>
