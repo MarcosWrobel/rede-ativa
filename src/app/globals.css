@@ -145,6 +145,12 @@ dialog.dialog-xl:modal {
   max-width: min(96vw, 62rem);
 }
 
+dialog.dialog-full:modal,
+dialog.dialog-ata:modal {
+  max-width: min(98vw, 1560px) !important;
+  width: 98vw !important;
+}
+
 dialog::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
