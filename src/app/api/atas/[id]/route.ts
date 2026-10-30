@@ -67,6 +67,11 @@ const updateMinuteDraftSchema = z.object({
         clearSignature: z.boolean().optional(),
         biometricVerified: z.boolean().optional(),
         biometricDeviceType: z.string().optional().nullable(),
+        expectedEmail: z.string().optional().nullable(),
+        verifiedEmail: z.string().optional().nullable(),
+        verifiedGoogleSub: z.string().optional().nullable(),
+        verifiedGoogleName: z.string().optional().nullable(),
+        emailVerifiedAt: z.string().optional().nullable(),
         refusalReason: z.string().optional().nullable(),
         witnessName: z.string().optional().nullable(),
       })
@@ -233,6 +238,17 @@ export async function PATCH(
         const bioDevice = shouldClear || isRefused ? null : (p.biometricDeviceType || match?.biometricDeviceType || null);
         const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
 
+        const verifiedEmail = shouldClear || isRefused ? null : (p.verifiedEmail || match?.verifiedEmail || null);
+        const verifiedGoogleName = shouldClear || isRefused ? null : (p.verifiedGoogleName || match?.verifiedGoogleName || null);
+        const verifiedGoogleSub = shouldClear || isRefused ? null : (p.verifiedGoogleSub || match?.verifiedGoogleSub || null);
+        const emailVerifiedAt = verifiedEmail ? (match?.emailVerifiedAt || new Date()) : null;
+
+        const effectiveSigMode = isRefused
+          ? "REFUSED"
+          : verifiedEmail
+            ? "ESCOLA_OAUTH"
+            : sigMode;
+
         return {
           ...(match?.id ? { id: match.id } : {}),
           minuteId: id,
@@ -244,15 +260,20 @@ export async function PATCH(
           documentNumber: p.documentNumber || null,
           documentVerifiedByStaff: p.documentVerifiedByStaff,
           phone: p.phone || null,
-          signatureMode: sigMode,
+          signatureMode: effectiveSigMode,
           signatureData: sigData,
-          signedAt,
+          signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
           signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
-          mobileSignToken: sigData || shouldClear || isRefused ? null : (match?.mobileSignToken || null),
-          mobileSignExpiresAt: sigData || shouldClear || isRefused ? null : (match?.mobileSignExpiresAt || null),
+          mobileSignToken: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignToken || null),
+          mobileSignExpiresAt: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignExpiresAt || null),
           biometricVerified: bioVerified,
           biometricDeviceType: bioDevice,
           biometricAuthTime: bioTime,
+          expectedEmail: p.expectedEmail !== undefined ? p.expectedEmail : (match?.expectedEmail || null),
+          verifiedEmail,
+          verifiedGoogleSub,
+          verifiedGoogleName,
+          emailVerifiedAt,
           refusalReason: isRefused ? (p.refusalReason || null) : null,
           witnessName: isRefused ? (p.witnessName || null) : null,
         };

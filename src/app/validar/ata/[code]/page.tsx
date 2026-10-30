@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { ShieldCheck, School, Calendar, CheckCircle2, AlertTriangle, Lock } from "lucide-react";
-import { maskName, maskDocument } from "@/lib/ataCrypto";
+import { maskName, maskDocument, maskEmail } from "@/lib/ataCrypto";
 
 interface Props {
   params: Promise<{ code: string }>;
@@ -114,11 +114,14 @@ export default async function ValidarAtaPage({ params }: Props) {
                     <strong className="text-slate-900 block">{maskName(p.name)}</strong>
                     <span className="text-[10px] text-slate-500">
                       {p.role} • Doc: {maskDocument(p.documentNumber)}
+                      {p.verifiedEmail ? ` • ${maskEmail(p.verifiedEmail)}` : ""}
                     </span>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
                     {p.signatureMode === "REFUSED"
                       ? "Recusa Certificada"
+                      : p.verifiedEmail
+                      ? "✓ Assinado via @escola.pr.gov.br"
                       : p.biometricVerified
                       ? "Assinatura Biométrica (WebAuthn)"
                       : "Assinatura Registrada"}

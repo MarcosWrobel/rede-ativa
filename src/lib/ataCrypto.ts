@@ -15,6 +15,7 @@ export interface MinuteParticipantPayload {
   signatureMode: string;
   signatureData?: string | null;
   biometricVerified?: boolean;
+  verifiedEmail?: string | null;
   refusalReason?: string | null;
 }
 
@@ -69,6 +70,7 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
         mode: p.signatureMode,
         hasSig: Boolean(p.signatureData),
         bio: Boolean(p.biometricVerified),
+        email: (p.verifiedEmail || "").toLowerCase().trim(),
         refusal: p.refusalReason?.trim() || "",
       })),
     actionItems: [...(payload.actionItems || [])]
@@ -126,6 +128,27 @@ export function maskDocument(docNumber?: string | null): string {
   const clean = docNumber.trim();
   if (clean.length <= 4) return "****";
   return clean.slice(0, 2) + "*".repeat(Math.max(2, clean.length - 4)) + clean.slice(-2);
+}
+
+/**
+ * Mascara e-mail institucional para exibição pública segura (LGPD/ECA).
+ * Ex: "joao.silva@escola.pr.gov.br" -> "jo***.si***@escola.pr.gov.br"
+ */
+export function maskEmail(email?: string | null): string {
+  if (!email) return "";
+  const clean = email.toLowerCase().trim();
+  const [user, domain] = clean.split("@");
+  if (!domain) return "****";
+
+  const maskedUser = user
+    .split(".")
+    .map((part) => {
+      if (part.length <= 2) return part[0] + "*";
+      return part.slice(0, 2) + "*".repeat(Math.max(1, part.length - 2));
+    })
+    .join(".");
+
+  return `${maskedUser}@${domain}`;
 }
 
 /**

@@ -186,7 +186,16 @@ export default function PrintPageClient({ minute }: Props) {
             {minute.participants?.map((p: any) => (
               <div key={p.id} className="text-center space-y-1">
                 <div className="border-b border-slate-800 pb-1 min-h-[45px] flex items-end justify-center">
-                  {p.signatureData ? (
+                  {p.verifiedEmail ? (
+                    <div className="space-y-0.5">
+                      <span className="font-mono text-[11px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-300 block">
+                        ASSINADO VIA @ESCOLA.PR.GOV.BR
+                      </span>
+                      <span className="text-[9px] text-slate-500 font-mono block">
+                        {p.verifiedEmail}
+                      </span>
+                    </div>
+                  ) : p.signatureData ? (
                     <img
                       src={p.signatureData}
                       alt={`Assinatura ${p.name}`}
@@ -203,7 +212,13 @@ export default function PrintPageClient({ minute }: Props) {
                 <p className="text-xs font-bold text-slate-900">{p.name}</p>
                 <p className="text-[10px] text-slate-500 uppercase">
                   {p.role} {p.documentNumber ? `• Doc: ${p.documentNumber}` : ""}
-                  {p.biometricVerified ? " • Autenticação Biométrica FIDO2" : ""}
+                  {p.verifiedEmail
+                    ? p.role === "ESTUDANTE"
+                      ? " • Ciência Discente (ECA Art. 12 / Lei 14.063/2020)"
+                      : " • Certificação Institucional SEED-PR"
+                    : p.biometricVerified
+                    ? " • Autenticação Biométrica FIDO2"
+                    : ""}
                 </p>
               </div>
             ))}

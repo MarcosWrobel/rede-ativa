@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { maskName, maskDocument } from "@/lib/ataCrypto";
+import { maskName, maskDocument, maskEmail } from "@/lib/ataCrypto";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,15 @@ export async function GET(
           select: { name: true, city: true, state: true, nre: true, inepCode: true },
         },
         participants: {
-          select: { role: true, name: true, documentNumber: true, signatureMode: true, signedAt: true },
+          select: {
+            role: true,
+            name: true,
+            documentNumber: true,
+            signatureMode: true,
+            signedAt: true,
+            verifiedEmail: true,
+            biometricVerified: true,
+          },
         },
         addendums: {
           select: { createdAt: true, authorName: true, addendumHash: true },
@@ -51,7 +59,10 @@ export async function GET(
         role: p.role,
         maskedName: maskName(p.name),
         maskedDoc: maskDocument(p.documentNumber),
+        maskedEmail: p.verifiedEmail ? maskEmail(p.verifiedEmail) : null,
+        isEscolaSigned: Boolean(p.verifiedEmail),
         signatureMode: p.signatureMode,
+        biometricVerified: Boolean(p.biometricVerified),
         signedAt: p.signedAt,
       })),
       addendumsCount: minute.addendums.length,

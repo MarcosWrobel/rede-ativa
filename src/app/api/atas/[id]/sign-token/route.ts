@@ -14,10 +14,26 @@ export async function POST(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await params;
-    const { participantId } = await req.json();
+    const { participantId, expiresInMinutes } = await req.json();
 
     if (!participantId) {
       return NextResponse.json({ error: "Informe o ID do participante" }, { status: 400 });
+    }
+
+    const minute = await prisma.pedagogicalMinute.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+
+    if (!minute) {
+      return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
+    }
+
+    if (minute.status !== "DRAFT") {
+      return NextResponse.json(
+        { error: "Não é possível emitir link de assinatura para uma ata já lavrada ou cancelada." },
+        { status: 400 }
+      );
     }
 
     const participant = await prisma.pedagogicalMinuteParticipant.findFirst({
@@ -28,9 +44,10 @@ export async function POST(
       return NextResponse.json({ error: "Participante não encontrado nesta ata" }, { status: 404 });
     }
 
-    // Gera token de 32 caracteres com validade de 20 minutos
+    // Validade configurável: padrão 20 minutos, ou até 24 horas (1440 min)
+    const validMinutes = Math.min(Math.max(Number(expiresInMinutes) || 20, 5), 1440);
     const token = crypto.randomBytes(16).toString("hex");
-    const expiresAt = new Date(Date.now() + 20 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + validMinutes * 60 * 1000);
 
     const updated = await prisma.pedagogicalMinuteParticipant.update({
       where: { id: participantId },
@@ -49,6 +66,7 @@ export async function POST(
       token,
       signUrl,
       expiresAt: expiresAt.toISOString(),
+      expiresInMinutes: validMinutes,
       participantName: updated.name,
     });
   } catch (error: any) {

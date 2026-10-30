@@ -115,6 +115,17 @@ export async function POST(
           const bioDevice = shouldClear || isRefused ? null : (p.biometricDeviceType || match?.biometricDeviceType || null);
           const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
 
+          const verifiedEmail = shouldClear || isRefused ? null : (p.verifiedEmail || match?.verifiedEmail || null);
+          const verifiedGoogleName = shouldClear || isRefused ? null : (p.verifiedGoogleName || match?.verifiedGoogleName || null);
+          const verifiedGoogleSub = shouldClear || isRefused ? null : (p.verifiedGoogleSub || match?.verifiedGoogleSub || null);
+          const emailVerifiedAt = verifiedEmail ? (match?.emailVerifiedAt || new Date()) : null;
+
+          const effectiveSigMode = isRefused
+            ? "REFUSED"
+            : verifiedEmail
+              ? "ESCOLA_OAUTH"
+              : sigMode;
+
           return {
             ...(match?.id ? { id: match.id } : {}),
             minuteId: id,
@@ -126,15 +137,20 @@ export async function POST(
             documentNumber: p.documentNumber || null,
             documentVerifiedByStaff: Boolean(p.documentVerifiedByStaff),
             phone: p.phone || null,
-            signatureMode: sigMode,
+            signatureMode: effectiveSigMode,
             signatureData: sigData,
-            signedAt,
+            signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
             signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
             mobileSignToken: null,
             mobileSignExpiresAt: null,
             biometricVerified: bioVerified,
             biometricDeviceType: bioDevice,
             biometricAuthTime: bioTime,
+            expectedEmail: p.expectedEmail !== undefined ? p.expectedEmail : (match?.expectedEmail || null),
+            verifiedEmail,
+            verifiedGoogleSub,
+            verifiedGoogleName,
+            emailVerifiedAt,
             refusalReason: isRefused ? (p.refusalReason || null) : null,
             witnessName: isRefused ? (p.witnessName || null) : null,
           };
@@ -247,6 +263,7 @@ export async function POST(
                 signatureMode: p.signatureMode,
                 signatureData: p.signatureData,
                 biometricVerified: p.biometricVerified,
+                verifiedEmail: p.verifiedEmail,
                 refusalReason: p.refusalReason,
               })),
               actionItems: minute!.actionItems.map((a) => ({
