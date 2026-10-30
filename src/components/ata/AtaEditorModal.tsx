@@ -124,6 +124,8 @@ export default function AtaEditorModal({
 
   const [minuteId, setMinuteId] = useState<string | null>(existingMinute?.id || null);
 
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+
   // Ditado por voz nativo pt-BR
   const toggleSpeechRecognition = () => {
     if (isListening) {
@@ -295,8 +297,19 @@ export default function AtaEditorModal({
 
   // Lavrar Oficialmente
   const handleFinalize = async () => {
+    setFinalizeError(null);
+
     if (!summary || summary.trim().length < 10) {
-      alert("É necessário preencher o texto formal da ata antes da lavratura oficial.");
+      const msg = "É necessário preencher o texto formal da ata (mínimo de 10 caracteres) antes da lavratura oficial.";
+      setFinalizeError(msg);
+      alert(msg);
+      return;
+    }
+
+    if (selectedStudentIds.length === 0) {
+      const msg = "Selecione pelo menos um estudante vinculado antes de lavrar a ata.";
+      setFinalizeError(msg);
+      alert(msg);
       return;
     }
 
@@ -309,7 +322,9 @@ export default function AtaEditorModal({
     try {
       // 1. Salva rascunho primeiro
       const savedMinute = await handleSaveDraft();
-      if (!savedMinute) return;
+      if (!savedMinute) {
+        throw new Error("Não foi possível salvar o rascunho da ata antes da lavratura.");
+      }
 
       // 2. Chama lavratura definitiva
       const res = await fetch(`/api/atas/${savedMinute.id}/finalize`, {
@@ -317,12 +332,17 @@ export default function AtaEditorModal({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao lavrar ata");
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao lavrar ata no servidor.");
+      }
 
       setFinalizedAta(data.minute);
       onSaved();
     } catch (err: any) {
-      alert(err.message || "Erro ao lavrar ata");
+      console.error("[handleFinalize] Erro:", err);
+      const msg = err.message || "Erro desconhecido ao lavrar ata.";
+      setFinalizeError(msg);
+      alert(`Falha na lavratura: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -849,7 +869,7 @@ export default function AtaEditorModal({
                 </div>
 
                 {/* Se estiver coletando assinatura em tela para este participante */}
-                {activeSignParticipantIndex === idx && (
+                {activeSignParticipantIndex === idx && !p.signatureData && (
                   <div className="pt-2">
                     <SignatureCanvas
                       signerName={p.name || "Participante"}
@@ -903,6 +923,17 @@ export default function AtaEditorModal({
             >
               Fechar QR Code
             </button>
+          </div>
+        )}
+
+        {/* Aviso de Erro Visual na Lavratura */}
+        {finalizeError && (
+          <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start space-x-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <strong className="font-bold text-xs">Não foi possível lavrar a ata:</strong>
+              <p className="text-[11px] leading-relaxed">{finalizeError}</p>
+            </div>
           </div>
         )}
 
