@@ -26,14 +26,15 @@ async function main() {
   });
   console.log('Seeded default school:', defaultSchool.name);
 
-  // 1. Seed Users
+  // 1. Seed Users (Oficiais @escola.pr.gov.br)
   const usersToCreate = [
-    { name: 'Marcos Wrobel', email: 'marcos.wrobel@escola.pr.gov.br', role: 'ADMIN', schoolId: defaultSchool.id },
-    { name: 'Andreia', email: 'andreia@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
-    { name: 'Ana Cecília', email: 'ana.cecilia@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'MARCOS ADRIANO WROBEL', email: 'marcos.wrobel@escola.pr.gov.br', role: 'ADMIN', schoolId: defaultSchool.id },
+    { name: 'ADRIANA DE ALMEIDA BUENO', email: 'bueno.adriana@escola.pr.gov.br', role: 'ADMIN', schoolId: defaultSchool.id },
+    { name: 'ANDREIA DE LOURDES BUENO CARNEIRO', email: 'andreia.carneiro@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'ANA CECILIA GAMPER SINHORI', email: 'ana.gamper@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
     { name: 'Jaqueline Lopes', email: 'jaqueline.lopes@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
-    { name: 'Nathaly R.', email: 'nathaly.r@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
-    { name: 'Natiele', email: 'natiele@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'Nathaly Cristina Ribeiro da Rosa', email: 'nathaly.ribeiro.rosa@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'NATIELE PACHECO DOS SANTOS', email: 'natiele.pacheco.santos@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
   ];
 
   const userMap = {};
@@ -46,7 +47,15 @@ async function main() {
     userMap[u.name.toLowerCase()] = user;
     userMap[u.email] = user;
   }
-  console.log('Seeded users.');
+
+  // Aliases para nomes simplificados legados da planilha
+  userMap['andreia'] = userMap['andreia.carneiro@escola.pr.gov.br'];
+  userMap['ana cecília'] = userMap['ana.gamper@escola.pr.gov.br'];
+  userMap['ana cecilia'] = userMap['ana.gamper@escola.pr.gov.br'];
+  userMap['nathaly r.'] = userMap['nathaly.ribeiro.rosa@escola.pr.gov.br'];
+  userMap['nathaly'] = userMap['nathaly.ribeiro.rosa@escola.pr.gov.br'];
+  userMap['natiele'] = userMap['natiele.pacheco.santos@escola.pr.gov.br'];
+  console.log('Seeded official users.');
 
   function getUserId(pedagogaName) {
     if (!pedagogaName) return null;
