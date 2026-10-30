@@ -30,15 +30,19 @@ export async function POST(req: Request) {
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json().catch(() => ({}));
-    const headerKey = req.headers.get("x-gemini-key")?.trim();
-    const bodyKey = body?.apiKey?.trim();
-
-    const apiKey =
-      (headerKey && headerKey.length > 10 ? headerKey : null) ||
-      (bodyKey && bodyKey.length > 10 ? bodyKey : null) ||
+    const envKey = (
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY;
+      process.env.GOOGLE_GENAI_API_KEY
+    )?.replace(/^["']|["']$/g, "").trim();
+
+    const headerKey = req.headers.get("x-gemini-key")?.replace(/^["']|["']$/g, "").trim();
+    const bodyKey = body?.apiKey?.replace(/^["']|["']$/g, "").trim();
+
+    const apiKey =
+      (bodyKey && bodyKey.length > 10 ? bodyKey : null) ||
+      (envKey && envKey.length > 10 ? envKey : null) ||
+      (headerKey && headerKey.length > 10 ? headerKey : null);
 
     if (!apiKey) {
       return NextResponse.json(

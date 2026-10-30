@@ -177,7 +177,14 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
       clearTimeout(timeoutId);
 
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error(`Servidor retornou resposta inválida (HTTP ${res.status}).`);
+      }
+
       if (!res.ok) {
         if (data.missingApiKey) {
           setMissingApiKey(true);

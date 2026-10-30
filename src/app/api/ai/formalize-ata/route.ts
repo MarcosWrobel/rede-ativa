@@ -76,13 +76,20 @@ export async function POST(req: Request) {
 
     const { rawNotes, existingSummary, category, studentNames, guardianNames, apiKey: bodyApiKey } = parsed.data;
 
-    const headerKey = req.headers.get("x-gemini-key")?.trim();
-    const apiKey =
-      (headerKey && headerKey.length > 10 ? headerKey : null) ||
-      (bodyApiKey && bodyApiKey.length > 10 ? bodyApiKey : null) ||
+    // Prioriza a chave oficial da Vercel (GEMINI_API_KEY)
+    const envKey = (
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY;
+      process.env.GOOGLE_GENAI_API_KEY
+    )?.replace(/^["']|["']$/g, "").trim();
+
+    const headerKey = req.headers.get("x-gemini-key")?.replace(/^["']|["']$/g, "").trim();
+    const bodyKey = bodyApiKey?.replace(/^["']|["']$/g, "").trim();
+
+    const apiKey =
+      (envKey && envKey.length > 10 ? envKey : null) ||
+      (headerKey && headerKey.length > 10 ? headerKey : null) ||
+      (bodyKey && bodyKey.length > 10 ? bodyKey : null);
 
     // Fallback heurístico inteligente se não houver chave Gemini
     if (!apiKey) {
@@ -96,7 +103,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: true,
         usedFallback: true,
-        fallbackReason: "Chave da API Gemini não configurada no navegador nem no servidor.",
+        fallbackReason: "Chave da API Gemini não configurada no servidor (Vercel) nem no navegador.",
         result: fallbackResult,
       });
     }
@@ -131,11 +138,8 @@ ${
 ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente)"}
 """`;
 
-    // Modelos vigentes na API do Google
+    // Modelos vigentes na API do Google (2026) - gemini-3.5-flash confirmado como prioritário
     const modelsToTry = [
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
       "gemini-3.5-flash",
       "gemini-flash-latest",
       "gemini-3.5-flash-lite",
@@ -145,19 +149,27 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
     let rawJsonText: string | null = null;
     let lastErrorMsg = "";
 
-    // 1. Tentativa principal via ai.models.generateContent
+    // 1. Tentativa principal via ai.models.generateContent com thinkingLevel: low
     for (const model of modelsToTry) {
       try {
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 18000);
+
         const response = await ai.models.generateContent({
           model,
-          contents: `${inputPrompt}\n\nResponda estritamente em formato JSON estruturado com os campos: formalSubject, formalSummary, agreementsSummary, actionItems.`,
+          contents: `${inputPrompt}\n\nResponda estritamente em formato JSON com as chaves: "formalSubject", "formalSummary", "agreementsSummary", "actionItems".`,
           config: {
             systemInstruction,
             responseMimeType: "application/json",
-            responseSchema: FORMALIZE_ATA_JSON_SCHEMA,
             temperature: 0.2,
+            thinkingConfig: {
+              thinkingLevel: "low" as any,
+            },
+            abortSignal: abortController.signal,
           },
         });
+
+        clearTimeout(timeoutId);
 
         if (response?.text) {
           rawJsonText = response.text.trim();
@@ -165,7 +177,7 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
         }
       } catch (err: any) {
         lastErrorMsg = err?.message || String(err);
-        if (lastErrorMsg.toLowerCase().includes("api key not valid") || lastErrorMsg.includes("403 Forbidden")) {
+        if (lastErrorMsg.toLowerCase().includes("api key not valid")) {
           break;
         }
         console.warn(`[GEMINI generateContent] Modelo ${model} falhou: ${lastErrorMsg}. Tentando próximo...`);
@@ -197,7 +209,12 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
 
     if (rawJsonText) {
       try {
-        const structured = JSON.parse(rawJsonText);
+        const cleanJson = rawJsonText
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/```$/i, "")
+          .trim();
+        const structured = JSON.parse(cleanJson);
         // Garante que formalSummary seja texto corrido (remove quebras de linha excessivas)
         if (structured.formalSummary && typeof structured.formalSummary === "string") {
           structured.formalSummary = structured.formalSummary
@@ -213,8 +230,8 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
           usedFallback: false,
           result: structured,
         });
-      } catch {
-        // cai no fallback se o parse falhar
+      } catch (parseErr) {
+        console.warn("[AI Formalize Ata] Falha no parse de JSON:", parseErr);
       }
     }
 

@@ -20,13 +20,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // Aceita chave pelo header do cliente OU pela variável de ambiente da Vercel
-    const headerKey = req.headers.get("x-gemini-key")?.trim();
-    const apiKey =
-      (headerKey && headerKey.length > 10 ? headerKey : null) ||
+    // Prioriza chave oficial da Vercel (GEMINI_API_KEY) e usa header apenas como fallback
+    const envKey = (
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY;
+      process.env.GOOGLE_GENAI_API_KEY
+    )?.replace(/^["']|["']$/g, "").trim();
+
+    const headerKey = req.headers.get("x-gemini-key")?.replace(/^["']|["']$/g, "").trim();
+
+    const apiKey =
+      (envKey && envKey.length > 10 ? envKey : null) ||
+      (headerKey && headerKey.length > 10 ? headerKey : null);
 
     if (!apiKey) {
       return NextResponse.json(

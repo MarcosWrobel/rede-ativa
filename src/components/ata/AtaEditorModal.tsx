@@ -440,8 +440,17 @@ export default function AtaEditorModal({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao revisar minuta");
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error(
+          `Servidor retornou resposta inválida (HTTP ${res.status}). Verifique a conexão com a IA.`
+        );
+      }
+
+      if (!res.ok) throw new Error(data?.error || "Erro ao revisar minuta");
 
       if (data.result) {
         if (data.result.formalSubject) setSubject(data.result.formalSubject);
