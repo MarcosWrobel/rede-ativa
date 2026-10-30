@@ -355,11 +355,12 @@ export default function ModelosClient({ initialTemplates }: Props) {
         ))}
       </div>
 
-      {/* Modal de Criação / Edição */}
+      {/* Modal de Criação / Edição com Layout Bi-Coluna e Rodapé Fixo */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border border-slate-200 my-8">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white rounded-2xl max-w-5xl w-full flex flex-col max-h-[90vh] shadow-2xl border border-slate-200 overflow-hidden">
+            {/* 1. Cabeçalho Fixo */}
+            <div className="flex-none px-5 sm:px-6 py-3.5 border-b border-slate-200 bg-white flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                 <FileText className="w-5 h-5 text-sky-600" />
                 <span>{editingTemplate ? "Editar Modelo de Mensagem" : "Criar Novo Modelo de Mensagem"}</span>
@@ -367,387 +368,406 @@ export default function ModelosClient({ initialTemplates }: Props) {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* AI Assistant Generator Card */}
-            <div className="bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-sky-50/80 border border-indigo-200 rounded-xl p-4 shadow-xs space-y-3">
-              <div 
-                className="flex items-center justify-between cursor-pointer select-none"
-                onClick={() => setIsAiCardOpen(!isAiCardOpen)}
-              >
-                <div className="flex items-center space-x-2">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                    <Wand2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="font-extrabold text-indigo-950 text-xs block">
-                      Criador Inteligente com IA (Google Gemini)
-                    </span>
-                    <span className="text-[11px] text-indigo-700">
-                      Descreva a mensagem em linguagem natural e a IA redige para você
-                    </span>
-                  </div>
-                </div>
-                <button type="button" className="text-indigo-600 hover:text-indigo-800 p-1">
-                  {isAiCardOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-              </div>
-
-              {isAiCardOpen && (
-                <div className="space-y-3 pt-2 border-t border-indigo-100 text-xs">
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleGenerateWithAI();
-                        }
-                      }}
-                      placeholder="Ex: Aviso pedindo atestado médico após 2 dias de faltas consecutivas..."
-                      className="flex-1 p-2.5 bg-white border border-indigo-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleGenerateWithAI()}
-                      disabled={isGeneratingAI}
-                      className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition flex items-center justify-center space-x-1.5 shadow-xs disabled:opacity-50"
+            {/* 2. Formulário e Corpo com Rolagem Interna e 2 Colunas */}
+            <form id="template-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 text-xs">
+                {/* COLUNA ESQUERDA (Edição, IA e Campos) - 7 colunas */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* AI Assistant Generator Card */}
+                  <div className="bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-sky-50/80 border border-indigo-200 rounded-xl p-3.5 shadow-2xs space-y-2.5">
+                    <div 
+                      className="flex items-center justify-between cursor-pointer select-none"
+                      onClick={() => setIsAiCardOpen(!isAiCardOpen)}
                     >
-                      {isGeneratingAI ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Redigindo...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4 text-amber-300" />
-                          <span>Gerar com IA</span>
-                        </>
-                      )}
-                    </button>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                          <Wand2 className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <span className="font-extrabold text-indigo-950 text-xs block leading-tight">
+                            Redação com Inteligência Artificial (Google Gemini)
+                          </span>
+                          <span className="text-[10px] text-indigo-700">
+                            Digite sua necessidade em linguagem natural
+                          </span>
+                        </div>
+                      </div>
+                      <button type="button" className="text-indigo-600 hover:text-indigo-800 p-1">
+                        {isAiCardOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    {isAiCardOpen && (
+                      <div className="space-y-2.5 pt-2 border-t border-indigo-100 text-xs">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={aiPrompt}
+                            onChange={(e) => setAiPrompt(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleGenerateWithAI();
+                              }
+                            }}
+                            placeholder="Ex: Aviso pedindo atestado médico após 2 dias de faltas consecutivas..."
+                            className="flex-1 p-2 bg-white border border-indigo-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateWithAI()}
+                            disabled={isGeneratingAI}
+                            className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition flex items-center justify-center space-x-1.5 shadow-xs disabled:opacity-50"
+                          >
+                            {isGeneratingAI ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Redigindo...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                <span>Gerar com IA</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Quick Ideas Chips */}
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "Aviso de entrega de boletins",
+                            "Atestado médico para faltas",
+                            "Notificação antes do Conselho Tutelar",
+                            "Uso obrigatório de uniforme",
+                            "Convite para Reunião de Pais",
+                          ].map((idea) => (
+                            <button
+                              key={idea}
+                              type="button"
+                              onClick={() => {
+                                setAiPrompt(idea);
+                                handleGenerateWithAI(idea);
+                              }}
+                              className="px-2 py-0.5 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-900 text-[10px] font-medium transition shadow-2xs"
+                            >
+                              + {idea}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Chave de API opcional */}
+                        <div className="pt-1 border-t border-indigo-100 flex items-center justify-between text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setShowKeyInput(!showKeyInput)}
+                            className="text-indigo-700 hover:text-indigo-900 font-bold inline-flex items-center space-x-1"
+                          >
+                            <Key className="w-3 h-3" />
+                            <span>{showKeyInput ? "Ocultar configuração da Chave" : "Configurar / Colar Chave Gemini"}</span>
+                          </button>
+                          {customApiKey && (
+                            <span className="text-emerald-700 font-semibold flex items-center">
+                              <Check className="w-3 h-3 mr-0.5 text-emerald-600" /> Chave ativa
+                            </span>
+                          )}
+                        </div>
+
+                        {showKeyInput && (
+                          <div className="p-2 bg-white border border-indigo-200 rounded-lg space-y-1.5">
+                            <div className="flex gap-1.5">
+                              <input
+                                type="password"
+                                value={customApiKey}
+                                onChange={(e) => handleSaveCustomKey(e.target.value)}
+                                placeholder="Cole sua chave AIzaSy..."
+                                className="flex-1 p-1.5 border border-slate-300 rounded text-xs font-mono"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveCustomKey(customApiKey)}
+                                className="px-2.5 py-1 bg-slate-800 text-white rounded text-[10px] font-bold hover:bg-slate-900"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleTestKey}
+                                disabled={isTestingKey}
+                                className="px-2.5 py-1 bg-indigo-600 text-white rounded text-[10px] font-bold hover:bg-indigo-700 flex items-center space-x-1 disabled:opacity-50"
+                              >
+                                {isTestingKey ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <span>Testar</span>
+                                )}
+                              </button>
+                            </div>
+                            {testKeyResult && (
+                              <div
+                                className={`p-1.5 rounded text-[11px] border flex items-start space-x-1.5 ${
+                                  testKeyResult.ok
+                                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                    : "bg-rose-50 border-rose-200 text-rose-800"
+                                }`}
+                              >
+                                {testKeyResult.ok ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                ) : (
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5" />
+                                )}
+                                <span className="leading-snug">{testKeyResult.message}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Feedback Messages */}
+                        {aiSuccess && (
+                          <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-1.5">
+                            <Check className="w-3.5 h-3.5 flex-shrink-0 text-emerald-600" />
+                            <span>{aiSuccess}</span>
+                          </div>
+                        )}
+
+                        {aiError && (
+                          <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>{aiError}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Quick Ideas Chips */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider block">
-                      Ideias rápidas para testar:
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
+                  {formError && (
+                    <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center space-x-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
+
+                  {/* Campos Principais */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">
+                        Motivo / Título do Modelo:
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ex: CONVOCAÇÃO URGENTE"
+                        value={formTitle}
+                        onChange={(e) => setFormTitle(e.target.value.toUpperCase())}
+                        className="w-full p-2 border border-slate-300 rounded-lg bg-white uppercase font-bold focus:ring-2 focus:ring-sky-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">
+                        Nível de Aplicação:
+                      </label>
+                      <select
+                        value={formSegment}
+                        onChange={(e) => setFormSegment(e.target.value)}
+                        className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium"
+                      >
+                        <option value="TODOS">Todos os Níveis (Recomendado)</option>
+                        <option value="FUNDAMENTAL">Apenas Ensino Fundamental</option>
+                        <option value="MEDIO">Apenas Ensino Médio</option>
+                        <option value="NOTURNO">Apenas Ensino Noturno</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Paleta de Variáveis Inteligentes */}
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-700 text-[10px] flex items-center space-x-1">
+                        <Sparkles className="w-3 h-3 text-sky-600" />
+                        <span>Variáveis Rápidas (inserir no campo ativo):</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Alvo: <strong>{lastFocusedField === "prefix" ? "Antes do Aluno" : "Depois do Aluno"}</strong>
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
                       {[
-                        "Aviso de entrega de boletins na quinta às 18h30",
-                        "Solicitação de atestado médico para justificar ausências",
-                        "Notificação preventiva de faltas antes do Conselho Tutelar",
-                        "Recado sobre uso obrigatório do uniforme escolar",
-                        "Convite para a Mostra Cultural no sábado de manhã",
-                      ].map((idea) => (
+                        { tag: "{saudacao}", desc: "Bom dia / Boa tarde / Boa noite" },
+                        { tag: "{aluno}", desc: "Nome do aluno" },
+                        { tag: "{turma}", desc: "Turma do aluno" },
+                        { tag: "{responsavel}", desc: "Nome do responsável" },
+                        { tag: "{pedagoga}", desc: "Nome da pedagoga" },
+                        { tag: "{periodo}", desc: "matutino / vespertino / noturno" },
+                      ].map((item) => (
                         <button
-                          key={idea}
+                          key={item.tag}
                           type="button"
-                          onClick={() => {
-                            setAiPrompt(idea);
-                            handleGenerateWithAI(idea);
-                          }}
-                          className="px-2 py-1 rounded bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-900 text-[10px] font-medium transition shadow-2xs"
+                          onClick={() => handleInsertTag(item.tag)}
+                          className="px-2 py-0.5 rounded-md bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-sky-700 font-mono text-[10px] font-bold shadow-2xs transition"
+                          title={item.desc}
                         >
-                          + {idea}
+                          + {item.tag}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Chave de API direta (opcional / fallback) */}
-                  <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => setShowKeyInput(!showKeyInput)}
-                      className="text-[10px] text-indigo-700 hover:text-indigo-900 font-bold inline-flex items-center space-x-1"
-                    >
-                      <Key className="w-3 h-3" />
-                      <span>{showKeyInput ? "Ocultar configuração da Chave" : "Configurar / Colar Chave Gemini"}</span>
-                    </button>
-                    {customApiKey && (
-                      <span className="text-[10px] text-emerald-700 font-semibold flex items-center">
-                        <Check className="w-3 h-3 mr-0.5 text-emerald-600" /> Chave configurada
+                  {/* Textos da Mensagem */}
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">
+                      Texto antes da identificação do aluno:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formPrefix}
+                      onFocus={() => setLastFocusedField("prefix")}
+                      onChange={(e) => setFormPrefix(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                      placeholder="Ex: {saudacao} Registramos a ausência do(a) aluno(a)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">
+                      Texto depois da identificação do aluno:
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={formSuffix}
+                      onFocus={() => setLastFocusedField("suffix")}
+                      onChange={(e) => setFormSuffix(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                      placeholder="Ex: hoje. Poderia nos informar o motivo? Atenciosamente, {pedagoga}."
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="isAbsence"
+                      checked={formIsAbsence}
+                      onChange={(e) => setFormIsAbsence(e.target.checked)}
+                      className="rounded text-sky-600 focus:ring-sky-500 w-4 h-4"
+                    />
+                    <label htmlFor="isAbsence" className="text-slate-700 font-medium text-xs">
+                      Este modelo é de <strong>infrequência / falta escolar</strong> (contabiliza no ranking)
+                    </label>
+                  </div>
+                </div>
+
+                {/* COLUNA DIREITA (Simulador Visual WhatsApp em Tempo Real) - 5 colunas */}
+                <div className="lg:col-span-5 flex flex-col space-y-3">
+                  <div className="bg-slate-100 border border-slate-200 rounded-xl p-3.5 flex-1 flex flex-col space-y-2.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                      <span className="font-bold text-slate-800 text-[11px] flex items-center space-x-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Prévia em Tempo Real (WhatsApp)</span>
                       </span>
-                    )}
-                  </div>
 
-                  {showKeyInput && (
-                    <div className="p-2.5 bg-white border border-indigo-200 rounded-lg space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-700 block">
-                        Chave de API do Google AI Studio (caso não tenha reiniciado o deploy na Vercel):
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="password"
-                          value={customApiKey}
-                          onChange={(e) => handleSaveCustomKey(e.target.value)}
-                          placeholder="Cole sua chave AIzaSy..."
-                          className="flex-1 p-1.5 border border-slate-300 rounded text-xs font-mono"
-                        />
+                      {/* Alternador de Turno */}
+                      <div className="flex items-center space-x-1 bg-white p-0.5 rounded-lg border border-slate-200">
                         <button
                           type="button"
-                          onClick={() => handleSaveCustomKey(customApiKey)}
-                          className="px-3 py-1 bg-slate-800 text-white rounded text-[11px] font-bold hover:bg-slate-900"
-                        >
-                          Salvar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleTestKey}
-                          disabled={isTestingKey}
-                          className="px-3 py-1 bg-indigo-600 text-white rounded text-[11px] font-bold hover:bg-indigo-700 flex items-center space-x-1 disabled:opacity-50"
-                        >
-                          {isTestingKey ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                              <span>Testando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="w-3 h-3 mr-1 text-amber-300" />
-                              <span>Testar Chave</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        Ao colar e salvar aqui, a chave é armazenada no seu navegador e sobrepõe a Vercel na hora!
-                      </p>
-                      {testKeyResult && (
-                        <div
-                          className={`mt-2 p-2 rounded text-xs border flex items-start space-x-1.5 ${
-                            testKeyResult.ok
-                              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                              : "bg-rose-50 border-rose-200 text-rose-800"
+                          onClick={() => setPreviewShift("MANHA")}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
+                            previewShift === "MANHA" ? "bg-amber-500 text-white" : "text-slate-600 hover:bg-slate-100"
                           }`}
+                          title="Simular Turno da Manhã"
                         >
-                          {testKeyResult.ok ? (
-                            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                          ) : (
-                            <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-                          )}
-                          <span className="leading-snug">{testKeyResult.message}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Feedback Messages */}
-                  {aiSuccess && (
-                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
-                      <Check className="w-4 h-4 flex-shrink-0 text-emerald-600" />
-                      <span>{aiSuccess}</span>
-                    </div>
-                  )}
-
-                  {aiError && (
-                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs space-y-1">
-                      <div className="flex items-center space-x-2 font-bold">
-                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                        <span>{aiError}</span>
+                          <Sun className="w-2.5 h-2.5" />
+                          <span>M</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewShift("TARDE")}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
+                            previewShift === "TARDE" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                          title="Simular Turno da Tarde"
+                        >
+                          <Sunset className="w-2.5 h-2.5" />
+                          <span>T</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewShift("NOITE")}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
+                            previewShift === "NOITE" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                          title="Simular Turno da Noite"
+                        >
+                          <Moon className="w-2.5 h-2.5" />
+                          <span>N</span>
+                        </button>
                       </div>
-                      {missingApiKey && (
-                        <p className="text-[11px] text-rose-600 pl-6">
-                          Para ativar a IA gratuitamente, gere sua chave no{" "}
-                          <a
-                            href="https://aistudio.google.com/app/apikey"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline font-bold inline-flex items-center hover:text-rose-900"
-                          >
-                            Google AI Studio <ExternalLink className="w-3 h-3 ml-0.5" />
-                          </a>{" "}
-                          e adicione como <code>GEMINI_API_KEY</code> na Vercel.
-                        </p>
-                      )}
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
 
-            {formError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center space-x-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                <span>{formError}</span>
-              </div>
-            )}
+                    {/* Balão Visual do WhatsApp */}
+                    <div className="flex-1 bg-[#efeae2] p-3 rounded-xl border border-slate-300/80 overflow-y-auto max-h-[280px] lg:max-h-[360px] flex flex-col justify-end">
+                      <div className="bg-white p-3 rounded-lg rounded-tl-none shadow-xs border border-slate-200 text-slate-800 text-[11px] leading-relaxed whitespace-pre-wrap font-sans relative">
+                        {simulatedMessage || "(Preencha o formulário para visualizar como a mensagem será enviada à família)"}
+                        <div className="text-[9px] text-slate-400 text-right mt-1.5">
+                          12:00 • Enviado via WhatsApp
+                        </div>
+                      </div>
+                    </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">
-                    Motivo / Título do Modelo:
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: CONVOCAÇÃO URGENTE"
-                    value={formTitle}
-                    onChange={(e) => setFormTitle(e.target.value.toUpperCase())}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white uppercase font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">
-                    Nível de Aplicação:
-                  </label>
-                  <select
-                    value={formSegment}
-                    onChange={(e) => setFormSegment(e.target.value)}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="TODOS">Todos os Níveis (Recomendado)</option>
-                    <option value="FUNDAMENTAL">Apenas Ensino Fundamental</option>
-                    <option value="MEDIO">Apenas Ensino Médio</option>
-                    <option value="NOTURNO">Apenas Ensino Noturno</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Tag Insertion Palette */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-700 text-[11px] flex items-center space-x-1">
-                    <Sparkles className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Inserir Variável Inteligente (clique para adicionar no campo ativo):</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    Alvo atual: <strong>{lastFocusedField === "prefix" ? "Antes do Aluno" : "Depois do Aluno"}</strong>
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { tag: "{saudacao}", desc: "Bom dia / Boa tarde / Boa noite" },
-                    { tag: "{aluno}", desc: "Nome do aluno" },
-                    { tag: "{turma}", desc: "Turma do aluno" },
-                    { tag: "{responsavel}", desc: "Nome do responsável" },
-                    { tag: "{pedagoga}", desc: "Nome da pedagoga" },
-                    { tag: "{periodo}", desc: "matutino / vespertino / noturno" },
-                  ].map((item) => (
-                    <button
-                      key={item.tag}
-                      type="button"
-                      onClick={() => handleInsertTag(item.tag)}
-                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-sky-700 font-mono text-[11px] font-bold shadow-2xs transition"
-                      title={item.desc}
-                    >
-                      + {item.tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  Texto antes da identificação do aluno:
-                </label>
-                <textarea
-                  rows={3}
-                  value={formPrefix}
-                  onFocus={() => setLastFocusedField("prefix")}
-                  onChange={(e) => setFormPrefix(e.target.value)}
-                  className="w-full p-3 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
-                  placeholder="Ex: {saudacao} Registramos a ausência do(a) aluno(a)"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  Texto depois da identificação do aluno:
-                </label>
-                <textarea
-                  rows={4}
-                  value={formSuffix}
-                  onFocus={() => setLastFocusedField("suffix")}
-                  onChange={(e) => setFormSuffix(e.target.value)}
-                  className="w-full p-3 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
-                  placeholder="Ex: hoje. Poderia nos informar o motivo? Atenciosamente, {pedagoga}."
-                />
-              </div>
-
-              {/* Live Preview Simulator */}
-              <div className="p-4 bg-slate-100/70 border border-slate-200 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-800 text-[11px]">
-                    Simulação em Tempo Real da Mensagem:
-                  </span>
-                  <div className="flex items-center space-x-1 bg-white p-0.5 rounded-lg border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewShift("MANHA")}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1 ${
-                        previewShift === "MANHA" ? "bg-amber-500 text-white" : "text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Sun className="w-3 h-3" />
-                      <span>Manhã</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewShift("TARDE")}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1 ${
-                        previewShift === "TARDE" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Sunset className="w-3 h-3" />
-                      <span>Tarde</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewShift("NOITE")}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1 ${
-                        previewShift === "NOITE" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Moon className="w-3 h-3" />
-                      <span>Noite</span>
-                    </button>
+                    {/* Dica Pedagógica */}
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-[10px] text-slate-500 space-y-1">
+                      <div className="font-bold text-slate-700 flex items-center space-x-1">
+                        <Info className="w-3 h-3 text-sky-600" />
+                        <span>Dica de Redação Pedagógica:</span>
+                      </div>
+                      <p>
+                        A tag <code className="bg-slate-100 px-1 py-0.5 rounded text-sky-700">{"{saudacao}"}</code> adapta automaticamente para *"Bom dia"*, *"Boa tarde"* ou *"Boa noite"* de acordo com o horário do envio.
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="bg-white p-3 rounded-lg border border-slate-200 text-[11px] whitespace-pre-wrap font-sans text-slate-800 shadow-inner">
-                  {simulatedMessage || "(Preencha os campos acima para ver a prévia)"}
-                </div>
               </div>
+            </form>
 
-              <div className="flex items-center space-x-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="isAbsence"
-                  checked={formIsAbsence}
-                  onChange={(e) => setFormIsAbsence(e.target.checked)}
-                  className="rounded text-sky-600 focus:ring-sky-500 w-4 h-4"
-                />
-                <label htmlFor="isAbsence" className="text-slate-700 font-medium">
-                  Este modelo refere-se a faltas / infrequência escolar (contabiliza no ranking de faltas)
-                </label>
-              </div>
+            {/* 3. Rodapé Fixo (Permanentemente visível) */}
+            <div className="flex-none px-5 sm:px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                Pressione <strong>Salvar Modelo</strong> para concluir as alterações.
+              </span>
 
-              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
+              <div className="flex items-center space-x-2 ml-auto">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 font-medium"
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
+                  form="template-form"
                   disabled={isSubmitting}
-                  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs"
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition flex items-center space-x-1.5 disabled:opacity-50"
                 >
-                  {isSubmitting ? "Gravando..." : "Salvar Modelo"}
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Gravando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Salvar Modelo</span>
+                    </>
+                  )}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
