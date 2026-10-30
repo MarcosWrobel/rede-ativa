@@ -605,6 +605,11 @@ export default function ModelosClient({ initialTemplates }: Props) {
                         { tag: "{responsavel}", desc: "Nome do responsável" },
                         { tag: "{pedagoga}", desc: "Nome da pedagoga" },
                         { tag: "{periodo}", desc: "matutino / vespertino / noturno" },
+                        { tag: "{frequencia}", desc: "Frequência escolar do B.I. (ex: 68,5%)" },
+                        { tag: "{semana_atual}", desc: "Presença na semana atual (ex: 50%)" },
+                        { tag: "{semana_anterior}", desc: "Presença na semana anterior (ex: 80%)" },
+                        { tag: "{situacao_frequencia}", desc: "crítica (abaixo de 75%) / em atenção" },
+                        { tag: "{protocolo_serp}", desc: "Número da ficha SERP se houver" },
                       ].map((item) => (
                         <button
                           key={item.tag}

@@ -5,6 +5,15 @@
 
 export type SchoolShift = "MANHA" | "TARDE" | "NOITE";
 
+export interface AttendanceContext {
+  percent?: number | null;
+  semanaAtual?: string | null;
+  semanaAnterior?: string | null;
+  variacao?: number | null;
+  serpProtocol?: string | null;
+  serpStatus?: string | null;
+}
+
 export interface StudentContext {
   id?: string;
   name: string;
@@ -16,6 +25,7 @@ export interface StudentContext {
     segment: string; // FUNDAMENTAL | MEDIO | NOTURNO
     shift?: string;   // MANHA | TARDE | NOITE
   };
+  attendance?: AttendanceContext | null;
 }
 
 export interface MessageContext {
@@ -23,6 +33,7 @@ export interface MessageContext {
   pedagogaName?: string;
   overrideShift?: SchoolShift;
   customNotes?: string;
+  attendance?: AttendanceContext | null;
 }
 
 /**
@@ -124,7 +135,7 @@ export function formatMessage(
 
     let res = text;
 
-    // 1. Substituir tags explícitas
+    // 1. Substituir tags explícitas de estudante e escola
     res = res.replace(/\{saudacao\}/gi, greeting);
     res = res.replace(/\{aluno\}/gi, student.name);
     res = res.replace(/\{turma\}/gi, student.classGroup.name);
@@ -134,7 +145,49 @@ export function formatMessage(
     res = res.replace(/\{periodo\}/gi, shiftLabel);
     res = res.replace(/\{turno\}/gi, shiftLabel);
 
-    // 2. Normalização automática de saudações legadas estáticas no início do texto
+    // 2. Substituir tags de Frequência do B.I. e SERP
+    const att = context.attendance || student.attendance;
+    const freqStr =
+      att?.percent !== undefined && att?.percent !== null
+        ? `${Number(att.percent).toFixed(1).replace(".", ",")}%`
+        : "";
+    const semAtualStr = att?.semanaAtual
+      ? att.semanaAtual.includes("%")
+        ? att.semanaAtual
+        : `${att.semanaAtual}%`
+      : "";
+    const semAntStr = att?.semanaAnterior
+      ? att.semanaAnterior.includes("%")
+        ? att.semanaAnterior
+        : `${att.semanaAnterior}%`
+      : "";
+
+    let situacaoFreq = "";
+    if (att?.percent !== undefined && att?.percent !== null) {
+      if (att.percent < 75) {
+        situacaoFreq = "em nível crítico (abaixo do mínimo legal de 75%)";
+      } else if (att.percent < 85) {
+        situacaoFreq = "em estado de atenção (entre 75% e 85%)";
+      } else {
+        situacaoFreq = "em situação regular";
+      }
+    }
+
+    const serpInfo = att?.serpProtocol
+      ? `Ficha SERP nº ${att.serpProtocol}`
+      : att?.serpStatus
+      ? `SERP: ${att.serpStatus}`
+      : "";
+
+    res = res.replace(/\{frequencia\}/gi, freqStr || "—");
+    res = res.replace(/\{media_geral\}/gi, freqStr || "—");
+    res = res.replace(/\{semana_atual\}/gi, semAtualStr || "—");
+    res = res.replace(/\{semana_anterior\}/gi, semAntStr || "—");
+    res = res.replace(/\{situacao_frequencia\}/gi, situacaoFreq || "alerta de infrequência");
+    res = res.replace(/\{protocolo_serp\}/gi, serpInfo || "—");
+    res = res.replace(/\{ficha_serp\}/gi, serpInfo || "—");
+
+    // 3. Normalização automática de saudações legadas estáticas no início do texto
     // Ex: "Boa tarde!\n", "Boa noite!\n", "Bom dia!\n", "Boa tarde, senhores pais"
     res = res.replace(/^(Boa tarde|Boa noite|Bom dia)!?/i, greeting);
     res = res.replace(/^(Boa tarde|Boa noite|Bom dia),/i, `${greeting.replace("!", "")},`);

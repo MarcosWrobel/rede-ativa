@@ -14,7 +14,7 @@ export default async function FaltasPage() {
   // 1. Optimized load of absence contacts
   const absenceKeywords = ["FALTOU", "FALTAS", "GAZEOU", "ATRASO", "ATRASOS"];
 
-  const [absenceLogs, lowAttendance, classGroups] = await Promise.all([
+  const [absenceLogs, lowAttendance, classGroups, templates] = await Promise.all([
     prisma.messageLog.findMany({
       where: {
         OR: absenceKeywords.map((kw) => ({
@@ -67,6 +67,19 @@ export default async function FaltasPage() {
       select: { id: true, name: true, segment: true, shift: true },
       orderBy: { name: "asc" },
     }),
+    prisma.messageTemplate.findMany({
+      where: { active: true },
+      orderBy: { title: "asc" },
+      select: {
+        id: true,
+        title: true,
+        segment: true,
+        shift: true,
+        reasonType: true,
+        prefixText: true,
+        suffixText: true,
+      },
+    }),
   ]);
 
   // Aggregate counts per student in memory
@@ -94,6 +107,11 @@ export default async function FaltasPage() {
       rankedAbsences={rankedAbsences}
       lowAttendance={lowAttendance}
       classGroups={classGroups}
+      templates={templates}
+      currentUser={{
+        name: session.user.name || "Equipe Pedagógica",
+        email: session.user.email || "",
+      }}
     />
   );
 }
