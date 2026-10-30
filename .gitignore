@@ -16,8 +16,10 @@ out/
 *.db
 *.db-journal
 
-# Excel raw source files (sensitive data)
+# Sensitive student / guardian datasets (LGPD)
 *.xlsx
+scripts/extracted_data.json
+scripts/*_data.json
 
 # System / logs
 .DS_Store

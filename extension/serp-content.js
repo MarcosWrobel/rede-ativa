@@ -276,7 +276,7 @@
             "></textarea>
           </details>
 
-          <details style="margin-top: 8px; font-size: 11px; color: #475569; background: #f8fafc; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <details id="leo-serp-settings-box" style="margin-top: 8px; font-size: 11px; color: #475569; background: #f8fafc; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0;">
             <summary style="cursor: pointer; font-weight: 600; color: #334155;">⚙️ Configuração de Envio (Vercel)</summary>
             <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
               <div>
@@ -285,7 +285,7 @@
               </div>
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">Chave de Sincronização:</label>
-                <input id="leo-serp-cfg-token" type="password" value="leopoldina-frequencia-2026-secret-sync" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                <input id="leo-serp-cfg-token" type="password" value="" placeholder="Cole a chave copiada do painel /faltas" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;" />
               </div>
             </div>
           </details>
@@ -322,11 +322,14 @@
     });
 
     // Copiar logs
-    document.getElementById('leo-serp-btn-copy-log')?.addEventListener('click', (e) => {
+    document.getElementById('leo-serp-btn-copy-log')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      navigator.clipboard.writeText(logsExecucao.join('\n')).then(() => {
+      try {
+        await navigator.clipboard.writeText(logsExecucao.join('\n'));
         setStatus('Logs copiados para o clipboard!', '#10b981');
-      });
+      } catch {
+        setStatus('Falha ao copiar logs.', '#ef4444');
+      }
     });
 
     // Limpar cache
@@ -342,16 +345,21 @@
     // Carrega configs salvas
     const inputUrl = document.getElementById('leo-serp-cfg-url');
     const inputToken = document.getElementById('leo-serp-cfg-token');
-    if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token'], (res) => {
-        if (inputUrl && res.leopoldina_server_url) inputUrl.value = res.leopoldina_server_url;
-        if (inputToken && res.leopoldina_sync_token) inputToken.value = res.leopoldina_sync_token;
-      });
-    }
-
-    const salvarConfigs = () => {
+    (async () => {
       if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({
+        try {
+          const res = await chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token']);
+          if (inputUrl && res.leopoldina_server_url) inputUrl.value = res.leopoldina_server_url;
+          if (inputToken && res.leopoldina_sync_token) inputToken.value = res.leopoldina_sync_token;
+        } catch (err) {
+          console.warn('[SERP] Falha ao ler storage:', err);
+        }
+      }
+    })();
+
+    const salvarConfigs = async () => {
+      if (chrome.storage && chrome.storage.local) {
+        await chrome.storage.local.set({
           leopoldina_server_url: inputUrl?.value?.trim() || '',
           leopoldina_sync_token: inputToken?.value?.trim() || '',
         });
@@ -781,17 +789,18 @@
   }
 
   // Copiar JSON
-  function copiarJSON() {
+  async function copiarJSON() {
     if (fichasCapturadas.size === 0) {
       extrairFichasDaTela(true);
     }
     const lista = Array.from(fichasCapturadas.values());
-    navigator.clipboard.writeText(JSON.stringify({ fichas: lista }, null, 2)).then(() => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({ fichas: lista }, null, 2));
       addLog(`JSON com ${lista.length} fichas copiado para o clipboard.`);
       setStatus(`JSON com ${lista.length} fichas copiado!`, '#10b981');
-    }).catch(() => {
+    } catch {
       setStatus('Erro ao copiar para clipboard.', '#ef4444');
-    });
+    }
   }
 
   // Sincronizar com a Vercel
@@ -807,7 +816,15 @@
     const inputUrl = document.getElementById('leo-serp-cfg-url');
     const inputToken = document.getElementById('leo-serp-cfg-token');
     const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app').replace(/\/+$/, '');
-    const token = inputToken?.value?.trim() || 'leopoldina-frequencia-2026-secret-sync';
+    const token = inputToken?.value?.trim() || '';
+
+    if (!token) {
+      const settingsBox = document.getElementById('leo-serp-settings-box');
+      if (settingsBox) settingsBox.open = true;
+      if (inputToken) inputToken.focus();
+      setStatus('⚠️ Cole a Chave de Sincronização (botão "Chave da Extensão" em /faltas).', '#f59e0b');
+      return;
+    }
 
     const lista = Array.from(fichasCapturadas.values());
     setStatus(`Enviando ${lista.length} fichas para ${baseUrl}...`, '#6d28d9');

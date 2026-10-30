@@ -25,6 +25,7 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
     "/relatorios": { title: "Relatórios & Estatísticas", subtitle: "Indicadores de ocorrências e comunicação" },
     "/alunos": { title: "Alunos & Turmas", subtitle: "Gestão cadastral de estudantes" },
     "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação" },
+    "/equipe": { title: "Equipe & Acessos", subtitle: "Controle institucional de servidores autorizados" },
     "/auditoria": { title: "Trilha de Auditoria", subtitle: "Histórico imutável de conformidade" },
   };
 

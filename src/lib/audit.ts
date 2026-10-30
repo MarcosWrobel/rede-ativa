@@ -12,12 +12,29 @@ export type AuditAction =
   | "UPDATE_TEMPLATE"
   | "DELETE_TEMPLATE"
   | "UPDATE_LOW_ATTENDANCE"
-  | "USER_LOGIN";
+  | "USER_LOGIN"
+  | "LOGIN_DENIED"
+  | "CREATE_USER"
+  | "UPDATE_USER"
+  | "DEACTIVATE_USER";
 
 export interface AuditUser {
   id?: string;
   name: string;
   email: string;
+}
+
+export function extractClientIp(source?: Request | Headers | null): string | null {
+  if (!source) return null;
+  const hdrs = source instanceof Request ? source.headers : source;
+  const forwarded = hdrs.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const realIp = hdrs.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+  return null;
 }
 
 export async function logAudit({
@@ -27,16 +44,19 @@ export async function logAudit({
   details,
   user,
   ipAddress,
+  req,
 }: {
   action: AuditAction;
   entityType: string;
   entityId?: string;
   details?: Record<string, any> | string;
   user: AuditUser;
-  ipAddress?: string;
+  ipAddress?: string | null;
+  req?: Request | Headers | null;
 }) {
   try {
     const detailsStr = typeof details === "object" ? JSON.stringify(details) : details;
+    const resolvedIp = ipAddress || extractClientIp(req) || null;
 
     await prisma.auditLog.create({
       data: {
@@ -47,7 +67,7 @@ export async function logAudit({
         entityType,
         entityId: entityId || null,
         details: detailsStr || null,
-        ipAddress: ipAddress || null,
+        ipAddress: resolvedIp,
       },
     });
   } catch (err) {

@@ -69,8 +69,7 @@ export default function HistoricoClient({ initialLogs, classGroups, currentUser 
 
   const isAdmin =
     currentUser.role === "ADMIN" ||
-    currentUser.email.toLowerCase().trim() === "marcos.wrobel@escola.pr.gov.br" ||
-    currentUser.email.toLowerCase().includes("marcos");
+    currentUser.email.toLowerCase().trim() === "marcos.wrobel@escola.pr.gov.br";
 
   // Extract distinct pedagogas from logs
   const pedagogas = useMemo(() => {

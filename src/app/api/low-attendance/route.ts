@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { requireAuth } from "@/lib/permissions";
 
 export async function GET() {
   try {
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
+
     const records = await prisma.lowAttendanceRecord.findMany({
       include: {
         student: {
@@ -21,10 +24,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { studentId, attendancePercent, enrollmentDetail, actionsTaken } = await req.json();
     if (!studentId) {
@@ -47,7 +48,6 @@ export async function POST(req: Request) {
       include: { student: { include: { classGroup: true } } },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     await logAudit({
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "LowAttendanceRecord",
@@ -58,10 +58,11 @@ export async function POST(req: Request) {
         actionsTaken: record.actionsTaken,
       },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json(record);

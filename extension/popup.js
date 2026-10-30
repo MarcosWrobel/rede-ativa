@@ -6,8 +6,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnScan = document.getElementById('btn-popup-autoscroll');
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const isPowerBi = !!(tab && tab.url && tab.url.includes('powerbi.com'));
-  const isSerp = !!(tab && tab.url && tab.url.includes('redeprotecao.seed.pr.gov.br'));
+  const isPowerBi = Boolean(tab && tab.url && tab.url.includes('powerbi.com'));
+  const isSerp = Boolean(tab && tab.url && tab.url.includes('redeprotecao.seed.pr.gov.br'));
 
   if (isSerp) {
     if (subtitleEl) subtitleEl.textContent = 'Módulo SERP (Rede de Proteção)';
@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    chrome.scripting.executeScript({
+    await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: (isS) => {
         if (isS) {
@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (btn) btn.click();
         }
       },
-      args: [isSerp]
+      args: [isSerp],
     });
     statusEl.textContent = isSerp ? 'Rastreando fichas do SERP...' : 'Auto-scroll iniciado no Power BI!';
     statusEl.style.color = isSerp ? '#7c3aed' : '#0284c7';
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Download CSV
   document.getElementById('btn-popup-csv').addEventListener('click', async () => {
     if (tab && tab.id) {
-      chrome.scripting.executeScript({
+      await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (isS) => {
           if (isS) {
@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btn) btn.click();
           }
         },
-        args: [isSerp]
+        args: [isSerp],
       });
     }
   });
@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Copiar JSON
   document.getElementById('btn-popup-copy').addEventListener('click', async () => {
     if (tab && tab.id) {
-      chrome.scripting.executeScript({
+      await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (isS) => {
           if (isS) {
@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btn) btn.click();
           }
         },
-        args: [isSerp]
+        args: [isSerp],
       });
     }
   });
@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Sincronizar Vercel
   document.getElementById('btn-popup-sync').addEventListener('click', async () => {
     if (tab && tab.id) {
-      chrome.scripting.executeScript({
+      await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (isS) => {
           if (isS) {
@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btn) btn.click();
           }
         },
-        args: [isSerp]
+        args: [isSerp],
       });
     }
   });

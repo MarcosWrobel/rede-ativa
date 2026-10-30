@@ -1,46 +1,63 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { getSyncCorsHeaders } from "@/lib/cors";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-sync-token",
-};
+function verifySyncToken(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
-export async function OPTIONS() {
+export async function OPTIONS(req: Request) {
   return new NextResponse(null, {
     status: 200,
-    headers: corsHeaders,
+    headers: getSyncCorsHeaders(req),
   });
 }
 
 export async function POST(req: Request) {
+  const corsHeaders = getSyncCorsHeaders(req);
+
   try {
-    // 1. Verificação de Segurança (Sessão Web ou Token de API)
+    // 1. Verificação de Segurança (Sessão Web ativa ou Token de API configurado)
     const session = await auth();
     let authMethod: "SESSION" | "TOKEN" = "TOKEN";
     let userName = "Extensão SERP (API)";
     let userEmail = "sistema@leopoldina.pr.gov.br";
     let userId: string | undefined = undefined;
 
-    if (session?.user?.email) {
+    if (session?.user?.email && (session.user as any).active !== false) {
       authMethod = "SESSION";
       userEmail = session.user.email;
       userName = session.user.name || session.user.email.split("@")[0];
       userId = (session.user as any).id;
     } else {
+      const configuredToken = (process.env.SYNC_API_TOKEN || "").trim();
+      if (!configuredToken) {
+        return NextResponse.json(
+          {
+            error:
+              "Variável SYNC_API_TOKEN não configurada no servidor. Configure-a no ambiente (.env / Vercel) para habilitar sincronização externa.",
+          },
+          { status: 503, headers: corsHeaders }
+        );
+      }
+
       const authHeader = req.headers.get("authorization") || "";
       const customTokenHeader = req.headers.get("x-sync-token") || "";
       const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-      const providedToken = bearerToken || customTokenHeader;
+      const providedToken = bearerToken || customTokenHeader.trim();
 
-      const configuredToken = process.env.SYNC_API_TOKEN || "leopoldina-frequencia-2026-secret-sync";
-
-      if (!providedToken || providedToken !== configuredToken) {
+      if (!providedToken || !verifySyncToken(providedToken, configuredToken)) {
         return NextResponse.json(
-          { error: "Não autorizado. Forneça o token de sincronização correto." },
+          {
+            error:
+              "Não autorizado. Copie a Chave de Sincronização atualizada no painel Busca-ativa (/faltas) e cole na Extensão Chrome.",
+          },
           { status: 401, headers: corsHeaders }
         );
       }
@@ -86,7 +103,6 @@ export async function POST(req: Request) {
     let conselhoTutelarCount = 0;
     const naoEncontrados: Array<{ nome: string; cgm?: string; protocolo?: string }> = [];
 
-    // Helper para normalizar status SERP
     const normalizarStatus = (raw?: string): string => {
       const s = (raw || "").toUpperCase();
       if (s.includes("CONSELHO") || s.includes("CT")) return "CONSELHO_TUTELAR";
@@ -106,7 +122,6 @@ export async function POST(req: Request) {
         .replace(/\s+/g, " ")
         .trim();
 
-      // Busca por CGM ou Nome
       let studentId: string | undefined = cgmClean ? cgmMap.get(cgmClean) : undefined;
 
       if (!studentId && rawName) {
@@ -114,7 +129,6 @@ export async function POST(req: Request) {
         if (studentByName) {
           studentId = studentByName.id;
 
-          // Se o aluno não tinha CGM e o SERP trouxe, salva no aluno
           if (!studentByName.hasCgm && cgmClean) {
             try {
               await prisma.student.update({
@@ -145,11 +159,20 @@ export async function POST(req: Request) {
         const acoesDesc = item.acoesRealizadas || item.motivo || item.observacoes || "";
         const actionSummary = [
           protocoloStr ? `Ficha SERP #${protocoloStr}` : "Ficha SERP Ativa",
-          statusEnum === "CONSELHO_TUTELAR" ? "ENCAMINHADO CONSELHO TUTELAR" : (statusEnum === "MINISTERIO_PUBLICO" ? "MINISTÉRIO PÚBLICO" : "EM ACOMPANHAMENTO"),
+          statusEnum === "CONSELHO_TUTELAR"
+            ? "ENCAMINHADO CONSELHO TUTELAR"
+            : statusEnum === "MINISTERIO_PUBLICO"
+            ? "MINISTÉRIO PÚBLICO"
+            : "EM ACOMPANHAMENTO",
           acoesDesc ? `(${acoesDesc})` : null,
-        ].filter(Boolean).join(" - ");
+        ]
+          .filter(Boolean)
+          .join(" - ");
 
-        const detailsStr = typeof item.detalhes === "object" ? JSON.stringify(item.detalhes) : (item.detalhes || acoesDesc || null);
+        const detailsStr =
+          typeof item.detalhes === "object"
+            ? JSON.stringify(item.detalhes)
+            : item.detalhes || acoesDesc || null;
 
         await prisma.lowAttendanceRecord.upsert({
           where: { studentId },
@@ -162,7 +185,7 @@ export async function POST(req: Request) {
           },
           create: {
             studentId,
-            attendancePercent: 70.0, // Frequência estimada/padrão de gatilho SERP até ser sincronizado com o Power BI
+            attendancePercent: 70.0,
             enrollmentDetail: "Importado do SERP (Rede de Proteção)",
             serpProtocol: protocoloStr,
             serpStatus: statusEnum,
@@ -182,7 +205,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Registro na Trilha de Auditoria
+    // 4. Registro na Trilha de Auditoria com IP
     await logAudit({
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "SerpSync",
@@ -200,6 +223,7 @@ export async function POST(req: Request) {
         name: userName,
         email: userEmail,
       },
+      req,
     });
 
     return NextResponse.json(

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { requireAuth } from "@/lib/permissions";
 
 export async function GET(req: Request) {
   try {
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
+
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
 
@@ -26,10 +29,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { title, segment, prefixText, suffixText, isAbsenceRelated } = await req.json();
     if (!title) return NextResponse.json({ error: "Título obrigatório" }, { status: 400 });
@@ -44,17 +45,17 @@ export async function POST(req: Request) {
       },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     await logAudit({
       action: "CREATE_TEMPLATE",
       entityType: "MessageTemplate",
       entityId: template.id,
       details: { title: template.title, segment: template.segment },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json(template);
@@ -65,10 +66,8 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = await req.json();
     if (!id) return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
@@ -85,17 +84,17 @@ export async function PUT(req: Request) {
       },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     await logAudit({
       action: "UPDATE_TEMPLATE",
       entityType: "MessageTemplate",
       entityId: template.id,
       details: { title: template.title, segment: template.segment },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json(template);

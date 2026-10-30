@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkIsAdmin } from "@/lib/permissions";
 import AuditoriaClient from "./AuditoriaClient";
 import { redirect } from "next/navigation";
 
@@ -11,16 +12,7 @@ export default async function AuditoriaPage() {
     redirect("/login");
   }
 
-  const email = (session.user.email || "").toLowerCase().trim();
-  const role = (session.user as any)?.role;
-  const isAdmin =
-    role === "ADMIN" ||
-    email === "marcos.wrobel@escola.pr.gov.br" ||
-    email.includes("marcos") ||
-    (process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.toLowerCase().trim());
-
-  // Apenas o Administrador pode visualizar a aba de auditoria
-  if (!isAdmin) {
+  if (!checkIsAdmin(session)) {
     redirect("/busca-ativa");
   }
 

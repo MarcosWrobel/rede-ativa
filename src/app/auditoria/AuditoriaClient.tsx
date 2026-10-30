@@ -1,19 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { 
-  ShieldCheck, 
-  Search, 
-  Calendar, 
-  User, 
-  Send, 
-  Edit3, 
-  Trash2, 
-  LogIn, 
-  FileText,
+import {
+  ShieldCheck,
+  Search,
   ChevronLeft,
   ChevronRight,
-  Info
 } from "lucide-react";
 
 interface Props {
@@ -21,7 +13,7 @@ interface Props {
 }
 
 export default function AuditoriaClient({ initialLogs }: Props) {
-  const [logs, setLogs] = useState<any[]>(initialLogs);
+  const [logs] = useState<any[]>(initialLogs);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAction, setSelectedAction] = useState("TODOS");
   const [page, setPage] = useState(1);
@@ -29,11 +21,13 @@ export default function AuditoriaClient({ initialLogs }: Props) {
 
   const filteredLogs = useMemo(() => {
     return logs.filter((l) => {
+      const term = searchTerm.toLowerCase();
       const matchSearch =
-        !searchTerm ||
-        l.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        l.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (l.details && l.details.toLowerCase().includes(searchTerm.toLowerCase()));
+        !term ||
+        l.userName.toLowerCase().includes(term) ||
+        l.userEmail.toLowerCase().includes(term) ||
+        (l.ipAddress && l.ipAddress.toLowerCase().includes(term)) ||
+        (l.details && l.details.toLowerCase().includes(term));
 
       const matchAction = selectedAction === "TODOS" || l.action === selectedAction;
 
@@ -65,6 +59,16 @@ export default function AuditoriaClient({ initialLogs }: Props) {
         return <span className="px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200">Exclusão de Histórico</span>;
       case "USER_LOGIN":
         return <span className="px-2 py-0.5 rounded font-bold bg-slate-100 text-slate-700 border border-slate-200">Login no Sistema</span>;
+      case "LOGIN_DENIED":
+        return <span className="px-2 py-0.5 rounded font-bold bg-red-100 text-red-800 border border-red-300">Login Bloqueado</span>;
+      case "CREATE_USER":
+        return <span className="px-2 py-0.5 rounded font-bold bg-teal-50 text-teal-800 border border-teal-200">Autorização Equipe</span>;
+      case "UPDATE_USER":
+        return <span className="px-2 py-0.5 rounded font-bold bg-blue-50 text-blue-800 border border-blue-200">Alteração Perfil</span>;
+      case "DEACTIVATE_USER":
+        return <span className="px-2 py-0.5 rounded font-bold bg-orange-50 text-orange-800 border border-orange-200">Revogação Equipe</span>;
+      case "UPDATE_LOW_ATTENDANCE":
+        return <span className="px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Sincronização / Faltas</span>;
       case "INITIAL_DATABASE_MIGRATION":
         return <span className="px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Migração Inicial</span>;
       default:
@@ -82,7 +86,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <span>Trilha de Auditoria & Conformidade</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Registro imutável de todas as interações com dados sensíveis escolares, e-mail institucional e carimbo de data/hora.
+            Registro imutável de todas as interações com dados sensíveis escolares, e-mail institucional, IP de origem e carimbo de data/hora.
           </p>
         </div>
         <div className="text-xs text-slate-500 font-medium">
@@ -97,7 +101,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
               type="text"
-              placeholder="Buscar por nome, e-mail da pedagoga ou dados da ação..."
+              placeholder="Buscar por nome, e-mail, IP ou dados da ação..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -121,8 +125,12 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <option value="UPDATE_STUDENT">Edição de Aluno</option>
             <option value="DELETE_STUDENT">Inativação de Aluno</option>
             <option value="MARK_REPLY">Retorno de Responsável</option>
+            <option value="UPDATE_LOW_ATTENDANCE">Sincronização / Faltas</option>
             <option value="USER_LOGIN">Login no Sistema</option>
-            <option value="INITIAL_DATABASE_MIGRATION">Migração Inicial</option>
+            <option value="LOGIN_DENIED">Login Bloqueado</option>
+            <option value="CREATE_USER">Autorização Equipe</option>
+            <option value="UPDATE_USER">Alteração Perfil</option>
+            <option value="DEACTIVATE_USER">Revogação Equipe</option>
           </select>
         </div>
       </div>
@@ -136,6 +144,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
                 <th className="px-4 py-3">Data / Hora Exata</th>
                 <th className="px-4 py-3">Usuário Responsável</th>
                 <th className="px-4 py-3">E-mail @escola</th>
+                <th className="px-4 py-3">IP Origem</th>
                 <th className="px-4 py-3">Tipo de Ação</th>
                 <th className="px-4 py-3">Detalhes Registrados</th>
               </tr>
@@ -164,11 +173,14 @@ export default function AuditoriaClient({ initialLogs }: Props) {
                     <td className="px-4 py-3 font-mono text-sky-700 whitespace-nowrap">
                       {log.userEmail}
                     </td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                      {log.ipAddress || "—"}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {getActionBadge(log.action)}
                     </td>
                     <td className="px-4 py-3 text-slate-600 font-mono text-[11px]">
-                      {typeof parsedDetails === "object" ? (
+                      {typeof parsedDetails === "object" && parsedDetails !== null ? (
                         <div className="max-w-md truncate">
                           {Object.entries(parsedDetails).map(([k, v]) => (
                             <span key={k} className="mr-2">
@@ -177,7 +189,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
                           ))}
                         </div>
                       ) : (
-                        <span className="truncate max-w-md block">{String(parsedDetails)}</span>
+                        <span className="truncate max-w-md block">{String(parsedDetails || "")}</span>
                       )}
                     </td>
                   </tr>
@@ -185,7 +197,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
               })}
               {paginatedLogs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     Nenhum registro de auditoria encontrado.
                   </td>
                 </tr>

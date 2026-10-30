@@ -35,7 +35,8 @@ import {
   Sunset,
   Moon,
   Info,
-  Sparkles
+  Sparkles,
+  Key
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
 
@@ -90,6 +91,25 @@ export default function FaltasClient({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [importError, setImportError] = useState("");
+  const [copyTokenStatus, setCopyTokenStatus] = useState<"idle" | "copied" | "missing">("idle");
+
+  const handleCopyExtensionToken = async () => {
+    try {
+      const res = await fetch("/api/sync-config");
+      const data = await res.json();
+      if (res.ok && data.configured && data.syncToken) {
+        await navigator.clipboard.writeText(data.syncToken);
+        setCopyTokenStatus("copied");
+        setTimeout(() => setCopyTokenStatus("idle"), 3000);
+      } else {
+        setCopyTokenStatus("missing");
+        setTimeout(() => setCopyTokenStatus("idle"), 4500);
+      }
+    } catch {
+      setCopyTokenStatus("missing");
+      setTimeout(() => setCopyTokenStatus("idle"), 4500);
+    }
+  };
 
   // Helper para interpretar enrollmentDetail
   const parseDetail = (detail?: string | null) => {
@@ -594,6 +614,37 @@ export default function FaltasClient({
             <Download className="w-4 h-4 text-purple-600" />
             <span>Baixar Extensão (.ZIP)</span>
           </a>
+
+          {/* Botão Autenticado para Copiar Chave da Extensão */}
+          <button
+            type="button"
+            onClick={handleCopyExtensionToken}
+            title="Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome"
+            className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition cursor-pointer ${
+              copyTokenStatus === "copied"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : copyTokenStatus === "missing"
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+            }`}
+          >
+            {copyTokenStatus === "copied" ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>Chave Copiada!</span>
+              </>
+            ) : copyTokenStatus === "missing" ? (
+              <>
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>Defina SYNC_API_TOKEN</span>
+              </>
+            ) : (
+              <>
+                <Key className="w-4 h-4 text-slate-500" />
+                <span>Chave da Extensão</span>
+              </>
+            )}
+          </button>
 
           {/* Botão de Importação Power BI */}
           <button

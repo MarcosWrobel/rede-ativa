@@ -11,6 +11,7 @@ import {
   Users, 
   FileText, 
   ShieldCheck, 
+  UserCheck,
   LogOut,
   GraduationCap,
   ChevronLeft,
@@ -50,8 +51,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
   const userEmail = (currentUser?.email || "").toLowerCase().trim();
   const isAdmin =
     currentUser?.role === "ADMIN" ||
-    userEmail === "marcos.wrobel@escola.pr.gov.br" ||
-    userEmail.includes("marcos");
+    userEmail === "marcos.wrobel@escola.pr.gov.br";
 
   const navLinks = [
     { href: "/busca-ativa", label: "Painel de Envio", icon: Send },
@@ -60,7 +60,12 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
     { href: "/relatorios", label: "Relatórios & Gráficos", icon: BarChart3 },
     { href: "/alunos", label: "Alunos & Turmas", icon: Users },
     { href: "/modelos", label: "Modelos de Mensagem", icon: FileText },
-    ...(isAdmin ? [{ href: "/auditoria", label: "Trilha de Auditoria", icon: ShieldCheck, badge: "ADM" }] : []),
+    ...(isAdmin
+      ? [
+          { href: "/equipe", label: "Equipe & Acessos", icon: UserCheck, badge: "ADM" },
+          { href: "/auditoria", label: "Trilha de Auditoria", icon: ShieldCheck, badge: "ADM" },
+        ]
+      : []),
   ];
 
   if (pathname === "/login") return null;

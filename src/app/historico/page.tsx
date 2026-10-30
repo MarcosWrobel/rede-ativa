@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkIsAdmin } from "@/lib/permissions";
 import HistoricoClient from "./HistoricoClient";
 import { redirect } from "next/navigation";
 
@@ -11,13 +12,7 @@ export default async function HistoricoPage() {
     redirect("/login");
   }
 
-  const email = (session.user.email || "").toLowerCase().trim();
-  const role = (session.user as any)?.role;
-  const isAdmin =
-    role === "ADMIN" ||
-    email === "marcos.wrobel@escola.pr.gov.br" ||
-    email.includes("marcos") ||
-    (process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.toLowerCase().trim());
+  const isAdmin = checkIsAdmin(session);
 
   const [logs, classGroups] = await Promise.all([
     prisma.messageLog.findMany({

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAuth } from "@/lib/permissions";
 import { GoogleGenAI } from "@google/genai";
 
 export const maxDuration = 60;
@@ -7,10 +7,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
     const prompt = body?.prompt;

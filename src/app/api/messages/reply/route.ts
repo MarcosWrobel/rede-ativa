@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { requireAuth } from "@/lib/permissions";
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { logId, guardianReplied, replyNotes } = await req.json();
     if (!logId) {
       return NextResponse.json({ error: "ID do log ausente" }, { status: 400 });
     }
-
-    const pedagogaUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
 
     const previous = await prisma.messageLog.findUnique({
       where: { id: logId },
@@ -30,7 +24,7 @@ export async function POST(req: Request) {
         guardianReplied: Boolean(guardianReplied),
         replyNotes: replyNotes !== undefined ? replyNotes : previous?.replyNotes,
         repliedAt: Boolean(guardianReplied) ? new Date() : null,
-        repliedByUserId: Boolean(guardianReplied) ? pedagogaUser?.id : null,
+        repliedByUserId: Boolean(guardianReplied) ? authCheck.userId || null : null,
       },
     });
 
@@ -45,10 +39,11 @@ export async function POST(req: Request) {
         notes: replyNotes,
       },
       user: {
-        id: pedagogaUser?.id,
-        name: pedagogaUser?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json({ success: true, updated });

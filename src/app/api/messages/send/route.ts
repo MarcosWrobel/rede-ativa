@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { requireAuth } from "@/lib/permissions";
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
     const { studentId, templateId, reasonTitle, messageContent, customPhone } = body;
@@ -27,16 +25,12 @@ export async function POST(req: Request) {
     }
 
     // Clean phone number
-    let rawPhone = customPhone || student.phone;
+    const rawPhone = customPhone || student.phone;
     let digits = rawPhone.replace(/\D/g, "");
     if (digits.startsWith("5555")) digits = digits.slice(2);
     if (!digits.startsWith("55")) digits = "55" + digits;
 
-    const pedagogaUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    const sentByName = pedagogaUser?.name || session.user.name || "Pedagoga";
+    const sentByName = authCheck.userName;
 
     // 1. Create message log
     const log = await prisma.messageLog.create({
@@ -46,7 +40,7 @@ export async function POST(req: Request) {
         reasonTitle,
         messageContent,
         phoneUsed: digits,
-        sentByUserId: pedagogaUser?.id || null,
+        sentByUserId: authCheck.userId || null,
         sentByName,
         sentAt: new Date(),
       },
@@ -65,10 +59,11 @@ export async function POST(req: Request) {
         messageSnippet: messageContent.slice(0, 100),
       },
       user: {
-        id: pedagogaUser?.id,
+        id: authCheck.userId,
         name: sentByName,
-        email: session.user.email,
+        email: authCheck.email,
       },
+      req,
     });
 
     // WhatsApp Web URL

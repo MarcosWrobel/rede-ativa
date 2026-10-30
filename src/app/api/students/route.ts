@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { requireAuth } from "@/lib/permissions";
 
 export async function GET(req: Request) {
   try {
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
+
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
     const classGroupId = searchParams.get("classGroupId");
@@ -34,10 +37,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { name, guardianName, phone, classGroupId } = await req.json();
     if (!name || !phone || !classGroupId) {
@@ -57,8 +58,6 @@ export async function POST(req: Request) {
       include: { classGroup: true },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
-
     await logAudit({
       action: "CREATE_STUDENT",
       entityType: "Student",
@@ -70,10 +69,11 @@ export async function POST(req: Request) {
         turma: student.classGroup.name,
       },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json(student);
@@ -84,10 +84,8 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { id, name, guardianName, phone, classGroupId } = await req.json();
     if (!id) return NextResponse.json({ error: "ID ausente" }, { status: 400 });
@@ -111,8 +109,6 @@ export async function PUT(req: Request) {
       include: { classGroup: true },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
-
     await logAudit({
       action: "UPDATE_STUDENT",
       entityType: "Student",
@@ -122,10 +118,11 @@ export async function PUT(req: Request) {
         new: { name: student.name, phone: student.phone, turma: student.classGroup.name },
       },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json(student);
@@ -136,10 +133,8 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -151,18 +146,17 @@ export async function DELETE(req: Request) {
       include: { classGroup: true },
     });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
-
     await logAudit({
       action: "DELETE_STUDENT",
       entityType: "Student",
       entityId: student.id,
       details: { name: student.name, turma: student.classGroup.name, deactivated: true },
       user: {
-        id: user?.id,
-        name: user?.name || session.user.name || "Pedagoga",
-        email: session.user.email,
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
       },
+      req,
     });
 
     return NextResponse.json({ success: true });

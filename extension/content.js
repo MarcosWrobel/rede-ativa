@@ -206,23 +206,27 @@
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
 
-    if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token'], (res) => {
-        if (inputUrl) {
-          inputUrl.value = res.leopoldina_server_url || 'https://busca-ativa-leopoldina.vercel.app';
-        }
-        if (inputToken) {
-          inputToken.value = res.leopoldina_sync_token || 'leopoldina-frequencia-2026-secret-sync';
-        }
-      });
-    } else {
-      if (inputUrl) inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
-      if (inputToken) inputToken.value = 'leopoldina-frequencia-2026-secret-sync';
-    }
-
-    const salvarConfigs = () => {
+    (async () => {
       if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({
+        try {
+          const res = await chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token']);
+          if (inputUrl) {
+            inputUrl.value = res.leopoldina_server_url || 'https://busca-ativa-leopoldina.vercel.app';
+          }
+          if (inputToken) {
+            inputToken.value = res.leopoldina_sync_token || '';
+          }
+        } catch (err) {
+          console.warn('[Leopoldina] Falha ao ler storage:', err);
+        }
+      } else {
+        if (inputUrl) inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
+      }
+    })();
+
+    const salvarConfigs = async () => {
+      if (chrome.storage && chrome.storage.local) {
+        await chrome.storage.local.set({
           leopoldina_server_url: inputUrl?.value?.trim() || '',
           leopoldina_sync_token: inputToken?.value?.trim() || '',
         });
@@ -475,16 +479,17 @@
   }
 
   // Copia JSON para clipboard
-  function copiarJSON() {
+  async function copiarJSON() {
     if (alunosCapturados.size === 0) {
       extrairLinhasVisiveis();
     }
     const lista = Array.from(alunosCapturados.values());
-    navigator.clipboard.writeText(JSON.stringify(lista, null, 2)).then(() => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(lista, null, 2));
       setStatus(`JSON com ${lista.length} alunos copiado!`, '#10b981');
-    }).catch(() => {
+    } catch {
       setStatus('Erro ao copiar para clipboard.', '#ef4444');
-    });
+    }
   }
 
   // Sincroniza diretamente com a Vercel (ou Localhost)
@@ -500,7 +505,15 @@
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
     const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app').replace(/\/+$/, '');
-    const token = inputToken?.value?.trim() || 'leopoldina-frequencia-2026-secret-sync';
+    const token = inputToken?.value?.trim() || '';
+
+    if (!token) {
+      const settingsBox = document.getElementById('leo-settings-box');
+      if (settingsBox) settingsBox.open = true;
+      if (inputToken) inputToken.focus();
+      setStatus('⚠️ Cole a Chave de Sincronização (botão "Chave da Extensão" em /faltas).', '#f59e0b');
+      return;
+    }
 
     const lista = Array.from(alunosCapturados.values());
     setStatus(`Enviando ${lista.length} alunos para ${baseUrl}...`, '#6366f1');

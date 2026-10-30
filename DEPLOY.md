@@ -28,7 +28,7 @@ Como a Vercel opera em ambiente serverless, o banco de dados deve estar hospedad
 
 O repositório Git local já foi inicializado e commitado na branch `main`.
 
-1. Acesse **[github.com/new](https://github.com/new)** e crie um novo repositório (ex: `busca-ativa-leopoldina`).
+1. Acesse **[github.com/new](https://github.com/new)** e crie um novo repositório **Privado** (ex: `busca-ativa-leopoldina`).
 2. No seu terminal, vincule o repositório remoto e faça o push:
    ```bash
    git remote add origin https://github.com/SEU_USUARIO/busca-ativa-leopoldina.git
@@ -47,6 +47,8 @@ O repositório Git local já foi inicializado e commitado na branch `main`.
    - `NEXTAUTH_URL`: `https://busca-ativa-leopoldina.vercel.app` (ou o domínio que a Vercel atribuir).
    - `GOOGLE_CLIENT_ID`: Seu Client ID do Google Cloud Console.
    - `GOOGLE_CLIENT_SECRET`: Seu Client Secret do Google Cloud Console.
+   - `ADMIN_EMAIL`: E-mail institucional do administrador principal (ex: `marcos.wrobel@escola.pr.gov.br`).
+   - `SYNC_API_TOKEN`: Token secreto exigido pela Extensão Chrome para sincronizar Power BI e SERP (gere com `openssl rand -hex 24`).
 4. Clique em **Deploy**. A Vercel executará automaticamente `prisma generate` e `next build`.
 
 ---

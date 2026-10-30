@@ -1,13 +1,46 @@
 import { signIn } from "@/lib/auth";
-import { GraduationCap, ShieldCheck } from "lucide-react";
+import { ShieldCheck, AlertOctagon } from "lucide-react";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const session = await auth();
-  if (session?.user) {
+  if (session?.user && (session.user as any).active !== false) {
     redirect("/busca-ativa");
   }
+
+  const params = await searchParams;
+  const errorCode = params?.error;
+
+  const errorMessages: Record<string, { title: string; body: string }> = {
+    DomainRestricted: {
+      title: "Domínio Não Institucional",
+      body: "O acesso é exclusivo para servidores estaduais autenticados com e-mail @escola.pr.gov.br.",
+    },
+    NotAuthorizedTeam: {
+      title: "E-mail Não Autorizado na Equipe",
+      body: "Sua conta @escola.pr.gov.br ainda não consta na lista de equipe autorizada do Colégio Leopoldina. Solicite a liberação à Administração na aba Equipe & Acessos.",
+    },
+    AccountInactive: {
+      title: "Acesso Revogado / Inativo",
+      body: "Seu acesso encontra-se temporariamente desativado. Contate a Direção ou o Administrador do sistema.",
+    },
+    ServerError: {
+      title: "Erro Temporário de Autenticação",
+      body: "Não foi possível validar sua conta no momento. Tente novamente em instantes.",
+    },
+  };
+
+  const activeError = errorCode
+    ? errorMessages[errorCode] || {
+        title: "Acesso Não Autorizado",
+        body: "Verifique se está utilizando sua conta institucional autorizada pela escola.",
+      }
+    : null;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-100">
@@ -21,14 +54,27 @@ export default async function LoginPage() {
           <p className="text-sky-100 text-sm mt-1">Sistema de Busca Ativa & Comunicação Escolar</p>
         </div>
 
-        <div className="p-8 space-y-6">
-          {/* Alerta de Segurança e Restrição de Domínio */}
+        <div className="p-8 space-y-5">
+          {activeError && (
+            <div
+              role="alert"
+              className="flex items-start space-x-3 bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-900"
+            >
+              <AlertOctagon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">{activeError.title}</p>
+                <p className="mt-0.5 text-red-800 leading-relaxed">{activeError.body}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Alerta de Segurança e Restrição de Equipe */}
           <div className="flex items-start space-x-3 bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900">
             <ShieldCheck className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Acesso Restrito</p>
+              <p className="font-bold">Acesso Restrito à Equipe Autorizada (LGPD)</p>
               <p className="mt-0.5 text-amber-800 leading-relaxed">
-                Utilize exclusivamente sua conta Google institucional terminada em <strong>@escola.pr.gov.br</strong>.
+                Utilize sua conta Google institucional <strong>@escola.pr.gov.br</strong> previamente cadastrada pela escola.
               </p>
             </div>
           </div>
