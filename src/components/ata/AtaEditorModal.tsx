@@ -436,6 +436,7 @@ export default function AtaEditorModal({
           category,
           studentNames,
           guardianNames,
+          attendedAt: existingMinute?.attendedAt || new Date().toISOString(),
           apiKey: savedKey || undefined,
         }),
       });
@@ -457,21 +458,41 @@ export default function AtaEditorModal({
         if (data.result.formalSummary) setSummary(data.result.formalSummary);
         if (data.result.agreementsSummary) setAgreementsSummary(data.result.agreementsSummary);
 
-        if (data.result.actionItems && data.result.actionItems.length > 0) {
-          const suggested = data.result.actionItems.map((a: any) => {
-            let dueDate = "";
-            if (a.suggestedDaysToComplete) {
-              const d = new Date();
-              d.setDate(d.getDate() + a.suggestedDaysToComplete);
-              dueDate = d.toISOString().slice(0, 10);
-            }
-            return {
-              description: a.description,
-              responsible: a.responsible || "FAMILIA",
-              dueDate,
-            };
-          });
-          setActionItems(suggested);
+        if (data.result.actionItems && Array.isArray(data.result.actionItems) && data.result.actionItems.length > 0) {
+          const suggested = data.result.actionItems
+            .map((a: any) => {
+              const days = Number(a.suggestedDaysToComplete || a.prazoDias || a.prazo || a.days);
+              let dueDate = "";
+              if (days && !isNaN(days) && days > 0) {
+                const d = new Date();
+                d.setDate(d.getDate() + days);
+                dueDate = d.toISOString().slice(0, 10);
+              }
+              const desc =
+                typeof a === "string"
+                  ? a
+                  : a.description ||
+                    a.descricao ||
+                    a.acao ||
+                    a.item ||
+                    a.task ||
+                    a.texto ||
+                    "";
+              const resp =
+                typeof a === "object" && a.responsible
+                  ? a.responsible
+                  : a.responsavel || "FAMILIA";
+              return {
+                description: String(desc || "").trim(),
+                responsible: resp,
+                dueDate,
+              };
+            })
+            .filter((item: any) => item.description.length > 0);
+
+          if (suggested.length > 0) {
+            setActionItems(suggested);
+          }
         }
 
         if (data.usedFallback) {

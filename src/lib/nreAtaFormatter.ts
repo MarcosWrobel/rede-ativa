@@ -4,6 +4,72 @@
  * e rigor gramatical (pretérito perfeito, texto corrido, numerais por extenso e ciência).
  */
 
+const DIAS_EXTENSO = [
+  "", "primeiro", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove", "dez",
+  "onze", "doze", "treze", "quatorze", "quinze", "dezesseis", "dezessete", "dezoito", "dezenove", "vinte",
+  "vinte e um", "vinte e dois", "vinte e três", "vinte e quatro", "vinte e cinco", "vinte e seis",
+  "vinte e sete", "vinte e oito", "vinte e nove", "trinta", "trinta e um"
+];
+
+const MESES = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+];
+
+function convertYearToExtenso(year: number): string {
+  const yearsMap: Record<number, string> = {
+    2024: "dois mil e vinte e quatro",
+    2025: "dois mil e vinte e cinco",
+    2026: "dois mil e vinte e seis",
+    2027: "dois mil e vinte e sete",
+    2028: "dois mil e vinte e oito",
+    2029: "dois mil e vinte e nove",
+    2030: "dois mil e trinta",
+  };
+  return yearsMap[year] || String(year);
+}
+
+export function formatAtaDateExtenso(dateInput?: string | Date | null): {
+  diaExtenso: string;
+  mesExtenso: string;
+  anoExtenso: string;
+  dataExtensoCompleta: string;
+  horaFormatada: string;
+} {
+  let d: Date;
+  if (!dateInput) {
+    d = new Date();
+  } else if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    d = new Date(`${dateInput}T12:00:00.000-03:00`);
+  } else {
+    d = new Date(dateInput);
+  }
+  const validDate = isNaN(d.getTime()) ? new Date() : d;
+
+  const day = validDate.getDate();
+  const diaExtenso = DIAS_EXTENSO[day] || String(day);
+  const mesExtenso = MESES[validDate.getMonth()] || "outubro";
+  const year = validDate.getFullYear();
+  const anoExtenso = convertYearToExtenso(year);
+
+  const hours = validDate.getHours();
+  const minutes = validDate.getMinutes();
+  const horaFormatada = `${String(hours).padStart(2, "0")}h${String(minutes).padStart(2, "0")}`;
+
+  const dataExtensoCompleta =
+    day === 1
+      ? `Ao primeiro dia do mês de ${mesExtenso} do ano de ${anoExtenso}`
+      : `Aos ${diaExtenso} dias do mês de ${mesExtenso} do ano de ${anoExtenso}`;
+
+  return {
+    diaExtenso,
+    mesExtenso,
+    anoExtenso,
+    dataExtensoCompleta,
+    horaFormatada,
+  };
+}
+
 export function sanitizeAndCorrectPedagogicalNotes(text: string): string {
   if (!text) return "";
   let clean = text
@@ -56,15 +122,18 @@ export function generateLocalAtaMinuta({
   category,
   studentNames,
   guardianNames,
+  attendedAt,
 }: {
   rawNotes: string;
   existingSummary?: string;
   category: string;
   studentNames: string[];
   guardianNames: string[];
+  attendedAt?: string | Date;
 }) {
   const studentsStr = studentNames.length > 0 ? studentNames.join(" e ") : "o(a) estudante";
   const guardiansStr = guardianNames.length > 0 ? guardianNames.join(", ") : "o(a) responsável legal";
+  const dateInfo = formatAtaDateExtenso(attendedAt);
 
   // Se já havia um texto prévio, limpa quebras e reaproveita aplicando sanitização
   if (existingSummary && existingSummary.trim().length >= 10) {
@@ -96,7 +165,7 @@ export function generateLocalAtaMinuta({
 
   const cleanNotes = sanitizeAndCorrectPedagogicalNotes(rawNotes || "");
 
-  const formalSummary = `Aos dias correntes, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento com a presença de ${guardiansStr}, referente a(o) ${studentsStr}, para tratar de assuntos pertinentes a(o) ${category.toLowerCase().replace(/_/g, " ")}. Pela equipe pedagógica foram pontuados os seguintes aspectos: ${cleanNotes} O(A) responsável tomou ciência das orientações escolares, apresentou seus esclarecimentos e comprometeu-se a acompanhar a rotina e as recomendações pedagógicas estabelecidas nesta data. Nada mais havendo a constar, a presente ata foi lida e conferida por todos os presentes, que apuseram sua ciência e assinatura.`;
+  const formalSummary = `${dateInfo.dataExtensoCompleta}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento com a presença de ${guardiansStr}, referente a(o) ${studentsStr}, para tratar de assuntos pertinentes a(o) ${category.toLowerCase().replace(/_/g, " ")}. Pela equipe pedagógica foram pontuados os seguintes aspectos: ${cleanNotes} O(A) responsável tomou ciência das orientações escolares, apresentou seus esclarecimentos e comprometeu-se a acompanhar a rotina e as recomendações pedagógicas estabelecidas nesta data. Nada mais havendo a constar, a presente ata foi lida e conferida por todos os presentes, que apuseram sua ciência e assinatura.`;
 
   return {
     formalSubject: `Atendimento Pedagógico — ${category.replace(/_/g, " ")}`,
