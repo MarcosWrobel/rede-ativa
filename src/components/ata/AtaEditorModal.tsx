@@ -49,6 +49,7 @@ interface Props {
   availableStudents: StudentOption[];
   preSelectedStudentId?: string;
   existingMinute?: any;
+  isAdmin?: boolean;
 }
 
 const CATEGORIES = [
@@ -67,6 +68,7 @@ export default function AtaEditorModal({
   availableStudents,
   preSelectedStudentId,
   existingMinute,
+  isAdmin = false,
 }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -116,6 +118,8 @@ export default function AtaEditorModal({
   const [showVoidForm, setShowVoidForm] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [savingVoid, setSavingVoid] = useState(false);
+  const [showAdminDeleteConfirm, setShowAdminDeleteConfirm] = useState(false);
+  const [isDeletingAdmin, setIsDeletingAdmin] = useState(false);
   const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   // Inicializa / reseta o modal sempre que abrir ou trocar de ata
@@ -717,6 +721,23 @@ export default function AtaEditorModal({
     }
   };
 
+  const handleAdminDelete = async () => {
+    if (!viewMinuteData?.id) return;
+    setIsDeletingAdmin(true);
+    try {
+      const res = await fetch(`/api/atas/${viewMinuteData.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao excluir ata");
+      setShowAdminDeleteConfirm(false);
+      onSaved();
+      onClose();
+    } catch (err: any) {
+      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao excluir ata pelo Administrador." });
+    } finally {
+      setIsDeletingAdmin(false);
+    }
+  };
+
   // ============================================================================
   // TELA A: CELEBRAÇÃO DE ATA RECÉM-LAVRADA COM SUCESSO
   // ============================================================================
@@ -1096,6 +1117,47 @@ export default function AtaEditorModal({
                             className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer disabled:opacity-50"
                           >
                             {savingVoid ? "Averbando..." : "Confirmar Cancelamento"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isAdmin && (
+                  <div className="pt-2 border-t border-slate-200 mt-2">
+                    {!showAdminDeleteConfirm ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminDeleteConfirm(true)}
+                        className="text-rose-600 hover:text-rose-700 font-bold text-[11px] flex items-center space-x-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Excluir permanentemente do livro de registros (Administrador Geral)</span>
+                      </button>
+                    ) : (
+                      <div className="p-3 bg-rose-100 border border-rose-300 rounded-xl space-y-2 mt-1">
+                        <p className="text-xs font-bold text-rose-900">
+                          ⚠️ Exclusão Permanente de Registro (Administrador Geral):
+                        </p>
+                        <p className="text-xs text-rose-800">
+                          Esta ata ({viewMinuteData.ataNumber ? `Nº ${String(viewMinuteData.ataNumber).padStart(3, "0")}/${viewMinuteData.year}` : "Rascunho"}) e todos os seus participantes e assinaturas serão apagados em definitivo do banco de dados. Use esta ação para expurgar registros gerados em teste.
+                        </p>
+                        <div className="flex justify-end space-x-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowAdminDeleteConfirm(false)}
+                            className="px-3 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer text-xs"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAdminDelete}
+                            disabled={isDeletingAdmin}
+                            className="px-3 py-1 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-bold cursor-pointer disabled:opacity-50 text-xs"
+                          >
+                            {isDeletingAdmin ? "Excluindo..." : "Confirmar Exclusão Definitiva"}
                           </button>
                         </div>
                       </div>

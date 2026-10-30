@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { checkIsAdmin } from "@/lib/permissions";
 import { loadStudent360Bundle } from "@/lib/safePhase3Queries";
 import ProntuarioClient from "./ProntuarioClient";
 import { notFound, redirect } from "next/navigation";
@@ -22,6 +23,8 @@ export default async function ProntuarioPage({
     notFound();
   }
 
+  const isAdmin = checkIsAdmin(session);
+
   return (
     <ProntuarioClient
       initialStudent={bundle.student}
@@ -34,6 +37,7 @@ export default async function ProntuarioPage({
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",
       }}
+      isAdmin={isAdmin}
     />
   );
 }

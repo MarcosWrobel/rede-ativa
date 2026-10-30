@@ -53,6 +53,7 @@ interface Props {
     name: string;
     email: string;
   };
+  isAdmin?: boolean;
 }
 
 type TabKey = "overview" | "contacts" | "justifications" | "timeline";
@@ -64,6 +65,7 @@ export default function ProntuarioClient({
   initialAttendances,
   initialSnapshots,
   initialMinutes = [],
+  isAdmin,
 }: Props) {
   const [student, setStudent] = useState<any>(initialStudent);
   const [contacts, setContacts] = useState<any[]>(initialContacts);
@@ -1534,6 +1536,7 @@ export default function ProntuarioClient({
       {/* Modal do Novo Livro Oficial de Atas Pedagógicas */}
       <AtaEditorModal
         isOpen={isAtaEditorOpen}
+        isAdmin={isAdmin}
         onClose={() => {
           setIsAtaEditorOpen(false);
           setEditingMinute(null);

@@ -29,6 +29,7 @@ export type AuditAction =
   | "CREATE_ATA_DRAFT"
   | "UPDATE_ATA_DRAFT"
   | "DELETE_ATA_DRAFT"
+  | "ADMIN_DELETE_ATA"
   | "FINALIZE_ATA"
   | "ADD_ATA_ADDENDUM"
   | "VOID_ATA"

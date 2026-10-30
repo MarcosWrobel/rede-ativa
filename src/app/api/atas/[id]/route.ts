@@ -357,13 +357,15 @@ export async function DELETE(
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
     }
 
-    // REGRA DE OURO JURÍDICA: Apenas rascunhos podem ser excluídos (não consumiram número).
-    // Atas lavradas NUNCA podem ser deletadas; se houver erro, usa-se 'Tornar Sem Efeito'.
-    if (existing.status !== "DRAFT") {
+    const isAdmin = authCheck.role === "ADMIN";
+
+    // REGRA DE OURO JURÍDICA: Usuários comuns só podem descartar rascunhos (DRAFT).
+    // Administradores Gerais possuem permissão de expurgo técnico (ex: descarte de atas de teste/homologação).
+    if (!isAdmin && existing.status !== "DRAFT") {
       return NextResponse.json(
         {
           error:
-            "Ata oficial lavrada não pode ser excluída do livro de registros. Utilize a função 'Tornar Sem Efeito' com justificativa auditada.",
+            "Ata oficial lavrada não pode ser excluída do livro de registros. Apenas Administradores do sistema possuem permissão para expurgar registros.",
         },
         { status: 403 }
       );
@@ -373,10 +375,13 @@ export async function DELETE(
 
     const ip = extractClientIp(req);
     await logAudit({
-      action: "DELETE_ATA_DRAFT",
+      action: existing.status === "DRAFT" ? "DELETE_ATA_DRAFT" : "ADMIN_DELETE_ATA",
       entityType: "PedagogicalMinute",
       entityId: id,
-      details: `Rascunho descartado: ${existing.subject}`,
+      details:
+        existing.status === "DRAFT"
+          ? `Rascunho descartado: ${existing.subject}`
+          : `Ata ${existing.ataNumber ? `nº ${String(existing.ataNumber).padStart(3, "0")}/${existing.year}` : existing.status} (${existing.subject}) expurgada pelo Administrador Geral ${authCheck.userName}`,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -385,7 +390,13 @@ export async function DELETE(
       ipAddress: ip,
     });
 
-    return NextResponse.json({ success: true, message: "Rascunho descartado com sucesso" });
+    return NextResponse.json({
+      success: true,
+      message:
+        existing.status === "DRAFT"
+          ? "Rascunho descartado com sucesso"
+          : "Ata excluída com sucesso pelo Administrador",
+    });
   } catch (error: any) {
     console.error("[DELETE /api/atas/[id]] Erro:", error);
     return NextResponse.json({ error: error.message || "Erro ao descartar rascunho" }, { status: 500 });

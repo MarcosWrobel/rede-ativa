@@ -24,12 +24,14 @@ interface Props {
   school: any;
   currentYear: number;
   availableStudents: any[];
+  isAdmin?: boolean;
 }
 
 export default function AtasClient({
   school,
   currentYear,
   availableStudents,
+  isAdmin = false,
 }: Props) {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -71,17 +73,17 @@ export default function AtasClient({
   const [finalizingId, setFinalizingId] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
 
-  const handleDeleteDraft = async (id: string) => {
+  const handleDeleteMinute = async (id: string) => {
     setDeletingId(id);
     setListError(null);
     try {
       const res = await fetch(`/api/atas/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao descartar rascunho");
+      if (!res.ok) throw new Error(data.error || "Erro ao excluir ata");
       setConfirmDeleteId(null);
       await fetchMinutes();
     } catch (e: any) {
-      setListError(e.message || "Erro ao descartar rascunho.");
+      setListError(e.message || "Erro ao excluir ata.");
     } finally {
       setDeletingId(null);
     }
@@ -377,7 +379,7 @@ export default function AtasClient({
                           <div className="flex items-center space-x-1">
                             <button
                               type="button"
-                              onClick={() => handleDeleteDraft(m.id)}
+                              onClick={() => handleDeleteMinute(m.id)}
                               disabled={deletingId === m.id}
                               className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
                             >
@@ -403,16 +405,52 @@ export default function AtasClient({
                         )}
                       </>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingMinute(m);
-                          setIsCreateModalOpen(true);
-                        }}
-                        className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition cursor-pointer"
-                      >
-                        Ver Detalhes / Adendo
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMinute(m);
+                            setIsCreateModalOpen(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition cursor-pointer"
+                        >
+                          Ver Detalhes / Adendo
+                        </button>
+
+                        {isAdmin && (
+                          confirmDeleteId === m.id ? (
+                            <div className="flex items-center space-x-1 bg-rose-50 p-1 rounded-xl border border-rose-200">
+                              <span className="text-[10px] text-rose-800 font-bold px-1.5">
+                                Excluir definitivamente?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMinute(m.id)}
+                                disabled={deletingId === m.id}
+                                className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
+                              >
+                                {deletingId === m.id ? "..." : "Sim"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 font-bold text-[11px] cursor-pointer"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(m.id)}
+                              className="p-2 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-rose-600 hover:text-rose-700 transition cursor-pointer"
+                              title="Excluir ata de teste (Acesso Administrador Geral)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -425,6 +463,7 @@ export default function AtasClient({
       {/* Modal Editor */}
       <AtaEditorModal
         isOpen={isCreateModalOpen}
+        isAdmin={isAdmin}
         onClose={() => {
           setIsCreateModalOpen(false);
           setEditingMinute(null);

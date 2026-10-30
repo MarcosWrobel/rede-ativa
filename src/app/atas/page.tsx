@@ -8,7 +8,8 @@ export const metadata = {
 };
 
 export default async function AtasPage() {
-  await requireAuth();
+  const authCheck = await requireAuth();
+  const isAdmin = authCheck.ok && authCheck.role === "ADMIN";
   const school = await getCurrentSchool();
 
   const currentYear = new Date().getFullYear();
@@ -44,6 +45,7 @@ export default async function AtasPage() {
         school={school}
         currentYear={currentYear}
         availableStudents={formattedStudents}
+        isAdmin={isAdmin}
       />
     </div>
   );
