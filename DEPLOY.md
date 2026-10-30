@@ -43,13 +43,16 @@ O repositório Git local já foi inicializado e commitado na branch `main`.
 2. Selecione o repositório `busca-ativa-leopoldina` importado do GitHub.
 3. Na seção **Environment Variables**, adicione as seguintes variáveis:
    - `DATABASE_URL`: Cole a string de conexão do PostgreSQL (obtida no Passo 1).
+   - `DIRECT_URL`: *(Opcional no Neon)* String de conexão direta sem pooler para migrações de schema.
    - `NEXTAUTH_SECRET`: Uma string aleatória longa ou gerada com `openssl rand -base64 32`.
    - `NEXTAUTH_URL`: `https://busca-ativa-leopoldina.vercel.app` (ou o domínio que a Vercel atribuir).
    - `GOOGLE_CLIENT_ID`: Seu Client ID do Google Cloud Console.
    - `GOOGLE_CLIENT_SECRET`: Seu Client Secret do Google Cloud Console.
    - `ADMIN_EMAIL`: E-mail institucional do administrador principal (ex: `marcos.wrobel@escola.pr.gov.br`).
    - `SYNC_API_TOKEN`: Token secreto exigido pela Extensão Chrome para sincronizar Power BI e SERP (gere com `openssl rand -hex 24`).
-4. Clique em **Deploy**. A Vercel executará automaticamente `prisma generate` e `next build`.
+   - `CRON_SECRET`: Token secreto utilizado pela Vercel Cron para disparar o Boletim Semanal (`/api/cron/weekly-digest`).
+   - `GEMINI_API_KEY`: Chave da API Google Gemini para formalização de atas, triagem de retornos e geração de modelos.
+4. Clique em **Deploy**. O script de build empacotará a extensão Chrome, sincronizará o schema Prisma (`vercel_db_push.cjs`) e executará `next build`.
 
 ---
 
