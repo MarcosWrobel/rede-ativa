@@ -146,8 +146,16 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 
 ## 5. Inteligência Artificial com Google Gemini (`@google/genai`)
 
-1. **Formalização Jurídico-Pedagógica de Atas (`/api/ai/formalize-ata`)**:
-   - Converte anotações rápidas ou transcrição de voz da equipe pedagógica em redação formal de ata escolar em norma culta, impessoal e protetiva (ECA-safe), retornando JSON estruturado com `formalSubject`, `formalSummary`, `agreementsSummary` e sugestão de `actionItems` com prazos. Possui *fallback* local estruturado caso a API oscile.
+1. **Formalização Jurídico-Pedagógica e Revisão Gramatical de Atas (`/api/ai/formalize-ata` & `src/lib/nreAtaFormatter.ts`)**:
+   - Converte anotações rápidas, transcrições de voz ou aprimora minutas já redigidas pela equipe pedagógica, atuando como corretor ortográfico, sintático e de concordância verbal/nominal.
+   - Aplica com rigor as **Diretrizes Oficiais do NRE/SEED-PR**:
+     - **Texto Corrido Contínuo:** Redação em bloco único e contínuo, sem quebras de linha (`\n`), parágrafos em branco ou tópicos/bullets, prevenindo espaços livres suscetíveis a entrelinhas ou interpolações fraudulentas.
+     - **Tempo Verbal Canônico:** Emprego estrito do Pretérito Perfeito do Indicativo (*"reuniram-se"*, *"deliberou-se"*, *"declarou"*, *"acordaram"*).
+     - **Grafia Oficial:** Números e horas redigidos preferencialmente por extenso (*"duas faltas consecutivas"*, *"às catorze horas e trinta minutos"*).
+     - **Linguagem Oficial e ECA-Safe:** Vedadas abreviaturas informais; preservação da integridade moral e psicológica do estudante segundo o Estatuto da Criança e do Adolescente.
+     - **Fechamento e Reconhecimento:** Cláusula canônica expressando que a ata foi lida, conferida e achada conforme por todos os presentes.
+   - Suporte a refinamento incremental: caso o usuário já tenha iniciado a minuta formal, a IA preserva o conteúdo manual enquanto corrige pontuação, ortografia e alinha às regras do NRE.
+   - Retorna JSON estruturado com `formalSubject`, `formalSummary` (texto corrido único), `agreementsSummary` e sugestão de `actionItems` com prazos, dispondo de *fallback* determinístico offline homologado em [`src/lib/nreAtaFormatter.ts`](../src/lib/nreAtaFormatter.ts).
 2. **Geração de Modelos Institucionais (`/api/ai/generate-template`)**:
    - Cria modelos acolhedores de comunicados estruturados (`title`, `prefixText`, `suffixText`, `isAbsenceRelated`).
 3. **Classificação & Formalização de Retorno Familiar (`/api/ai/classify-reply`)**:

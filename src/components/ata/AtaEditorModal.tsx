@@ -88,6 +88,7 @@ export default function AtaEditorModal({
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuccessMsg, setAiSuccessMsg] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingFinal, setSavingFinal] = useState(false);
@@ -124,6 +125,7 @@ export default function AtaEditorModal({
     setFinalizeError(null);
     setStep1Error(null);
     setAiError(null);
+    setAiSuccessMsg(null);
     setDraftSavedMsg(null);
     setQrModalInfo(null);
     setActiveSignParticipantIndex(null);
@@ -329,11 +331,15 @@ export default function AtaEditorModal({
     }
   };
 
-  // Formalização IA com Gemini
+  // Formalização e Revisão com Diretrizes NRE/SEED-PR
   const handleFormalizeWithAi = async () => {
     setAiError(null);
-    if (!rawNotes.trim()) {
-      setAiError("Digite tópicos rápidos acima ou use o microfone antes de clicar em Formalizar com IA.");
+    setAiSuccessMsg(null);
+    const hasNotes = Boolean(rawNotes && rawNotes.trim().length >= 3);
+    const hasExistingSummary = Boolean(summary && summary.trim().length >= 5);
+
+    if (!hasNotes && !hasExistingSummary) {
+      setAiError("Digite anotações no quadro acima ou insira um texto para revisão.");
       return;
     }
 
@@ -348,7 +354,8 @@ export default function AtaEditorModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rawNotes,
+          rawNotes: rawNotes.trim(),
+          existingSummary: summary.trim(),
           category,
           studentNames,
           guardianNames,
@@ -356,7 +363,7 @@ export default function AtaEditorModal({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao consultar IA");
+      if (!res.ok) throw new Error(data.error || "Erro ao revisar minuta");
 
       if (data.result) {
         if (data.result.formalSubject) setSubject(data.result.formalSubject);
@@ -379,9 +386,12 @@ export default function AtaEditorModal({
           });
           setActionItems(suggested);
         }
+
+        setAiSuccessMsg("Texto formalizado e revisado com sucesso segundo as normas do NRE.");
+        setTimeout(() => setAiSuccessMsg(null), 4000);
       }
     } catch (err: any) {
-      setAiError(err.message || "Erro ao formalizar minuta com IA.");
+      setAiError(err.message || "Erro ao formalizar e revisar minuta.");
     } finally {
       setIsAiLoading(false);
     }
@@ -1512,9 +1522,8 @@ export default function AtaEditorModal({
               <div className="lg:col-span-6 space-y-4">
                 <div className="border border-sky-100 bg-sky-50/50 p-4 rounded-2xl space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-extrabold text-sky-900 text-xs flex items-center space-x-1.5">
-                      <Sparkles className="w-4 h-4 text-sky-600" />
-                      <span>Formalização Pedagógica (Gemini AI + Voz)</span>
+                    <span className="font-extrabold text-sky-900 text-xs">
+                      Redação & Diretrizes NRE/SEED-PR
                     </span>
 
                     <div className="flex items-center space-x-2">
@@ -1539,13 +1548,19 @@ export default function AtaEditorModal({
                         type="button"
                         onClick={handleFormalizeWithAi}
                         disabled={isAiLoading}
-                        className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer text-xs"
+                        className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer text-xs"
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                        <span>{isAiLoading ? "Formalizando..." : "Formalizar com IA"}</span>
+                        <span>{isAiLoading ? "Revisando..." : "Formalizar & Revisar"}</span>
                       </button>
                     </div>
                   </div>
+
+                  {aiSuccessMsg && (
+                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-xs flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{aiSuccessMsg}</span>
+                    </div>
+                  )}
 
                   {aiError && (
                     <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold text-xs flex items-center space-x-1.5">
@@ -1558,7 +1573,7 @@ export default function AtaEditorModal({
                     rows={3}
                     value={rawNotes}
                     onChange={(e) => setRawNotes(e.target.value)}
-                    placeholder="Digite tópicos rápidos da conversa ou use o microfone. A IA redigirá na íntegra a ata formal em norma culta e respeitando o ECA."
+                    placeholder="Digite anotações rápidas ou use o ditado por voz. Clique em 'Formalizar & Revisar' para redigir ou aprimorar o texto nas normas cultas do NRE."
                     className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs"
                   />
                 </div>
@@ -1567,9 +1582,9 @@ export default function AtaEditorModal({
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="font-extrabold text-slate-900 block text-xs">
-                      Texto Formal da Ata (Norma Culta / ECA-safe): <span className="text-rose-600">*</span>
+                      Texto Formal da Ata (Norma Culta / Diretrizes NRE): <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[11px] text-slate-400">Revisável pela servidora antes de lavrar</span>
+                    <span className="text-[11px] text-slate-400">Texto corrido contínuo e sem entrelinhas</span>
                   </div>
                   <textarea
                     rows={9}
