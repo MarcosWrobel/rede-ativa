@@ -23,6 +23,7 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
     "/historico": { title: "Histórico de Envios", subtitle: "Controle de contatos e retornos dos pais" },
     "/faltas": { title: "Busca-ativa", subtitle: "Acompanhamento de infrequência e Conselho Tutelar" },
     "/relatorios": { title: "Relatórios & Estatísticas", subtitle: "Indicadores de ocorrências e comunicação" },
+    "/boletim": { title: "Boletim Semanal", subtitle: "Diagnóstico executivo de busca ativa e infrequência" },
     "/alunos": { title: "Alunos & Turmas", subtitle: "Gestão cadastral de estudantes" },
     "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação" },
     "/equipe": { title: "Equipe & Acessos", subtitle: "Controle institucional de servidores autorizados" },

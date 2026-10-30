@@ -8,6 +8,7 @@ import {
   History, 
   AlertTriangle, 
   BarChart3, 
+  FileSpreadsheet,
   Users, 
   FileText, 
   ShieldCheck, 
@@ -58,6 +59,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
     { href: "/historico", label: "Histórico de Envios", icon: History },
     { href: "/faltas", label: "Busca-ativa", icon: AlertTriangle },
     { href: "/relatorios", label: "Relatórios & Gráficos", icon: BarChart3 },
+    { href: "/boletim", label: "Boletim Semanal", icon: FileSpreadsheet },
     { href: "/alunos", label: "Alunos & Turmas", icon: Users },
     { href: "/modelos", label: "Modelos de Mensagem", icon: FileText },
     ...(isAdmin

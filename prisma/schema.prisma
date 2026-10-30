@@ -8,6 +8,32 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model School {
+  id              String            @id @default(cuid())
+  inepCode        String            @unique // e.g. "41042730"
+  name            String            // e.g. "Colégio Estadual Leopoldina B. Pedroso"
+  city            String            @default("Ponta Grossa")
+  state           String            @default("PR")
+  nre             String            @default("Ponta Grossa") // Núcleo Regional de Educação
+  phone           String?
+  email           String?
+  logoUrl         String?
+  active          Boolean           @default(true)
+  syncTokenHash   String?           // Token hash para sincronização com extensões
+  settingsJson    String?           // Configurações e preferências personalizadas
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  users           User[]
+  classGroups     ClassGroup[]
+  students        Student[]
+  templates       MessageTemplate[]
+  auditLogs       AuditLog[]
+
+  @@index([inepCode])
+  @@index([active])
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -15,12 +41,16 @@ model User {
   image         String?
   role          String       @default("PEDAGOGA") // ADMIN | PEDAGOGA
   active        Boolean      @default(true)
+  schoolId      String?
+  school        School?      @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   messageLogs   MessageLog[] @relation("SentByUser")
   repliedLogs   MessageLog[] @relation("RepliedByUser")
   auditLogs     AuditLog[]
+
+  @@index([schoolId])
 }
 
 model ClassGroup {
@@ -28,11 +58,14 @@ model ClassGroup {
   name      String    @unique // e.g. "6º 1", "1º ADM", "2º Série"
   segment   String    // FUNDAMENTAL | MEDIO | NOTURNO
   shift     String    @default("MANHA") // MANHA | TARDE | NOITE
+  schoolId  String?
+  school    School?   @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   createdAt DateTime  @default(now())
 
   students  Student[]
 
   @@index([segment, shift])
+  @@index([schoolId])
 }
 
 model Student {
@@ -43,6 +76,8 @@ model Student {
   phone                String                // e.g. "42988189394"
   classGroupId         String
   classGroup           ClassGroup            @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  schoolId             String?
+  school               School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   active               Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
@@ -56,6 +91,7 @@ model Student {
 
   @@index([classGroupId, active])
   @@index([name])
+  @@index([schoolId])
 }
 
 model MessageTemplate {
@@ -66,12 +102,15 @@ model MessageTemplate {
   suffixText       String       // Text after student name
   isAbsenceRelated Boolean      @default(false)
   active           Boolean      @default(true)
+  schoolId         String?
+  school           School?      @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
 
   messageLogs      MessageLog[]
 
   @@index([active, segment])
   @@index([isAbsenceRelated])
+  @@index([schoolId])
 }
 
 model MessageLog {
@@ -133,10 +172,13 @@ model AuditLog {
   entityId   String?
   details    String?  // JSON string with previous/new state or description
   ipAddress  String?
+  schoolId   String?
+  school     School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
   @@index([action])
+  @@index([schoolId])
 }
 
 model AttendanceSnapshot {

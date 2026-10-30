@@ -10,14 +10,30 @@ async function main() {
   const rawData = fs.readFileSync(path.join(__dirname, 'extracted_data.json'), 'utf-8');
   const data = JSON.parse(rawData);
 
+  // 0. Seed Default School
+  const defaultSchool = await prisma.school.upsert({
+    where: { inepCode: '41042730' },
+    update: {},
+    create: {
+      inepCode: '41042730',
+      name: 'Colégio Estadual Leopoldina B. Pedroso',
+      city: 'Ponta Grossa',
+      state: 'PR',
+      nre: 'Ponta Grossa',
+      active: true,
+      logoUrl: '/logo.svg',
+    },
+  });
+  console.log('Seeded default school:', defaultSchool.name);
+
   // 1. Seed Users
   const usersToCreate = [
-    { name: 'Marcos Wrobel', email: 'marcos.wrobel@escola.pr.gov.br', role: 'ADMIN' },
-    { name: 'Andreia', email: 'andreia@escola.pr.gov.br', role: 'PEDAGOGA' },
-    { name: 'Ana Cecília', email: 'ana.cecilia@escola.pr.gov.br', role: 'PEDAGOGA' },
-    { name: 'Jaqueline Lopes', email: 'jaqueline.lopes@escola.pr.gov.br', role: 'PEDAGOGA' },
-    { name: 'Nathaly R.', email: 'nathaly.r@escola.pr.gov.br', role: 'PEDAGOGA' },
-    { name: 'Natiele', email: 'natiele@escola.pr.gov.br', role: 'PEDAGOGA' },
+    { name: 'Marcos Wrobel', email: 'marcos.wrobel@escola.pr.gov.br', role: 'ADMIN', schoolId: defaultSchool.id },
+    { name: 'Andreia', email: 'andreia@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'Ana Cecília', email: 'ana.cecilia@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'Jaqueline Lopes', email: 'jaqueline.lopes@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'Nathaly R.', email: 'nathaly.r@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
+    { name: 'Natiele', email: 'natiele@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: defaultSchool.id },
   ];
 
   const userMap = {};

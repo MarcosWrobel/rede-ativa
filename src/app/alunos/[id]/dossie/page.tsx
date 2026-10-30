@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { loadStudent360Bundle } from "@/lib/safePhase3Queries";
 import { logAudit } from "@/lib/audit";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import DossieClient from "./DossieClient";
 import { notFound, redirect } from "next/navigation";
 
@@ -23,6 +24,8 @@ export default async function DossiePage({
     notFound();
   }
 
+  const school = await getCurrentSchool(bundle.student.schoolId);
+
   await logAudit({
     action: "GENERATE_DOSSIER",
     entityType: "Student",
@@ -30,6 +33,7 @@ export default async function DossiePage({
     details: {
       studentName: bundle.student.name,
       cgm: bundle.student.cgm,
+      schoolName: school.name,
       totalMessages: bundle.student.messageLogs?.length || 0,
     },
     user: {
@@ -46,6 +50,7 @@ export default async function DossiePage({
       justifications={bundle.justifications}
       attendances={bundle.attendances}
       snapshots={bundle.snapshots}
+      school={school}
       emittedBy={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",

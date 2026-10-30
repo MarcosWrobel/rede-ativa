@@ -373,18 +373,45 @@ O sistema adota o SDK oficial `@google/genai` com foco em agilidade e precisão:
 | `POST` | `/api/students/:id/attendances` | Sessão Web | Registro de atas de comparecimento presencial. |
 | `POST` | `/api/frequencia/sync` | Bearer Token / Sessão | Sincronização em lote (*batch upsert*) da frequência Power BI. |
 | `POST` | `/api/serp/sync` | Bearer Token / Sessão | Sincronização em lote das fichas do portal SERP/Celepar. |
+| `GET/POST` | `/api/cron/weekly-digest` | CRON_SECRET / Sessão | Compilação automática de indicadores e fila de prioridade para boletim semanal. |
 | `POST` | `/api/webhooks/whatsapp` | Webhook Secret | Endpoint passivo futuro para gateways externos de mensageria. |
 
 ---
 
-## 7. Qualidade, Testes & Conformidade
+## 7. Escala, PWA & Rotinas Automatizadas (Fase 5)
+
+### Transformação em PWA Mobile (`ESC-02`)
+- **Web App Manifest (`public/manifest.json`)**: Configurado com exibição `standalone`, orientação `portrait-primary`, tema `#0284c7`, atalhos rápidos de tela inicial para a Fila por Turma e Busca Ativa.
+- **Ícones Adaptativos**: Gerados nos tamanhos `192x192`, `512x512` e `maskable` a partir do brasão institucional.
+- **Service Worker (`public/sw.js`)**: Cache estático para carregamento instantâneo no celular de pedagogas e gestores, com *bypass* obrigatório para APIs dinâmicas (`/api/*`) e rotas de autenticação.
+- **Instalador Intuitivo (`PwaRegister.tsx`)**: Banner discreto que intercepta o evento `beforeinstallprompt` e oferece a instalação como app nativo no Android/iOS com memorização da preferência do usuário.
+
+### Boletim Semanal Automatizado (`ESC-03`)
+- **Vercel Cron (`0 10 * * 1`)**: Disparado toda segunda-feira às 07:00 da manhã no horário de Brasília (`10:00 UTC`).
+- **Endpoint Seguro (`/api/cron/weekly-digest`)**: Protegido por `CRON_SECRET` e compatível com chamadas manuais autenticadas pela equipe escolar.
+- **Painel Executivo `/boletim` (`BoletimClient.tsx`)**:
+  - Diagnóstico de urgência: alunos com infrequência crítica (<75%) sem nenhum contato registrado há mais de 7 dias.
+  - Monitoramento de casos SERP / Conselho Tutelar ativos.
+  - Taxa de resposta dos responsáveis nos últimos 7 dias.
+  - Destaque para turmas com maior concentração de faltosos e distribuição por turnos.
+  - Layout otimizado para reunião de pedagógico e impressão A4 em 1 clique.
+
+### Arquitetura Multi-Escola (`ESC-01`)
+- **Modelo `School` no Prisma**: Entidade estruturada com `inepCode`, `name`, `city`, `state`, `nre`, `logoUrl` e `settingsJson`.
+- **Relações Não-Destrutivas**: Chaves `schoolId String?` nos modelos `User`, `ClassGroup`, `Student`, `MessageTemplate` e `AuditLog`.
+- **Fallback Seguro**: Módulo `currentSchool.ts` com fallback gracioso para os dados padrão do Colégio Leopoldina (INEP: `41042730`), garantindo retrocompatibilidade total com a base existente.
+
+---
+
+## 8. Qualidade, Testes & Conformidade
 
 - **Testes Automatizados (Vitest)**:
   - `src/lib/__tests__/messageFormatter.test.ts`: Substituição de tags e saudações por turno.
   - `src/lib/__tests__/studentMatcher.test.ts`: Pareamento robusto por CGM e nome normalizado.
   - `src/lib/__tests__/pedagogicalClassifier.test.ts`: Detecção de queda abrupta e atestados vigentes.
   - `src/lib/__tests__/whatsappPhase4.test.ts`: Elegibilidade na fila, saneamento de números e classificação de retornos.
-  - Total: **26 testes unitários** com 100% de aprovação.
+  - `src/lib/__tests__/phase5Features.test.ts`: Interpolação de `{escola}` e integridade do modelo multi-escola.
+  - Total: **29 testes unitários** com 100% de aprovação.
 - **Conformidade LGPD**:
   - Restrição de visualização de dados de menores a profissionais autenticados.
   - Expurgo de dados sensíveis de repositórios públicos.

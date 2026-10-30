@@ -19,6 +19,12 @@ interface Props {
   justifications: any[];
   attendances: any[];
   snapshots: any[];
+  school?: {
+    name: string;
+    city: string;
+    nre: string;
+    inepCode?: string;
+  };
   emittedBy: {
     name: string;
     email: string;
@@ -32,6 +38,7 @@ export default function DossieClient({
   justifications,
   attendances,
   snapshots,
+  school,
   emittedBy,
   emittedAtIso,
 }: Props) {
@@ -165,10 +172,10 @@ export default function DossieClient({
         <header className="border-b-2 border-slate-900 pb-4 flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
-              Governo do Estado do Paraná • Secretaria de Estado da Educação (SEED-PR)
+              Governo do Estado do Paraná • SEED-PR • {school?.nre ? `NRE ${school.nre}` : "NRE Ponta Grossa"} {school?.inepCode ? `• INEP: ${school.inepCode}` : ""}
             </div>
             <h2 className="text-lg font-black uppercase tracking-tight text-slate-900">
-              Colégio Estadual Leopoldina B. Pedroso
+              {school?.name || "Colégio Estadual Leopoldina B. Pedroso"}
             </h2>
             <div className="text-xs font-bold text-slate-800 pt-1">
               DOSSIÊ INDIVIDUAL DE BUSCA ATIVA ESCOLAR E ACOMPANHAMENTO DE FREQUÊNCIA

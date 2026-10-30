@@ -34,6 +34,8 @@ export interface MessageContext {
   overrideShift?: SchoolShift;
   customNotes?: string;
   attendance?: AttendanceContext | null;
+  schoolName?: string;
+  nre?: string;
 }
 
 /**
@@ -129,6 +131,9 @@ export function formatMessage(
   const shiftLabel =
     shift === "MANHA" ? "matutino" : shift === "TARDE" ? "vespertino" : "noturno";
 
+  const schoolName = context.schoolName?.trim() || "Colégio Estadual Leopoldina B. Pedroso";
+  const nre = context.nre?.trim() || "NRE Ponta Grossa";
+
   // Função interna para substituir tags e saudações legadas
   const interpolate = (text: string): string => {
     if (!text) return "";
@@ -144,6 +149,9 @@ export function formatMessage(
     res = res.replace(/\{segmento\}/gi, segmento);
     res = res.replace(/\{periodo\}/gi, shiftLabel);
     res = res.replace(/\{turno\}/gi, shiftLabel);
+    res = res.replace(/\{escola\}/gi, schoolName);
+    res = res.replace(/\{colegio\}/gi, schoolName);
+    res = res.replace(/\{nre\}/gi, nre);
 
     // 2. Substituir tags de Frequência do B.I. e SERP
     const att = context.attendance || student.attendance;

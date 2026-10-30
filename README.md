@@ -8,13 +8,15 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 ## 🚀 Tecnologias
 
 - **Frontend & Backend**: Next.js 16 (App Router + Turbopack), React 19, TypeScript
+- **PWA Mobile**: Instalável nativamente no smartphone com Service Worker (`sw.js`), suporte offline e ícones maskable
 - **Estilização**: Tailwind CSS v4, Lucide Icons, Modern Web Guidance (Dialogs acessíveis, Checkboxes `:indeterminate`, Progress bars nativas)
-- **Banco de Dados**: Neon PostgreSQL (Serverless na AWS São Paulo - `sa-east-1`) + Prisma ORM 6
+- **Banco de Dados**: Neon PostgreSQL (Serverless na AWS São Paulo - `sa-east-1`) + Prisma ORM 6 com suporte multi-escola (`School`)
 - **Autenticação & Segurança**: NextAuth.js v5 (Google OAuth `@escola.pr.gov.br`), Proxy Middleware global (`proxy.ts`), Allowlist de equipe (`/equipe`) e trilha de auditoria completa com IP
+- **Rotinas Automatizadas**: Vercel Cron semanal (`/api/cron/weekly-digest`) para diagnóstico executivo e fila de intervenção às segundas-feiras
 - **Inteligência Artificial**: Google Gemini API (`@google/genai`) — Redação de comunicados e triagem/formalização de retornos com JSON estruturado
 - **Automação de Mensageria**: Fluxo operacional gratuito e ilimitado via WhatsApp Web (`wa.me`) com reuso de guia única (`leopoldina_whatsapp_dispatch`) e camada plugável para gateways futuros
 - **Extensão Chrome**: Manifest V3 para extração segura de dados do Power BI estadual e do portal SERP/Celepar
-- **Testes & Qualidade**: Vitest com 26 testes unitários automatizados cobrindo classificadores pedagógicos, pareamento e schemas Zod
+- **Testes & Qualidade**: Vitest com 29 testes unitários automatizados cobrindo classificadores pedagógicos, pareamento, schemas Zod e recursos da Fase 5
 
 ---
 
@@ -23,6 +25,7 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 | Módulo | Rota | Descrição |
 | :--- | :--- | :--- |
 | **Busca Ativa** | `/busca-ativa` | Disparo individual ou **Fila Guiada por Turma** via `wa.me`, salto automático de atestados médicos, múltiplos contatos familiares e confirmação de entrega com saneamento de números. |
+| **Boletim Semanal** | `/boletim` | Diagnóstico semanal automatizado (Vercel Cron) com alertas de alunos críticos sem busca recente, casos SERP, taxa de retorno dos pais e exportação A4 para reuniões pedagógicas. |
 | **Prontuário 360º** | `/alunos/[id]` | Visão integral do aluno: indicadores do B.I., múltiplos contatos, controle de atestados médicos vigentes, atas presenciais e linha do tempo de WhatsApp. |
 | **Dossiê Oficial PDF** | `/alunos/[id]/dossie` | Emissão em 1 clique de relatório A4 auditado e formatado para envio formal ao Conselho Tutelar, Promotoria da Infância ou SERP. |
 | **Painel de Frequência** | `/faltas` | Monitoramento de infrequência com chips de risco, alerta de **📉 Queda Abrupta**, drawer lateral de envio sem perda de contexto e atalho para fila da turma. |

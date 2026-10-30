@@ -1,11 +1,33 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppLayoutClient from "@/components/AppLayoutClient";
+import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
+
+export const viewport: Viewport = {
+  themeColor: "#0284c7",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 export const metadata: Metadata = {
   title: "Busca Ativa & Comunicação | Colégio Estadual Leopoldina",
   description: "Sistema web de busca ativa, comunicação escolar automatizada e controle de faltas",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Busca Ativa",
+  },
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png" }],
+  },
 };
 
 export default async function RootLayout({
@@ -28,6 +50,7 @@ export default async function RootLayout({
         <AppLayoutClient currentUser={currentUser}>
           {children}
         </AppLayoutClient>
+        <PwaRegister />
       </body>
     </html>
   );

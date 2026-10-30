@@ -1,0 +1,63 @@
+{
+  "name": "Busca Ativa & Comunicação Escolar — Colégio Leopoldina",
+  "short_name": "Busca Ativa",
+  "description": "Sistema de busca ativa escolar, comunicação institucional e controle de frequência — Colégio Estadual Leopoldina B. Pedroso",
+  "start_url": "/busca-ativa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "lang": "pt-BR",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Painel de Envio",
+      "short_name": "Envio",
+      "description": "Abrir o painel de busca ativa e disparo WhatsApp",
+      "url": "/busca-ativa",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Fila por Turma",
+      "short_name": "Fila",
+      "description": "Disparo assistido em lote por turma",
+      "url": "/busca-ativa?mode=fila",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Busca-ativa & Frequência",
+      "short_name": "Frequência",
+      "description": "Painel de acompanhamento de infrequência e SERP",
+      "url": "/faltas",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Histórico de Envios",
+      "short_name": "Histórico",
+      "description": "Histórico e retorno dos pais",
+      "url": "/historico",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
