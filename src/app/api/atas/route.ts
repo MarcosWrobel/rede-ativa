@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { z } from "zod";
 
@@ -156,9 +156,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Nenhum estudante válido encontrado para vincular" }, { status: 400 });
     }
 
+    // Garante que a escola exista no banco de dados para satisfazer a chave estrangeira (FK)
+    let effectiveSchoolId = school.id;
+    if (effectiveSchoolId === "default-leopoldina") {
+      const ensured = await ensureDefaultSchool();
+      if (ensured) {
+        effectiveSchoolId = ensured.id;
+      }
+    }
+
     const minute = await prisma.pedagogicalMinute.create({
       data: {
-        schoolId: school.id,
+        schoolId: effectiveSchoolId,
         year: currentYear,
         status: "DRAFT", // Sempre inicia como rascunho sem consumir número
         category,

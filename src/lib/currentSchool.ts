@@ -48,6 +48,22 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
           logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
         };
       }
+
+      // Se a tabela School estiver vazia, cria a escola padrão no banco de dados para garantir que a FK exista
+      const created = await ensureDefaultSchool();
+      if (created) {
+        return {
+          id: created.id,
+          inepCode: created.inepCode,
+          name: created.name,
+          city: created.city,
+          state: created.state,
+          nre: created.nre,
+          phone: created.phone,
+          email: created.email,
+          logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
+        };
+      }
     } catch {
       // Falha de conexão ou tabela ainda em processo de migração: fallback gracioso
       return DEFAULT_SCHOOL;
