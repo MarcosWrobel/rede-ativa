@@ -14,6 +14,7 @@ const formalizeAtaSchema = z
     category: z.string().default("ACOMPANHAMENTO_PEDAGOGICO"),
     studentNames: z.array(z.string()).default([]),
     guardianNames: z.array(z.string()).default([]),
+    apiKey: z.string().optional(),
   })
   .refine(
     (data) => (data.rawNotes && data.rawNotes.trim().length >= 3) || (data.existingSummary && data.existingSummary.trim().length >= 5),
@@ -73,11 +74,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const { rawNotes, existingSummary, category, studentNames, guardianNames } = parsed.data;
+    const { rawNotes, existingSummary, category, studentNames, guardianNames, apiKey: bodyApiKey } = parsed.data;
 
     const headerKey = req.headers.get("x-gemini-key")?.trim();
     const apiKey =
       (headerKey && headerKey.length > 10 ? headerKey : null) ||
+      (bodyApiKey && bodyApiKey.length > 10 ? bodyApiKey : null) ||
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
       process.env.GOOGLE_GENAI_API_KEY;
@@ -94,6 +96,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: true,
         usedFallback: true,
+        fallbackReason: "Chave da API Gemini não configurada no navegador nem no servidor.",
         result: fallbackResult,
       });
     }
@@ -105,7 +108,7 @@ export async function POST(req: Request) {
 Sua missão é formalizar e revisar o texto da ata de atendimento pedagógico aplicando com o mais alto rigor a Norma Culta da Língua Portuguesa e as Diretrizes Oficiais do NRE/SEED-PR para elaboração de Atas Escolares.
 
 DIRETRIZES OBRIGATÓRIAS DO NRE/SEED-PR E REVISÃO GRAMATICAL:
-1. RIGOR GRAMATICAL TOTAL: Atue como corretor ortográfico (Novo Acordo Ortográfico), garantindo concordância verbal e nominal perfeitas, sintaxe impecável, pontuação precisa e regência verbal e nominal exata.
+1. RIGOR GRAMATICAL TOTAL: Atue como corretor ortográfico (Novo Acordo Ortográfico), garantindo concordância verbal e nominal perfeitas, sintaxe impecável, pontuação precisa e regência verbal e nominal exata. Corrija imediatamente erros e vícios como "conflita", "por conta de", "entraram em atrito", convertendo para linguagem pedagógica culta.
 2. CONTINUIDADE TEXTUAL (TEXTO CORRIDO): O corpo da ata (formalSummary) DEVE ser redigido em um ÚNICO bloco contínuo de texto corrido. NÃO utilize quebras de linha duplas, tópicos com marcadores (bullet points), listas ou parágrafos em branco no meio do texto, pois a legislação e as normas de registro do NRE vedam entrelinhas e espaços vazios em atas oficiais.
 3. TEMPO VERBAL: Empregue estritamente os verbos no PRETÉRITO PERFEITO DO INDICATIVO para narrar os fatos já ocorridos (exemplo: "reuniu-se", "compareceu", "foi apresentada", "pontuou-se", "declarou", "assumiu o compromisso").
 4. GRAFIA DE NÚMEROS E HORAS: Datas, horários, prazos e quantidades devem ser grafados prioritariamente por extenso, com numerais opcionais entre parênteses quando couber (exemplo: "às quatorze horas", "no prazo de cinco dias úteis", "duas faltas consecutivas").
@@ -128,13 +131,52 @@ ${
 ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente)"}
 """`;
 
-    const modelsToTry = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
-    let rawJsonText: string | null = null;
+    // Modelos vigentes na API do Google
+    const modelsToTry = [
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-3.5-flash",
+      "gemini-flash-latest",
+      "gemini-3.5-flash-lite",
+      "gemini-3.8-flash",
+    ];
 
+    let rawJsonText: string | null = null;
+    let lastErrorMsg = "";
+
+    // 1. Tentativa principal via ai.models.generateContent
     for (const model of modelsToTry) {
       try {
-        const interaction: any = await ai.interactions.create({
+        const response = await ai.models.generateContent({
           model,
+          contents: `${inputPrompt}\n\nResponda estritamente em formato JSON estruturado com os campos: formalSubject, formalSummary, agreementsSummary, actionItems.`,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: FORMALIZE_ATA_JSON_SCHEMA,
+            temperature: 0.2,
+          },
+        });
+
+        if (response?.text) {
+          rawJsonText = response.text.trim();
+          break;
+        }
+      } catch (err: any) {
+        lastErrorMsg = err?.message || String(err);
+        if (lastErrorMsg.toLowerCase().includes("api key not valid") || lastErrorMsg.includes("403 Forbidden")) {
+          break;
+        }
+        console.warn(`[GEMINI generateContent] Modelo ${model} falhou: ${lastErrorMsg}. Tentando próximo...`);
+      }
+    }
+
+    // 2. Fallback secundário para Interactions API caso generateContent oscile
+    if (!rawJsonText && !lastErrorMsg.toLowerCase().includes("api key not valid")) {
+      try {
+        const interaction: any = await ai.interactions.create({
+          model: "gemini-3.5-flash-lite",
           input: inputPrompt,
           system_instruction: systemInstruction,
           response_format: {
@@ -143,15 +185,13 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
           },
         });
 
-        if (interaction.outputs && interaction.outputs.length > 0) {
-          const firstOutput = interaction.outputs[0];
-          if (firstOutput.type === "text" && firstOutput.text) {
-            rawJsonText = firstOutput.text.trim();
-            break;
-          }
+        if (interaction?.output_text) {
+          rawJsonText = interaction.output_text.trim();
+        } else if (interaction?.outputs?.[0]?.text) {
+          rawJsonText = interaction.outputs[0].text.trim();
         }
       } catch (err: any) {
-        console.warn(`[AI Formalize Ata] Erro com ${model}:`, err.message);
+        console.warn("[GEMINI Interactions fallback] Falhou:", err.message);
       }
     }
 
@@ -189,6 +229,9 @@ ${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente
     return NextResponse.json({
       success: true,
       usedFallback: true,
+      fallbackReason: !apiKey
+        ? "Chave da API Gemini não configurada no navegador nem no servidor."
+        : `A chamada à API Gemini falhou (${lastErrorMsg || "tempo limite esgotado"}).`,
       result: fallbackResult,
     });
   } catch (error: any) {

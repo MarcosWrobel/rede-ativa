@@ -28,6 +28,7 @@ import {
   RotateCcw,
   ExternalLink,
   Copy,
+  Key,
   Send,
   Clock,
 } from "lucide-react";
@@ -90,7 +91,11 @@ export default function AtaEditorModal({
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiSuccessMsg, setAiSuccessMsg] = useState<string | null>(null);
+  const [aiSuccessMsg, setAiSuccessMsg] = useState<{ type: "success" | "warning"; text: string } | null>(null);
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [isTestingApiKey, setIsTestingApiKey] = useState(false);
+  const [keyTestStatus, setKeyTestStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingFinal, setSavingFinal] = useState(false);
@@ -121,6 +126,56 @@ export default function AtaEditorModal({
   const [showAdminDeleteConfirm, setShowAdminDeleteConfirm] = useState(false);
   const [isDeletingAdmin, setIsDeletingAdmin] = useState(false);
   const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // Carrega chave Gemini salva no navegador
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("leopoldina_gemini_api_key");
+      if (saved) setGeminiApiKey(saved);
+    } catch (e) {}
+  }, []);
+
+  const handleSaveGeminiKey = (val: string) => {
+    setGeminiApiKey(val);
+    try {
+      localStorage.setItem("leopoldina_gemini_api_key", val.trim());
+    } catch (e) {}
+  };
+
+  const handleTestGeminiKey = async () => {
+    setIsTestingApiKey(true);
+    setKeyTestStatus(null);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (geminiApiKey && geminiApiKey.trim().length > 10) {
+        headers["x-gemini-key"] = geminiApiKey.trim();
+      }
+      const res = await fetch("/api/ai/test-key", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ apiKey: geminiApiKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setKeyTestStatus({
+          ok: true,
+          msg: `✨ Chave ativa! Modelo: ${data.respondingModel} (${data.durationMs}ms)`,
+        });
+      } else {
+        setKeyTestStatus({
+          ok: false,
+          msg: data.error || "Chave inválida ou sem resposta do Google Gemini.",
+        });
+      }
+    } catch (err: any) {
+      setKeyTestStatus({
+        ok: false,
+        msg: err.message || "Erro ao conectar com o serviço do Google Gemini.",
+      });
+    } finally {
+      setIsTestingApiKey(false);
+    }
+  };
 
   // Inicializa / reseta o modal sempre que abrir ou trocar de ata
   useEffect(() => {
@@ -354,15 +409,26 @@ export default function AtaEditorModal({
         .map((s) => s.name);
       const guardianNames = participants.map((p) => p.name).filter(Boolean);
 
+      const savedKey =
+        geminiApiKey.trim() ||
+        (typeof window !== "undefined" ? localStorage.getItem("leopoldina_gemini_api_key")?.trim() : "") ||
+        "";
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (savedKey && savedKey.length > 10) {
+        headers["x-gemini-key"] = savedKey;
+      }
+
       const res = await fetch("/api/ai/formalize-ata", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           rawNotes: rawNotes.trim(),
           existingSummary: summary.trim(),
           category,
           studentNames,
           guardianNames,
+          apiKey: savedKey || undefined,
         }),
       });
 
@@ -391,8 +457,21 @@ export default function AtaEditorModal({
           setActionItems(suggested);
         }
 
-        setAiSuccessMsg("Texto formalizado e revisado com sucesso segundo as normas do NRE.");
-        setTimeout(() => setAiSuccessMsg(null), 4000);
+        if (data.usedFallback) {
+          setAiSuccessMsg({
+            type: "warning",
+            text: `${data.fallbackReason || "Aviso:"} Minuta estruturada pelo modelo padrão local. Para correção ortográfica, sintaxe e redação pedagógica por IA, configure sua chave do Google Gemini no botão 'Configurar Chave IA' acima.`,
+          });
+          if (!savedKey) {
+            setShowKeyModal(true);
+          }
+        } else {
+          setAiSuccessMsg({
+            type: "success",
+            text: "Texto formalizado e revisado com sucesso pelo Google Gemini segundo as normas do NRE/SEED-PR.",
+          });
+          setTimeout(() => setAiSuccessMsg(null), 5000);
+        }
       }
     } catch (err: any) {
       setAiError(err.message || "Erro ao formalizar e revisar minuta.");
@@ -1608,6 +1687,20 @@ export default function AtaEditorModal({
 
                       <button
                         type="button"
+                        onClick={() => setShowKeyModal(!showKeyModal)}
+                        className={`inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-2xs cursor-pointer ${
+                          geminiApiKey
+                            ? "bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                            : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                        }`}
+                        title="Configurar chave da API Google Gemini para correção ortográfica e formalização"
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                        <span>{geminiApiKey ? "Chave IA Ativa" : "Configurar IA"}</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={handleFormalizeWithAi}
                         disabled={isAiLoading}
                         className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer text-xs"
@@ -1617,10 +1710,74 @@ export default function AtaEditorModal({
                     </div>
                   </div>
 
+                  {showKeyModal && (
+                    <div className="p-3 bg-white border border-sky-300 rounded-xl space-y-2 shadow-sm text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-slate-800 flex items-center space-x-1.5">
+                          <Key className="w-3.5 h-3.5 text-sky-600" />
+                          <span>Chave da API Google Gemini</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowKeyModal(false)}
+                          className="text-slate-400 hover:text-slate-700 font-bold cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Informe sua chave do Google Gemini (gratuita em <code>aistudio.google.com</code>). Ela é salva no seu navegador e utilizada para corrigir erros ortográficos, concordância e sintaxe na formalização da ata.
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          value={geminiApiKey}
+                          onChange={(e) => handleSaveGeminiKey(e.target.value)}
+                          placeholder="Cole sua chave AIzaSy..."
+                          className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleTestGeminiKey}
+                          disabled={isTestingApiKey || !geminiApiKey}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50 cursor-pointer"
+                        >
+                          {isTestingApiKey ? "Testando..." : "Testar"}
+                        </button>
+                      </div>
+                      {keyTestStatus && (
+                        <p className={`text-[11px] font-bold ${keyTestStatus.ok ? "text-emerald-700" : "text-rose-600"}`}>
+                          {keyTestStatus.msg}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {aiSuccessMsg && (
-                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-xs flex items-center space-x-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>{aiSuccessMsg}</span>
+                    <div
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                        aiSuccessMsg.type === "warning"
+                          ? "bg-amber-50 border-amber-200 text-amber-900"
+                          : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                      }`}
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        {aiSuccessMsg.type === "warning" ? (
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        )}
+                        <span className="font-semibold">{aiSuccessMsg.text}</span>
+                      </div>
+                      {aiSuccessMsg.type === "warning" && (
+                        <button
+                          type="button"
+                          onClick={() => setShowKeyModal(true)}
+                          className="px-2 py-0.5 bg-amber-700 text-white font-bold rounded-lg text-[10px] hover:bg-amber-800 shrink-0 cursor-pointer"
+                        >
+                          Configurar Chave
+                        </button>
+                      )}
                     </div>
                   )}
 
