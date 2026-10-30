@@ -8,6 +8,7 @@ import {
   JUSTIFICATION_TYPE_LABELS,
   parseEnrollmentDetailMetrics,
 } from "@/lib/pedagogicalClassifier";
+import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import {
   REPLY_CATEGORY_LABELS,
   type ReplyCategory,
@@ -19,6 +20,7 @@ interface Props {
   justifications: any[];
   attendances: any[];
   snapshots: any[];
+  minutes?: any[];
   school?: {
     name: string;
     city: string;
@@ -38,6 +40,7 @@ export default function DossieClient({
   justifications,
   attendances,
   snapshots,
+  minutes = [],
   school,
   emittedBy,
   emittedAtIso,
@@ -50,6 +53,8 @@ export default function DossieClient({
     "Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente (SERP)"
   );
   const [showFullMessages, setShowFullMessages] = useState(false);
+  const [anonymizeOtherMinors, setAnonymizeOtherMinors] = useState(true);
+  const [includeConfidential, setIncludeConfidential] = useState(false);
 
   const totalLogs = student.messageLogs?.length || 0;
   const failedLogs = (student.messageLogs || []).filter(
@@ -148,6 +153,30 @@ export default function DossieClient({
               />
               <span className="text-slate-600 font-medium">
                 Incluir texto integral de cada mensagem WhatsApp na tabela impressa
+              </span>
+            </label>
+
+            <label className="inline-flex items-center space-x-2 pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={anonymizeOtherMinors}
+                onChange={(e) => setAnonymizeOtherMinors(e.target.checked)}
+                className="rounded border-slate-300 text-emerald-600"
+              />
+              <span className="text-slate-700 font-bold">
+                Anonimizar iniciais de outros estudantes em atas conjuntas (ECA / Art. 17 e 143)
+              </span>
+            </label>
+
+            <label className="inline-flex items-center space-x-2 pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeConfidential}
+                onChange={(e) => setIncludeConfidential(e.target.checked)}
+                className="rounded border-slate-300 text-rose-600"
+              />
+              <span className="text-rose-700 font-bold">
+                Incluir atas sob Sigilo Reforçado (exclusivo para Ministério Público / CT)
               </span>
             </label>
           </div>
@@ -360,22 +389,81 @@ export default function DossieClient({
           )}
         </section>
 
-        {/* 5. Atas de Comparecimento Presencial da Família */}
+        {/* 4. Atas do Livro Oficial de Atendimento Pedagógico */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            4. Atas de Comparecimento Presencial da Família na Escola ({attendances.length})
+            4. Atas Oficiais do Atendimento Pedagógico Digital ({minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length})
           </h3>
 
-          {attendances.length === 0 ? (
+          {minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length === 0 ? (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-2.5">
-              Não constam atas de comparecimento presencial dos responsáveis registradas até a presente data.
+              Não constam atas oficiais lavradas no Livro Digital para este estudante até a presente data.
             </p>
           ) : (
+            <div className="space-y-2.5">
+              {minutes
+                .filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential))
+                .map((min) => {
+                  const rawSummary = min.summary || "";
+                  const linkedStudents = min.students?.map((s: any) => ({
+                    id: s.studentId,
+                    name: s.studentNameSnapshot,
+                  })) || [];
+
+                  const displaySummary = anonymizeOtherMinors
+                    ? anonymizeOtherMinorsInText(rawSummary, student.id, linkedStudents)
+                    : rawSummary;
+
+                  return (
+                    <div
+                      key={min.id}
+                      className="border border-slate-300 rounded-lg p-3 space-y-1.5 text-[11px] break-inside-avoid"
+                    >
+                      <div className="flex justify-between font-bold border-b border-slate-200 pb-1">
+                        <span>
+                          Ata nº {String(min.ataNumber).padStart(3, "0")}/{min.year} — {new Date(min.attendedAt).toLocaleDateString("pt-BR")} — {min.subject}
+                        </span>
+                        <span className="font-mono text-[10px] text-slate-500">
+                          Cód: {min.verificationCode}
+                        </span>
+                      </div>
+
+                      <div>
+                        <strong>Servidora:</strong> {min.authorName} ({min.authorRole}) • <strong>Presentes:</strong>{" "}
+                        {min.participants?.map((p: any) => p.name).join(", ") || "Conforme ata"}
+                      </div>
+
+                      <div className="leading-relaxed whitespace-pre-line text-slate-800">
+                        <strong>Síntese da Ata:</strong> {displaySummary}
+                      </div>
+
+                      {min.agreementsSummary && (
+                        <div className="text-slate-700 bg-slate-50 p-1.5 rounded">
+                          <strong>Deliberações e Combinados:</strong> {min.agreementsSummary}
+                        </div>
+                      )}
+
+                      <div className="text-[9.5px] text-slate-400 font-mono">
+                        Hash SHA-256: {min.contentHash}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </section>
+
+        {/* 5. Atas Legadas de Comparecimento Presencial */}
+        {attendances.length > 0 && (
+          <section className="space-y-2 break-inside-avoid">
+            <h3 className="text-xs font-bold uppercase tracking-wider bg-slate-50 border-l-4 border-slate-400 px-2.5 py-1 text-slate-700">
+              5. Atendimentos Presenciais Anteriores (Histórico Legado — {attendances.length})
+            </h3>
             <div className="space-y-2">
               {attendances.map((att) => (
                 <div
                   key={att.id}
-                  className="border border-slate-300 rounded-lg p-2.5 space-y-1 text-[11px] break-inside-avoid"
+                  className="border border-slate-200 rounded-lg p-2.5 space-y-1 text-[11px] break-inside-avoid bg-slate-50/50"
                 >
                   <div className="flex justify-between font-bold">
                     <span>
@@ -397,8 +485,8 @@ export default function DossieClient({
                 </div>
               ))}
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
         {/* 6. Histórico Completo e Auditado de Tentativas de Contato (Busca Ativa) */}
         <section className="space-y-2">

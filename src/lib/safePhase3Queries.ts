@@ -16,7 +16,7 @@ export async function safeQueryList<T>(fn: () => Promise<T[]>): Promise<T[]> {
 }
 
 export async function loadStudent360Bundle(studentId: string) {
-  const [student, contacts, justifications, attendances, snapshots] = await Promise.all([
+  const [student, contacts, justifications, attendances, snapshots, minutes] = await Promise.all([
     prisma.student.findUnique({
       where: { id: studentId },
       include: {
@@ -52,6 +52,20 @@ export async function loadStudent360Bundle(studentId: string) {
         take: 24,
       })
     ),
+    safeQueryList(() =>
+      prisma.pedagogicalMinute.findMany({
+        where: {
+          students: { some: { studentId } },
+        },
+        include: {
+          students: true,
+          participants: true,
+          addendums: { orderBy: { createdAt: "asc" } },
+          actionItems: { orderBy: { createdAt: "asc" } },
+        },
+        orderBy: [{ ataNumber: "desc" }, { attendedAt: "desc" }],
+      })
+    ),
   ]);
 
   if (!student) return null;
@@ -62,5 +76,6 @@ export async function loadStudent360Bundle(studentId: string) {
     justifications,
     attendances,
     snapshots,
+    minutes,
   };
 }

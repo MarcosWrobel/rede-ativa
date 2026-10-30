@@ -21,7 +21,12 @@ import {
   ShieldAlert,
   Calendar,
   MessageSquare,
+  BookOpenCheck,
+  Printer,
+  QrCode,
+  Lock,
 } from "lucide-react";
+import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import ModalDialog from "@/components/ModalDialog";
 import {
   KINSHIP_LABELS,
@@ -43,6 +48,7 @@ interface Props {
   initialJustifications: any[];
   initialAttendances: any[];
   initialSnapshots: any[];
+  initialMinutes?: any[];
   currentUser: {
     name: string;
     email: string;
@@ -57,12 +63,15 @@ export default function ProntuarioClient({
   initialJustifications,
   initialAttendances,
   initialSnapshots,
+  initialMinutes = [],
 }: Props) {
   const [student, setStudent] = useState<any>(initialStudent);
   const [contacts, setContacts] = useState<any[]>(initialContacts);
   const [justifications, setJustifications] = useState<any[]>(initialJustifications);
   const [attendances, setAttendances] = useState<any[]>(initialAttendances);
+  const [minutes, setMinutes] = useState<any[]>(initialMinutes);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [isAtaEditorOpen, setIsAtaEditorOpen] = useState(false);
 
   // Modal: Novo Contato
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -930,28 +939,125 @@ export default function ProntuarioClient({
         </div>
       )}
 
-      {/* ABA 4: ATAS PRESENCIAIS & LINHA DO TEMPO WHATSAPP */}
+      {/* ABA 4: ATAS PEDAGÓGICAS OFICIAIS & LINHA DO TEMPO */}
       {activeTab === "timeline" && (
         <div role="tabpanel" className="space-y-6">
-          {/* Atas de Comparecimento Presencial */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
+          {/* Atas Pedagógicas Oficiais (Novo Livro Oficial) */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                  1. Atas de Comparecimento Presencial da Família
+                <h2 className="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center space-x-1.5">
+                  <BookOpenCheck className="w-4 h-4 text-sky-600" />
+                  <span>1. Livro Oficial de Atas Pedagógicas</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Registre reuniões presenciais com pais/responsáveis para compor o Dossiê do Conselho Tutelar/SERP.
+                  Atas lavradas com fé pública, assinatura em tela/mobile, hash SHA-256 e numeração sequencial oficial.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setIsAttModalOpen(true)}
-                className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition"
+                onClick={() => setIsAtaEditorOpen(true)}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
-                <span>Registrar Ata Presencial</span>
+                <Plus className="w-4 h-4 text-sky-400" />
+                <span>Lavrar Nova Ata Digital</span>
               </button>
+            </div>
+
+            {minutes.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-3 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                Nenhuma ata do novo Livro Oficial lavrada para este(a) estudante ainda.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {minutes.map((m) => {
+                  const isFinal = m.status === "FINALIZED";
+                  const isVoid = m.status === "VOIDED";
+                  const numStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
+
+                  return (
+                    <div
+                      key={m.id}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2 text-xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            {isFinal ? (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-mono font-extrabold text-[11px]">
+                                Ata nº {numStr}/{m.year}
+                              </span>
+                            ) : isVoid ? (
+                              <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-mono font-extrabold text-[11px] line-through">
+                                Ata nº {numStr}/{m.year} (Sem Efeito)
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-extrabold text-[11px]">
+                                Rascunho
+                              </span>
+                            )}
+
+                            {m.isConfidential && (
+                              <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 text-[10px] font-bold border border-rose-200 flex items-center space-x-1">
+                                <Lock className="w-3 h-3" />
+                                <span>Sigilo Reforçado</span>
+                              </span>
+                            )}
+
+                            <span className="text-slate-400 text-[11px]">
+                              {new Date(m.attendedAt).toLocaleDateString("pt-BR")}
+                            </span>
+                          </div>
+
+                          <h3 className="text-sm font-extrabold text-slate-900">
+                            {m.subject}
+                          </h3>
+
+                          <p className="text-slate-600">
+                            Lavrada por: <strong>{m.authorName}</strong> • Presentes:{" "}
+                            {m.participants?.map((p: any) => p.name).join(", ") || "Nenhum informado"}
+                          </p>
+                        </div>
+
+                        {isFinal && (
+                          <Link
+                            href={`/atas/${m.id}/imprimir`}
+                            target="_blank"
+                            className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition"
+                            title="Imprimir Via A4 Oficial"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Link>
+                        )}
+                      </div>
+
+                      <p className="text-slate-700 leading-relaxed font-serif bg-white p-3 rounded-xl border border-slate-100">
+                        {m.summary}
+                      </p>
+
+                      {m.agreementsSummary && (
+                        <p className="text-sky-900 bg-sky-50 p-2 rounded-lg border border-sky-100 text-[11px]">
+                          <strong>Combinados:</strong> {m.agreementsSummary}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Histórico Anterior (Atas Legadas InPersonAttendance) */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  2. Atendimentos Presenciais Anteriores (Histórico Legado)
+                </h2>
+                <p className="text-[11px] text-slate-400">
+                  Registros simples anteriores à implantação do Livro Oficial Digital.
+                </p>
+              </div>
             </div>
 
             {attendances.length === 0 ? (
@@ -1404,6 +1510,33 @@ export default function ProntuarioClient({
           </div>
         </form>
       </ModalDialog>
+
+      {/* Modal do Novo Livro Oficial de Atas Pedagógicas */}
+      <AtaEditorModal
+        isOpen={isAtaEditorOpen}
+        onClose={() => setIsAtaEditorOpen(false)}
+        onSaved={async () => {
+          setIsAtaEditorOpen(false);
+          try {
+            const res = await fetch(`/api/atas?studentId=${student.id}`);
+            const data = await res.json();
+            if (res.ok) setMinutes(data.minutes || []);
+          } catch (e) {
+            console.error("Erro ao atualizar atas do aluno:", e);
+          }
+        }}
+        availableStudents={[
+          {
+            id: student.id,
+            name: student.name,
+            classGroupName: student.classGroup?.name,
+            cgm: student.cgm,
+            phone: student.phone,
+            guardianName: student.guardianName,
+          },
+        ]}
+        preSelectedStudentId={student.id}
+      />
     </div>
   );
 }

@@ -29,6 +29,7 @@ model School {
   students        Student[]
   templates       MessageTemplate[]
   auditLogs       AuditLog[]
+  pedagogicalMinutes PedagogicalMinute[]
 
   @@index([inepCode])
   @@index([active])
@@ -87,6 +88,7 @@ model Student {
   contacts             StudentContact[]
   justifications       AbsenceJustification[]
   inPersonAttendances  InPersonAttendance[]
+  pedagogicalMinuteLinks PedagogicalMinuteStudent[]
   attendanceSnapshots  AttendanceSnapshot[]
 
   @@index([classGroupId, active])
@@ -242,4 +244,145 @@ model InPersonAttendance {
   createdAt       DateTime @default(now())
 
   @@index([studentId, attendedAt(sort: Desc)])
+}
+
+// ---------------------------------------------------------------------------
+// LIVRO OFICIAL DE ATAS DO ATENDIMENTO PEDAGÓGICO (LEI 14.063/2020 & ECA)
+// ---------------------------------------------------------------------------
+
+model PedagogicalMinute {
+  id                    String                         @id @default(cuid())
+  schoolId              String
+  school                School                         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  year                  Int                            // Ano do livro oficial (ex: 2026)
+  ataNumber             Int?                           // Número sequencial anual (ex: 1, 2, 42). Null enquanto rascunho.
+  status                String                         @default("DRAFT") // DRAFT | FINALIZED | VOIDED
+  category              String                         @default("ACOMPANHAMENTO_PEDAGOGICO") // BUSCA_ATIVA_FALTAS | CONVIVENCIA_INDISCIPLINA | ACOMPANHAMENTO_PEDAGOGICO | SAUDE_VULNERABILIDADE | REDE_PROTECAO_CT | ORIENTACAO_ROTINA
+  isConfidential        Boolean                        @default(false) // Sigilo reforçado (ECA/LGPD) - não sai no dossiê comum sem confirmação explícita
+  attendedAt            DateTime                       @default(now())
+  subject               String                         // Assunto / Pauta do atendimento
+  rawNotes              String?                        // Notas livres / transcrição bruta de rascunho
+  summary               String                         // Texto formal da ata em linguagem oficial
+  agreementsSummary     String?                        // Resumo dos combinados/encaminhamentos
+  
+  // Fé Pública e Servidor Responsável pela Lavratura
+  authorId              String?
+  authorName            String
+  authorEmail           String
+  authorRole            String                         @default("PEDAGOGA")
+  authorIp              String?
+  finalizedAt           DateTime?
+  
+  // Integridade e Validação Jurídica
+  contentHash           String?                        // SHA-256 canônico gerado no momento da lavratura
+  verificationCode      String?                        @unique // Código curto aleatório não sequencial para o QR Code público
+  physicalSignedScanData String?                       // Base64 compactado de imagem/PDF da via física assinada
+  
+  // Averbação de Cancelamento ("Tornada Sem Efeito")
+  voidedAt              DateTime?
+  voidedByName          String?
+  voidedByEmail         String?
+  voidReason            String?
+  
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+
+  students              PedagogicalMinuteStudent[]
+  participants          PedagogicalMinuteParticipant[]
+  addendums             PedagogicalMinuteAddendum[]
+  actionItems           PedagogicalActionItem[]
+
+  @@unique([schoolId, year, ataNumber])
+  @@index([schoolId, year, status])
+  @@index([schoolId, attendedAt(sort: Desc)])
+  @@index([verificationCode])
+}
+
+model PedagogicalMinuteStudent {
+  id                  String            @id @default(cuid())
+  minuteId            String
+  minute              PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  studentId           String
+  student             Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  // Snapshot imutável no momento da vinculação
+  studentNameSnapshot String
+  classNameSnapshot   String?
+  cgmSnapshot         String?
+
+  createdAt           DateTime          @default(now())
+
+  @@unique([minuteId, studentId])
+  @@index([studentId, createdAt(sort: Desc)])
+  @@index([minuteId])
+}
+
+model PedagogicalMinuteParticipant {
+  id                      String            @id @default(cuid())
+  minuteId                String
+  minute                  PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  
+  role                    String            // RESPONSAVEL | ESTUDANTE | PROFESSOR | EQUIPE_ESCOLAR | REDE_EXTERNA | TESTEMUNHA
+  studentId               String?           // Aluno de referência quando aplicável
+  name                    String
+  kinship                 String?           // Grau de parentesco se responsável
+  documentType            String?           // CPF | RG | MATRICULA | OUTRO
+  documentNumber          String?
+  documentVerifiedByStaff Boolean           @default(false) // Pedagoga atesta conferência com fé pública
+  phone                   String?
+  
+  signatureMode           String            @default("PENDING") // PENDING | SCREEN_CANVAS | MOBILE_QR | PAPER_A4 | REFUSED
+  signatureData           String?           // Imagem de traço vetorial/SVG ou PNG compactado (data URL)
+  signedAt                DateTime?
+  signerIp                String?
+  refusalReason           String?           // Justificativa caso tenha se recusado a assinar
+  witnessName             String?           // Servidor/testemunha presencial se houver recusa
+  
+  mobileSignToken         String?           @unique // Token temporário para assinar pelo celular via QR Code
+  mobileSignExpiresAt     DateTime?
+
+  createdAt               DateTime          @default(now())
+
+  @@index([minuteId])
+  @@index([mobileSignToken])
+}
+
+model PedagogicalMinuteAddendum {
+  id                       String            @id @default(cuid())
+  minuteId                 String
+  minute                   PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  
+  content                  String            // Texto do aditamento ("Em tempo: ...")
+  authorName               String
+  authorEmail              String
+  authorIp                 String?
+  previousHash             String            // Hash encadeado da ata ou do adendo imediatamente anterior
+  addendumHash             String            // Novo hash resultante (hash-chaining)
+  
+  participantSignatureData String?           // Assinatura de participante no adendo se houver
+  participantSignerName    String?
+  
+  createdAt                DateTime          @default(now())
+
+  @@index([minuteId, createdAt(sort: Asc)])
+}
+
+model PedagogicalActionItem {
+  id              String            @id @default(cuid())
+  minuteId        String
+  minute          PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  
+  description     String
+  responsible     String            @default("FAMILIA") // FAMILIA | ESTUDANTE | ESCOLA | REDE_PROTECAO
+  dueDate         DateTime?
+  status          String            @default("PENDING") // PENDING | COMPLETED | CANCELED
+  completedAt     DateTime?
+  completedByName String?
+  completionNotes String?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([minuteId])
+  @@index([status, dueDate])
 }

@@ -50,6 +50,7 @@ export default async function DossiePage({
       justifications={bundle.justifications}
       attendances={bundle.attendances}
       snapshots={bundle.snapshots}
+      minutes={bundle.minutes}
       school={school}
       emittedBy={{
         name: session.user.name || "Equipe Pedagógica",

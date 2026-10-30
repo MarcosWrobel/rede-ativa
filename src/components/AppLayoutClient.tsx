@@ -34,7 +34,12 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  if (pathname === "/login") {
+  const isStandalonePage =
+    pathname === "/login" ||
+    pathname.startsWith("/validar/ata/") ||
+    pathname.startsWith("/assinar/ata/");
+
+  if (isStandalonePage) {
     return <main className="min-h-screen bg-slate-50">{children}</main>;
   }
 

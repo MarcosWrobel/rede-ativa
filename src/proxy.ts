@@ -7,18 +7,21 @@ import { checkIsAdmin } from "@/lib/roles";
 const { auth: proxyAuth } = NextAuth(authConfig);
 
 const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PREFIXES = ["/validar/ata/", "/assinar/ata/"];
 const SELF_AUTH_API_PREFIXES = [
   "/api/auth/",
   "/api/frequencia/sync",
   "/api/serp/sync",
+  "/api/atas/public/",
+  "/api/atas/sign-token/",
 ];
 const ADMIN_PAGE_PREFIXES = ["/auditoria", "/equipe"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1. Libera página de login e endpoints com autenticação própria (OAuth / Extensão Chrome)
-  if (PUBLIC_PATHS.includes(pathname)) {
+  // 1. Libera página de login, validação pública e endpoints com autenticação própria
+  if (PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
   if (SELF_AUTH_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {

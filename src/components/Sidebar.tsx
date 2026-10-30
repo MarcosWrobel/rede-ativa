@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Users, 
   FileText, 
+  BookOpenCheck,
   ShieldCheck, 
   UserCheck,
   LogOut,
@@ -61,6 +62,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
     { href: "/relatorios", label: "Relatórios & Gráficos", icon: BarChart3 },
     { href: "/boletim", label: "Boletim Semanal", icon: FileSpreadsheet },
     { href: "/alunos", label: "Alunos & Turmas", icon: Users },
+    { href: "/atas", label: "Livro de Atas", icon: BookOpenCheck },
     { href: "/modelos", label: "Modelos de Mensagem", icon: FileText },
     ...(isAdmin
       ? [
