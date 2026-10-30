@@ -83,6 +83,10 @@ export default function AuditoriaClient({ initialLogs }: Props) {
       case "UPDATE_STUDENT_CONTACT":
       case "DELETE_STUDENT_CONTACT":
         return <span className="px-2 py-0.5 rounded font-bold bg-sky-50 text-sky-800 border border-sky-200">Contato Familiar</span>;
+      case "UPDATE_DELIVERY_STATUS":
+        return <span className="px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-800 border border-amber-200">Status Entrega (wa.me)</span>;
+      case "WEBHOOK_REPLY":
+        return <span className="px-2 py-0.5 rounded font-bold bg-purple-100 text-purple-800 border border-purple-200">Retorno Automático</span>;
       case "INITIAL_DATABASE_MIGRATION":
         return <span className="px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Migração Inicial</span>;
       default:
@@ -139,6 +143,8 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <option value="UPDATE_STUDENT">Edição de Aluno</option>
             <option value="DELETE_STUDENT">Inativação de Aluno</option>
             <option value="MARK_REPLY">Retorno de Responsável</option>
+            <option value="UPDATE_DELIVERY_STATUS">Status Entrega / Sem WhatsApp</option>
+            <option value="GENERATE_DOSSIER">Emissão Dossiê PDF</option>
             <option value="UPDATE_LOW_ATTENDANCE">Sincronização / Faltas</option>
             <option value="USER_LOGIN">Login no Sistema</option>
             <option value="LOGIN_DENIED">Login Bloqueado</option>

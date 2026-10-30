@@ -3,6 +3,8 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'></polyline></svg>");
+  --icon-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'><line x1='5' y1='12' x2='19' y2='12'></line></svg>");
 }
 
 body {
@@ -144,6 +146,114 @@ dialog::backdrop {
   overscroll-behavior: contain;
   background-color: rgba(15, 23, 42, 0.48);
   backdrop-filter: blur(2px);
+}
+
+/* Modern Web Guidance: checkbox (custom appearance: none + :indeterminate + 44px hit target) */
+.checkbox-custom {
+  --checkbox-size: 1.25em;
+  --checkbox-icon-size: 0.72em;
+
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  inline-size: var(--checkbox-size);
+  aspect-ratio: 1;
+  margin: 0;
+  border: 2px solid currentColor;
+  border-radius: 0.25rem;
+  background-color: #ffffff;
+  color: #0284c7;
+  cursor: pointer;
+
+  &::before {
+    content: "";
+    inline-size: var(--checkbox-icon-size);
+    aspect-ratio: 1;
+    background-color: currentColor;
+    mask: var(--checkbox-icon) no-repeat center / contain;
+    scale: 0;
+
+    @media (prefers-reduced-motion: no-preference) {
+      transition: scale 150ms ease;
+    }
+
+    @media (forced-colors: active) {
+      background-color: CanvasText;
+    }
+  }
+
+  &:checked {
+    --checkbox-icon: var(--icon-check);
+    background-color: #0284c7;
+    border-color: #0284c7;
+  }
+
+  &:checked::before {
+    background-color: #ffffff;
+  }
+
+  &:indeterminate {
+    --checkbox-icon: var(--icon-dash);
+    background-color: #0284c7;
+    border-color: #0284c7;
+  }
+
+  &:indeterminate::before {
+    background-color: #ffffff;
+  }
+
+  &:is(:checked, :indeterminate)::before {
+    scale: 1;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.checkbox-hit-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-block-size: 44px;
+  cursor: pointer;
+}
+
+/* Modern Web Guidance: progress (native <progress> with ungrouped -webkit- and -moz- pseudo-elements) */
+progress.queue-progress {
+  appearance: none;
+  border: 0 solid;
+  overflow: clip;
+  inline-size: 100%;
+  block-size: 0.65rem;
+  --progress-bar-radius: 1e5px;
+  --progress-bar-track: #e2e8f0;
+  --progress-bar-fill: #0284c7;
+  border-radius: var(--progress-bar-radius);
+  background: var(--progress-bar-track);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+progress.queue-progress::-webkit-progress-bar {
+  background: transparent;
+}
+
+progress.queue-progress::-webkit-progress-value {
+  background: var(--progress-bar-fill);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
+}
+
+progress.queue-progress::-moz-progress-bar {
+  background: var(--progress-bar-fill);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
 }
 
 /* Formatação A4 limpa para impressão de Dossiê Individual e Relatórios */

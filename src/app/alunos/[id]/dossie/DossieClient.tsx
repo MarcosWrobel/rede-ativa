@@ -8,6 +8,10 @@ import {
   JUSTIFICATION_TYPE_LABELS,
   parseEnrollmentDetailMetrics,
 } from "@/lib/pedagogicalClassifier";
+import {
+  REPLY_CATEGORY_LABELS,
+  type ReplyCategory,
+} from "@/lib/whatsappProvider";
 
 interface Props {
   student: any;
@@ -41,13 +45,21 @@ export default function DossieClient({
   const [showFullMessages, setShowFullMessages] = useState(false);
 
   const totalLogs = student.messageLogs?.length || 0;
+  const failedLogs = (student.messageLogs || []).filter(
+    (l: any) => l.deliveryStatus === "FAILED_NO_WHATSAPP"
+  ).length;
+  const effectiveLogs = Math.max(0, totalLogs - failedLogs);
   const repliedLogs = (student.messageLogs || []).filter((l: any) => l.guardianReplied).length;
 
   const [parecerFinal, setParecerFinal] = useState(() => {
     const freqTxt = lowAtt
       ? `apresenta percentual acumulado de frequência escolar de ${lowAtt.attendancePercent.toFixed(1)}%`
       : "encontra-se em acompanhamento preventivo de assiduidade escolar";
-    return `Certificamos, para os devidos fins legais junto aos órgãos da Rede de Proteção (Art. 56, inciso II do Estatuto da Criança e do Adolescente — Lei nº 8.069/1990 e LDB — Lei nº 9.394/1996), que a Equipe Pedagógica do Colégio Estadual Leopoldina B. Pedroso realizou ${totalLogs} acionamento(s) documentado(s) de Busca Ativa Escolar (obtendo ${repliedLogs} retorno(s) familiar(es)) e ${attendances.length} atendimento(s) presencial(is) referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}.`;
+    const failedClause =
+      failedLogs > 0
+        ? ` (além de ${failedLogs} tentativa(s) frustrada(s) em número cadastral sem conta ativa no WhatsApp)`
+        : "";
+    return `Certificamos, para os devidos fins legais junto aos órgãos da Rede de Proteção (Art. 56, inciso II do Estatuto da Criança e do Adolescente — Lei nº 8.069/1990 e LDB — Lei nº 9.394/1996), que a Equipe Pedagógica do Colégio Estadual Leopoldina B. Pedroso realizou ${effectiveLogs} acionamento(s) efetivo(s) de Busca Ativa Escolar${failedClause}, obtendo ${repliedLogs} retorno(s) familiar(es), e ${attendances.length} atendimento(s) presencial(is) referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}.`;
   });
 
   useEffect(() => {
@@ -425,15 +437,40 @@ export default function DossieClient({
                     </td>
                     <td className="border border-slate-300 px-2 py-1 font-mono whitespace-nowrap">
                       {log.phoneUsed}
+                      {log.deliveryStatus === "FAILED_NO_WHATSAPP" && (
+                        <span className="block font-sans text-[9.5px] font-bold text-rose-800">
+                          [Sem WhatsApp]
+                        </span>
+                      )}
                     </td>
                     <td className="border border-slate-300 px-2 py-1 whitespace-nowrap">
                       {log.sentByName}
                     </td>
                     <td className="border border-slate-300 px-2 py-1 text-center font-bold">
-                      {log.guardianReplied ? "SIM" : "NÃO"}
+                      {log.deliveryStatus === "FAILED_NO_WHATSAPP"
+                        ? "FRUSTRADO"
+                        : log.guardianReplied
+                        ? "SIM"
+                        : "NÃO"}
                     </td>
                     <td className="border border-slate-300 px-2 py-1">
-                      {log.replyNotes || (log.guardianReplied ? "Retorno confirmado sem observação textual." : "Sem retorno registrado.")}
+                      {log.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
+                        <strong>
+                          Tentativa frustrada — Número informado no cadastro não possui WhatsApp ativo.
+                        </strong>
+                      ) : (
+                        <>
+                          {log.replyCategory && (
+                            <strong className="block text-slate-800">
+                              [{REPLY_CATEGORY_LABELS[log.replyCategory as ReplyCategory] || log.replyCategory}]
+                            </strong>
+                          )}
+                          {log.replyNotes ||
+                            (log.guardianReplied
+                              ? "Retorno confirmado sem observação textual."
+                              : "Sem retorno registrado.")}
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}

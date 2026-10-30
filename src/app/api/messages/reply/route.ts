@@ -14,20 +14,36 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
-    const { logId, guardianReplied, replyNotes } = parsed.data;
+    const { logId, guardianReplied, replyNotes, replyCategory } = parsed.data;
 
     const previous = await prisma.messageLog.findUnique({
       where: { id: logId },
       include: { student: true },
     });
 
+    if (!previous) {
+      return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
+    }
+
+    const shouldUpgradeDelivery =
+      Boolean(guardianReplied) &&
+      (previous.deliveryStatus === "LINK_OPENED" || previous.deliveryStatus === "SENT");
+
     const updated = await prisma.messageLog.update({
       where: { id: logId },
       data: {
         guardianReplied: Boolean(guardianReplied),
-        replyNotes: replyNotes !== undefined ? replyNotes : previous?.replyNotes,
+        replyNotes: replyNotes !== undefined ? replyNotes : previous.replyNotes,
+        replyCategory: Boolean(guardianReplied)
+          ? replyCategory !== undefined
+            ? replyCategory
+            : previous.replyCategory
+          : null,
         repliedAt: Boolean(guardianReplied) ? new Date() : null,
         repliedByUserId: Boolean(guardianReplied) ? authCheck.userId || null : null,
+        ...(shouldUpgradeDelivery
+          ? { deliveryStatus: "READ", deliveryUpdatedAt: new Date() }
+          : {}),
       },
     });
 
@@ -36,9 +52,10 @@ export async function POST(req: Request) {
       entityType: "MessageLog",
       entityId: logId,
       details: {
-        studentName: previous?.student.name,
-        previousReplied: previous?.guardianReplied,
+        studentName: previous.student.name,
+        previousReplied: previous.guardianReplied,
         newReplied: Boolean(guardianReplied),
+        replyCategory: updated.replyCategory,
         notes: replyNotes,
       },
       user: {

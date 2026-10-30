@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
+import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +16,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const { studentId, templateId, reasonTitle, messageContent, customPhone } = parsed.data;
+    const {
+      studentId,
+      templateId,
+      reasonTitle,
+      messageContent,
+      customPhone,
+      initialDeliveryStatus,
+    } = parsed.data;
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -28,12 +36,21 @@ export async function POST(req: Request) {
 
     const digits = normalizeWhatsAppPhone(customPhone || student.phone);
     if (!digits || digits.length < 10) {
-      return NextResponse.json({ error: "Telefone inválido para envio no WhatsApp" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Telefone inválido para envio no WhatsApp" },
+        { status: 400 }
+      );
     }
 
     const sentByName = authCheck.userName;
+    const dispatch = await dispatchWhatsAppMessage({
+      phoneDigits: digits,
+      messageText: messageContent,
+    });
 
-    // 1. Create message log
+    const resolvedStatus = initialDeliveryStatus || dispatch.initialStatus;
+
+    // 1. Create message log with deliveryStatus (AUT-01)
     const log = await prisma.messageLog.create({
       data: {
         studentId: student.id,
@@ -43,6 +60,8 @@ export async function POST(req: Request) {
         phoneUsed: digits,
         sentByUserId: authCheck.userId || null,
         sentByName,
+        deliveryStatus: resolvedStatus,
+        deliveryUpdatedAt: new Date(),
         sentAt: new Date(),
       },
     });
@@ -57,6 +76,8 @@ export async function POST(req: Request) {
         turma: student.classGroup.name,
         reason: reasonTitle,
         phone: digits,
+        deliveryStatus: resolvedStatus,
+        providerMode: dispatch.mode,
         messageSnippet: messageContent.slice(0, 100),
       },
       user: {
@@ -67,14 +88,12 @@ export async function POST(req: Request) {
       req,
     });
 
-    // WhatsApp Web URL
-    const encodedText = encodeURIComponent(messageContent);
-    const whatsappUrl = `https://wa.me/${digits}?text=${encodedText}`;
-
     return NextResponse.json({
       success: true,
       logId: log.id,
-      whatsappUrl,
+      whatsappUrl: dispatch.whatsappUrl,
+      deliveryStatus: resolvedStatus,
+      providerMode: dispatch.mode,
     });
   } catch (error: any) {
     console.error("Erro ao enviar mensagem:", error);

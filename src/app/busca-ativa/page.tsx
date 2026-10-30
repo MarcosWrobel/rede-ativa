@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function BuscaAtivaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ studentId?: string; phone?: string }>;
+  searchParams: Promise<{ studentId?: string; phone?: string; mode?: string; turmaId?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) {
@@ -105,6 +105,8 @@ export default async function BuscaAtivaPage({
       initialStudents={initialStudents}
       initialSelectedStudentId={sp.studentId || ""}
       initialCustomPhone={sp.phone || ""}
+      initialMode={sp.mode === "fila" ? "fila" : "individual"}
+      initialTurmaId={sp.turmaId || ""}
       currentUser={{
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",

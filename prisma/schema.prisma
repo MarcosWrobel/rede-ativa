@@ -86,18 +86,23 @@ model MessageLog {
   sentByUserId    String?
   sentByUser      User?            @relation("SentByUser", fields: [sentByUserId], references: [id], onDelete: SetNull)
   sentByName      String           // Stored snapshot of pedagoga name
-  guardianReplied Boolean          @default(false)
-  replyNotes      String?
-  repliedAt       DateTime?
-  repliedByUserId String?
-  repliedByUser   User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
-  sentAt          DateTime         @default(now())
+  guardianReplied   Boolean          @default(false)
+  replyNotes        String?
+  replyCategory     String?          // SAUDE | TRANSPORTE | TRABALHO | VIAGEM_FAMILIAR | VULNERABILIDADE | SEM_JUSTIFICATIVA | OUTROS
+  repliedAt         DateTime?
+  repliedByUserId   String?
+  repliedByUser     User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
+  deliveryStatus    String           @default("SENT") // LINK_OPENED | SENT | DELIVERED | READ | FAILED_NO_WHATSAPP
+  deliveryUpdatedAt DateTime?
+  sentAt            DateTime         @default(now())
 
   @@index([sentAt(sort: Desc)])
   @@index([studentId, sentAt(sort: Desc)])
   @@index([guardianReplied])
   @@index([sentByName])
   @@index([reasonTitle])
+  @@index([deliveryStatus])
+  @@index([replyCategory])
 }
 
 model LowAttendanceRecord {

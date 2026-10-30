@@ -17,6 +17,8 @@ export async function GET(req: Request) {
     const classGroupId = (searchParams.get("classGroupId") || "").trim();
     const pedagoga = (searchParams.get("pedagoga") || "").trim();
     const replied = searchParams.get("replied") || "TODOS";
+    const deliveryStatus = (searchParams.get("deliveryStatus") || "TODOS").trim();
+    const replyCategory = (searchParams.get("replyCategory") || "TODOS").trim();
     const dateFrom = (searchParams.get("dateFrom") || "").trim();
     const dateTo = (searchParams.get("dateTo") || "").trim();
 
@@ -48,6 +50,14 @@ export async function GET(req: Request) {
       andFilters.push({ guardianReplied: true });
     } else if (replied === "NAO") {
       andFilters.push({ guardianReplied: false });
+    }
+
+    if (deliveryStatus && deliveryStatus !== "TODOS") {
+      andFilters.push({ deliveryStatus });
+    }
+
+    if (replyCategory && replyCategory !== "TODOS") {
+      andFilters.push({ replyCategory });
     }
 
     if (dateFrom || dateTo) {

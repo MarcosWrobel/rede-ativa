@@ -40,7 +40,8 @@ import {
   Stethoscope,
   FileText,
   UserCheck,
-  PhoneOff
+  PhoneOff,
+  ListChecks
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
 import {
@@ -49,6 +50,11 @@ import {
   KINSHIP_LABELS,
   JUSTIFICATION_TYPE_LABELS,
 } from "@/lib/pedagogicalClassifier";
+import {
+  DELIVERY_STATUS_LABELS,
+  WA_ME_REUSABLE_WINDOW_NAME,
+  type DeliveryStatus,
+} from "@/lib/whatsappProvider";
 
 interface Props {
   rankedAbsences: any[];
@@ -158,9 +164,12 @@ export default function FaltasClient({
   const [composedMessage, setComposedMessage] = useState<string>("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [messageSuccessInfo, setMessageSuccessInfo] = useState<{
+    logId: string;
     whatsappUrl: string;
     phone: string;
+    deliveryStatus: DeliveryStatus;
   } | null>(null);
+  const [isUpdatingDrawerStatus, setIsUpdatingDrawerStatus] = useState(false);
   const [messageError, setMessageError] = useState<string>("");
 
   // Abre o Painel com os dados do Aluno e Frequência do B.I.
@@ -299,16 +308,42 @@ export default function FaltasClient({
       }
 
       setMessageSuccessInfo({
+        logId: data.logId,
         whatsappUrl: data.whatsappUrl,
         phone: customPhone || activeStudentData.student.phone || "",
+        deliveryStatus: data.deliveryStatus || "LINK_OPENED",
       });
 
-      // Tenta abrir a aba do WhatsApp
-      window.open(data.whatsappUrl, "_blank");
+      // Abre na guia única reutilizável do WhatsApp Web
+      window.open(data.whatsappUrl, WA_ME_REUSABLE_WINDOW_NAME);
     } catch (err: any) {
       setMessageError(err.message || "Erro ao processar envio.");
     } finally {
       setIsSendingMessage(false);
+    }
+  };
+
+  const handleUpdateDrawerDeliveryStatus = async (nextStatus: DeliveryStatus) => {
+    if (!messageSuccessInfo) return;
+    setIsUpdatingDrawerStatus(true);
+    try {
+      const res = await fetch("/api/messages/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logId: messageSuccessInfo.logId,
+          deliveryStatus: nextStatus,
+        }),
+      });
+      if (res.ok) {
+        setMessageSuccessInfo((prev) =>
+          prev ? { ...prev, deliveryStatus: nextStatus } : null
+        );
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsUpdatingDrawerStatus(false);
     }
   };
 
@@ -707,6 +742,20 @@ export default function FaltasClient({
             <UploadCloud className="w-4 h-4" />
             <span>Sincronizar Power BI</span>
           </button>
+
+          {/* Fila por Turma (wa.me) */}
+          <Link
+            href={
+              selectedTurma
+                ? `/busca-ativa?mode=fila&turmaId=${encodeURIComponent(selectedTurma)}`
+                : "/busca-ativa?mode=fila"
+            }
+            title="Abrir modo de disparo assistido em fila por turma via wa.me"
+            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
+          >
+            <ListChecks className="w-4 h-4" />
+            <span>Fila por Turma (wa.me)</span>
+          </Link>
 
           {/* Exportar CSV */}
           <button
@@ -1961,25 +2010,75 @@ export default function FaltasClient({
                 </div>
               )}
 
-              {/* Banner de Feedback de Sucesso */}
+              {/* Banner de Feedback de Sucesso + Confirmação de Entrega (AUT-01) */}
               {messageSuccessInfo && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 space-y-2 text-xs">
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="font-bold">Mensagem registrada e direcionada com sucesso!</span>
+                <div
+                  className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
+                    messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
+                      ? "bg-rose-50 border-rose-200 text-rose-900"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2 font-bold">
+                      {messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
+                        <>
+                          <PhoneOff className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>Número sinalizado sem WhatsApp!</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>
+                            {DELIVERY_STATUS_LABELS[messageSuccessInfo.deliveryStatus]}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-emerald-700 text-[11px]">
-                    O contato foi salvo no histórico escolar do aluno. Se a janela do WhatsApp Web não abriu automaticamente:
+                  <p className="text-[11px] opacity-90">
+                    {messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
+                      ? "O telefone foi marcado como inválido no cadastro do estudante e constará como tentativa frustrada no Dossiê PDF."
+                      : "Confirme se o envio foi concluído no WhatsApp Web ou se o número não possui conta:"}
                   </p>
-                  <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={
+                        isUpdatingDrawerStatus || messageSuccessInfo.deliveryStatus === "SENT"
+                      }
+                      onClick={() => handleUpdateDrawerDeliveryStatus("SENT")}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold transition shadow-2xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>
+                        {messageSuccessInfo.deliveryStatus === "SENT"
+                          ? "Confirmado"
+                          : "Confirmar Envio"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={
+                        isUpdatingDrawerStatus ||
+                        messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
+                      }
+                      onClick={() => handleUpdateDrawerDeliveryStatus("FAILED_NO_WHATSAPP")}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 disabled:opacity-50 rounded-lg font-bold transition"
+                    >
+                      <PhoneOff className="w-3.5 h-3.5" />
+                      <span>Sem WhatsApp</span>
+                    </button>
+
                     <a
                       href={messageSuccessInfo.whatsappUrl}
-                      target="_blank"
+                      target={WA_ME_REUSABLE_WINDOW_NAME}
                       rel="noopener noreferrer"
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs transition shadow-2xs"
+                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-bold transition ml-auto"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Abrir WhatsApp Web Manualmente</span>
+                      <span>Reabrir wa.me</span>
                     </a>
                   </div>
                 </div>

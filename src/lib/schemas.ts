@@ -48,18 +48,52 @@ export const templateUpdateSchema = z.object({
   active: z.boolean().optional(),
 });
 
+export const deliveryStatusEnum = z.enum([
+  "LINK_OPENED",
+  "SENT",
+  "DELIVERED",
+  "READ",
+  "FAILED_NO_WHATSAPP",
+]);
+
+export const replyCategoryEnum = z.enum([
+  "SAUDE",
+  "TRANSPORTE",
+  "TRABALHO",
+  "VIAGEM_FAMILIAR",
+  "VULNERABILIDADE",
+  "SEM_JUSTIFICATIVA",
+  "OUTROS",
+]);
+
 export const messageSendSchema = z.object({
   studentId: z.string().trim().min(1, "Aluno é obrigatório"),
   templateId: z.string().optional().nullable(),
   reasonTitle: z.string().trim().min(1, "Motivo é obrigatório"),
   messageContent: z.string().trim().min(2, "Conteúdo da mensagem é obrigatório"),
   customPhone: z.string().optional().nullable(),
+  initialDeliveryStatus: deliveryStatusEnum.optional(),
+});
+
+export const messageDeliveryStatusUpdateSchema = z.object({
+  logId: z.string().trim().min(1, "ID do registro é obrigatório"),
+  deliveryStatus: deliveryStatusEnum,
 });
 
 export const messageReplySchema = z.object({
   logId: z.string().trim().min(1, "ID do registro é obrigatório"),
   guardianReplied: z.boolean(),
   replyNotes: z.string().optional().nullable(),
+  replyCategory: replyCategoryEnum.optional().nullable(),
+});
+
+export const aiClassifyReplySchema = z.object({
+  rawReply: z
+    .string()
+    .trim()
+    .min(3, "Cole ou digite ao menos uma frase informada pelo responsável para classificar."),
+  studentName: z.string().trim().optional().nullable(),
+  reasonTitle: z.string().trim().optional().nullable(),
 });
 
 export const frequenciaSyncItemSchema = z.object({

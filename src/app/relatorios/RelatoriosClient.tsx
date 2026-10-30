@@ -93,7 +93,17 @@ export default function RelatoriosClient({ initialSummary }: Props) {
     window.print();
   };
 
-  const { reasonStats, pedagogaStats } = summary;
+  const {
+    reasonStats,
+    pedagogaStats,
+    categoryStats = [],
+    deliveryStats = {
+      confirmedCount: 0,
+      linkOpenedCount: 0,
+      failedNoWhatsappCount: 0,
+      failedPercent: "0.0",
+    },
+  } = summary;
 
   return (
     <div className="space-y-6">
@@ -309,20 +319,60 @@ export default function RelatoriosClient({ initialSummary }: Props) {
           {/* Return Status Distribution */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-              3. Índice de Retorno dos Responsáveis
+              3. Índice de Retorno & Qualidade Cadastral (wa.me)
             </h2>
-            <div className="grid grid-cols-2 gap-4 text-center">
-              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl">
                 <div className="text-2xl font-bold text-emerald-700">{summary.replied}</div>
-                <div className="text-xs font-semibold text-emerald-800 mt-1">Responsável Retornou</div>
+                <div className="text-xs font-semibold text-emerald-800 mt-1">Retornaram</div>
                 <div className="text-[11px] text-emerald-600 mt-0.5">{summary.repliedPercent}% do total</div>
               </div>
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
                 <div className="text-2xl font-bold text-slate-600">{summary.pending}</div>
-                <div className="text-xs font-semibold text-slate-700 mt-1">Retorno Pendente</div>
+                <div className="text-xs font-semibold text-slate-700 mt-1">Pendentes</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">{summary.pendingPercent}% do total</div>
               </div>
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl">
+                <div className="text-2xl font-bold text-rose-700">
+                  {deliveryStats.failedNoWhatsappCount}
+                </div>
+                <div className="text-xs font-semibold text-rose-800 mt-1">Sem WhatsApp</div>
+                <div className="text-[11px] text-rose-600 mt-0.5">
+                  {deliveryStats.failedPercent}% dos envios
+                </div>
+              </div>
             </div>
+          </div>
+
+          {/* Classified Return Causes (AUT-03) */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              4. Causas / Categorias das Justificativas Familiares
+            </h2>
+            {categoryStats.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-3">
+                Nenhum retorno classificado por causa neste recorte temporal. Use o botão &ldquo;Formalizar &amp; Classificar com IA&rdquo; no Histórico para alimentar este indicador.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {categoryStats.map((cat) => (
+                  <div key={cat.category} className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium text-slate-700">
+                      <span className="font-semibold">{cat.label}</span>
+                      <span className="whitespace-nowrap font-mono text-slate-500">
+                        <strong>{cat.count}</strong> ({cat.percent}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-600 rounded-full"
+                        style={{ width: `${cat.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

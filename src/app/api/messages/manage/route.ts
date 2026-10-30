@@ -18,6 +18,8 @@ export async function PUT(req: Request) {
       sentByName,
       guardianReplied,
       replyNotes,
+      replyCategory,
+      deliveryStatus,
       messageContent,
     } = body;
 
@@ -52,6 +54,11 @@ export async function PUT(req: Request) {
         : null;
     }
     if (replyNotes !== undefined) updateData.replyNotes = replyNotes;
+    if (replyCategory !== undefined) updateData.replyCategory = replyCategory || null;
+    if (deliveryStatus !== undefined) {
+      updateData.deliveryStatus = deliveryStatus;
+      updateData.deliveryUpdatedAt = new Date();
+    }
 
     const updated = await prisma.messageLog.update({
       where: { id },

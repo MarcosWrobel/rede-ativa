@@ -24,7 +24,9 @@ export type AuditAction =
   | "CREATE_JUSTIFICATION"
   | "DELETE_JUSTIFICATION"
   | "CREATE_IN_PERSON_ATTENDANCE"
-  | "DELETE_IN_PERSON_ATTENDANCE";
+  | "DELETE_IN_PERSON_ATTENDANCE"
+  | "UPDATE_DELIVERY_STATUS"
+  | "WEBHOOK_REPLY";
 
 export interface AuditUser {
   id?: string;
