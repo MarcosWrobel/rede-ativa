@@ -38,8 +38,8 @@ flowchart TD
     end
 
     subgraph BusinessLayer [Módulos da Aplicação]
-        NextApp --> BuscaAtiva[/busca-ativa - Disparo WhatsApp]
-        NextApp --> Faltas[/faltas - Painel de Risco e SERP]
+        NextApp --> BuscaAtiva[/busca-ativa - Painel de Envio]
+        NextApp --> Faltas[/faltas - Busca-ativa (Risco e SERP)]
         NextApp --> Modelos[/modelos - Editor Bi-Coluna & IA]
         NextApp --> Historico[/historico - Controle de Retornos]
         NextApp --> Relatorios[/relatorios - Gráficos e Exportação]
@@ -212,8 +212,8 @@ Como o Power BI estadual bloqueia exportação direta para `.CSV` e o portal SER
 
 ## 5. Módulos do Sistema & Interface
 
-### 5.1. Painel de Faltas & Infrequência (`/faltas`)
-Redesenhado para responsividade total em **monitores Full HD (1920x1080 até 1800px)** e **notebooks escolares (1366x768)**:
+### 5.1. Painel de Busca-ativa & Frequência (`/faltas`)
+Acessado pela aba **"Busca-ativa"** no menu lateral, este módulo foi redesenhado para responsividade total em **monitores Full HD (1920x1080 até 1800px)** e **notebooks escolares (1366x768)**:
 - **Cabeçalho Fixo (*Sticky Header*)**: Colunas congeladas no topo durante a rolagem de mais de 600 alunos.
 - **Alternador de Densidade**: Modo *Compacto* (ideal para telas de 768p, cabendo 12 a 15 alunos por tela) e modo *Espaçoso*.
 - **5 Cards de Resumo Executivo (KPIs em Tempo Real)**:

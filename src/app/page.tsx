@@ -63,8 +63,8 @@ export default async function DashboardPage() {
       btnText: "Ver Histórico",
     },
     {
-      title: "Controle de Faltas & Busca Ativa",
-      desc: "Ranking de acionamentos por infrequência e acompanhamento SERP / Conselho Tutelar.",
+      title: "Busca-ativa",
+      desc: "Ranking de acionamentos por infrequência, acompanhamento SERP e métricas do Power BI.",
       href: "/faltas",
       icon: AlertTriangle,
       color: "bg-amber-50 text-amber-700 border-amber-200",

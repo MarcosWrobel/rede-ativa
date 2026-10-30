@@ -56,7 +56,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
   const navLinks = [
     { href: "/busca-ativa", label: "Painel de Envio", icon: Send },
     { href: "/historico", label: "Histórico de Envios", icon: History },
-    { href: "/faltas", label: "Controle de Faltas & CT", icon: AlertTriangle },
+    { href: "/faltas", label: "Busca-ativa", icon: AlertTriangle },
     { href: "/relatorios", label: "Relatórios & Gráficos", icon: BarChart3 },
     { href: "/alunos", label: "Alunos & Turmas", icon: Users },
     { href: "/modelos", label: "Modelos de Mensagem", icon: FileText },
