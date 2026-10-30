@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
 import {
@@ -122,6 +122,8 @@ export default function AtaEditorModal({
   const [qrModalInfo, setQrModalInfo] = useState<{ url: string; name: string } | null>(null);
   const [finalizedAta, setFinalizedAta] = useState<any | null>(null);
 
+  const [minuteId, setMinuteId] = useState<string | null>(existingMinute?.id || null);
+
   // Ditado por voz nativo pt-BR
   const toggleSpeechRecognition = () => {
     if (isListening) {
@@ -161,7 +163,30 @@ export default function AtaEditorModal({
     }
   };
 
-  // Formalização IA com Gemini
+  // Polling para detectar automaticamente quando o participante assinar pelo celular
+  useEffect(() => {
+    if (!qrModalInfo || !minuteId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/atas/${minuteId}`);
+        const data = await res.json();
+        if (data.minute?.participants) {
+          setParticipants(data.minute.participants);
+          const currentPart = data.minute.participants.find(
+            (p: any) => p.name === qrModalInfo.name
+          );
+          if (currentPart?.signatureData) {
+            setQrModalInfo(null);
+          }
+        }
+      } catch (err) {
+        console.warn("Polling de assinatura falhou:", err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [qrModalInfo, minuteId]);
   const handleFormalizeWithAi = async () => {
     if (!rawNotes.trim()) {
       alert("Digite tópicos ou use o microfone antes de solicitar a formalização com IA.");
@@ -239,8 +264,9 @@ export default function AtaEditorModal({
         actionItems,
       };
 
-      const url = existingMinute?.id ? `/api/atas/${existingMinute.id}` : "/api/atas";
-      const method = existingMinute?.id ? "PATCH" : "POST";
+      const targetId = minuteId || existingMinute?.id;
+      const url = targetId ? `/api/atas/${targetId}` : "/api/atas";
+      const method = targetId ? "PATCH" : "POST";
 
       const res = await fetch(url, {
         method,
@@ -250,6 +276,13 @@ export default function AtaEditorModal({
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erro ao salvar rascunho");
+
+      if (data.minute?.id) {
+        setMinuteId(data.minute.id);
+        if (data.minute.participants) {
+          setParticipants(data.minute.participants);
+        }
+      }
 
       return data.minute;
     } catch (err: any) {
@@ -298,19 +331,24 @@ export default function AtaEditorModal({
   // Gerar QR Code para participante assinar no celular
   const handleGenerateMobileSign = async (index: number) => {
     const part = participants[index];
-    if (!existingMinute?.id) {
-      // Salva rascunho primeiro para ter ID no banco
+    const currentId = minuteId || existingMinute?.id;
+
+    if (!currentId || !part.id) {
+      // Salva rascunho primeiro para garantir ID no banco
       const saved = await handleSaveDraft();
       if (!saved) return;
-      generateTokenForParticipant(saved.id, saved.participants[index]?.id, part.name);
+      const partId = saved.participants[index]?.id;
+      if (partId) {
+        generateTokenForParticipant(saved.id, partId, part.name);
+      }
       return;
     }
-    generateTokenForParticipant(existingMinute.id, part.id, part.name);
+    generateTokenForParticipant(currentId, part.id, part.name);
   };
 
-  const generateTokenForParticipant = async (minuteId: string, participantId: string, name: string) => {
+  const generateTokenForParticipant = async (targetMinuteId: string, participantId: string, name: string) => {
     try {
-      const res = await fetch(`/api/atas/${minuteId}/sign-token`, {
+      const res = await fetch(`/api/atas/${targetMinuteId}/sign-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ participantId }),
@@ -318,6 +356,7 @@ export default function AtaEditorModal({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
+      setMinuteId(targetMinuteId);
       setQrModalInfo({ url: data.signUrl, name });
     } catch (err: any) {
       alert(err.message || "Erro ao gerar link de assinatura");

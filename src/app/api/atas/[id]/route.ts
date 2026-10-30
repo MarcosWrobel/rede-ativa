@@ -29,6 +29,7 @@ const updateMinuteDraftSchema = z.object({
         phone: z.string().optional().nullable(),
         signatureMode: z.string().default("PENDING"),
         signatureData: z.string().optional().nullable(),
+        signedAt: z.string().optional().nullable(),
         refusalReason: z.string().optional().nullable(),
         witnessName: z.string().optional().nullable(),
       })
@@ -156,26 +157,42 @@ export async function PATCH(
       });
     }
 
-    // Se informou participants, atualiza
+    // Se informou participants, preserva assinaturas mobile recém-coletadas caso o front-end envie rascunho anterior
     if (data.participants) {
+      const existingParticipants = await prisma.pedagogicalMinuteParticipant.findMany({
+        where: { minuteId: id },
+      });
+
       await prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
       await prisma.pedagogicalMinuteParticipant.createMany({
-        data: data.participants.map((p) => ({
-          minuteId: id,
-          role: p.role,
-          studentId: p.studentId || null,
-          name: p.name,
-          kinship: p.kinship || null,
-          documentType: p.documentType || null,
-          documentNumber: p.documentNumber || null,
-          documentVerifiedByStaff: p.documentVerifiedByStaff,
-          phone: p.phone || null,
-          signatureMode: p.signatureMode || "PENDING",
-          signatureData: p.signatureData || null,
-          signedAt: p.signatureData ? new Date() : null,
-          refusalReason: p.refusalReason || null,
-          witnessName: p.witnessName || null,
-        })),
+        data: data.participants.map((p, idx) => {
+          // Se o participante já tinha assinatura salva no banco (ex: via QR Code móvel), não perde!
+          const match =
+            (p.id && existingParticipants.find((ep) => ep.id === p.id)) ||
+            existingParticipants.find((ep) => ep.name.trim() === p.name.trim()) ||
+            existingParticipants[idx];
+
+          const sigData = p.signatureData || match?.signatureData || null;
+          const sigMode = sigData ? (p.signatureMode !== "PENDING" ? p.signatureMode : match?.signatureMode || "SCREEN_CANVAS") : p.signatureMode || "PENDING";
+          const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
+
+          return {
+            minuteId: id,
+            role: p.role,
+            studentId: p.studentId || null,
+            name: p.name,
+            kinship: p.kinship || null,
+            documentType: p.documentType || null,
+            documentNumber: p.documentNumber || null,
+            documentVerifiedByStaff: p.documentVerifiedByStaff,
+            phone: p.phone || null,
+            signatureMode: sigMode,
+            signatureData: sigData,
+            signedAt,
+            refusalReason: p.refusalReason || null,
+            witnessName: p.witnessName || null,
+          };
+        }),
       });
     }
 
