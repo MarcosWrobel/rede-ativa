@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 export type AuditAction =
   | "SEND_MESSAGE"
   | "CREATE_STUDENT"
+  | "IMPORT_STUDENTS_SERE"
   | "UPDATE_STUDENT"
   | "DELETE_STUDENT"
   | "MARK_REPLY"

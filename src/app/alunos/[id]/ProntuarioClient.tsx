@@ -406,7 +406,7 @@ export default function ProntuarioClient({
             <p className="text-xs text-slate-600">
               Responsável Principal:{" "}
               <strong>{student.guardianName || "Não informado"}</strong> • Telefone Principal:{" "}
-              <strong className="font-mono">{student.phone}</strong>
+              <strong className="font-mono">{student.phone || "Não informado"}</strong>
             </p>
           </div>
 
@@ -734,14 +734,18 @@ export default function ProntuarioClient({
                   <h3 className="text-sm font-bold text-slate-900 mt-1.5">
                     {student.guardianName || "Responsável Principal"}
                   </h3>
-                  <p className="font-mono text-slate-700 mt-0.5">{student.phone}</p>
+                  <p className="font-mono text-slate-700 mt-0.5">
+                    {student.phone || "Sem telefone informado no SERE"}
+                  </p>
                 </div>
-                <Link
-                  href={`/busca-ativa?studentId=${student.id}&phone=${student.phone}`}
-                  className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px]"
-                >
-                  Enviar WhatsApp
-                </Link>
+                {student.phone && (
+                  <Link
+                    href={`/busca-ativa?studentId=${student.id}&phone=${student.phone}`}
+                    className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px]"
+                  >
+                    Enviar WhatsApp
+                  </Link>
+                )}
               </div>
               <p className="text-[11px] text-slate-500">
                 Este é o telefone padrão sincronizado com a ficha cadastral do estudante.

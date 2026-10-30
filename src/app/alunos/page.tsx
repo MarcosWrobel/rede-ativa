@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkIsAdmin } from "@/lib/roles";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import AlunosClient from "./AlunosClient";
 import { redirect } from "next/navigation";
@@ -58,5 +59,13 @@ export default async function AlunosPage() {
     extraContactsCount: contactsCountMap.get(s.id) || 0,
   }));
 
-  return <AlunosClient initialStudents={enrichedStudents} classGroups={classGroups} />;
+  const isAdmin = checkIsAdmin(session);
+
+  return (
+    <AlunosClient
+      initialStudents={enrichedStudents}
+      classGroups={classGroups}
+      isAdmin={isAdmin}
+    />
+  );
 }

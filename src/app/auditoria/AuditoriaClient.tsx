@@ -47,6 +47,8 @@ export default function AuditoriaClient({ initialLogs }: Props) {
         return <span className="px-2 py-0.5 rounded font-bold bg-sky-50 text-sky-700 border border-sky-200">Envio de Mensagem</span>;
       case "CREATE_STUDENT":
         return <span className="px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Cadastro de Aluno</span>;
+      case "IMPORT_STUDENTS_SERE":
+        return <span className="px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">Importação Lote SERE</span>;
       case "UPDATE_STUDENT":
         return <span className="px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200">Edição de Aluno</span>;
       case "DELETE_STUDENT":
@@ -140,6 +142,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <option value="TODOS">Todas as Ações</option>
             <option value="SEND_MESSAGE">Envio de Mensagem</option>
             <option value="CREATE_STUDENT">Cadastro de Aluno</option>
+            <option value="IMPORT_STUDENTS_SERE">Importação Lote SERE</option>
             <option value="UPDATE_STUDENT">Edição de Aluno</option>
             <option value="DELETE_STUDENT">Inativação de Aluno</option>
             <option value="MARK_REPLY">Retorno de Responsável</option>

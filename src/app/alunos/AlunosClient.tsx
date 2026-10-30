@@ -11,26 +11,40 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  FileSpreadsheet,
   UserCheck,
   Stethoscope,
+  PhoneOff,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
+import SereImportModal from "./SereImportModal";
 import { getActiveJustification } from "@/lib/pedagogicalClassifier";
 
 interface Props {
   initialStudents: any[];
   classGroups: any[];
+  isAdmin?: boolean;
 }
 
-export default function AlunosClient({ initialStudents, classGroups }: Props) {
+export default function AlunosClient({
+  initialStudents,
+  classGroups,
+  isAdmin = false,
+}: Props) {
   const [students, setStudents] = useState<any[]>(initialStudents);
+  const [classGroupList, setClassGroupList] = useState<any[]>(classGroups);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
+  const [onlyMissingPhone, setOnlyMissingPhone] = useState(false);
 
-  // Modal State
+  // SERE Batch Import Modal
+  const [isSereModalOpen, setIsSereModalOpen] = useState(false);
+
+  // Add/Edit Individual Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<any>(null);
+  const [formCgm, setFormCgm] = useState("");
   const [formName, setFormName] = useState("");
   const [formGuardian, setFormGuardian] = useState("");
   const [formPhone, setFormPhone] = useState("");
@@ -42,6 +56,11 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
   const [page, setPage] = useState(1);
   const pageSize = 25;
 
+  const missingPhoneTotal = useMemo(
+    () => students.filter((s) => !s.phone).length,
+    [students]
+  );
+
   const filteredStudents = useMemo(() => {
     const q = searchTerm.toLowerCase();
     return students.filter((s) => {
@@ -50,16 +69,18 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
         s.name.toLowerCase().includes(q) ||
         (s.cgm && s.cgm.toLowerCase().includes(q)) ||
         (s.guardianName && s.guardianName.toLowerCase().includes(q)) ||
-        s.phone.includes(searchTerm);
+        (s.phone && s.phone.includes(searchTerm));
 
       const matchSegment =
         selectedSegment === "TODOS" || s.classGroup.segment === selectedSegment;
 
       const matchTurma = !selectedTurma || s.classGroupId === selectedTurma;
 
-      return matchSearch && matchSegment && matchTurma;
+      const matchMissingPhone = !onlyMissingPhone || !s.phone;
+
+      return matchSearch && matchSegment && matchTurma && matchMissingPhone;
     });
-  }, [students, searchTerm, selectedSegment, selectedTurma]);
+  }, [students, searchTerm, selectedSegment, selectedTurma, onlyMissingPhone]);
 
   const totalPages = Math.ceil(filteredStudents.length / pageSize) || 1;
   const paginatedStudents = useMemo(() => {
@@ -69,19 +90,21 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
 
   const openCreateModal = () => {
     setEditingStudent(null);
+    setFormCgm("");
     setFormName("");
     setFormGuardian("");
     setFormPhone("");
-    setFormClassId(classGroups[0]?.id || "");
+    setFormClassId(classGroupList[0]?.id || "");
     setFormError("");
     setIsModalOpen(true);
   };
 
   const openEditModal = (s: any) => {
     setEditingStudent(s);
+    setFormCgm(s.cgm || "");
     setFormName(s.name);
     setFormGuardian(s.guardianName || "");
-    setFormPhone(s.phone);
+    setFormPhone(s.phone || "");
     setFormClassId(s.classGroupId);
     setFormError("");
     setIsModalOpen(true);
@@ -89,8 +112,8 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName || !formPhone || !formClassId) {
-      setFormError("Nome, telefone e turma são obrigatórios.");
+    if (!formName || !formClassId || (!editingStudent && !formPhone)) {
+      setFormError("Nome, turma e telefone são obrigatórios.");
       return;
     }
 
@@ -104,6 +127,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: editingStudent.id,
+            cgm: formCgm || null,
             name: formName,
             guardianName: formGuardian,
             phone: formPhone,
@@ -128,6 +152,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            cgm: formCgm || null,
             name: formName,
             guardianName: formGuardian,
             phone: formPhone,
@@ -136,7 +161,10 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
         });
         const created = await res.json();
         if (!res.ok) throw new Error(created.error || "Erro ao cadastrar");
-        setStudents((prev) => [{ ...created, justifications: [], extraContactsCount: 0 }, ...prev]);
+        setStudents((prev) => [
+          { ...created, justifications: [], extraContactsCount: 0 },
+          ...prev,
+        ]);
       }
       setIsModalOpen(false);
     } catch (err: any) {
@@ -160,7 +188,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Title & Add button */}
+      {/* Title & Action buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
@@ -168,18 +196,30 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
             <span>Cadastro & Prontuário 360º de Alunos</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            {students.length} alunos ativos. Clique no nome ou em <strong>Prontuário</strong> para gerenciar múltiplos contatos, atestados, atas presenciais e emitir o Dossiê PDF.
+            {students.length} alunos ativos em {classGroupList.length} turmas. Clique no nome ou em{" "}
+            <strong>Prontuário</strong> para gerenciar múltiplos contatos, atestados, atas presenciais e emitir o Dossiê PDF.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Cadastrar Novo Aluno</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsSereModalOpen(true)}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Importar Lote (SERE)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Cadastrar Novo Aluno</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}
@@ -223,7 +263,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
             className="border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white"
           >
             <option value="">Todas as Turmas</option>
-            {classGroups
+            {classGroupList
               .filter(
                 (cg) => selectedSegment === "TODOS" || cg.segment === selectedSegment
               )
@@ -234,6 +274,31 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
               ))}
           </select>
         </div>
+
+        {missingPhoneTotal > 0 && (
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+            <span className="text-amber-800 flex items-center gap-1.5 font-medium">
+              <PhoneOff className="w-3.5 h-3.5 text-amber-600" />
+              <span>
+                Há <strong>{missingPhoneTotal}</strong> aluno(s) sem telefone informado no SERE.
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setOnlyMissingPhone((v) => !v);
+                setPage(1);
+              }}
+              className={`px-3 py-1 rounded-lg font-bold transition ${
+                onlyMissingPhone
+                  ? "bg-amber-600 text-white"
+                  : "bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200"
+              }`}
+            >
+              {onlyMissingPhone ? "Mostrar Todos os Alunos" : "Filtrar Sem Telefone"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Students Table */}
@@ -290,7 +355,21 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-700">{st.phone}</td>
+                    <td className="px-4 py-3 font-mono text-slate-700">
+                      {st.phone ? (
+                        st.phone
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(st)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 font-sans font-bold text-[10px] transition"
+                          title="Clique para informar um telefone de contato"
+                        >
+                          <PhoneOff className="w-3 h-3" />
+                          <span>Informar fone</span>
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center font-bold text-sky-700">
                       {st._count?.messageLogs || 0}
                     </td>
@@ -368,7 +447,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
         </div>
       </div>
 
-      {/* Add / Edit Modal (Native <dialog>) */}
+      {/* Add / Edit Individual Modal */}
       <ModalDialog
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -381,19 +460,34 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
             </div>
           )}
 
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Nome Completo do Aluno (em maiúsculas):
-            </label>
-            <input
-              type="text"
-              required
-              autoFocus
-              placeholder="EX: JOÃO DA SILVA"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value.toUpperCase())}
-              className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white uppercase"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="font-semibold text-slate-700 block mb-1">
+                Nome Completo do Aluno (em maiúsculas):
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="EX: JOÃO DA SILVA"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value.toUpperCase())}
+                className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white uppercase"
+              />
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">
+                CGM (Opcional):
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: 1018613740"
+                value={formCgm}
+                onChange={(e) => setFormCgm(e.target.value.replace(/\D/g, ""))}
+                className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white font-mono"
+              />
+            </div>
           </div>
 
           <div>
@@ -406,7 +500,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
               onChange={(e) => setFormClassId(e.target.value)}
               className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white"
             >
-              {classGroups.map((cg) => (
+              {classGroupList.map((cg) => (
                 <option key={cg.id} value={cg.id}>
                   {cg.name} ({cg.segment})
                 </option>
@@ -433,7 +527,7 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
             </label>
             <input
               type="tel"
-              required
+              required={!editingStudent}
               placeholder="Ex: 42998765432"
               value={formPhone}
               onChange={(e) => setFormPhone(e.target.value.replace(/\D/g, ""))}
@@ -459,6 +553,25 @@ export default function AlunosClient({ initialStudents, classGroups }: Props) {
           </div>
         </form>
       </ModalDialog>
+
+      {/* SERE Batch Import Modal */}
+      <SereImportModal
+        open={isSereModalOpen}
+        onClose={() => setIsSereModalOpen(false)}
+        existingClassGroups={classGroupList}
+        isAdmin={isAdmin}
+        onImportComplete={({ students: nextStudents, classGroups: nextGroups, filterMissingPhone }) => {
+          setStudents(nextStudents);
+          setClassGroupList(nextGroups);
+          if (filterMissingPhone) {
+            setOnlyMissingPhone(true);
+            setSelectedSegment("TODOS");
+            setSelectedTurma("");
+            setSearchTerm("");
+            setPage(1);
+          }
+        }}
+      />
     </div>
   );
 }

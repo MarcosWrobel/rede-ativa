@@ -5,6 +5,7 @@ export function formatZodError(error: z.ZodError): string {
 }
 
 export const studentCreateSchema = z.object({
+  cgm: z.string().trim().optional().nullable(),
   name: z.string().trim().min(2, "Nome do aluno deve ter pelo menos 2 caracteres"),
   guardianName: z.string().optional().nullable(),
   phone: z
@@ -18,16 +19,70 @@ export const studentCreateSchema = z.object({
 
 export const studentUpdateSchema = z.object({
   id: z.string().trim().min(1, "ID do aluno é obrigatório"),
+  cgm: z.string().trim().optional().nullable(),
   name: z.string().trim().min(2, "Nome inválido").optional(),
   guardianName: z.string().optional().nullable(),
   phone: z
     .string()
     .trim()
-    .refine((val) => val.replace(/\D/g, "").length >= 8, {
-      message: "Telefone inválido",
+    .refine((val) => val === "" || val.replace(/\D/g, "").length >= 8, {
+      message: "Telefone inválido (informe ao menos 8 dígitos com DDD ou deixe em branco)",
     })
     .optional(),
   classGroupId: z.string().trim().min(1).optional(),
+});
+
+export const sereBatchImportSchema = z.object({
+  turmas: z
+    .array(
+      z.object({
+        tempId: z.string().trim().min(1),
+        name: z.string().trim().min(1, "Nome da turma não pode ser vazio"),
+        segment: z.enum(["FUNDAMENTAL", "MEDIO", "NOTURNO"]),
+        shift: z.enum(["MANHA", "TARDE", "NOITE"]),
+      })
+    )
+    .min(1, "Selecione ao menos uma turma para importar."),
+  students: z
+    .array(
+      z.object({
+        cgm: z.string().trim().optional().nullable(),
+        name: z.string().trim().min(2),
+        phone: z.string().trim().optional().default(""),
+        guardianName: z.string().trim().optional().nullable(),
+        turmaTempId: z.string().trim().min(1),
+      })
+    )
+    .min(1, "Nenhum aluno elegível para importação nas turmas selecionadas."),
+  transferredStudents: z
+    .array(
+      z.object({
+        cgm: z.string().trim().optional().nullable(),
+        name: z.string().trim().min(2),
+      })
+    )
+    .optional()
+    .default([]),
+  options: z
+    .object({
+      updateExisting: z.boolean().default(true),
+      deactivateTransferred: z.boolean().default(true),
+      updateSchoolInfo: z.boolean().optional().default(false),
+      schoolInfo: z
+        .object({
+          name: z.string().trim().min(2),
+          city: z.string().trim().optional().default(""),
+        })
+        .optional()
+        .nullable(),
+    })
+    .optional()
+    .default({
+      updateExisting: true,
+      deactivateTransferred: true,
+      updateSchoolInfo: false,
+      schoolInfo: null,
+    }),
 });
 
 export const templateCreateSchema = z.object({

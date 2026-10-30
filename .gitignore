@@ -24,3 +24,5 @@ scripts/*_data.json
 # System / logs
 .DS_Store
 *.log
+*.tsbuildinfo
+

@@ -46,12 +46,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const { name, guardianName, phone, classGroupId } = parsed.data;
+    const { cgm, name, guardianName, phone, classGroupId } = parsed.data;
     const cleanDigits = phone.replace(/\D/g, "");
+    const cleanCgm = cgm ? cgm.replace(/\D/g, "") || null : null;
     const formattedName = name.toUpperCase();
 
     const student = await prisma.student.create({
       data: {
+        cgm: cleanCgm,
         name: formattedName,
         guardianName: guardianName?.trim() || "Responsável",
         phone: cleanDigits,
@@ -94,19 +96,22 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const { id, name, guardianName, phone, classGroupId } = parsed.data;
+    const { id, cgm, name, guardianName, phone, classGroupId } = parsed.data;
 
     const previous = await prisma.student.findUnique({
       where: { id },
       include: { classGroup: true },
     });
 
-    const cleanDigits = phone ? phone.replace(/\D/g, "") : previous?.phone;
+    const cleanDigits = phone !== undefined ? phone.replace(/\D/g, "") : previous?.phone;
+    const cleanCgm =
+      cgm !== undefined ? (cgm ? cgm.replace(/\D/g, "") || null : null) : previous?.cgm;
     const formattedName = name ? name.toUpperCase() : previous?.name;
 
     const student = await prisma.student.update({
       where: { id },
       data: {
+        cgm: cleanCgm,
         name: formattedName,
         guardianName:
           guardianName !== undefined ? (guardianName ? guardianName.trim() : null) : previous?.guardianName,

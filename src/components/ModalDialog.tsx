@@ -8,6 +8,7 @@ interface ModalDialogProps {
   onClose: () => void;
   title: string;
   subtitle?: string;
+  size?: "md" | "xl";
   children: React.ReactNode;
 }
 
@@ -22,6 +23,7 @@ export default function ModalDialog({
   onClose,
   title,
   subtitle,
+  size = "md",
   children,
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -81,9 +83,10 @@ export default function ModalDialog({
     <dialog
       ref={dialogRef}
       aria-labelledby={titleId}
+      className={size === "xl" ? "dialog-xl" : undefined}
       {...({ closedby: "any" } as any)}
     >
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4 text-slate-900">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4 text-slate-900 max-h-[88vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
             <h2 id={titleId} className="text-base font-bold text-slate-900">
