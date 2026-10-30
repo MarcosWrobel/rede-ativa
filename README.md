@@ -1,18 +1,20 @@
 # Sistema de Busca Ativa & Comunicação Escolar
 **Colégio Estadual Leopoldina B. Pedroso — Paraná**
 
-Aplicação web institucional para gestão de busca ativa escolar, comunicação ágil e acolhedora com famílias via WhatsApp, monitoramento de infrequência e geração assistida de comunicados com Inteligência Artificial.
+Aplicação web institucional para gestão de busca ativa escolar, comunicação ágil e acolhedora com famílias via WhatsApp (`wa.me`), monitoramento de infrequência em tempo real, controle de atestados médicos, emissão de dossiês individuais (Conselho Tutelar / SERP) e triagem assistida com Inteligência Artificial.
 
 ---
 
 ## 🚀 Tecnologias
 
 - **Frontend & Backend**: Next.js 16 (App Router + Turbopack), React 19, TypeScript
-- **Estilização**: Tailwind CSS v4, Lucide Icons
-- **Banco de Dados**: Neon PostgreSQL (Serverless na AWS São Paulo) + Prisma ORM
-- **Autenticação**: NextAuth.js v5 com Google OAuth institucional (`@escola.pr.gov.br`)
-- **Inteligência Artificial**: Google Gemini API (`gemini-3.5-flash` via `@google/genai`)
-- **Hospedagem**: Vercel
+- **Estilização**: Tailwind CSS v4, Lucide Icons, Modern Web Guidance (Dialogs acessíveis, Checkboxes `:indeterminate`, Progress bars nativas)
+- **Banco de Dados**: Neon PostgreSQL (Serverless na AWS São Paulo - `sa-east-1`) + Prisma ORM 6
+- **Autenticação & Segurança**: NextAuth.js v5 (Google OAuth `@escola.pr.gov.br`), Proxy Middleware global (`proxy.ts`), Allowlist de equipe (`/equipe`) e trilha de auditoria completa com IP
+- **Inteligência Artificial**: Google Gemini API (`@google/genai`) — Redação de comunicados e triagem/formalização de retornos com JSON estruturado
+- **Automação de Mensageria**: Fluxo operacional gratuito e ilimitado via WhatsApp Web (`wa.me`) com reuso de guia única (`leopoldina_whatsapp_dispatch`) e camada plugável para gateways futuros
+- **Extensão Chrome**: Manifest V3 para extração segura de dados do Power BI estadual e do portal SERP/Celepar
+- **Testes & Qualidade**: Vitest com 26 testes unitários automatizados cobrindo classificadores pedagógicos, pareamento e schemas Zod
 
 ---
 
@@ -20,29 +22,42 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 
 | Módulo | Rota | Descrição |
 | :--- | :--- | :--- |
-| **Busca Ativa** | `/busca-ativa` | Filtro por turma e aluno, alternador de período (Manhã, Tarde, Noite), prévia em tempo real e abertura direta no WhatsApp. |
-| **Modelos de Mensagem** | `/modelos` | Padronização de comunicados, tags dinâmicas (`{saudacao}`, `{aluno}`, etc.) e assistente de redação com IA generativa. |
-| **Ranking de Faltas** | `/faltas` | Monitoramento de alunos infrequentes com cálculo automático de avisos de ausência para suporte ao Conselho Tutelar/SERP. |
-| **Histórico de Envios** | `/historico` | Linha do tempo dos comunicados expedidos. Administradores podem editar e excluir registros. |
-| **Auditoria** | `/auditoria` | Trilha de logs de governança restrita exclusivamente a administradores. |
-| **Alunos** | `/alunos` | Base de 688 estudantes com CGM, turma e contato dos responsáveis. |
-| **Relatórios** | `/relatorios` | Visão consolidada de contatos por período, segmento e pedagoga. |
+| **Busca Ativa** | `/busca-ativa` | Disparo individual ou **Fila Guiada por Turma** via `wa.me`, salto automático de atestados médicos, múltiplos contatos familiares e confirmação de entrega com saneamento de números. |
+| **Prontuário 360º** | `/alunos/[id]` | Visão integral do aluno: indicadores do B.I., múltiplos contatos, controle de atestados médicos vigentes, atas presenciais e linha do tempo de WhatsApp. |
+| **Dossiê Oficial PDF** | `/alunos/[id]/dossie` | Emissão em 1 clique de relatório A4 auditado e formatado para envio formal ao Conselho Tutelar, Promotoria da Infância ou SERP. |
+| **Painel de Frequência** | `/faltas` | Monitoramento de infrequência com chips de risco, alerta de **📉 Queda Abrupta**, drawer lateral de envio sem perda de contexto e atalho para fila da turma. |
+| **Modelos de Mensagem** | `/modelos` | Padronização institucional de comunicados, tags dinâmicas do B.I. e assistente de redação com IA generativa (Google Gemini). |
+| **Histórico de Envios** | `/historico` | Linha do tempo paginada no servidor com status de entrega (`deliveryStatus`), registro de retorno dos pais e botão **"✨ Formalizar & Classificar com IA"**. |
+| **Gestão de Equipe** | `/equipe` | Controle restrito a administradores para aprovação, atribuição de perfis (`ADMIN` / `PEDAGOGA`) e desativação de usuários institucionais. |
+| **Relatórios Gerenciais** | `/relatorios` | Gráficos consolidados por motivo, pedagoga, recorte temporal (trimestres/30 dias), causas de faltas e taxa de números sem WhatsApp. |
+| **Auditoria** | `/auditoria` | Trilha de logs imutável com registro de ações, usuário, IP de origem, data/hora e dados modificados. |
+| **Alunos** | `/alunos` | Base de estudantes com CGM, turma, contatos e filtros rápidos por atestado e infrequência. |
 
 ---
 
-## 🤖 Assistente de Redação com Inteligência Artificial
+## 🤖 Inteligência Artificial & Automação Pedagógica
 
-O sistema conta com integração nativa com o **Google Gemini 3.5 Flash**:
-- Permite que a pedagoga digite uma frase simples (ex.: *"avisar reunião de pais quinta às 18h30"*).
-- A IA formata a mensagem institucional completa com saudação adaptada ao período e encerramento formal do colégio.
-- Otimizado com `thinkingLevel: "low"` para gerar a resposta em **menos de 2 segundos**.
-- Suporte a chave direta no navegador (`localStorage`) para uso imediato sem necessidade de reconfigurar a Vercel.
-- Ferramenta de diagnóstico rápido com botão **"Testar Chave"** (`/api/ai/test-key`).
+1. **Redação de Modelos Institucionais**:
+   - Transforma solicitações informais das pedagogas em modelos acolhedores e padronizados com saudações automáticas para manhã, tarde ou noite.
+2. **Formalização e Classificação de Retornos dos Pais**:
+   - A pedagoga cola a mensagem informal recebida da família no WhatsApp (ex.: *"ele tá com febre desde ontem e foi no postinho"*).
+   - O Gemini transforma o relato em texto administrativo formal para ata/dossiê e classifica a causa da ausência:
+     - 🩺 **Saúde / Consulta / Atestado**
+     - 🚌 **Transporte Escolar / Clima**
+     - 💼 **Trabalho / Conflito de Horário**
+     - 🧳 **Viagem / Compromisso Familiar**
+     - ⚠️ **Vulnerabilidade / Desmotivação**
+     - 📌 **Ciente — Sem Justificativa Formal**
+     - 📝 **Outros Motivos**
+   - Possui *fallback* determinístico inteligente caso a chave de IA não esteja configurada no momento.
+3. **Fila Guiada por Turma via `wa.me`**:
+   - Disparo assistido para os faltosos da turma sem necessidade de APIs pagas da Meta.
+   - Reutiliza a mesma aba do navegador, evitando acúmulo de dezenas de guias abertas.
+   - Saneia a base cadastral ao marcar números sem WhatsApp (`FAILED_NO_WHATSAPP`), documentando tentativas frustradas para proteção jurídica da escola.
 
 ---
 
-## 📖 Documentação Completa
+## 📖 Documentação Detalhada
 
-Para a documentação técnica detalhada, diagramas de arquitetura, modelo relacional do banco e rotas de API, consulte:
-👉 **[Documentação Técnica do Sistema](docs/DOCUMENTACAO_SISTEMA.md)**
-👉 **[Guia de Implantação e Deploy](DEPLOY.md)**
+- 👉 **[Documentação Técnica Completa do Sistema](docs/DOCUMENTACAO_SISTEMA.md)** (Arquitetura, Banco, APIs, Segurança e Manuais)
+- 👉 **[Guia de Implantação e Deploy](DEPLOY.md)** (Configuração na Vercel, Neon e Google Cloud)

@@ -8,11 +8,12 @@
 O **Sistema de Busca Ativa & Comunicação Escolar** foi concebido e estruturado especificamente para a realidade operacional do **Colégio Estadual Leopoldina B. Pedroso (Paraná)**. Ele atende às demandas pedagógicas de contato rápido com famílias, combate preventivo ao abandono escolar e integração com os ecossistemas oficiais do estado: o relatório **PRESENTE NA ESCOLA (Power BI)** e o **SERP (Sistema Educacional da Rede de Proteção / Celepar)**.
 
 ### Objetivos do Projeto
-- Substituir o uso de planilhas manuais descentralizadas por um banco de dados relacional íntegro na nuvem (**Neon PostgreSQL**).
-- Reduzir o tempo que a equipe pedagógica gasta redigindo mensagens para responsáveis, padronizando a linguagem institucional.
+- Substituir o uso de planilhas manuais descentralizadas por um banco de dados relacional íntegro na nuvem (**Neon PostgreSQL Serverless**).
+- Reduzir o tempo que a equipe pedagógica gasta redigindo mensagens para responsáveis, padronizando a linguagem institucional e acolhedora.
 - Adaptar automaticamente a saudação e o contexto conforme o turno do estudante (Manhã, Tarde ou Noturno).
-- Registrar com precisão jurídica e auditoria os contatos efetuados, respaldando a escola perante o Conselho Tutelar e a Rede de Proteção (SERP/FICAI).
-- Oferecer assistência de redação pedagógica por Inteligência Artificial generativa (**Google Gemini 3.5 Flash**) com custo R$ 0,00 na cota gratuita do Google AI Studio.
+- Prover **Fila Assistida por Turma via WhatsApp Web (`wa.me`)**, permitindo acionar múltiplos faltosos com reuso de guia única sem custos de API externa.
+- Registrar com precisão jurídica e auditoria os contatos efetuados, atestados médicos e atas presenciais, gerando **Dossiês em PDF** para respaldar a escola perante o Conselho Tutelar e a Rede de Proteção (SERP/FICAI).
+- Oferecer assistência de redação e **triagem/formalização de retornos de responsáveis com Inteligência Artificial generativa (Google Gemini)** com JSON estruturado e *fallback* local.
 - Prover uma **Extensão Chrome Multissistema (Manifest V3)** para extrair dados oficiais do Power BI e do SERP sem exigir permissões de backend da SEED-PR ou senhas em servidores.
 
 ---
@@ -29,45 +30,51 @@ flowchart TD
         ExtLeopoldina -.->|Main World Bridge paginar()| SERPPortal["SERP / Rede de Proteção (Celepar)"]
     end
 
-    subgraph AuthLayer [Camada de Segurança]
-        NextApp --> NextAuth[NextAuth.js v5]
-        NextAuth --> GoogleOAuth[Google OAuth @escola.pr.gov.br]
-        NextAuth --> RBAC{Controle de Papéis}
-        RBAC -->|ADMIN| AdminPrivileges[Edição de Histórico + /auditoria]
-        RBAC -->|PEDAGOGA| UserPrivileges[Visualização + Busca Ativa + Faltas + Modelos]
+    subgraph AuthSecurity [Camada de Segurança & Governança]
+        NextApp --> Proxy[src/proxy.ts - Next.js Middleware Global]
+        Proxy --> NextAuth[NextAuth.js v5 - Google OAuth @escola.pr.gov.br]
+        NextAuth --> Allowlist["Allowlist de Usuários (/equipe)"]
+        Allowlist --> RBAC{Controle de Papéis}
+        RBAC -->|ADMIN| AdminPrivileges[Gestão de Equipe + Auditoria Completa + Edição de Histórico]
+        RBAC -->|PEDAGOGA| UserPrivileges[Busca Ativa + Prontuário 360º + Faltas + Modelos + Dossiê]
     end
 
     subgraph BusinessLayer [Módulos da Aplicação]
-        NextApp --> BuscaAtiva[/busca-ativa - Painel de Envio]
-        NextApp --> Faltas[/faltas - Busca-ativa (Risco e SERP)]
-        NextApp --> Modelos[/modelos - Editor Bi-Coluna & IA]
-        NextApp --> Historico[/historico - Controle de Retornos]
-        NextApp --> Relatorios[/relatorios - Gráficos e Exportação]
-        NextApp --> Auditoria[/auditoria - Trilha de Conformidade]
-        NextApp --> Alunos[/alunos - Gestão Cadastral]
+        NextApp --> BuscaAtiva[/busca-ativa - Painel Individual & Fila por Turma]
+        NextApp --> Prontuario[/alunos/:id - Prontuário 360º]
+        NextApp --> Dossie[/alunos/:id/dossie - Dossiê A4 PDF]
+        NextApp --> Faltas[/faltas - Frequência, Risco e SERP]
+        NextApp --> Modelos[/modelos - Editor Bi-Coluna & IA Gemini]
+        NextApp --> Historico[/historico - Controle Paginado & Triagem IA]
+        NextApp --> Relatorios[/relatorios - Indicadores e Causas de Falta]
+        NextApp --> Equipe[/equipe - Controle de Membros da Escola]
+        NextApp --> Auditoria[/auditoria - Trilha de Conformidade com IP]
     end
 
     subgraph DataAndAI [Persistência e Inteligência]
-        NextApp --> Prisma[Prisma ORM Client]
+        NextApp --> Prisma[Prisma ORM Client 6]
         Prisma --> NeonDB[(Neon PostgreSQL Serverless - AWS SP)]
-        Modelos --> GeminiAPI[Google Gemini 3.5 Flash API]
-        ExtLeopoldina -->|POST Seguro com Bearer Token| SyncFreq["/api/frequencia/sync"]
-        ExtLeopoldina -->|POST Seguro com Bearer Token| SyncSerp["/api/serp/sync"]
+        Modelos --> GeminiGen[Google Gemini API - Geração de Modelos]
+        Historico --> GeminiTriage[Google Gemini API - Classificação de Retornos]
+        ExtLeopoldina -->|POST em Lote com Bearer Token| SyncFreq["/api/frequencia/sync"]
+        ExtLeopoldina -->|POST em Lote com Bearer Token| SyncSerp["/api/serp/sync"]
         SyncFreq --> Prisma
         SyncSerp --> Prisma
     end
 
-    subgraph ExternalDelivery [Disparo ao Destinatário]
-        BuscaAtiva --> WhatsAppLink[API WhatsApp wa.me / Desktop]
-        WhatsAppLink --> Pais[Pais / Responsáveis Legais]
+    subgraph DeliveryTransport [Camada de Mensageria]
+        BuscaAtiva --> WaMeProvider["WhatsApp Provider (src/lib/whatsappProvider.ts)"]
+        WaMeProvider --> WaMeWeb["WhatsApp Web (wa.me) - Reuso de Aba"]
+        WaMeProvider -.->|Pluggable Gateway Opcional| HttpGateway["HTTP Gateway (Futuro)"]
+        WaMeWeb --> Pais[Pais e Responsáveis Legais]
     end
 ```
 
 ---
 
-## 3. Modelo de Dados Relacional Atualizado (Prisma / PostgreSQL)
+## 3. Modelo de Dados Relacional (Prisma / PostgreSQL)
 
-O banco de dados relacional está hospedado no **Neon PostgreSQL Serverless (AWS São Paulo - `sa-east-1`)**, otimizado com índices e relacionamentos em cascata:
+O banco de dados relacional está hospedado no **Neon PostgreSQL Serverless (AWS São Paulo - `sa-east-1`)**, com índices otimizados, constraints de integridade e tabelas para visão 360º do estudante:
 
 ```prisma
 generator client {
@@ -103,11 +110,13 @@ model ClassGroup {
   createdAt DateTime  @default(now())
 
   students  Student[]
+
+  @@index([segment, shift])
 }
 
 model Student {
   id                   String                @id @default(cuid())
-  cgm                  String?               @unique // Cadastro Geral de Matrícula oficial SEED-PR (10 dígitos)
+  cgm                  String?               @unique // Cadastro Geral de Matrícula oficial SEED-PR
   name                 String
   guardianName         String?
   phone                String                // Ex: "42988189394"
@@ -119,53 +128,140 @@ model Student {
 
   messageLogs          MessageLog[]
   lowAttendanceRecord  LowAttendanceRecord?
+  contacts             StudentContact[]
+  justifications       AbsenceJustification[]
+  inPersonAttendances  InPersonAttendance[]
+  attendanceSnapshots  AttendanceSnapshot[]
+
+  @@index([classGroupId, active])
+  @@index([name])
+}
+
+model StudentContact {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name          String
+  kinship       String   @default("RESPONSAVEL") // MAE | PAI | AVOS | TIOS | IRMAOS | RECADO | PROPRIO_ALUNO | RESPONSAVEL
+  phone         String
+  isPrimary     Boolean  @default(false)
+  whatsappValid Boolean  @default(true)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId, isPrimary])
+}
+
+model AbsenceJustification {
+  id             String   @id @default(cuid())
+  studentId      String
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type           String   @default("ATESTADO_MEDICO") // ATESTADO_MEDICO | ATESTADO_ODONTOLOGICO | DECLARACAO_COMPARECIMENTO | JUSTIFICATIVA_FAMILIAR | DISPENSA_LEGAL
+  startDate      DateTime
+  endDate        DateTime
+  cidCode        String?
+  notes          String?
+  createdByName  String
+  createdByEmail String
+  createdAt      DateTime @default(now())
+
+  @@index([studentId, endDate(sort: Desc)])
+  @@index([startDate, endDate])
+}
+
+model InPersonAttendance {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attendedAt      DateTime @default(now())
+  guardianPresent String
+  subject         String
+  summary         String
+  agreements      String?
+  recordedByName  String
+  recordedByEmail String
+  createdAt       DateTime @default(now())
+
+  @@index([studentId, attendedAt(sort: Desc)])
+}
+
+model AttendanceSnapshot {
+  id                    String   @id @default(cuid())
+  studentId             String
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  referenceWeek         String   // Ex: "2026-W44"
+  attendancePercent     Float
+  weeklyPercent         Float?
+  previousWeeklyPercent Float?
+  recordedAt            DateTime @default(now())
+
+  @@unique([studentId, referenceWeek])
+  @@index([studentId, recordedAt(sort: Desc)])
 }
 
 model MessageTemplate {
   id               String       @id @default(cuid())
   title            String       // Ex: "ALUNO FALTOU", "CONVOCAÇÃO URGENTE"
   segment          String       @default("TODOS") // TODOS | FUNDAMENTAL | MEDIO | NOTURNO
-  prefixText       String       // Texto antes da identificação do estudante
-  suffixText       String       // Texto pós identificação do estudante
-  isAbsenceRelated Boolean      @default(false)   // Alimenta índice e ranking de faltas
+  prefixText       String
+  suffixText       String
+  isAbsenceRelated Boolean      @default(false)
   active           Boolean      @default(true)
   createdAt        DateTime     @default(now())
 
   messageLogs      MessageLog[]
+
+  @@index([active, segment])
+  @@index([isAbsenceRelated])
 }
 
 model MessageLog {
-  id              String           @id @default(cuid())
-  studentId       String
-  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  templateId      String?
-  template        MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  reasonTitle     String
-  messageContent  String
-  phoneUsed       String
-  sentByUserId    String?
-  sentByUser      User?            @relation("SentByUser", fields: [sentByUserId], references: [id], onDelete: SetNull)
-  sentByName      String           // Snapshot auditado do nome da pedagoga
-  guardianReplied Boolean          @default(false)
-  replyNotes      String?          // Justificativa apresentada pelo responsável
-  repliedAt       DateTime?
-  repliedByUserId String?
-  repliedByUser   User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
-  sentAt          DateTime         @default(now())
+  id                String           @id @default(cuid())
+  studentId         String
+  student           Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  templateId        String?
+  template          MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  reasonTitle       String
+  messageContent    String
+  phoneUsed         String
+  sentByUserId      String?
+  sentByUser        User?            @relation("SentByUser", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  sentByName        String
+  guardianReplied   Boolean          @default(false)
+  replyNotes        String?
+  replyCategory     String?          // SAUDE | TRANSPORTE | TRABALHO | VIAGEM_FAMILIAR | VULNERABILIDADE | SEM_JUSTIFICATIVA | OUTROS
+  repliedAt         DateTime?
+  repliedByUserId   String?
+  repliedByUser     User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
+  deliveryStatus    String           @default("SENT") // LINK_OPENED | SENT | DELIVERED | READ | FAILED_NO_WHATSAPP
+  deliveryUpdatedAt DateTime?
+  sentAt            DateTime         @default(now())
+
+  @@index([sentAt(sort: Desc)])
+  @@index([studentId, sentAt(sort: Desc)])
+  @@index([guardianReplied])
+  @@index([sentByName])
+  @@index([reasonTitle])
+  @@index([deliveryStatus])
+  @@index([replyCategory])
 }
 
 model LowAttendanceRecord {
   id                String    @id @default(cuid())
   studentId         String    @unique
   student           Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  attendancePercent Float     // Percentual consolidado (ex: 74.20)
-  enrollmentDetail  String?   // Detalhes semanais (ex: "Semana Atual: 50,00% | Semana Anterior: 88,00%")
-  actionsTaken      String?   // Resumo de encaminhamentos
-  serpProtocol      String?   // Número oficial da Ficha SERP/FICAI
+  attendancePercent Float
+  enrollmentDetail  String?
+  actionsTaken      String?
+  serpProtocol      String?
   serpStatus        String?   // "CONSELHO_TUTELAR" | "EM_ACOMPANHAMENTO" | "MINISTERIO_PUBLICO" | "ARQUIVADO"
-  serpOpenedAt      DateTime? // Data de instauração no SERP
-  serpDetails       String?   // Histórico completo de buscas no SERP
+  serpOpenedAt      DateTime?
+  serpDetails       String?
   updatedAt         DateTime  @updatedAt
+
+  @@index([attendancePercent])
+  @@index([serpStatus])
 }
 
 model AuditLog {
@@ -174,132 +270,122 @@ model AuditLog {
   user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userEmail  String
   userName   String
-  action     String   // SEND_MESSAGE | CREATE_STUDENT | UPDATE_STUDENT | DELETE_STUDENT | MARK_REPLY | UPDATE_LOW_ATTENDANCE | LOGIN
-  entityType String   // Student | MessageLog | MessageTemplate | LowAttendanceRecord | SerpSync
+  action     String   // SEND_MESSAGE | CREATE_STUDENT | UPDATE_STUDENT | DELETE_STUDENT | MARK_REPLY | UPDATE_DELIVERY_STATUS | WEBHOOK_REPLY | GENERATE_DOSSIER | etc.
+  entityType String
   entityId   String?
-  details    String?  // JSON estruturado com os dados da operação
+  details    String?
   ipAddress  String?
   createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([action])
 }
 ```
 
 ---
 
-## 4. Integrações Oficiais & Scraping Autenticado
+## 4. Módulos do Sistema & Interfaces
 
-### 4.1. Extensão Chrome Leopoldina Sync (`extension/`)
-Como o Power BI estadual bloqueia exportação direta para `.CSV` e o portal SERP é protegido pela Central de Segurança da Celepar, a escola utiliza a **Extensão Chrome Leopoldina Sync (Manifest V3)**:
-- **`manifest.json`**: Concede permissões para `*://app.powerbi.com/*` e `*://*.redeprotecao.seed.pr.gov.br/*`.
-- **`content.js` (Power BI)**: Injeta o widget flutuante no portal Power BI, realiza auto-scroll suave pela tabela de estudantes no *Modo de Foco*, extrai CGMs, Turmas, Médias Gerais e Semanas, baixando em CSV ou sincronizando diretamente na nuvem.
-- **`serp-bridge.js` (Main World)**: Executa no contexto nativo do portal SERP para ter acesso direto às funções globais da Celepar (como `window.paginar(página, 119)`), contornando as restrições de CSP do Chrome.
-- **`serp-content.js` (SERP Isolated World)**: Varre as 12 páginas de fichas da escola, identifica estudantes encaminhados ao **Conselho Tutelar**, protocolos e datas, salvando em cache de sessão (`sessionStorage`) com console de logs em tempo real.
-- **Empacotamento Automático**: O script [`scripts/package_extension.cjs`](file:///home/marcoswrobel/Documents/Registro/scripts/package_extension.cjs) é executado automaticamente a cada build (`npm run build`), gerando o arquivo `public/extensao-leopoldina.zip` para download com 1 clique pela equipe escolar.
+### 4.1. Painel de Busca Ativa (`/busca-ativa`)
+Oferece dois modos integrados de operação:
+1. **Envio Individual**:
+   - Seleção encadeada de Nível $\rightarrow$ Turma $\rightarrow$ Aluno.
+   - Detecção visual de 🩺 **Atestado Vigente** e alerta de infrequência.
+   - Seletor de contatos múltiplos da família (Mãe, Pai, Avós, Recado).
+   - Confirmação de entrega pós-abertura do `wa.me`: botão **"Confirmar Envio"** (`SENT`) ou **"Número sem WhatsApp"** (`FAILED_NO_WHATSAPP`).
+2. **Fila Assistida por Turma (wa.me Cadenciado)**:
+   - Seleção da turma e do modelo de mensagem.
+   - Lista com checkbox mestre acessível (`:indeterminate`), desmarcando automaticamente alunos com atestado vigente, sem WhatsApp ou já acionados no dia.
+   - Passo a passo guiado (`Aluno 1 de N`) com `<progress>` nativo, prévia editável, botão de disparo reusando a mesma guia do navegador (`leopoldina_whatsapp_dispatch`), confirmação e salto de estudantes.
 
-### 4.2. API de Frequência Power BI (`/api/frequencia/sync`)
-- **Autenticação Híbrida**: Aceita `Authorization: Bearer <TOKEN>` (usando `SYNC_API_TOKEN`) da Extensão ou sessão web ativa.
-- **Pareamento em 2 Etapas**:
-  1. Busca por `cgm` oficial (10 dígitos).
-  2. Fallback por `name` normalizado (sem acentos, maiúsculas limpas).
-  3. Salva retroativamente o CGM no cadastro do aluno (`Student.cgm`).
-- **Persistência**: Grava a Média Geral e o resumo de semanas em `LowAttendanceRecord` e cria registro em `AuditLog`.
+### 4.2. Prontuário 360º do Estudante (`/alunos/[id]`)
+- **Aba 1 (Geral)**: KPIs de frequência (média geral, semana atual, semana anterior), status no SERP e histórico de encaminhamentos.
+- **Aba 2 (Contatos Familiares)**: Cadastro de múltiplos números com indicação de parentesco, contato principal e flag de WhatsApp válido.
+- **Aba 3 (Atestados & Justificativas)**: Registro de atestados médicos com data inicial/final, código CID e observações, alimentando selos de vigência em todo o sistema.
+- **Aba 4 (Atas Presenciais & Linha do Tempo)**: Registro formal de comparecimento da família na coordenação e histórico auditado de todas as mensagens de WhatsApp com status e retornos.
 
-### 4.3. API de Fichas do SERP (`/api/serp/sync`)
-- Recebe o lote de fichas capturadas no portal `redeprotecao.seed.pr.gov.br`.
-- Normaliza o status para `CONSELHO_TUTELAR`, `MINISTERIO_PUBLICO`, `EM_ACOMPANHAMENTO` ou `ARQUIVADO`.
-- Vincula o protocolo e atualiza o histórico pedagógico do aluno.
+### 4.3. Emissão de Dossiê Oficial em PDF (`/alunos/[id]/dossie`)
+- Formatação A4 padronizada para impressão física ou exportação em PDF.
+- Cabeçalho oficial SEED-PR e Colégio Leopoldina.
+- Quadro cadastral completo do aluno e contatos.
+- Indicadores oficiais de frequência e série histórica semanal.
+- Relação de atestados médicos entregues e atas presenciais firmadas.
+- Relação cronológica auditada de tentativas de busca ativa, identificando com clareza **tentativas frustradas por número sem WhatsApp** (resguardando a responsabilidade da escola perante o Conselho Tutelar e SERP).
+- Parecer técnico conclusivo personalizável e campo triplo de assinaturas (Pedagoga, Direção e Ciência do Responsável/Órgão).
 
----
+### 4.4. Painel de Infrequência & SERP (`/faltas`)
+- Monitoramento em tempo real dos alunos da escola com ordenação por menor frequência ou **📉 Maior Queda Abrupta**.
+- Drawer lateral de envio rápido sem perda de filtros ou paginação.
+- Confirmação imediata de envio/invalidação de número no banner de feedback.
+- Atalho direto para iniciar a Fila da Turma selecionada.
 
-## 5. Módulos do Sistema & Interface
+### 4.5. Histórico de Envios & Triagem IA (`/historico`)
+- Consulta paginada no PostgreSQL com busca textual rápida em nome, CGM, motivo, telefone e anotações.
+- Filtros combinados por segmento, turma, pedagoga, status de retorno, status de entrega (`deliveryStatus`) e categoria de causa (`replyCategory`).
+- Modal nativo `<dialog>` de retorno com assistente **"✨ Formalizar & Classificar com IA"** (Google Gemini).
 
-### 5.1. Painel de Busca-ativa & Frequência (`/faltas`)
-Acessado pela aba **"Busca-ativa"** no menu lateral, este módulo foi redesenhado para responsividade total em **monitores Full HD (1920x1080 até 1800px)** e **notebooks escolares (1366x768)**:
-- **Cabeçalho Fixo (*Sticky Header*)**: Colunas congeladas no topo durante a rolagem de mais de 600 alunos.
-- **Alternador de Densidade**: Modo *Compacto* (ideal para telas de 768p, cabendo 12 a 15 alunos por tela) e modo *Espaçoso*.
-- **5 Cards de Resumo Executivo (KPIs em Tempo Real)**:
-  - *Total Monitorados*;
-  - *🚨 Risco Crítico (< 75%)*;
-  - *⚠️ Em Atenção (75% a 85%)*;
-  - *Média Geral da Escola*;
-  - *🏛️ Casos no Conselho Tutelar*.
-- **Filtros Multi-Critério Combináveis**:
-  - Busca global simultânea por **Nome** ou **CGM**;
-  - Filtro de Segmento (Fundamental, Médio, Noturno);
-  - Filtro de Turno (Manhã, Tarde, Noite);
-  - Chips rápidos por faixa de risco;
-  - Filtro de status SERP (Conselho Tutelar, MP, Acompanhamento);
-  - Ordenação por Menor Frequência, Maior Frequência, A-Z e **Maior Queda Semanal**;
-  - Botão de **Exportar CSV** filtrado e botão para **Baixar Extensão (.ZIP)**.
-- **Ação Direta In-Page (Drawer Lateral)**: Botão **"Mensagem"** em cada linha que abre instantaneamente uma gaveta lateral (*slide-over*) na própria tela, sem redirecionar ou perder filtros e paginação. O painel exibe resumo de frequência, seletor de templates, alternador de turno (Manhã/Tarde/Noite), telefone editável e disparo via WhatsApp com registro auditado.
+### 4.6. Relatórios Gerenciais (`/relatorios`)
+- Agregação SQL nativa (`groupBy` + `count`).
+- Recortes temporais dinâmicos: Todo o período, Últimos 30 dias, 1º/2º/3º Trimestres ou Período Personalizado.
+- Distribuição de contatos por motivo e por pedagoga responsável.
+- Indicadores de **Índice de Retorno & Qualidade Cadastral** (confirmados, pendentes e taxa de números sem WhatsApp).
+- Gráfico de **Causas / Categorias das Justificativas Familiares** (Saúde, Transporte, Trabalho, Viagem, Vulnerabilidade, Sem Justificativa, Outros).
 
-### 5.2. Editor de Modelos com Redação por IA (`/modelos`)
-- **Layout Bi-Coluna Ergonômico (*Side-by-Side*)**:
-  - **Lado Esquerdo**: Título, Nível, Assistente Google Gemini compacto, paleta de tags (incluindo métricas do B.I. e SERP) e campos de texto.
-  - **Lado Direito**: **Simulador WhatsApp em tempo real** com alternador de turnos (**M**anhã / **T**arde / **N**oite) que renderiza a mensagem instantaneamente enquanto a IA ou o usuário digita.
-- **Rodapé Fixo (*Sticky Footer*)**: Os botões **"Cancelar"** e **"Salvar Modelo"** nunca saem da área visível da tela, garantindo que mesmo após a IA redigir um texto longo, o botão de salvar permanece acessível sem rolagem.
-
-### 5.3. Painel de Disparo de Busca Ativa (`/busca-ativa`)
-- Seleção por Segmento $\rightarrow$ Turma $\rightarrow$ Aluno.
-- Card de Alerta de Infrequência: exibe a média do aluno, dados da semana e histórico de contatos prévios.
-- Telefone editável pontualmente para o envio.
-- Integração direta com a API do WhatsApp (`wa.me`) e gravação auditada com o nome da pedagoga logada.
-
-### 5.4. Trilha de Auditoria (`/auditoria`) & Gestão de Retornos (`/historico`)
-- Pedagogas registram se o pai/mãe respondeu ao WhatsApp e anotam o motivo da ausência.
-- Administradores possuem visão de governança completa com registro imutável de quem enviou, editou ou excluiu qualquer mensagem.
+### 4.7. Controle de Equipe (`/equipe`) & Auditoria (`/auditoria`)
+- Restrito ao Administrador.
+- Gerenciamento de e-mails autorizados `@escola.pr.gov.br`, impedindo que qualquer usuário do domínio acesse a plataforma sem permissão expressa da direção.
+- Registro auditado imutável com data/hora exata, IP de origem, usuário responsável e payload das operações sensíveis.
 
 ---
 
-## 6. Engine de Formatação de Mensagens (`src/lib/messageFormatter.ts`)
+## 5. Inteligência Artificial com Google Gemini (`@google/genai`)
 
-O motor de formatação processa o texto do modelo e substitui as seguintes variáveis dinâmicas em tempo de execução:
+O sistema adota o SDK oficial `@google/genai` com foco em agilidade e precisão:
 
-| Tag | Descrição | Exemplo de Saída |
-| :--- | :--- | :--- |
-| `{saudacao}` | Saudação formal contextualizada pelo turno do aluno ou horário | `Bom dia!`, `Boa tarde!` ou `Boa noite!` |
-| `{aluno}` | Nome completo do estudante | `Gabriel Silva dos Santos` |
-| `{turma}` | Turma oficial do estudante | `8º Ano A - Ensino Fundamental` |
-| `{responsavel}` | Nome do pai, mãe ou responsável legal cadastrado | `Maria de Fátima Silva` |
-| `{pedagoga}` | Nome da pedagoga logada na sessão institucional | `Profª Ana Cláudia` |
-| `{periodo}` / `{turno}` | Turno escolar por extenso | `matutino`, `vespertino` ou `noturno` |
-| `{frequencia}` / `{media_geral}` | Frequência escolar apurada no Power BI | `68,5%` |
-| `{semana_atual}` | Percentual de presença na semana mais recente | `40,00%` |
-| `{semana_anterior}` | Percentual de presença na semana de referência anterior | `75,00%` |
-| `{situacao_frequencia}` | Classificação contextual do nível de risco | `em nível crítico (abaixo do mínimo legal de 75%)` |
-| `{protocolo_serp}` | Ficha SERP ou número de protocolo de proteção | `Ficha SERP nº 119/2026` |
+1. **Geração de Modelos (`/api/ai/generate-template`)**:
+   - Modelos utilizados: `gemini-3.5-flash`, `gemini-3.8-flash` ou `gemini-3.5-flash-lite`.
+   - Gera modelos de comunicados estruturados em JSON (`title`, `prefixText`, `suffixText`, `isAbsenceRelated`) a partir de comandos em linguagem natural.
+2. **Classificação & Formalização de Retorno (`/api/ai/classify-reply`)**:
+   - Executa via `ai.interactions.create` com *Structured Outputs* (JSON Schema estrito).
+   - Extrai:
+     - `formalSummary`: Texto em norma culta para ata e dossiê (ex.: *"Responsável informou via WhatsApp que o aluno realizou consulta médica e apresentará atestado na próxima semana"*).
+     - `category`: `SAUDE` | `TRANSPORTE` | `TRABALHO` | `VIAGEM_FAMILIAR` | `VULNERABILIDADE` | `SEM_JUSTIFICATIVA` | `OUTROS`.
+     - `requiresMedicalCertificate`: Booleano sinalizando necessidade de recolhimento de atestado.
+     - `suggestedFollowUp`: Recomendação de ação pedagógica prática.
+   - **Fallback Determinístico Local**: Se a chave de IA não estiver disponível ou oscilar, o sistema executa imediatamente heurísticas locais de regex pedagógico sem travar o usuário.
 
 ---
 
-## 7. Inteligência Artificial Generativa (Google Gemini)
+## 6. Rotas de API e Endpoints
 
-### 7.1. Arquitetura da Rota `/api/ai/generate-template`
-- **SDK**: `@google/genai` oficial.
-- **Modelo Principal**: `gemini-3.5-flash` (com fallback para `gemini-flash-latest`, `gemini-3.5-flash-lite` e `gemini-3.8-flash`).
-- **Otimização de Latência e Tokens**:
-  ```typescript
-  config: {
-    systemInstruction,
-    responseMimeType: "application/json",
-    temperature: 0.2,
-    thinkingConfig: {
-      thinkingLevel: "low", // Reduz latência de resposta para ~1.5s
-    },
-    abortSignal: abortController.signal,
-  }
-  ```
-- **Resiliência Serverless**: `export const maxDuration = 60` para evitar cortes de execução na Vercel.
-
-### 7.2. Teste Instantâneo da Chave (`/api/ai/test-key`)
-- Permite que a pedagoga teste ou informe uma chave personalizada do Google AI Studio diretamente pelo navegador, gravada em `localStorage`, sem depender de novo deploy na Vercel.
+| Método | Rota | Autenticação | Descrição |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/messages/send` | Sessão Web | Registra log com `deliveryStatus` e gera URL `wa.me` normalizada. |
+| `PATCH` | `/api/messages/status` | Sessão Web | Atualiza status de entrega (`SENT` / `FAILED_NO_WHATSAPP`) e invalida contatos. |
+| `POST` | `/api/messages/reply` | Sessão Web | Registra retorno familiar, notas e causa classificada (`replyCategory`). |
+| `GET` | `/api/messages` | Sessão Web | Listagem paginada do histórico com filtros combinados. |
+| `PUT/DELETE`| `/api/messages/manage` | `ADMIN` | Edição ou exclusão administrativa de registros com auditoria. |
+| `POST` | `/api/ai/classify-reply` | Sessão Web | Triagem e formalização de justificativas com Gemini AI. |
+| `POST` | `/api/ai/generate-template`| Sessão Web | Geração generativa de modelos institucionais com Gemini AI. |
+| `POST` | `/api/ai/test-key` | Sessão Web | Validação e teste de latência de chave Gemini informada no painel. |
+| `POST` | `/api/students/:id/contacts` | Sessão Web | Criação de contatos secundários da família. |
+| `POST` | `/api/students/:id/justifications` | Sessão Web | Registro de atestados médicos com vigência. |
+| `POST` | `/api/students/:id/attendances` | Sessão Web | Registro de atas de comparecimento presencial. |
+| `POST` | `/api/frequencia/sync` | Bearer Token / Sessão | Sincronização em lote (*batch upsert*) da frequência Power BI. |
+| `POST` | `/api/serp/sync` | Bearer Token / Sessão | Sincronização em lote das fichas do portal SERP/Celepar. |
+| `POST` | `/api/webhooks/whatsapp` | Webhook Secret | Endpoint passivo futuro para gateways externos de mensageria. |
 
 ---
 
-## 8. Governança, Perfis de Acesso & Segurança
+## 7. Qualidade, Testes & Conformidade
 
-1. **Autenticação Restrita `@escola.pr.gov.br`**:
-   - NextAuth v5 com validação estrita de domínio. Tentativas com e-mails particulares (`@gmail.com`) são rejeitadas na camada de callback.
-2. **Controle de Acesso Baseado em Papéis (RBAC)**:
-   - `PEDAGOGA`: Visualiza dados, dispara mensagens pelo WhatsApp, registra respostas de pais, cria/edita modelos e importa planilhas.
-   - `ADMIN` (`marcos.wrobel@escola.pr.gov.br`): Gerencia turmas, cadastra/edita estudantes, remove mensagens incorretas e audita logs no `/auditoria`.
-3. **Segurança de APIs de Sincronização**:
-   - Endpoints `/api/frequencia/sync` e `/api/serp/sync` protegidos por token Bearer configurado em variável de ambiente (`SYNC_API_TOKEN`).
+- **Testes Automatizados (Vitest)**:
+  - `src/lib/__tests__/messageFormatter.test.ts`: Substituição de tags e saudações por turno.
+  - `src/lib/__tests__/studentMatcher.test.ts`: Pareamento robusto por CGM e nome normalizado.
+  - `src/lib/__tests__/pedagogicalClassifier.test.ts`: Detecção de queda abrupta e atestados vigentes.
+  - `src/lib/__tests__/whatsappPhase4.test.ts`: Elegibilidade na fila, saneamento de números e classificação de retornos.
+  - Total: **26 testes unitários** com 100% de aprovação.
+- **Conformidade LGPD**:
+  - Restrição de visualização de dados de menores a profissionais autenticados.
+  - Expurgo de dados sensíveis de repositórios públicos.
+  - Trilha imutável em `AuditLog` com IP e dados da modificação.
