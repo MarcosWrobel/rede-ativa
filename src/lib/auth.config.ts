@@ -43,7 +43,7 @@ export const authConfig: NextAuthConfig = {
         const email = (session.user.email || "").toLowerCase().trim();
         const isRoot = isBootstrapAdminEmail(email);
         (session.user as any).id = token.userId as string | undefined;
-        (session.user as any).role = isRoot ? "ADMIN" : (token.role as string) || "PEDAGOGA";
+        (session.user as any).role = isRoot ? "SUPERADMIN" : (token.role as string) || "PEDAGOGA";
         (session.user as any).active = isRoot ? true : token.active !== false;
         if (token.name) {
           session.user.name = String(token.name);
@@ -53,6 +53,9 @@ export const authConfig: NextAuthConfig = {
         }
         if (token.userSchools) {
           (session.user as any).schools = token.userSchools;
+        }
+        if (token.userNetworks) {
+          (session.user as any).networks = token.userNetworks;
         }
       }
       return session;

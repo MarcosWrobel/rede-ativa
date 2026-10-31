@@ -53,10 +53,14 @@ export default async function RootLayout({
   }
 
   const sessionUser = session?.user as any;
-  const isRootAdmin = isBootstrapAdminEmail(sessionUser?.email) || sessionUser?.role === "ADMIN";
+  const isSuper =
+    isBootstrapAdminEmail(sessionUser?.email) ||
+    sessionUser?.role === "SUPERADMIN" ||
+    sessionUser?.role === "ADMIN";
+  const isSecretariat = sessionUser?.role === "GESTAO_SECRETARIA";
 
   let userSchoolsList = Array.isArray(sessionUser?.schools) ? sessionUser.schools : [];
-  if (isRootAdmin) {
+  if (isSuper) {
     try {
       const allActiveSchools = await prisma.school.findMany({
         where: { active: true },
@@ -77,10 +81,44 @@ export default async function RootLayout({
         city: s.city,
         network: (s as any).network || "ESTADUAL",
         logoUrl: s.logoUrl || null,
-        role: "ADMIN",
+        role: "SUPERADMIN",
       }));
     } catch (e) {
-      console.warn("[RootLayout] Falha não crítica ao buscar escolas para admin:", e);
+      console.warn("[RootLayout] Falha não crítica ao buscar escolas para SuperAdmin:", e);
+    }
+  } else if (isSecretariat) {
+    try {
+      const userNetworks = Array.isArray(sessionUser?.networks) ? sessionUser.networks : [];
+      const networkIds = userNetworks.map((n: any) => n.networkId);
+      const networkSchools = await prisma.school.findMany({
+        where: {
+          active: true,
+          OR: [
+            { networkId: { in: networkIds } },
+            ...userNetworks.map((n: any) => ({ city: n.city, network: "MUNICIPAL" })),
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          inepCode: true,
+          city: true,
+          network: true,
+          logoUrl: true,
+        },
+        orderBy: { name: "asc" },
+      });
+      userSchoolsList = networkSchools.map((s) => ({
+        schoolId: s.id,
+        name: s.name,
+        inepCode: s.inepCode,
+        city: s.city,
+        network: (s as any).network || "MUNICIPAL",
+        logoUrl: s.logoUrl || null,
+        role: "GESTAO_SECRETARIA",
+      }));
+    } catch (e) {
+      console.warn("[RootLayout] Falha não crítica ao buscar escolas da rede municipal:", e);
     }
   }
 
@@ -88,9 +126,10 @@ export default async function RootLayout({
     ? {
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",
-        role: sessionUser?.role || "PEDAGOGA",
+        role: isSuper ? "SUPERADMIN" : sessionUser?.role || "PEDAGOGA",
         schoolId: currentSchool?.id || sessionUser?.schoolId || null,
         schools: userSchoolsList,
+        networks: Array.isArray(sessionUser?.networks) ? sessionUser.networks : [],
       }
     : null;
 

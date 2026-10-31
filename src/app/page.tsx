@@ -200,7 +200,7 @@ export default async function DashboardPage() {
           <div>
             <div className="inline-flex items-center space-x-2 bg-white/10 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-xs mb-2 border border-white/20">
               <School className="w-3.5 h-3.5" />
-              <span>Colégio Estadual Leopoldina B. Pedroso</span>
+              <span>{currentSchool?.name || "Colégio Estadual Leopoldina B. Pedroso"}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               Olá, {session?.user?.name || "Equipe Pedagógica"}!

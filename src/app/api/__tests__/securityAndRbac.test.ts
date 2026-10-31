@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { checkIsAdmin, isBootstrapAdminEmail, BOOTSTRAP_ADMIN_EMAIL } from "@/lib/roles";
+import {
+  checkIsAdmin,
+  checkIsSuperAdmin,
+  checkIsSecretariat,
+  checkIsSchoolManager,
+  isBootstrapAdminEmail,
+  BOOTSTRAP_ADMIN_EMAIL,
+} from "@/lib/roles";
 import { SELF_AUTH_API_PREFIXES } from "@/lib/proxyConstants";
 
 describe("Segurança Perimetral e RBAC (Auditoria SEC-01 a SEC-04)", () => {
@@ -98,5 +105,64 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
     expect(checkSchoolAccess("escola-1", "escola-1", "PEDAGOGA")).toBe(true);
     expect(checkSchoolAccess("escola-2", "escola-1", "PEDAGOGA")).toBe(false);
     expect(checkSchoolAccess("escola-2", "escola-1", "ADMIN")).toBe(true);
+  });
+
+  describe("Hierarquia de 4 Camadas SaaS (SuperAdmin, SEMEC, Gestor, Pedagoga)", () => {
+    const superAdminSession = {
+      user: { email: BOOTSTRAP_ADMIN_EMAIL, role: "SUPERADMIN", active: true },
+    };
+    const semecSession = {
+      user: {
+        email: "secretario@tibagi.pr.gov.br",
+        role: "GESTAO_SECRETARIA",
+        active: true,
+        networks: [{ networkId: "semec-tibagi", city: "Tibagi" }],
+      },
+    };
+    const gestorSession = {
+      user: {
+        email: "diretor@tibagi.pr.gov.br",
+        role: "GESTOR_ESCOLAR",
+        active: true,
+        schoolId: "escola-david-federmann",
+        schools: [{ schoolId: "escola-david-federmann", role: "GESTOR_ESCOLAR" }],
+      },
+    };
+    const pedagogaSession = {
+      user: {
+        email: "pedagoga@escola.pr.gov.br",
+        role: "PEDAGOGA",
+        active: true,
+        schoolId: "escola-leopoldina",
+      },
+    };
+
+    it("Nível 1 - SuperAdmin tem acesso global a tudo", () => {
+      expect(checkIsSuperAdmin(superAdminSession)).toBe(true);
+      expect(checkIsSecretariat(superAdminSession, "semec-tibagi")).toBe(true);
+      expect(checkIsSchoolManager(superAdminSession, "qualquer-escola")).toBe(true);
+      expect(checkIsAdmin(superAdminSession)).toBe(true);
+    });
+
+    it("Nível 2 - Gestão Secretaria (SEMEC) tem acesso à sua rede e escolas vinculadas", () => {
+      expect(checkIsSuperAdmin(semecSession)).toBe(false);
+      expect(checkIsSecretariat(semecSession, "semec-tibagi")).toBe(true);
+      expect(checkIsSecretariat(semecSession, "semec-outro-municipio")).toBe(false);
+      expect(checkIsSchoolManager(semecSession, "escola-david-federmann")).toBe(true);
+    });
+
+    it("Nível 3 - Gestor Escolar tem acesso de gestão à sua escola mas não à secretaria", () => {
+      expect(checkIsSuperAdmin(gestorSession)).toBe(false);
+      expect(checkIsSecretariat(gestorSession)).toBe(false);
+      expect(checkIsSchoolManager(gestorSession, "escola-david-federmann")).toBe(true);
+      expect(checkIsSchoolManager(gestorSession, "outra-escola")).toBe(false);
+    });
+
+    it("Nível 4 - Pedagoga não tem permissão de gestão de escola nem de secretaria", () => {
+      expect(checkIsSuperAdmin(pedagogaSession)).toBe(false);
+      expect(checkIsSecretariat(pedagogaSession)).toBe(false);
+      expect(checkIsSchoolManager(pedagogaSession, "escola-leopoldina")).toBe(false);
+      expect(checkIsAdmin(pedagogaSession)).toBe(false);
+    });
   });
 });

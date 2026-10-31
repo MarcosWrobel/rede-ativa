@@ -37,18 +37,45 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Instituição escolar não encontrada ou inativa." }, { status: 404 });
     }
 
-    // 2. Valida se o usuário tem vínculo com essa escola (ou se é Administrador Geral)
-    if (!isRootAdmin && authCheck.userId) {
-      const membership = await prisma.userSchool.findUnique({
-        where: {
-          userId_schoolId: {
-            userId: authCheck.userId,
-            schoolId,
-          },
-        },
-      });
+    // 2. Valida se o usuário tem vínculo com essa escola (ou se é SuperAdmin ou Gestão da Secretaria)
+    const isSuper = isBootstrapAdminEmail(authCheck.email) || authCheck.role === "SUPERADMIN";
+    const isSecretariat = authCheck.role === "GESTAO_SECRETARIA";
 
-      if (!membership || !membership.active) {
+    if (!isSuper && authCheck.userId) {
+      let isAuthorized = false;
+
+      // Se for gestor da secretaria, verifica se a escola pertence à sua rede ou município
+      if (isSecretariat) {
+        const userNetworks = await prisma.userNetwork.findMany({
+          where: { userId: authCheck.userId, active: true },
+          include: { network: true },
+        });
+        const networkIds = userNetworks.map((un) => un.networkId);
+        const networkCities = userNetworks.map((un) => un.network.city.toUpperCase());
+
+        if (
+          ((targetSchool as any).networkId && networkIds.includes((targetSchool as any).networkId)) ||
+          networkCities.includes(targetSchool.city.toUpperCase())
+        ) {
+          isAuthorized = true;
+        }
+      }
+
+      if (!isAuthorized) {
+        const membership = await prisma.userSchool.findUnique({
+          where: {
+            userId_schoolId: {
+              userId: authCheck.userId,
+              schoolId,
+            },
+          },
+        });
+        if (membership && membership.active) {
+          isAuthorized = true;
+        }
+      }
+
+      if (!isAuthorized) {
         return NextResponse.json(
           { error: "Você não possui vínculo autorizado com esta instituição de ensino." },
           { status: 403 }

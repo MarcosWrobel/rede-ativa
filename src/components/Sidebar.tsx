@@ -71,9 +71,15 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
   };
 
   const userEmail = (currentUser?.email || "").toLowerCase().trim();
-  const isAdmin =
-    currentUser?.role === "ADMIN" ||
+  const isSuper =
+    currentUser?.role === "SUPERADMIN" ||
     userEmail === "marcos.wrobel@escola.pr.gov.br";
+  const isSecretariat = currentUser?.role === "GESTAO_SECRETARIA" || isSuper;
+  const isSchoolManager =
+    currentUser?.role === "GESTOR_ESCOLAR" ||
+    currentUser?.role === "ADMIN" ||
+    isSuper;
+  const isAdmin = isSchoolManager;
 
   const navSections: NavSection[] = [
     {
@@ -158,28 +164,43 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           icon: FileText,
           description: "Textos padronizados de comunicação e gerador IA",
         },
-        ...(isAdmin
+        ...(isSecretariat
+          ? [
+              {
+                href: "/secretaria",
+                label: "Painel SEMEC / Rede",
+                icon: Landmark,
+                badge: "SEMEC",
+                description: "Visão executiva consolidada da rede municipal de ensino",
+              },
+            ]
+          : []),
+        ...(isSchoolManager
           ? [
               {
                 href: "/configuracoes/escola",
                 label: "Identidade da Escola",
                 icon: Building2,
-                badge: "ADM",
+                badge: "GESTOR",
                 description: "Personalização de dados, brasão institucional e chave da extensão",
-              },
-              {
-                href: "/admin/escolas",
-                label: "Gestão de Escolas",
-                icon: Landmark,
-                badge: "ADM",
-                description: "Cadastro e gestão de unidades escolares e redes municipais/estaduais",
               },
               {
                 href: "/equipe",
                 label: "Equipe & Acessos",
                 icon: UserCheck,
-                badge: "ADM",
-                description: "Servidores autorizados @escola e controle de papéis",
+                badge: "GESTOR",
+                description: "Servidores autorizados e controle de papéis da unidade",
+              },
+            ]
+          : []),
+        ...(isSuper
+          ? [
+              {
+                href: "/admin/escolas",
+                label: "Gestão SaaS de Escolas",
+                icon: Building2,
+                badge: "SUPER",
+                description: "Cadastro e gestão de unidades escolares e redes municipais/estaduais",
               },
               {
                 href: "/auditoria",

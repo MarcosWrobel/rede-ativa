@@ -1,15 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { isBootstrapAdminEmail, requireAdmin } from "@/lib/permissions";
+import { isBootstrapAdminEmail, requireAdmin, checkIsSuperAdmin } from "@/lib/permissions";
 import { formatZodError, userCreateSchema } from "@/lib/schemas";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function GET() {
   try {
     const authCheck = await requireAdmin();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const isSuper = checkIsSuperAdmin(authCheck.session);
+
+    const whereClause: any = isSuper
+      ? {}
+      : {
+          OR: [
+            { schoolId: currentSchool.id },
+            { schools: { some: { schoolId: currentSchool.id } } },
+          ],
+        };
+
     const users = await prisma.user.findMany({
+      where: whereClause,
       include: {
         schools: {
           include: {
@@ -65,12 +79,15 @@ export async function POST(req: Request) {
         .replace(/[._-]+/g, " ")
         .replace(/\b\w/g, (l) => l.toUpperCase());
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const targetSchoolId = currentSchool.id;
+
     const created = await prisma.user.create({
       data: {
         email: rawEmail,
         name: defaultName,
-        role: isBootstrapAdminEmail(rawEmail) ? "ADMIN" : role,
-        schoolId: authCheck.schoolId || null,
+        role: isBootstrapAdminEmail(rawEmail) ? "SUPERADMIN" : role,
+        schoolId: targetSchoolId,
         active: true,
       },
       include: {
@@ -80,23 +97,21 @@ export async function POST(req: Request) {
       },
     });
 
-    if (authCheck.schoolId) {
-      await prisma.userSchool.upsert({
-        where: {
-          userId_schoolId: {
-            userId: created.id,
-            schoolId: authCheck.schoolId,
-          },
-        },
-        update: { role: created.role, active: true },
-        create: {
+    await prisma.userSchool.upsert({
+      where: {
+        userId_schoolId: {
           userId: created.id,
-          schoolId: authCheck.schoolId,
-          role: created.role,
-          active: true,
+          schoolId: targetSchoolId,
         },
-      });
-    }
+      },
+      update: { role: created.role, active: true },
+      create: {
+        userId: created.id,
+        schoolId: targetSchoolId,
+        role: created.role,
+        active: true,
+      },
+    });
 
     await logAudit({
       action: "CREATE_USER",

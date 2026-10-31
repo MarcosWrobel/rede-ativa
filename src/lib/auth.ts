@@ -65,25 +65,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, account }) {
       const email = user.email?.toLowerCase().trim();
 
-      if (!email || !email.endsWith("@escola.pr.gov.br")) {
-        console.warn(`[AUTH] Tentativa de login negada para e-mail não institucional: ${email}`);
-        await logAudit({
-          action: "LOGIN_DENIED",
-          entityType: "User",
-          details: { reason: "DOMINIO_NAO_INSTITUCIONAL", email: email || "desconhecido" },
-          user: { name: user.name || "Visitante Externo", email: email || "desconhecido" },
-        });
-        return "/login?error=DomainRestricted";
+      if (!email) {
+        return "/login?error=InvalidEmail";
       }
 
+      const isRootAdmin = isBootstrapAdminEmail(email);
+      const isSeedPrDomain = email.endsWith("@escola.pr.gov.br");
+
       try {
-        const isRootAdmin = isBootstrapAdminEmail(email);
         const existingUser = await prisma.user.findUnique({
           where: { email },
         });
 
-        // Se não for o admin semente, exige estar previamente autorizado na tabela User da escola
-        if (!isRootAdmin && !existingUser) {
+        // Permite login se:
+        // 1. For o SuperAdmin raiz da plataforma
+        // 2. Ou pertencer ao domínio institucional da rede estadual (@escola.pr.gov.br) e estiver autorizado
+        // 3. Ou se for uma conta municipal/externa previamente cadastrada/convidada pela gestão
+        if (!isRootAdmin && !isSeedPrDomain && !existingUser) {
+          console.warn(`[AUTH] Tentativa de login negada para e-mail externo não convidado: ${email}`);
+          await logAudit({
+            action: "LOGIN_DENIED",
+            entityType: "User",
+            details: { reason: "CONTA_NAO_AUTORIZADA_NA_PLATAFORMA", email },
+            user: { name: user.name || "Visitante Externo", email },
+          });
+          return "/login?error=NotAuthorizedTeam";
+        }
+
+        if (!isRootAdmin && !existingUser && isSeedPrDomain) {
           console.warn(`[AUTH] Login negado para conta fora da equipe autorizada: ${email}`);
           await logAudit({
             action: "LOGIN_DENIED",
@@ -106,24 +115,28 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return "/login?error=AccountInactive";
         }
 
+        const effectiveRole = isRootAdmin
+          ? "SUPERADMIN"
+          : existingUser?.role || "PEDAGOGA";
+
         const dbUser = await prisma.user.upsert({
           where: { email },
           update: {
             name: user.name || existingUser?.name || email.split("@")[0],
             image: user.image ?? existingUser?.image,
-            ...(isRootAdmin ? { role: "ADMIN", active: true } : {}),
+            ...(isRootAdmin ? { role: "SUPERADMIN", active: true } : {}),
           },
           create: {
             email,
             name: user.name || email.split("@")[0],
             image: user.image,
-            role: "ADMIN",
+            role: effectiveRole,
             active: true,
           },
         });
 
         (user as any).dbId = dbUser.id;
-        (user as any).role = isRootAdmin ? "ADMIN" : dbUser.role;
+        (user as any).role = isRootAdmin ? "SUPERADMIN" : dbUser.role;
         (user as any).active = isRootAdmin ? true : dbUser.active;
         (user as any).schoolId = dbUser.schoolId;
 
@@ -196,6 +209,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                   },
                 },
               },
+              networks: {
+                where: { active: true },
+                include: {
+                  network: {
+                    select: {
+                      id: true,
+                      name: true,
+                      shortName: true,
+                      city: true,
+                      type: true,
+                      logoUrl: true,
+                    },
+                  },
+                },
+              },
             },
           });
           if (dbUser) {
@@ -214,6 +242,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             }));
             token.userSchools = mappedSchools;
 
+            const mappedNetworks = ((dbUser as any).networks || []).map((n: any) => ({
+              networkId: n.networkId,
+              role: n.role,
+              name: n.network.name,
+              shortName: n.network.shortName,
+              city: n.network.city,
+              type: n.network.type,
+              logoUrl: n.network.logoUrl || null,
+            }));
+            token.userNetworks = mappedNetworks;
+
             // Se o usuário ainda não tiver um schoolId ativo selecionado ou se o atual não pertencer à lista
             const currentSelected = (token.schoolId as string) || dbUser.schoolId;
             const validSelected =
@@ -223,7 +262,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
             token.schoolId = validSelected;
             const activeSchoolInfo = mappedSchools.find((s) => s.schoolId === validSelected);
-            token.role = isRootAdmin ? "ADMIN" : activeSchoolInfo?.role || dbUser.role || "PEDAGOGA";
+            token.role = isRootAdmin
+              ? "SUPERADMIN"
+              : activeSchoolInfo?.role || dbUser.role || "PEDAGOGA";
           } else if (!isRootAdmin) {
             token.active = false;
           }

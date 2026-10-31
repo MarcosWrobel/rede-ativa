@@ -8,6 +8,41 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model EducationNetwork {
+  id          String        @id @default(cuid())
+  name        String        // Ex: "Secretaria Municipal de Educação de Tibagi"
+  shortName   String        // Ex: "SEMEC Tibagi"
+  city        String        // "Tibagi"
+  state       String        @default("PR")
+  type        String        @default("MUNICIPAL") // MUNICIPAL | ESTADUAL | PRIVADA
+  logoUrl     String?       // Brasão oficial da Prefeitura / SEMEC
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  schools     School[]
+  managers    UserNetwork[]
+
+  @@index([city, state])
+  @@index([active])
+}
+
+model UserNetwork {
+  id          String           @id @default(cuid())
+  userId      String
+  networkId   String
+  role        String           @default("GESTAO_SECRETARIA") // GESTAO_SECRETARIA | SUPERVISOR
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  network     EducationNetwork @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, networkId])
+  @@index([userId])
+  @@index([networkId])
+}
+
 model School {
   id              String            @id @default(cuid())
   inepCode        String            @unique // e.g. "41042730"
@@ -22,6 +57,10 @@ model School {
   active          Boolean           @default(true)
   syncTokenHash   String?           // Token hash para sincronização com extensões
   settingsJson    String?           // Configurações e preferências personalizadas
+
+  networkId       String?
+  educationNetwork EducationNetwork? @relation(fields: [networkId], references: [id], onDelete: SetNull)
+
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -35,23 +74,25 @@ model School {
 
   @@index([inepCode])
   @@index([active])
+  @@index([networkId])
 }
 
 model User {
-  id            String       @id @default(cuid())
+  id            String        @id @default(cuid())
   name          String
-  email         String       @unique
+  email         String        @unique
   image         String?
-  role          String       @default("PEDAGOGA") // ADMIN | PEDAGOGA
-  active        Boolean      @default(true)
+  role          String        @default("PEDAGOGA") // SUPERADMIN | ADMIN | GESTAO_SECRETARIA | GESTOR_ESCOLAR | PEDAGOGA
+  active        Boolean       @default(true)
   schoolId      String?
-  school        School?      @relation(fields: [schoolId], references: [id], onDelete: SetNull)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  school        School?       @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   schools       UserSchool[]
-  messageLogs   MessageLog[] @relation("SentByUser")
-  repliedLogs   MessageLog[] @relation("RepliedByUser")
+  networks      UserNetwork[]
+  messageLogs   MessageLog[]  @relation("SentByUser")
+  repliedLogs   MessageLog[]  @relation("RepliedByUser")
   auditLogs     AuditLog[]
 
   @@index([schoolId])

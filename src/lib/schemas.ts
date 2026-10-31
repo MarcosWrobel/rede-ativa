@@ -184,17 +184,32 @@ export const serpSyncItemSchema = z.object({
   detalhes: z.any().optional().nullable(),
 });
 
+const PUBLIC_EMAIL_DOMAINS = ["gmail.com", "hotmail.com", "yahoo.com", "outlook.com", "live.com", "bol.com.br", "uol.com.br"];
+
 export const userCreateSchema = z.object({
   email: z
     .string()
     .trim()
     .toLowerCase()
     .email("Formato de e-mail inválido")
-    .refine((e) => e.endsWith("@escola.pr.gov.br"), {
-      message: "O e-mail deve pertencer ao domínio institucional @escola.pr.gov.br",
-    }),
+    .refine(
+      (e) => {
+        const domain = e.split("@")[1] || "";
+        return (
+          e.endsWith(".gov.br") ||
+          e.endsWith(".edu.br") ||
+          !PUBLIC_EMAIL_DOMAINS.includes(domain)
+        );
+      },
+      {
+        message: "O e-mail deve ser institucional (ex: @escola.pr.gov.br, @tibagi.pr.gov.br ou domínio próprio da mantenedora)",
+      }
+    ),
   name: z.string().trim().optional().default(""),
-  role: z.enum(["PEDAGOGA", "ADMIN"]).optional().default("PEDAGOGA"),
+  role: z
+    .enum(["PEDAGOGA", "GESTOR_ESCOLAR", "GESTAO_SECRETARIA", "ADMIN", "SUPERADMIN"])
+    .optional()
+    .default("PEDAGOGA"),
 });
 
 export const kinshipEnum = z.enum([

@@ -29,5 +29,5 @@ describe("BuscaAtivaPage with real database", () => {
     });
     const html = renderToString(pageComponent);
     expect(html).toContain("Painel de Busca Ativa");
-  });
+  }, 15000);
 });

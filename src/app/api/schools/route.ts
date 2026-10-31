@@ -125,7 +125,32 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Cria a nova escola no banco de dados
+    // 2. Resolve Rede Municipal (SEMEC) se aplicável
+    let networkId: string | undefined = undefined;
+    if (data.network === "MUNICIPAL") {
+      const cleanCity = data.city.trim();
+      const semecId = `semec-${cleanCity.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-")}`;
+      try {
+        const net = await prisma.educationNetwork.upsert({
+          where: { id: semecId },
+          update: {},
+          create: {
+            id: semecId,
+            name: `Secretaria Municipal de Educação de ${cleanCity}`,
+            shortName: `SEMEC ${cleanCity}`,
+            city: cleanCity,
+            state: data.state.trim().toUpperCase(),
+            type: "MUNICIPAL",
+            logoUrl: data.logoUrl || null,
+          },
+        });
+        networkId = net.id;
+      } catch (e) {
+        console.warn("[POST /api/schools] Falha não crítica ao criar rede municipal:", e);
+      }
+    }
+
+    // 3. Cria a nova escola no banco de dados
     const createdSchool = await prisma.school.create({
       data: {
         inepCode: data.inepCode,
@@ -134,6 +159,7 @@ export async function POST(req: Request) {
         state: data.state.trim().toUpperCase(),
         nre: data.nre?.trim() || (data.network === "MUNICIPAL" ? `SEMEC ${data.city.trim()}` : "Ponta Grossa"),
         network: data.network,
+        networkId,
         phone: data.phone?.trim() || null,
         email: data.email?.trim() || null,
         logoUrl: data.logoUrl?.trim() || null,
@@ -141,7 +167,46 @@ export async function POST(req: Request) {
       },
     });
 
-    // 3. Vincula automaticamente o usuário criador como ADMIN da nova escola
+    // 4. Injeta Starter Pack de Modelos Pedagógicos essenciais para a nova escola
+    const baseTemplates = [
+      {
+        title: "AUSÊNCIA HOJE - TURNO MANHÃ",
+        segment: "TODOS",
+        isAbsenceRelated: true,
+        prefixText: "Prezados pais ou responsáveis por {aluno},\n\nIdentificamos a ausência do estudante nas aulas desta manhã.",
+        suffixText: "\nSolicitamos justificativa ou contato com a equipe pedagógica para regularização da frequência escolar.",
+      },
+      {
+        title: "AUSÊNCIA HOJE - TURNO TARDE",
+        segment: "TODOS",
+        isAbsenceRelated: true,
+        prefixText: "Prezados pais ou responsáveis por {aluno},\n\nConstatamos a ausência do estudante nas aulas deste período da tarde.",
+        suffixText: "\nFavor responder a esta mensagem informando o motivo da ausência.",
+      },
+      {
+        title: "CONVOCAÇÃO DE RESPONSÁVEIS - INFREQUÊNCIA",
+        segment: "TODOS",
+        isAbsenceRelated: true,
+        prefixText: "Prezados responsáveis por {aluno},\n\nSolicitamos seu comparecimento à escola para alinhamento pedagógico urgente sobre a frequência escolar do estudante.",
+        suffixText: "\nPedimos que confirme o recebimento desta notificação institucional.",
+      },
+    ];
+
+    for (const t of baseTemplates) {
+      try {
+        await prisma.messageTemplate.create({
+          data: {
+            ...t,
+            schoolId: createdSchool.id,
+            active: true,
+          },
+        });
+      } catch (err) {
+        console.warn("[POST /api/schools] Erro ao injetar modelo starter:", err);
+      }
+    }
+
+    // 5. Vincula automaticamente o usuário criador como GESTOR/ADMIN da nova escola
     if (authCheck.userId) {
       await prisma.userSchool.upsert({
         where: {

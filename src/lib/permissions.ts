@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
 import { auth } from "./auth";
-import { BOOTSTRAP_ADMIN_EMAIL, checkIsAdmin, isBootstrapAdminEmail } from "./roles";
+import {
+  BOOTSTRAP_ADMIN_EMAIL,
+  checkIsAdmin,
+  checkIsSuperAdmin,
+  checkIsSecretariat,
+  checkIsSchoolManager,
+  isBootstrapAdminEmail,
+  type RoleLevel,
+} from "./roles";
 
-export { BOOTSTRAP_ADMIN_EMAIL, checkIsAdmin, isBootstrapAdminEmail };
+export {
+  BOOTSTRAP_ADMIN_EMAIL,
+  checkIsAdmin,
+  checkIsSuperAdmin,
+  checkIsSecretariat,
+  checkIsSchoolManager,
+  isBootstrapAdminEmail,
+};
 
 export type AuthCheckSuccess = {
   ok: true;
@@ -10,8 +25,9 @@ export type AuthCheckSuccess = {
   userId?: string;
   email: string;
   userName: string;
-  role: "ADMIN" | "PEDAGOGA";
+  role: RoleLevel | "ADMIN";
   schoolId?: string;
+  networkId?: string;
 };
 
 export type AuthCheckFailure = {
@@ -43,8 +59,9 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
     };
   }
 
-  const isAdmin = checkIsAdmin(session);
+  const role = (session.user as any).role || (isBootstrapAdminEmail(email) ? "SUPERADMIN" : "PEDAGOGA");
   const schoolId = (session.user as any)?.schoolId || undefined;
+  const networkId = (session.user as any)?.networkId || undefined;
 
   return {
     ok: true,
@@ -52,23 +69,24 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
     userId: (session.user as any).id || undefined,
     email,
     userName: session.user.name || email.split("@")[0],
-    role: isAdmin ? "ADMIN" : "PEDAGOGA",
+    role,
     schoolId,
+    networkId,
   };
 }
 
 /**
- * Exige perfil estrito de Administrador (ADMIN).
+ * Exige perfil estrito de SuperAdmin da Plataforma SaaS (Nível 1).
  */
-export async function requireAdmin(): Promise<AuthCheckSuccess | AuthCheckFailure> {
+export async function requireSuperAdmin(): Promise<AuthCheckSuccess | AuthCheckFailure> {
   const authCheck = await requireAuth();
   if (!authCheck.ok) return authCheck;
 
-  if (authCheck.role !== "ADMIN") {
+  if (!checkIsSuperAdmin(authCheck.session)) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Acesso restrito a administradores do sistema." },
+        { error: "Acesso restrito a administradores gerais da plataforma." },
         { status: 403 }
       ),
     };
@@ -78,27 +96,64 @@ export async function requireAdmin(): Promise<AuthCheckSuccess | AuthCheckFailur
 }
 
 /**
- * Exige perfil de Administrador na escola alvo (ou Administrador Geral da Rede).
+ * Exige perfil de Gestão da Secretaria de Educação (Nível 2) ou SuperAdmin.
+ */
+export async function requireSecretariat(targetNetworkId?: string | null): Promise<AuthCheckSuccess | AuthCheckFailure> {
+  const authCheck = await requireAuth();
+  if (!authCheck.ok) return authCheck;
+
+  if (!checkIsSecretariat(authCheck.session, targetNetworkId)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Acesso restrito à Gestão da Secretaria Municipal de Educação." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return authCheck;
+}
+
+/**
+ * Exige perfil de Administrador Geral (Retrocompatibilidade).
+ */
+export async function requireAdmin(): Promise<AuthCheckSuccess | AuthCheckFailure> {
+  const authCheck = await requireAuth();
+  if (!authCheck.ok) return authCheck;
+
+  if (!checkIsAdmin(authCheck.session)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Acesso restrito a gestores e administradores do sistema." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return authCheck;
+}
+
+/**
+ * Exige perfil de Gestor na escola alvo (Nível 3), Secretaria da Rede (Nível 2) ou SuperAdmin (Nível 1).
  */
 export async function requireSchoolAdmin(targetSchoolId?: string | null): Promise<AuthCheckSuccess | AuthCheckFailure> {
   const authCheck = await requireAuth();
   if (!authCheck.ok) return authCheck;
 
-  if (isBootstrapAdminEmail(authCheck.email)) {
+  if (checkIsSuperAdmin(authCheck.session)) {
     return authCheck;
   }
 
   const effectiveSchoolId = targetSchoolId || authCheck.schoolId;
-  const userSchools = ((authCheck.session?.user as any)?.schools as any[]) || [];
-  const schoolMembership = userSchools.find((s: any) => s.schoolId === effectiveSchoolId);
+  const isManager = checkIsSchoolManager(authCheck.session, effectiveSchoolId);
 
-  const isAdminInSchool = (schoolMembership && schoolMembership.role === "ADMIN") || authCheck.role === "ADMIN";
-
-  if (!isAdminInSchool) {
+  if (!isManager) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Acesso restrito ao Administrador ou Direção desta instituição escolar." },
+        { error: "Acesso restrito à Direção ou Gestão desta instituição escolar." },
         { status: 403 }
       ),
     };
