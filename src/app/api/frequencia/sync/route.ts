@@ -12,6 +12,7 @@ import {
   parseAttendancePercent,
 } from "@/lib/studentMatcher";
 import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export const maxDuration = 60;
 
@@ -39,39 +40,58 @@ export async function POST(req: Request) {
     let userName = "Extensão Power BI (API)";
     let userEmail = "sistema@leopoldina.pr.gov.br";
     let userId: string | undefined = undefined;
+    let targetSchoolId: string | undefined = undefined;
 
     if (session?.user?.email && (session.user as any).active !== false) {
       authMethod = "SESSION";
       userEmail = session.user.email;
       userName = session.user.name || session.user.email.split("@")[0];
       userId = (session.user as any).id;
+      targetSchoolId = (session.user as any).schoolId;
     } else {
       const configuredToken = (process.env.SYNC_API_TOKEN || "").trim();
-      if (!configuredToken) {
-        return NextResponse.json(
-          {
-            error:
-              "Variável SYNC_API_TOKEN não configurada no servidor. Configure-a no ambiente (.env / Vercel) para habilitar sincronização externa.",
-          },
-          { status: 503, headers: corsHeaders }
-        );
-      }
-
       const authHeader = req.headers.get("authorization") || "";
       const customTokenHeader = req.headers.get("x-sync-token") || "";
       const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
       const providedToken = bearerToken || customTokenHeader.trim();
 
-      if (!providedToken || !verifySyncToken(providedToken, configuredToken)) {
+      if (!providedToken) {
         return NextResponse.json(
           {
             error:
-              "Não autorizado. Copie a Chave de Sincronização atualizada no painel Busca-ativa (/faltas) e cole na Extensão Chrome.",
+              "Não autorizado. Forneça o token de sincronização da instituição no cabeçalho Authorization: Bearer <TOKEN>.",
+          },
+          { status: 401, headers: corsHeaders }
+        );
+      }
+
+      // 1.1 Procura se é a chave de sincronização de uma escola específica
+      const schoolByToken = await prisma.school.findFirst({
+        where: { syncTokenHash: providedToken, active: true },
+        select: { id: true, name: true },
+      });
+
+      if (schoolByToken) {
+        targetSchoolId = schoolByToken.id;
+        userName = `Extensão Power BI (${schoolByToken.name})`;
+      } else if (configuredToken && verifySyncToken(providedToken, configuredToken)) {
+        // 1.2 Token global: vincula à escola especificada em header/query ou escola sede padrão
+        const { searchParams } = new URL(req.url);
+        const reqSchoolId = searchParams.get("schoolId") || req.headers.get("x-school-id");
+        const resolved = await getCurrentSchool(reqSchoolId);
+        targetSchoolId = resolved.id;
+      } else {
+        return NextResponse.json(
+          {
+            error:
+              "Chave de sincronização inválida. Copie a chave atualizada no painel da sua escola e cole na Extensão.",
           },
           { status: 401, headers: corsHeaders }
         );
       }
     }
+
+    const currentSchool = await getCurrentSchool(targetSchoolId);
 
     const rawBody = await req.json();
     const parsedBody = frequenciaSyncSchema.safeParse(rawBody);
@@ -84,8 +104,9 @@ export async function POST(req: Request) {
 
     const { alunos } = parsedBody.data;
 
-    // 2. Carrega todos os estudantes em 1 query leve
+    // 2. Carrega estudantes da escola ativa em 1 query leve
     const allStudents = await prisma.student.findMany({
+      where: currentSchool.id ? { schoolId: currentSchool.id, active: true } : { active: true },
       select: {
         id: true,
         cgm: true,

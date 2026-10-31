@@ -1,19 +1,22 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Menu, GraduationCap, Bell, Search, ShieldCheck } from "lucide-react";
+import { Menu, GraduationCap } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
+import SchoolSelector from "./SchoolSelector";
 
 interface TopHeaderProps {
   currentUser?: {
     name: string;
     email: string;
     role: string;
+    schools?: any[];
   } | null;
+  currentSchool?: any;
   onOpenMobile: () => void;
 }
 
-export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps) {
+export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: TopHeaderProps) {
   const pathname = usePathname();
 
   if (pathname === "/login") return null;
@@ -32,6 +35,8 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
     "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação institucional" },
     "/equipe": { title: "Equipe & Acessos", subtitle: "Controle institucional de servidores autorizados" },
     "/auditoria": { title: "Trilha de Auditoria", subtitle: "Histórico imutável de conformidade e auditoria com IP" },
+    "/configuracoes/escola": { title: "Identidade da Escola", subtitle: "Personalização de dados, brasão e chave da extensão" },
+    "/admin/escolas": { title: "Gestão de Escolas", subtitle: "Administração de escolas e redes municipais/estaduais" },
   };
 
   let currentInfo = pageTitles[pathname];
@@ -45,7 +50,7 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
     } else if (pathname.startsWith("/atas/livro/")) {
       currentInfo = { title: "Livro Anual Consolidado", subtitle: "Termo de abertura, atas sequenciais e encerramento anual" };
     } else {
-      currentInfo = { title: "Colégio Leopoldina", subtitle: "Sistema de Busca Ativa & Atas" };
+      currentInfo = { title: currentSchool?.name || "Colégio Estadual", subtitle: "Sistema de Busca Ativa & Atas" };
     }
   }
 
@@ -64,14 +69,22 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
 
         <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
           <GraduationCap className="w-4 h-4 text-sky-600 dark:text-sky-400 hidden sm:block" />
-          <span className="text-slate-400 dark:text-slate-500 hidden sm:inline">Colégio Leopoldina</span>
+          <span className="text-slate-400 dark:text-slate-500 hidden sm:inline">
+            {currentSchool?.shortName || currentSchool?.name || "Colégio Estadual"}
+          </span>
           <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">/</span>
           <span className="text-slate-700 dark:text-slate-200 font-bold">{currentInfo.title}</span>
         </div>
       </div>
 
-      {/* Right: Theme Toggle & User Status */}
+      {/* Right: School Selector, Theme Toggle & User Status */}
       <div className="flex items-center space-x-3">
+        <SchoolSelector
+          currentSchool={currentSchool}
+          userSchools={currentUser?.schools}
+          isAdmin={currentUser?.role === "ADMIN"}
+        />
+
         <ThemeToggle />
 
         {currentUser ? (

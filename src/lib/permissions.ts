@@ -76,3 +76,33 @@ export async function requireAdmin(): Promise<AuthCheckSuccess | AuthCheckFailur
 
   return authCheck;
 }
+
+/**
+ * Exige perfil de Administrador na escola alvo (ou Administrador Geral da Rede).
+ */
+export async function requireSchoolAdmin(targetSchoolId?: string | null): Promise<AuthCheckSuccess | AuthCheckFailure> {
+  const authCheck = await requireAuth();
+  if (!authCheck.ok) return authCheck;
+
+  if (isBootstrapAdminEmail(authCheck.email)) {
+    return authCheck;
+  }
+
+  const effectiveSchoolId = targetSchoolId || authCheck.schoolId;
+  const userSchools = ((authCheck.session?.user as any)?.schools as any[]) || [];
+  const schoolMembership = userSchools.find((s: any) => s.schoolId === effectiveSchoolId);
+
+  const isAdminInSchool = (schoolMembership && schoolMembership.role === "ADMIN") || authCheck.role === "ADMIN";
+
+  if (!isAdminInSchool) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Acesso restrito ao Administrador ou Direção desta instituição escolar." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return authCheck;
+}

@@ -14,7 +14,8 @@ model School {
   name            String            // e.g. "Colégio Estadual Leopoldina B. Pedroso"
   city            String            @default("Ponta Grossa")
   state           String            @default("PR")
-  nre             String            @default("Ponta Grossa") // Núcleo Regional de Educação
+  nre             String            @default("Ponta Grossa") // Núcleo Regional de Educação ou Secretaria Municipal (ex: SEMEC Tibagi)
+  network         String            @default("ESTADUAL")     // ESTADUAL | MUNICIPAL | PRIVADA
   phone           String?
   email           String?
   logoUrl         String?
@@ -25,6 +26,7 @@ model School {
   updatedAt       DateTime          @updatedAt
 
   users           User[]
+  userSchools     UserSchool[]
   classGroups     ClassGroup[]
   students        Student[]
   templates       MessageTemplate[]
@@ -47,10 +49,27 @@ model User {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
+  schools       UserSchool[]
   messageLogs   MessageLog[] @relation("SentByUser")
   repliedLogs   MessageLog[] @relation("RepliedByUser")
   auditLogs     AuditLog[]
 
+  @@index([schoolId])
+}
+
+model UserSchool {
+  id        String   @id @default(cuid())
+  userId    String
+  schoolId  String
+  role      String   @default("PEDAGOGA") // ADMIN | PEDAGOGA
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, schoolId])
+  @@index([userId])
   @@index([schoolId])
 }
 

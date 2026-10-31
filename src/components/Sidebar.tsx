@@ -22,7 +22,9 @@ import {
   X,
   LayoutDashboard,
   Stethoscope,
-  ListTodo
+  ListTodo,
+  Building2,
+  Landmark
 } from "lucide-react";
 
 interface SidebarProps {
@@ -31,6 +33,7 @@ interface SidebarProps {
     email: string;
     role: string;
   } | null;
+  currentSchool?: any;
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
 }
@@ -49,7 +52,7 @@ interface NavSection {
   items: NavItem[];
 }
 
-export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: SidebarProps) {
+export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMobileOpen }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -158,6 +161,20 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
         ...(isAdmin
           ? [
               {
+                href: "/configuracoes/escola",
+                label: "Identidade da Escola",
+                icon: Building2,
+                badge: "ADM",
+                description: "Personalização de dados, brasão institucional e chave da extensão",
+              },
+              {
+                href: "/admin/escolas",
+                label: "Gestão de Escolas",
+                icon: Landmark,
+                badge: "ADM",
+                description: "Cadastro e gestão de unidades escolares e redes municipais/estaduais",
+              },
+              {
                 href: "/equipe",
                 label: "Equipe & Acessos",
                 icon: UserCheck,
@@ -209,15 +226,22 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
             className="flex items-center space-x-3 overflow-hidden group"
           >
             <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 flex-shrink-0 shadow-sm border border-slate-700 group-hover:scale-105 transition">
-              <img src="/logo.svg" alt="Colégio Leopoldina" className="w-full h-full object-contain" />
+              <img
+                src={currentSchool?.logoUrl || "/logo.svg"}
+                alt={currentSchool?.name || "Colégio Estadual Leopoldina"}
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/logo.svg";
+                }}
+              />
             </div>
             {(!collapsed || mobileOpen) && (
-              <div className="transition-opacity duration-200">
-                <span className="font-bold text-white text-base leading-tight block truncate">
-                  Leopoldina
+              <div className="transition-opacity duration-200 min-w-0">
+                <span className="font-bold text-white text-sm leading-tight block truncate">
+                  {currentSchool?.shortName || currentSchool?.name?.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "") || "Leopoldina"}
                 </span>
                 <span className="text-[10px] text-sky-400 font-semibold tracking-wider uppercase block truncate">
-                  Busca Ativa & Atas
+                  {currentSchool?.network === "MUNICIPAL" ? "SEMEC" : "SEED-PR"} • Busca Ativa
                 </span>
               </div>
             )}

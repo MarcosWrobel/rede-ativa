@@ -7,6 +7,7 @@ export interface SchoolContext {
   city: string;
   state: string;
   nre: string;
+  network?: string; // "ESTADUAL" | "MUNICIPAL" | "PRIVADA"
   phone?: string | null;
   email?: string | null;
   logoUrl?: string | null;
@@ -19,6 +20,7 @@ export const DEFAULT_SCHOOL: SchoolContext = {
   city: "Ponta Grossa",
   state: "PR",
   nre: "Ponta Grossa",
+  network: "ESTADUAL",
   phone: "(42) 3224-0000",
   email: "leopoldinabpedroso@escola.pr.gov.br",
   logoUrl: "/logo.svg",
@@ -43,6 +45,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
           city: firstSchool.city,
           state: firstSchool.state,
           nre: firstSchool.nre,
+          network: (firstSchool as any).network || "ESTADUAL",
           phone: firstSchool.phone,
           email: firstSchool.email,
           logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
@@ -59,6 +62,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
           city: created.city,
           state: created.state,
           nre: created.nre,
+          network: (created as any).network || "ESTADUAL",
           phone: created.phone,
           email: created.email,
           logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
@@ -83,6 +87,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
         city: school.city,
         state: school.state,
         nre: school.nre,
+        network: (school as any).network || "ESTADUAL",
         phone: school.phone,
         email: school.email,
         logoUrl: school.logoUrl || DEFAULT_SCHOOL.logoUrl,
@@ -109,6 +114,7 @@ export async function ensureDefaultSchool() {
         city: DEFAULT_SCHOOL.city,
         state: DEFAULT_SCHOOL.state,
         nre: DEFAULT_SCHOOL.nre,
+        network: "ESTADUAL",
         phone: DEFAULT_SCHOOL.phone,
         email: DEFAULT_SCHOOL.email,
         logoUrl: DEFAULT_SCHOOL.logoUrl,
@@ -119,4 +125,35 @@ export async function ensureDefaultSchool() {
     console.warn("[Multi-Tenancy] Falha não crítica ao assegurar escola padrão:", error);
     return null;
   }
+}
+
+/**
+ * Atualiza o perfil e identidade visual de uma unidade escolar (Acesso Gestor).
+ */
+export async function updateSchoolProfile(
+  schoolId: string,
+  data: {
+    name?: string;
+    city?: string;
+    state?: string;
+    nre?: string;
+    network?: string;
+    phone?: string | null;
+    email?: string | null;
+    logoUrl?: string | null;
+  }
+) {
+  return await prisma.school.update({
+    where: { id: schoolId },
+    data: {
+      ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+      ...(data.city?.trim() ? { city: data.city.trim() } : {}),
+      ...(data.state?.trim() ? { state: data.state.trim().toUpperCase() } : {}),
+      ...(data.nre?.trim() ? { nre: data.nre.trim() } : {}),
+      ...(data.network?.trim() ? { network: data.network.trim().toUpperCase() } : {}),
+      ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
+      ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
+      ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl?.trim() || null } : {}),
+    },
+  });
 }

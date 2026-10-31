@@ -3,6 +3,7 @@ import "./globals.css";
 import AppLayoutClient from "@/components/AppLayoutClient";
 import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export const viewport: Viewport = {
   themeColor: "#0284c7",
@@ -11,7 +12,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Busca Ativa & Comunicação | Colégio Estadual Leopoldina",
+  title: "Busca Ativa & Comunicação | Gestão Escolar",
   description: "Sistema web de busca ativa, comunicação escolar automatizada e controle de faltas",
   manifest: "/manifest.json",
   appleWebApp: {
@@ -34,11 +35,16 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  const sessionUser = session?.user as any;
+  const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+
   const currentUser = session?.user
     ? {
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",
-        role: (session.user as any).role || "PEDAGOGA",
+        role: sessionUser?.role || "PEDAGOGA",
+        schoolId: sessionUser?.schoolId || currentSchool?.id || null,
+        schools: sessionUser?.schools || [],
       }
     : null;
 
@@ -61,7 +67,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-150">
-        <AppLayoutClient currentUser={currentUser}>
+        <AppLayoutClient currentUser={currentUser} currentSchool={currentSchool}>
           {children}
         </AppLayoutClient>
         <PwaRegister />

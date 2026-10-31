@@ -141,9 +141,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       const email = ((user?.email || token?.email || "") as string).toLowerCase().trim();
       const isRootAdmin = isBootstrapAdminEmail(email);
+
+      // Trata requisição explícita de alternância de instituição ativa
+      if (trigger === "update" && session?.activeSchoolId) {
+        const targetSchoolId = String(session.activeSchoolId);
+        const userSchools = (token.userSchools as any[]) || [];
+        const hasAccess = isRootAdmin || userSchools.some((s) => s.schoolId === targetSchoolId);
+        if (hasAccess) {
+          token.schoolId = targetSchoolId;
+          const activeLink = userSchools.find((s) => s.schoolId === targetSchoolId);
+          if (activeLink && !isRootAdmin) {
+            token.role = activeLink.role || "PEDAGOGA";
+          }
+        }
+        return token;
+      }
 
       if (user) {
         token.userId = (user as any).dbId || user.id;
@@ -151,24 +166,64 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.active = isRootAdmin ? true : (user as any).active !== false;
         token.schoolId = (user as any).schoolId;
         token.checkedAt = Date.now();
-        return token;
       }
 
       const lastChecked = Number(token.checkedAt || 0);
-      const needsRefresh = !token.userId || Date.now() - lastChecked > SESSION_REVALIDATE_MS;
+      const needsRefresh = !token.userId || !token.userSchools || Date.now() - lastChecked > SESSION_REVALIDATE_MS;
 
       if (email && needsRefresh) {
         try {
           const dbUser = await prisma.user.findUnique({
             where: { email },
-            select: { id: true, role: true, active: true, name: true, schoolId: true },
+            select: {
+              id: true,
+              role: true,
+              active: true,
+              name: true,
+              schoolId: true,
+              schools: {
+                where: { active: true },
+                include: {
+                  school: {
+                    select: {
+                      id: true,
+                      name: true,
+                      inepCode: true,
+                      city: true,
+                      network: true,
+                      logoUrl: true,
+                    },
+                  },
+                },
+              },
+            },
           });
           if (dbUser) {
             token.userId = dbUser.id;
             token.name = dbUser.name;
-            token.role = isRootAdmin ? "ADMIN" : dbUser.role;
             token.active = isRootAdmin ? true : dbUser.active;
-            token.schoolId = dbUser.schoolId;
+
+            const mappedSchools = dbUser.schools.map((s) => ({
+              schoolId: s.schoolId,
+              role: s.role,
+              name: s.school.name,
+              inepCode: s.school.inepCode,
+              city: s.school.city,
+              network: (s.school as any).network || "ESTADUAL",
+              logoUrl: s.school.logoUrl || null,
+            }));
+            token.userSchools = mappedSchools;
+
+            // Se o usuário ainda não tiver um schoolId ativo selecionado ou se o atual não pertencer à lista
+            const currentSelected = (token.schoolId as string) || dbUser.schoolId;
+            const validSelected =
+              isRootAdmin || mappedSchools.some((s) => s.schoolId === currentSelected)
+                ? currentSelected
+                : mappedSchools[0]?.schoolId || dbUser.schoolId;
+
+            token.schoolId = validSelected;
+            const activeSchoolInfo = mappedSchools.find((s) => s.schoolId === validSelected);
+            token.role = isRootAdmin ? "ADMIN" : activeSchoolInfo?.role || dbUser.role || "PEDAGOGA";
           } else if (!isRootAdmin) {
             token.active = false;
           }

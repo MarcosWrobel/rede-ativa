@@ -11,6 +11,13 @@ export async function GET() {
 
     const users = await prisma.user.findMany({
       include: {
+        schools: {
+          include: {
+            school: {
+              select: { id: true, name: true, inepCode: true, network: true },
+            },
+          },
+        },
         _count: {
           select: {
             messageLogs: true,
@@ -63,6 +70,7 @@ export async function POST(req: Request) {
         email: rawEmail,
         name: defaultName,
         role: isBootstrapAdminEmail(rawEmail) ? "ADMIN" : role,
+        schoolId: authCheck.schoolId || null,
         active: true,
       },
       include: {
@@ -71,6 +79,24 @@ export async function POST(req: Request) {
         },
       },
     });
+
+    if (authCheck.schoolId) {
+      await prisma.userSchool.upsert({
+        where: {
+          userId_schoolId: {
+            userId: created.id,
+            schoolId: authCheck.schoolId,
+          },
+        },
+        update: { role: created.role, active: true },
+        create: {
+          userId: created.id,
+          schoolId: authCheck.schoolId,
+          role: created.role,
+          active: true,
+        },
+      });
+    }
 
     await logAudit({
       action: "CREATE_USER",

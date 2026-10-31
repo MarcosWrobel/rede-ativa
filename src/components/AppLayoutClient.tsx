@@ -11,10 +11,20 @@ interface AppLayoutClientProps {
     name: string;
     email: string;
     role: string;
+    schoolId?: string | null;
+    schools?: Array<{
+      schoolId: string;
+      name: string;
+      network?: string;
+      city?: string;
+      role: string;
+      isDefault?: boolean;
+    }>;
   } | null;
+  currentSchool?: any;
 }
 
-export default function AppLayoutClient({ children, currentUser }: AppLayoutClientProps) {
+export default function AppLayoutClient({ children, currentUser, currentSchool }: AppLayoutClientProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -49,6 +59,7 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
       <div className="print:hidden">
         <Sidebar
           currentUser={currentUser}
+          currentSchool={currentSchool}
           mobileOpen={mobileOpen}
           setMobileOpen={setMobileOpen}
         />
@@ -63,6 +74,7 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
         <div className="print:hidden">
           <TopHeader
             currentUser={currentUser}
+            currentSchool={currentSchool}
             onOpenMobile={() => setMobileOpen(true)}
           />
         </div>
@@ -72,7 +84,7 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
         </main>
 
         <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-6 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden transition-colors">
-          Colégio Estadual Leopoldina B. Pedroso — Sistema de Busca Ativa & Comunicação Escolar 2026. Protegido por autenticação institucional @escola.pr.gov.br.
+          {currentSchool?.name || "Colégio Estadual Leopoldina B. Pedroso"} — Sistema de Busca Ativa & Comunicação Escolar 2026. Acesso institucional seguro.
         </footer>
       </div>
     </div>
