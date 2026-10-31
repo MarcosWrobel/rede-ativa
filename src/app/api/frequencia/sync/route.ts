@@ -90,6 +90,7 @@ export async function POST(req: Request) {
         id: true,
         cgm: true,
         name: true,
+        isExchangeStudent: true,
       },
     });
 
@@ -182,9 +183,15 @@ export async function POST(req: Request) {
           pendingStudentUpdates.set(studentId, current);
         }
 
+        // Verifica se o estudante é Ganhando Mundo (no payload ou no banco)
+        const studentRecord = allStudents.find((s) => s.id === studentId);
+        const isGanhandoMundo = isExchangeStudent || Boolean(studentRecord?.isExchangeStudent);
+
         // Amparo Legal Vigência Máx (Automação de Atestado / Dispensa Legal)
+        // REGRA DE NEGÓCIO: Se o estudante for de intercâmbio (Ganhando Mundo), a vigência na coluna do BI
+        // refere-se ao período de intercâmbio internacional e NÃO deve ser inserida como atestado médico/pedagógico.
         const amparoDate = parseBrDate(item.amparoLegalVigencia);
-        if (amparoDate) {
+        if (amparoDate && !isGanhandoMundo) {
           pendingAmparos.set(studentId, {
             vigenciaStr: item.amparoLegalVigencia!.trim(),
             date: amparoDate,
@@ -323,6 +330,31 @@ export async function POST(req: Request) {
     // 5d. Automação de Amparo Legal Vigente (Criação/Prorrogação de Atestados / Dispensa Legal)
     let amparosCriados = 0;
     let amparosAtualizados = 0;
+
+    // Limpeza de segurança: Remove qualquer atestado/dispensa legal criada indevidamente para alunos do Ganhando Mundo
+    const exchangeStudentIds = Array.from(
+      new Set([
+        ...allStudents.filter((s) => s.isExchangeStudent).map((s) => s.id),
+        ...Array.from(pendingStudentUpdates.entries())
+          .filter(([, u]) => u.isExchangeStudent)
+          .map(([id]) => id),
+      ])
+    );
+
+    if (exchangeStudentIds.length > 0) {
+      try {
+        await prisma.absenceJustification.deleteMany({
+          where: {
+            studentId: { in: exchangeStudentIds },
+            type: "DISPENSA_LEGAL",
+            notes: { contains: "Power BI" },
+          },
+        });
+      } catch (err: any) {
+        console.warn("[frequencia/sync] Aviso ao limpar atestados automáticos de alunos Ganhando Mundo:", err?.message);
+      }
+    }
+
     if (pendingAmparos.size > 0) {
       const studentIdsWithAmparo = Array.from(pendingAmparos.keys());
       const existingJusts = await prisma.absenceJustification.findMany({

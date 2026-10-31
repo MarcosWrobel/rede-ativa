@@ -283,7 +283,7 @@
       if (!isNaN(freqNum) && freqNum < 75) {
         risco++;
       }
-      if (a.amparoLegalVigencia) {
+      if (a.amparoLegalVigencia && !a.ganhandoMundo) {
         amparos++;
       }
       if (a.ganhandoMundo) {
@@ -648,6 +648,10 @@
           }
         }
 
+        const isGanhando = Boolean(ganhandoMundo || existente?.ganhandoMundo);
+        // Regra de Negócio: Se for Ganhando Mundo, a vigência é do intercâmbio e NÃO deve constar como atestado/amparo legal
+        const vigenciaAtestado = isGanhando ? null : (amparoLegalVigencia || existente?.amparoLegalVigencia || null);
+
         const aluno = {
           cgm: cgm,
           nome: nome,
@@ -655,9 +659,9 @@
           mediaGeral: percentuais[0] || existente?.mediaGeral || '',
           semanaAtual: percentuais[1] || existente?.semanaAtual || '',
           semanaAnterior: percentuais[2] || existente?.semanaAnterior || '',
-          amparoLegalVigencia: amparoLegalVigencia || existente?.amparoLegalVigencia || null,
+          amparoLegalVigencia: vigenciaAtestado,
           deficienciaAltasHabilidades: deficienciaAltasHabilidades || existente?.deficienciaAltasHabilidades || false,
-          ganhandoMundo: ganhandoMundo || existente?.ganhandoMundo || false,
+          ganhandoMundo: isGanhando,
           serpAtivo: serpAtivo || existente?.serpAtivo || false,
           idade: idade || existente?.idade || null,
           capturadoEm: new Date().toISOString()
@@ -672,13 +676,20 @@
           if (aluno.ganhandoMundo && !prev.ganhandoMundo) { prev.ganhandoMundo = true; mudou = true; }
           if (aluno.serpAtivo && !prev.serpAtivo) { prev.serpAtivo = true; mudou = true; }
           if (aluno.deficienciaAltasHabilidades && !prev.deficienciaAltasHabilidades) { prev.deficienciaAltasHabilidades = true; mudou = true; }
-          if (aluno.amparoLegalVigencia && !prev.amparoLegalVigencia) { prev.amparoLegalVigencia = aluno.amparoLegalVigencia; mudou = true; }
+          if (aluno.amparoLegalVigencia && !prev.amparoLegalVigencia && !prev.ganhandoMundo && !aluno.ganhandoMundo) {
+            prev.amparoLegalVigencia = aluno.amparoLegalVigencia;
+            mudou = true;
+          }
           if (aluno.idade && !prev.idade) { prev.idade = aluno.idade; mudou = true; }
           if (aluno.mediaGeral && !prev.mediaGeral) { prev.mediaGeral = aluno.mediaGeral; mudou = true; }
           if (aluno.semanaAtual && !prev.semanaAtual) { prev.semanaAtual = aluno.semanaAtual; mudou = true; }
           if (aluno.semanaAnterior && !prev.semanaAnterior) { prev.semanaAnterior = aluno.semanaAnterior; mudou = true; }
           if (aluno.turma && (!prev.turma || prev.turma.includes('Período') || prev.turma.includes('Periodo')) && (aluno.turma.includes('Série') || aluno.turma.includes('Serie'))) {
             prev.turma = aluno.turma;
+            mudou = true;
+          }
+          if (prev.ganhandoMundo && prev.amparoLegalVigencia) {
+            prev.amparoLegalVigencia = null;
             mudou = true;
           }
           if (mudou) {
