@@ -164,5 +164,21 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(checkIsSchoolManager(pedagogaSession, "escola-leopoldina")).toBe(false);
       expect(checkIsAdmin(pedagogaSession)).toBe(false);
     });
+
+    it("Roteamento Inteligente: determina corretamente o destino de aterrissagem de cada perfil", () => {
+      function getLandingRoute(session: any) {
+        if (!session?.user) return "/login";
+        if (checkIsSuperAdmin(session)) return "/admin";
+        if (checkIsSecretariat(session)) return "/secretaria";
+        if (checkIsSchoolManager(session)) return "/gestao";
+        return "/busca-ativa";
+      }
+
+      expect(getLandingRoute(superAdminSession)).toBe("/admin");
+      expect(getLandingRoute(semecSession)).toBe("/secretaria");
+      expect(getLandingRoute(gestorSession)).toBe("/gestao");
+      expect(getLandingRoute(pedagogaSession)).toBe("/busca-ativa");
+      expect(getLandingRoute(null)).toBe("/login");
+    });
   });
 });

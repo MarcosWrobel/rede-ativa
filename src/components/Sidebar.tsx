@@ -178,6 +178,13 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
         ...(isSchoolManager
           ? [
               {
+                href: "/gestao",
+                label: "Painel da Direção",
+                icon: Building2,
+                badge: "GESTOR",
+                description: "Visão executiva, KPIs e atalhos da direção da escola",
+              },
+              {
                 href: "/configuracoes/escola",
                 label: "Identidade da Escola",
                 icon: Building2,
@@ -195,6 +202,13 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           : []),
         ...(isSuper
           ? [
+              {
+                href: "/admin",
+                label: "Painel Global SaaS",
+                icon: ShieldCheck,
+                badge: "SUPER",
+                description: "Painel operacional e métricas globais da plataforma",
+              },
               {
                 href: "/admin/escolas",
                 label: "Gestão SaaS de Escolas",
@@ -217,7 +231,29 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
 
   if (pathname === "/login") return null;
 
-  const isHomeActive = pathname === "/";
+  let primaryHomeHref = "/busca-ativa";
+  let primaryHomeLabel = "Busca Ativa";
+  let primaryHomeDesc = "Fila e disparos via WhatsApp";
+  let PrimaryHomeIcon = Send;
+
+  if (isSuper) {
+    primaryHomeHref = "/admin";
+    primaryHomeLabel = "Painel Global SaaS";
+    primaryHomeDesc = "Gestão operacional global do SaaS";
+    PrimaryHomeIcon = ShieldCheck;
+  } else if (isSecretariat) {
+    primaryHomeHref = "/secretaria";
+    primaryHomeLabel = "Painel SEMEC";
+    primaryHomeDesc = "Indicadores da rede municipal";
+    PrimaryHomeIcon = Landmark;
+  } else if (isSchoolManager) {
+    primaryHomeHref = "/gestao";
+    primaryHomeLabel = "Painel da Direção";
+    primaryHomeDesc = "Gestão da unidade e equipe";
+    PrimaryHomeIcon = Building2;
+  }
+
+  const isPrimaryActive = pathname === primaryHomeHref;
 
   return (
     <>
@@ -280,34 +316,59 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
 
         {/* Navigation Items Organized in Sections */}
         <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto">
-          {/* Link Principal: Início / Visão Geral */}
+          {/* Link Principal: Home nativo do perfil */}
           <div>
             <Link
-              href="/"
+              href={primaryHomeHref}
               onClick={() => setMobileOpen(false)}
               className={`relative flex items-center rounded-xl py-2.5 px-3 text-xs font-semibold transition-colors group ${
-                isHomeActive
+                isPrimaryActive
                   ? "bg-sky-600 text-white shadow-md shadow-sky-900/30 font-bold"
                   : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/80"
               }`}
-              title={collapsed && !mobileOpen ? "Início / Visão Geral" : undefined}
+              title={collapsed && !mobileOpen ? primaryHomeLabel : undefined}
             >
-              <LayoutDashboard
+              <PrimaryHomeIcon
                 className={`w-5 h-5 flex-shrink-0 transition ${
-                  isHomeActive ? "text-white" : "text-slate-400 group-hover:text-slate-200"
+                  isPrimaryActive ? "text-white" : "text-slate-400 group-hover:text-slate-200"
                 }`}
               />
               {(!collapsed || mobileOpen) && (
-                <span className="ml-3 truncate">Visão Geral</span>
+                <span className="ml-3 truncate">{primaryHomeLabel}</span>
               )}
               {collapsed && !mobileOpen && (
                 <div className="fixed left-20 ml-2 hidden group-hover:flex flex-col px-3 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap z-50 pointer-events-none">
-                  <span>Visão Geral</span>
-                  <span className="text-[10px] text-slate-400 font-normal">Painel de controle e métricas</span>
+                  <span>{primaryHomeLabel}</span>
+                  <span className="text-[10px] text-slate-400 font-normal">{primaryHomeDesc}</span>
                 </div>
               )}
             </Link>
           </div>
+
+          {/* Link Secundário: Visão Geral da Escola (para quem deseja ver o resumo da unidade) */}
+          {(isSuper || isSchoolManager) && (
+            <div>
+              <Link
+                href="/visao-geral"
+                onClick={() => setMobileOpen(false)}
+                className={`relative flex items-center rounded-xl py-2 px-3 text-xs font-semibold transition-colors group ${
+                  pathname === "/visao-geral"
+                    ? "bg-slate-800 text-white font-bold"
+                    : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/60"
+                }`}
+                title={collapsed && !mobileOpen ? "Visão Geral da Escola" : undefined}
+              >
+                <LayoutDashboard
+                  className={`w-4 h-4 flex-shrink-0 transition ${
+                    pathname === "/visao-geral" ? "text-white" : "text-slate-500 group-hover:text-slate-300"
+                  }`}
+                />
+                {(!collapsed || mobileOpen) && (
+                  <span className="ml-3 truncate text-slate-300">Visão Geral da Unidade</span>
+                )}
+              </Link>
+            </div>
+          )}
 
           {/* Seções Temáticas */}
           {navSections.map((section, sIdx) => (

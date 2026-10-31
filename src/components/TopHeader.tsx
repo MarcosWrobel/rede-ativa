@@ -22,7 +22,11 @@ export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: 
   if (pathname === "/login") return null;
 
   const pageTitles: Record<string, { title: string; subtitle: string }> = {
-    "/": { title: "Visão Geral", subtitle: "Painel de controle e métricas gerais" },
+    "/": { title: "Início", subtitle: "Redirecionamento inteligente por perfil" },
+    "/admin": { title: "Super Admin SaaS", subtitle: "Painel operacional e métricas globais da plataforma" },
+    "/secretaria": { title: "Painel SEMEC / Rede", subtitle: "Consolidado executivo municipal e indicadores da rede" },
+    "/gestao": { title: "Painel da Direção", subtitle: "Visão gerencial da unidade, equipe e turmas" },
+    "/visao-geral": { title: "Visão Geral da Unidade", subtitle: "Painel de controle e métricas gerais da escola" },
     "/faltas": { title: "Painel de Frequência & Alertas", subtitle: "Monitoramento de infrequência, risco crítico e SERP" },
     "/busca-ativa": { title: "Enviar Mensagem", subtitle: "Envio individual e fila assistida por turma via wa.me" },
     "/historico": { title: "Histórico & Retornos", subtitle: "Controle de contatos e retornos familiares com IA" },

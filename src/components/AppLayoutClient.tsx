@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import TopHeader from "./TopHeader";
+import ElevationBanner from "./ElevationBanner";
 
 interface AppLayoutClientProps {
   children: React.ReactNode;
@@ -76,6 +77,10 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
             currentUser={currentUser}
             currentSchool={currentSchool}
             onOpenMobile={() => setMobileOpen(true)}
+          />
+          <ElevationBanner
+            currentUser={currentUser}
+            currentSchool={currentSchool}
           />
         </div>
 
