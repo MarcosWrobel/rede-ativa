@@ -901,7 +901,7 @@ export default function FaltasClient({
       )}
 
       {/* 3. Barra de Filtros Inteligente Multi-Critério */}
-      <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+      <div className="bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
         {/* Linha 1: Busca + Filtros Principais */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 text-xs">
           {/* Busca Rápida */}
@@ -915,13 +915,13 @@ export default function FaltasClient({
                 setSearchTerm(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 text-xs"
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 text-xs"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm("")}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -937,7 +937,7 @@ export default function FaltasClient({
                 setSelectedTurma("");
                 setCurrentPage(1);
               }}
-              className="w-full border border-slate-300 rounded-lg py-2 px-2.5 bg-slate-50 focus:bg-white text-xs font-medium"
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-lg py-2 px-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 text-xs font-medium"
             >
               <option value="TODOS">Todos os Segmentos</option>
               <option value="FUNDAMENTAL">Fundamental</option>
@@ -955,7 +955,7 @@ export default function FaltasClient({
                 setSelectedTurma("");
                 setCurrentPage(1);
               }}
-              className="w-full border border-slate-300 rounded-lg py-2 px-2.5 bg-slate-50 focus:bg-white text-xs font-medium"
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-lg py-2 px-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 text-xs font-medium"
             >
               <option value="TODOS">Todos os Turnos</option>
               <option value="MANHA">Manhã</option>
@@ -972,7 +972,7 @@ export default function FaltasClient({
                 setSelectedTurma(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full border border-slate-300 rounded-lg py-2 px-2.5 bg-slate-50 focus:bg-white text-xs font-medium"
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-lg py-2 px-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 text-xs font-medium"
             >
               <option value="">Todas as Turmas ({filteredClassGroups.length})</option>
               {filteredClassGroups.map((c) => (
@@ -988,7 +988,7 @@ export default function FaltasClient({
             <select
               value={sortBy}
               onChange={(e: any) => setSortBy(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg py-2 px-2.5 bg-slate-50 focus:bg-white text-xs font-medium text-slate-800"
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-lg py-2 px-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 text-xs font-medium"
             >
               <option value="MENOR_FREQ">Menor Frequência</option>
               <option value="MAIOR_FREQ">Maior Frequência</option>
@@ -1000,9 +1000,9 @@ export default function FaltasClient({
         </div>
 
         {/* Linha 2: Chips Rápidos de Faixa de Risco & Status SERP */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">
               Faixa:
             </span>
             {[
@@ -1030,8 +1030,8 @@ export default function FaltasClient({
                         ? "bg-red-600 text-white shadow-2xs"
                         : chip.id === "ATENCAO"
                         ? "bg-amber-600 text-white shadow-2xs"
-                        : "bg-slate-900 text-white shadow-2xs"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        : "bg-slate-900 dark:bg-sky-600 text-white shadow-2xs"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                   }`}
                 >
                   {chip.label}
@@ -1042,8 +1042,8 @@ export default function FaltasClient({
 
           <div className="flex items-center space-x-3">
             {/* Status SERP */}
-            <div className="flex items-center space-x-1.5 text-xs text-slate-600">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <div className="flex items-center space-x-1.5 text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 SERP:
               </span>
               <select
@@ -1052,7 +1052,7 @@ export default function FaltasClient({
                   setSelectedActionStatus(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="border border-slate-300 rounded-md py-1 px-2 bg-slate-50 text-xs"
+                className="border border-slate-300 dark:border-slate-700 rounded-md py-1 px-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs"
               >
                 <option value="TODOS">Todos os Casos</option>
                 <option value="CONSELHO_TUTELAR">🏛️ Encaminhado Conselho Tutelar</option>
@@ -1076,7 +1076,7 @@ export default function FaltasClient({
                   setSelectedActionStatus("TODOS");
                   setCurrentPage(1);
                 }}
-                className="text-xs text-sky-600 hover:text-sky-800 font-semibold"
+                className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-semibold"
               >
                 Limpar Filtros
               </button>
@@ -1087,29 +1087,29 @@ export default function FaltasClient({
 
       {/* 4. Grade de Dados com Sticky Header (Aba SERP / Frequência Oficial) */}
       {activeTab === "serp" && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
           {/* Barra de Status da Tabela */}
-          <div className="p-3 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="p-3 bg-slate-50/80 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center space-x-2">
-              <span className="font-bold text-slate-800">
+              <span className="font-bold text-slate-800 dark:text-slate-200">
                 Mostrando {filteredLowAttendance.length} alunos
               </span>
               {filteredLowAttendance.length !== recordsList.length && (
-                <span className="text-slate-500 font-normal">
+                <span className="text-slate-500 dark:text-slate-400 font-normal">
                   (de um total de {recordsList.length})
                 </span>
               )}
             </div>
 
             <div className="flex items-center space-x-2">
-              <span className="text-slate-500">Exibir por página:</span>
+              <span className="text-slate-500 dark:text-slate-400">Exibir por página:</span>
               <select
                 value={pageSize}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="border border-slate-300 rounded-md py-0.5 px-2 bg-white text-xs font-semibold"
+                className="border border-slate-300 dark:border-slate-700 rounded-md py-0.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-semibold"
               >
                 <option value={25}>25</option>
                 <option value={50}>50</option>
@@ -1127,7 +1127,7 @@ export default function FaltasClient({
             className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-290px)] focus:outline-none"
           >
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 font-extrabold border-b border-slate-200 shadow-2xs">
+              <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold border-b border-slate-200 dark:border-slate-700 shadow-2xs">
                 <tr>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} w-10 text-center`}>#</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[200px]`}>Estudante</th>
@@ -1140,10 +1140,10 @@ export default function FaltasClient({
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right min-w-[130px]`}>Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-200">
                 {paginatedRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="p-10 text-center text-slate-400">
+                    <td colSpan={9} className="p-10 text-center text-slate-400 dark:text-slate-500">
                       Nenhum estudante encontrado com os filtros aplicados.
                     </td>
                   </tr>
@@ -1159,12 +1159,12 @@ export default function FaltasClient({
                     return (
                       <tr
                         key={rec.id}
-                        className={`transition hover:bg-slate-50/80 ${
-                          isCritical ? "bg-red-50/15" : ""
+                        className={`transition hover:bg-slate-50/80 dark:hover:bg-slate-800/60 ${
+                          isCritical ? "bg-red-50/15 dark:bg-red-950/20" : ""
                         }`}
                       >
                         {/* Numeração */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center text-slate-400 font-mono text-[11px]`}>
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center text-slate-400 dark:text-slate-500 font-mono text-[11px]`}>
                           {rowNum}
                         </td>
 
@@ -1173,14 +1173,14 @@ export default function FaltasClient({
                           <div className="flex flex-wrap items-center gap-1.5">
                             <Link
                               href={`/alunos/${rec.student.id}`}
-                              className="font-bold text-slate-900 hover:text-sky-700 hover:underline tracking-tight leading-snug"
+                              className="font-bold text-slate-900 dark:text-slate-100 hover:text-sky-700 dark:hover:text-sky-400 hover:underline tracking-tight leading-snug"
                             >
                               {rec.student.name}
                             </Link>
                             {rec.student.isExchangeStudent && (
                               <span
                                 title="Estudante em Intercâmbio Oficial (Ganhando Mundo)"
-                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 font-bold text-[10px]"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-bold text-[10px]"
                               >
                                 <span>✈️ Ganhando Mundo</span>
                               </span>
@@ -1188,7 +1188,7 @@ export default function FaltasClient({
                             {rec.student.isSpecialNeeds && (
                               <span
                                 title="Estudante com Deficiência / Altas Habilidades (AEE)"
-                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 font-bold text-[10px]"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-bold text-[10px]"
                               >
                                 <span>♿ AEE / PCD</span>
                               </span>
@@ -1199,7 +1199,7 @@ export default function FaltasClient({
                               return (
                                 <span
                                   title={`Atestado vigente até ${new Date(activeJust.endDate).toLocaleDateString("pt-BR")}`}
-                                  className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px]"
+                                  className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold text-[10px]"
                                 >
                                   <Stethoscope className="w-3 h-3" />
                                   <span>Atestado</span>
@@ -1219,7 +1219,7 @@ export default function FaltasClient({
                               return (
                                 <span
                                   title={drop.reason || "Queda abrupta recente"}
-                                  className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]"
+                                  className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px]"
                                 >
                                   <TrendingDown className="w-3 h-3" />
                                   <span>Queda Abrupta</span>
@@ -1227,19 +1227,19 @@ export default function FaltasClient({
                               );
                             })()}
                           </div>
-                          <div className="flex items-center space-x-2 text-[11px] text-slate-500 font-mono mt-0.5">
+                          <div className="flex items-center space-x-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                             {cgm && (
-                              <span className="bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                              <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
                                 CGM: {cgm}
                               </span>
                             )}
                             {rec.student.age && (
-                              <span className="bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 font-sans font-semibold text-slate-700">
+                              <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700 font-sans font-semibold text-slate-700 dark:text-slate-300">
                                 {rec.student.age} anos
                               </span>
                             )}
                             {rec.student.phone && (
-                              <span className="text-slate-400">
+                              <span className="text-slate-400 dark:text-slate-500">
                                 Tel: {rec.student.phone}
                               </span>
                             )}

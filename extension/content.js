@@ -304,7 +304,13 @@
     if (pAmparo) pAmparo.textContent = `${amparos} alunos`;
 
     const pGanhando = document.getElementById('leo-panel-ganhando');
-    if (pGanhando) pGanhando.textContent = `${ganhando} alunos`;
+    if (pGanhando) {
+      pGanhando.textContent = `${ganhando} aluno${ganhando === 1 ? '' : 's'}`;
+      if (ganhando > 0) {
+        pGanhando.style.color = '#0284c7';
+        pGanhando.style.fontWeight = '800';
+      }
+    }
   }
 
   // Palavras de interface e metadados a ignorar
@@ -316,11 +322,13 @@
     'formatacao condicional', 'formatação condicional adicional', 'formatacao condicional adicional'
   ];
 
-  // Identifica a posição das colunas no cabeçalho do Power BI
   // Identifica a posição das colunas no cabeçalho do Power BI (aria-colindex e coordenadas X)
   function detectarIndicesColunas() {
-    const headerCandidates = Array.from(
-      document.querySelectorAll('[role="columnheader"], .columnHeaders .headerCell, th, .headerRow .header')
+    // Busca ampla em todos os seletores possíveis de cabeçalho de matriz e tabela Power BI
+    const allHeaderNodes = Array.from(
+      document.querySelectorAll(
+        '[role="columnheader"], [role="columnheader"] *, .columnHeaders *, .pivotTableHeaderWrap, .pivotTableHeaderWrap *, .pivotTableHeader, th, th *, .headerCell, .tablix-column-header, .tablix-column-header *'
+      )
     );
 
     const map = {
@@ -335,7 +343,7 @@
       idade: { ariaCol: 9, left: -1, right: -1, found: false },
     };
 
-    headerCandidates.forEach((h) => {
+    allHeaderNodes.forEach((h) => {
       const txt = (h.innerText || h.getAttribute('title') || '').toLowerCase().trim();
       if (!txt) return;
 
@@ -350,8 +358,10 @@
           map[key].ariaCol = fallbackCol;
         }
         if (rect.width > 0) {
-          map[key].left = rect.left;
-          map[key].right = rect.right;
+          if (map[key].left === -1 || (rect.width >= 20 && rect.width < (map[key].right - map[key].left))) {
+            map[key].left = rect.left;
+            map[key].right = rect.right;
+          }
         }
         map[key].found = true;
       };
@@ -376,6 +386,20 @@
         assign('turma', 1);
       }
     });
+
+    // Fallback Geométrico Relativo:
+    // Ganhando Mundo vem logo após Deficiência e antes de SERP/Idade
+    if (map.deficiencia.left > 0 && map.ganhando.left === -1) {
+      const colWidth = (map.deficiencia.right - map.deficiencia.left) || 80;
+      map.ganhando.left = map.deficiencia.right;
+      map.ganhando.right = map.deficiencia.right + colWidth;
+      map.ganhando.found = true;
+    } else if (map.serp.left > 0 && map.ganhando.left === -1) {
+      const colWidth = 80;
+      map.ganhando.right = map.serp.left;
+      map.ganhando.left = map.serp.left - colWidth;
+      map.ganhando.found = true;
+    }
 
     return map;
   }
@@ -471,44 +495,47 @@
           if (m) amparoLegalVigencia = m[1];
         }
 
-        // 4. Deficiência / Altas Habilidades (1 ou vazio)
+        // 4. Deficiência / Altas Habilidades vs 5. Ganhando Mundo
         let deficienciaAltasHabilidades = false;
-        const defCell = distinctCells.find(c => isCellForCol(c, 'deficiencia'));
-        if (defCell) {
-          const txt = (defCell.innerText || defCell.getAttribute('title') || '').trim();
-          if (txt === '1' || txt.toLowerCase() === 'sim') {
-            deficienciaAltasHabilidades = true;
-          }
-        }
-
-        // 5. Ganhando Mundo (Intercâmbio Internacional - 1 ou vazio)
         let ganhandoMundo = false;
-        const ganhandoCell = distinctCells.find(c => isCellForCol(c, 'ganhando'));
-        if (ganhandoCell) {
-          const txt = (ganhandoCell.innerText || ganhandoCell.getAttribute('title') || '').trim();
-          if (txt === '1' || txt.toLowerCase() === 'sim') {
-            ganhandoMundo = true;
-          }
+
+        // Limiar geométrico entre Deficiência e Ganhando Mundo
+        let divisaDefGanhando = null;
+        if (colMap.deficiencia.left > 0 && colMap.ganhando.left > 0) {
+          const midDef = (colMap.deficiencia.left + colMap.deficiencia.right) / 2;
+          const midGanhando = (colMap.ganhando.left + colMap.ganhando.right) / 2;
+          divisaDefGanhando = (midDef + midGanhando) / 2;
         }
 
-        // Heurística de Resolução para colunas com "1" (Deficiência vs Ganhando Mundo)
         distinctCells.forEach(c => {
           const txt = (c.innerText || c.getAttribute('title') || '').trim();
           if (txt === '1' || txt.toLowerCase() === 'sim') {
             const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
             const title = (c.getAttribute('title') || '').toLowerCase();
+            const colAttr = c.getAttribute('aria-colindex') || c.closest('[aria-colindex]')?.getAttribute('aria-colindex');
+            const cAria = colAttr ? parseInt(colAttr, 10) : null;
 
             if (ariaLabel.includes('ganhando') || title.includes('ganhando')) {
               ganhandoMundo = true;
             } else if (ariaLabel.includes('deficiên') || ariaLabel.includes('deficien') || title.includes('deficiên') || title.includes('deficien')) {
               deficienciaAltasHabilidades = true;
-            } else if (colMap.ganhando.left > 0 && colMap.deficiencia.left > 0) {
+            } else if (cAria && colMap.ganhando.ariaCol && cAria === colMap.ganhando.ariaCol) {
+              ganhandoMundo = true;
+            } else if (cAria && colMap.deficiencia.ariaCol && cAria === colMap.deficiencia.ariaCol) {
+              deficienciaAltasHabilidades = true;
+            } else {
               const cRect = c.getBoundingClientRect();
               if (cRect.width > 0) {
                 const cMid = (cRect.left + cRect.right) / 2;
-                const distDef = Math.abs(cMid - (colMap.deficiencia.left + colMap.deficiencia.right) / 2);
-                const distGanhando = Math.abs(cMid - (colMap.ganhando.left + colMap.ganhando.right) / 2);
-                if (distGanhando < distDef) {
+                if (divisaDefGanhando !== null) {
+                  if (cMid >= divisaDefGanhando) {
+                    ganhandoMundo = true;
+                  } else {
+                    deficienciaAltasHabilidades = true;
+                  }
+                } else if (colMap.deficiencia.right > 0 && cMid > (colMap.deficiencia.right - 5)) {
+                  ganhandoMundo = true;
+                } else if (colMap.ganhando.left > 0 && cMid >= (colMap.ganhando.left - 10)) {
                   ganhandoMundo = true;
                 } else {
                   deficienciaAltasHabilidades = true;
@@ -517,6 +544,11 @@
             }
           }
         });
+
+        if (ganhandoMundo) {
+          console.warn('✈️ [Leopoldina] Aluno Ganhando Mundo capturado:', nome, cgm, turma);
+          setStatus(`✈️ Aluno Ganhando Mundo capturado: ${nome}`, '#0284c7');
+        }
 
         // 6. SERP? (Checkmark ou ícone)
         let serpAtivo = false;

@@ -365,17 +365,17 @@ export default function ModelosClient({ initialTemplates }: Props) {
       {/* Modal de Criação / Edição com Layout Bi-Coluna e Rodapé Fixo */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-5xl w-full flex flex-col max-h-[90vh] shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-5xl w-full flex flex-col max-h-[90vh] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
             {/* 1. Cabeçalho Fixo */}
-            <div className="flex-none px-5 sm:px-6 py-3.5 border-b border-slate-200 bg-white flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-                <FileText className="w-5 h-5 text-sky-600" />
+            <div className="flex-none px-5 sm:px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-sky-600 dark:text-sky-400" />
                 <span>{editingTemplate ? "Editar Modelo de Mensagem" : "Criar Novo Modelo de Mensagem"}</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -387,7 +387,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                 {/* COLUNA ESQUERDA (Edição, IA e Campos) - 7 colunas */}
                 <div className="lg:col-span-7 space-y-4">
                   {/* AI Assistant Generator Card */}
-                  <div className="bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-sky-50/80 border border-indigo-200 rounded-xl p-3.5 shadow-2xs space-y-2.5">
+                  <div className="bg-gradient-to-br from-indigo-50/80 via-purple-50/40 to-sky-50/80 dark:from-indigo-950/50 dark:via-purple-950/30 dark:to-sky-950/50 border border-indigo-200 dark:border-indigo-800/70 rounded-xl p-3.5 shadow-2xs space-y-2.5">
                     <div 
                       className="flex items-center justify-between cursor-pointer select-none"
                       onClick={() => setIsAiCardOpen(!isAiCardOpen)}
@@ -397,21 +397,21 @@ export default function ModelosClient({ initialTemplates }: Props) {
                           <Wand2 className="w-3.5 h-3.5" />
                         </div>
                         <div>
-                          <span className="font-extrabold text-indigo-950 text-xs block leading-tight">
+                          <span className="font-extrabold text-indigo-950 dark:text-indigo-200 text-xs block leading-tight">
                             Redação com Inteligência Artificial (Google Gemini)
                           </span>
-                          <span className="text-[10px] text-indigo-700">
+                          <span className="text-[10px] text-indigo-700 dark:text-indigo-400">
                             Digite sua necessidade em linguagem natural
                           </span>
                         </div>
                       </div>
-                      <button type="button" className="text-indigo-600 hover:text-indigo-800 p-1">
+                      <button type="button" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 p-1">
                         {isAiCardOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
                     </div>
 
                     {isAiCardOpen && (
-                      <div className="space-y-2.5 pt-2 border-t border-indigo-100 text-xs">
+                      <div className="space-y-2.5 pt-2 border-t border-indigo-100 dark:border-indigo-900/60 text-xs">
                         <div className="flex flex-col sm:flex-row gap-2">
                           <input
                             type="text"
@@ -424,7 +424,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                               }
                             }}
                             placeholder="Ex: Aviso pedindo atestado médico após 2 dias de faltas consecutivas..."
-                            className="flex-1 p-2 bg-white border border-indigo-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 text-xs"
+                            className="flex-1 p-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500 text-xs"
                           />
                           <button
                             type="button"
@@ -563,7 +563,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                   {/* Campos Principais */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="font-bold text-slate-700 block mb-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
                         Motivo / Título do Modelo:
                       </label>
                       <input
@@ -572,18 +572,18 @@ export default function ModelosClient({ initialTemplates }: Props) {
                         placeholder="Ex: CONVOCAÇÃO URGENTE"
                         value={formTitle}
                         onChange={(e) => setFormTitle(e.target.value.toUpperCase())}
-                        className="w-full p-2 border border-slate-300 rounded-lg bg-white uppercase font-bold focus:ring-2 focus:ring-sky-500"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 uppercase font-bold focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold text-slate-700 block mb-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
                         Nível de Aplicação:
                       </label>
                       <select
                         value={formSegment}
                         onChange={(e) => setFormSegment(e.target.value)}
-                        className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium"
                       >
                         <option value="TODOS">Todos os Níveis (Recomendado)</option>
                         <option value="FUNDAMENTAL">Apenas Ensino Fundamental</option>
@@ -594,13 +594,13 @@ export default function ModelosClient({ initialTemplates }: Props) {
                   </div>
 
                   {/* Paleta de Variáveis Inteligentes */}
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-700 text-[10px] flex items-center space-x-1">
-                        <Sparkles className="w-3 h-3 text-sky-600" />
+                      <span className="font-bold text-slate-700 dark:text-slate-300 text-[10px] flex items-center space-x-1">
+                        <Sparkles className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                         <span>Variáveis Rápidas (inserir no campo ativo):</span>
                       </span>
-                      <span className="text-[10px] text-slate-400">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
                         Alvo: <strong>{lastFocusedField === "prefix" ? "Antes do Aluno" : "Depois do Aluno"}</strong>
                       </span>
                     </div>
@@ -622,7 +622,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                           key={item.tag}
                           type="button"
                           onClick={() => handleInsertTag(item.tag)}
-                          className="px-2 py-0.5 rounded-md bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-sky-700 font-mono text-[10px] font-bold shadow-2xs transition"
+                          className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-850 hover:bg-sky-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-sky-300 text-sky-700 dark:text-sky-300 font-mono text-[10px] font-bold shadow-2xs transition"
                           title={item.desc}
                         >
                           + {item.tag}
@@ -633,7 +633,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
                   {/* Textos da Mensagem */}
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
                       Texto antes da identificação do aluno:
                     </label>
                     <textarea
@@ -641,13 +641,13 @@ export default function ModelosClient({ initialTemplates }: Props) {
                       value={formPrefix}
                       onFocus={() => setLastFocusedField("prefix")}
                       onChange={(e) => setFormPrefix(e.target.value)}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500 font-sans"
                       placeholder="Ex: {saudacao} Registramos a ausência do(a) aluno(a)"
                     />
                   </div>
 
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
                       Texto depois da identificação do aluno:
                     </label>
                     <textarea
@@ -655,7 +655,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                       value={formSuffix}
                       onFocus={() => setLastFocusedField("suffix")}
                       onChange={(e) => setFormSuffix(e.target.value)}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500 font-sans"
                       placeholder="Ex: hoje. Poderia nos informar o motivo? Atenciosamente, {pedagoga}."
                     />
                   </div>
@@ -666,9 +666,9 @@ export default function ModelosClient({ initialTemplates }: Props) {
                       id="isAbsence"
                       checked={formIsAbsence}
                       onChange={(e) => setFormIsAbsence(e.target.checked)}
-                      className="rounded text-sky-600 focus:ring-sky-500 w-4 h-4"
+                      className="rounded text-sky-600 focus:ring-sky-500 w-4 h-4 border-slate-300 dark:border-slate-700"
                     />
-                    <label htmlFor="isAbsence" className="text-slate-700 font-medium text-xs">
+                    <label htmlFor="isAbsence" className="text-slate-700 dark:text-slate-300 font-medium text-xs">
                       Este modelo é de <strong>infrequência / falta escolar</strong> (contabiliza no ranking)
                     </label>
                   </div>
@@ -676,7 +676,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
                 {/* COLUNA DIREITA (Simulador Visual WhatsApp em Tempo Real) - 5 colunas */}
                 <div className="lg:col-span-5 flex flex-col space-y-3">
-                  <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex-1 flex flex-col space-y-2.5">
+                  <div className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex-1 flex flex-col space-y-2.5">
                     <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
                       <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px] flex items-center space-x-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -732,13 +732,13 @@ export default function ModelosClient({ initialTemplates }: Props) {
                     </div>
 
                     {/* Dica Pedagógica */}
-                    <div className="bg-white dark:bg-slate-800/80 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
-                      <div className="font-bold text-slate-700 flex items-center space-x-1">
-                        <Info className="w-3 h-3 text-sky-600" />
+                    <div className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
+                      <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1">
+                        <Info className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                         <span>Dica de Redação Pedagógica:</span>
                       </div>
                       <p>
-                        A tag <code className="bg-slate-100 px-1 py-0.5 rounded text-sky-700">{"{saudacao}"}</code> adapta automaticamente para *"Bom dia"*, *"Boa tarde"* ou *"Boa noite"* de acordo com o horário do envio.
+                        A tag <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-sky-700 dark:text-sky-400">{"{saudacao}"}</code> adapta automaticamente para *"Bom dia"*, *"Boa tarde"* ou *"Boa noite"* de acordo com o horário do envio.
                       </p>
                     </div>
                   </div>
@@ -747,8 +747,8 @@ export default function ModelosClient({ initialTemplates }: Props) {
             </form>
 
             {/* 3. Rodapé Fixo (Permanentemente visível) */}
-            <div className="flex-none px-5 sm:px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-              <span className="text-[11px] text-slate-500 hidden sm:inline">
+            <div className="flex-none px-5 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
                 Pressione <strong>Salvar Modelo</strong> para concluir as alterações.
               </span>
 
@@ -756,7 +756,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition"
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition"
                 >
                   Cancelar
                 </button>
