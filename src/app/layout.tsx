@@ -5,6 +5,8 @@ import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
 
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   themeColor: "#0284c7",
   width: "device-width",
@@ -34,17 +36,28 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-  const sessionUser = session?.user as any;
-  const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+  let session: any = null;
+  let currentSchool: any = null;
 
+  try {
+    session = await auth();
+    const sessionUser = session?.user as any;
+    currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+  } catch (err: any) {
+    if (err?.digest === "DYNAMIC_SERVER_USAGE" || err?.message?.includes("Dynamic server usage")) {
+      throw err;
+    }
+    console.error("[RootLayout] Erro na resolução da sessão ou escola:", err);
+  }
+
+  const sessionUser = session?.user as any;
   const currentUser = session?.user
     ? {
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",
         role: sessionUser?.role || "PEDAGOGA",
         schoolId: sessionUser?.schoolId || currentSchool?.id || null,
-        schools: sessionUser?.schools || [],
+        schools: Array.isArray(sessionUser?.schools) ? sessionUser.schools : [],
       }
     : null;
 

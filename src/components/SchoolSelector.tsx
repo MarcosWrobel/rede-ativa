@@ -75,7 +75,8 @@ export default function SchoolSelector({
     }
   };
 
-  const hasMultiple = userSchools.length > 1 || isAdmin;
+  const schoolsList = Array.isArray(userSchools) ? userSchools : [];
+  const hasMultiple = schoolsList.length > 1 || isAdmin;
   const networkBadge =
     currentSchool?.network === "MUNICIPAL"
       ? "SEMEC"
@@ -151,7 +152,7 @@ export default function SchoolSelector({
           </div>
 
           <div className="max-h-64 overflow-y-auto p-1.5 space-y-1">
-            {userSchools.map((item) => {
+            {schoolsList.map((item) => {
               const isSelected = item.schoolId === currentSchool?.id;
               return (
                 <button

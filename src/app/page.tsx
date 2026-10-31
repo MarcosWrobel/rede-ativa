@@ -29,28 +29,37 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  // Load quick metrics from DB
-  const [
-    totalStudents,
-    totalLogs,
-    totalReplied,
-    recentLogs,
-    lowAttendanceCount,
-    totalMinutes,
-  ] = await Promise.all([
-    prisma.student.count({ where: { active: true } }),
-    prisma.messageLog.count(),
-    prisma.messageLog.count({ where: { guardianReplied: true } }),
-    prisma.messageLog.findMany({
-      take: 6,
-      orderBy: { sentAt: "desc" },
-      include: {
-        student: { include: { classGroup: true } },
-      },
-    }),
-    prisma.lowAttendanceRecord.count(),
-    prisma.pedagogicalMinute.count({ where: { status: "FINALIZED" } }),
-  ]);
+  let totalStudents = 0;
+  let totalLogs = 0;
+  let totalReplied = 0;
+  let recentLogs: any[] = [];
+  let lowAttendanceCount = 0;
+  let totalMinutes = 0;
+
+  try {
+    const results = await Promise.all([
+      prisma.student.count({ where: { active: true } }),
+      prisma.messageLog.count(),
+      prisma.messageLog.count({ where: { guardianReplied: true } }),
+      prisma.messageLog.findMany({
+        take: 6,
+        orderBy: { sentAt: "desc" },
+        include: {
+          student: { include: { classGroup: true } },
+        },
+      }),
+      prisma.lowAttendanceRecord.count(),
+      prisma.pedagogicalMinute.count({ where: { status: "FINALIZED" } }),
+    ]);
+    totalStudents = results[0];
+    totalLogs = results[1];
+    totalReplied = results[2];
+    recentLogs = results[3];
+    lowAttendanceCount = results[4];
+    totalMinutes = results[5];
+  } catch (err) {
+    console.error("[DashboardPage] Falha temporária ao carregar métricas:", err);
+  }
 
   const sections = [
     {
@@ -310,14 +319,14 @@ export default async function DashboardPage() {
             <tbody className="divide-y divide-slate-100">
               {recentLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-50/70">
-                  <td className="px-4 py-3 font-medium text-slate-900">{log.student.name}</td>
-                  <td className="px-4 py-3 text-slate-600">{log.student.classGroup.name}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900">{log.student?.name || "Estudante"}</td>
+                  <td className="px-4 py-3 text-slate-600">{log.student?.classGroup?.name || "Geral"}</td>
                   <td className="px-4 py-3">
                     <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-100">
-                      {log.reasonTitle}
+                      {log.reasonTitle || "Contato"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{log.sentByName}</td>
+                  <td className="px-4 py-3 text-slate-600">{log.sentByName || "Equipe"}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {new Date(log.sentAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
                   </td>
