@@ -441,14 +441,18 @@
           const cAria = c.getAttribute('aria-colindex') || c.closest('[aria-colindex]')?.getAttribute('aria-colindex');
           if (cAria) {
             const parsed = parseInt(cAria, 10);
-            if (parsed === target.ariaCol) return true;
+            if (target.ariaCol && parsed === target.ariaCol) return true;
           }
 
           if (target.left > 0 && target.right > 0) {
             const rect = c.getBoundingClientRect();
             if (rect.width > 0) {
               const center = (rect.left + rect.right) / 2;
-              if (center >= target.left - 6 && center <= target.right + 6) {
+              if (center >= target.left - 10 && center <= target.right + 10) {
+                return true;
+              }
+              const overlap = Math.max(0, Math.min(rect.right, target.right) - Math.max(rect.left, target.left));
+              if (overlap > 15) {
                 return true;
               }
             }
@@ -495,51 +499,122 @@
           if (m) amparoLegalVigencia = m[1];
         }
 
-        // 4. Deficiência / Altas Habilidades vs 5. Ganhando Mundo
+        // 4. Deficiência, Ganhando Mundo e SERP
         let deficienciaAltasHabilidades = false;
         let ganhandoMundo = false;
+        let serpAtivo = false;
 
-        // Limiar geométrico entre Deficiência e Ganhando Mundo
-        let divisaDefGanhando = null;
-        if (colMap.deficiencia.left > 0 && colMap.ganhando.left > 0) {
-          const midDef = (colMap.deficiencia.left + colMap.deficiencia.right) / 2;
-          const midGanhando = (colMap.ganhando.left + colMap.ganhando.right) / 2;
-          divisaDefGanhando = (midDef + midGanhando) / 2;
+        // Limiares geométricos horizontais
+        const midDef = (colMap.deficiencia.left > 0 && colMap.deficiencia.right > 0)
+          ? (colMap.deficiencia.left + colMap.deficiencia.right) / 2
+          : null;
+        const midGanhando = (colMap.ganhando.left > 0 && colMap.ganhando.right > 0)
+          ? (colMap.ganhando.left + colMap.ganhando.right) / 2
+          : null;
+        const midSerp = (colMap.serp.left > 0 && colMap.serp.right > 0)
+          ? (colMap.serp.left + colMap.serp.right) / 2
+          : null;
+
+        let divisaDefGanhando = (midDef && midGanhando) ? (midDef + midGanhando) / 2 : null;
+        let divisaGanhandoSerp = (midGanhando && midSerp) ? (midGanhando + midSerp) / 2 : null;
+
+        if (!divisaGanhandoSerp && midSerp) {
+          divisaGanhandoSerp = midSerp - 30;
+        }
+        if (!divisaDefGanhando && midDef) {
+          divisaDefGanhando = midDef + 30;
         }
 
+        // Teste direto nas células mapeadas de cada coluna
+        const ganhandoCell = distinctCells.find(c => isCellForCol(c, 'ganhando'));
+        if (ganhandoCell) {
+          const txt = (ganhandoCell.innerText || ganhandoCell.getAttribute('title') || '').trim();
+          const hasIcon = Boolean(ganhandoCell.querySelector('svg, i, .check, [role="img"], polygon, path, circle'));
+          const title = (ganhandoCell.getAttribute('title') || '').toLowerCase();
+          const ariaLabel = (ganhandoCell.getAttribute('aria-label') || '').toLowerCase();
+          if (hasIcon || /[✓✔√☑]/.test(txt) || txt === '1' || txt.toLowerCase() === 'sim' || txt.toLowerCase() === 'true' || title.includes('ganhando') || ariaLabel.includes('ganhando')) {
+            ganhandoMundo = true;
+          }
+        }
+
+        const serpCell = distinctCells.find(c => isCellForCol(c, 'serp'));
+        if (serpCell) {
+          const txt = (serpCell.innerText || serpCell.getAttribute('title') || '').trim();
+          const hasIcon = Boolean(serpCell.querySelector('svg, i, .check, [role="img"], polygon, path, circle'));
+          const title = (serpCell.getAttribute('title') || '').toLowerCase();
+          const ariaLabel = (serpCell.getAttribute('aria-label') || '').toLowerCase();
+          if (hasIcon || /[✓✔√☑]/.test(txt) || txt.toLowerCase() === 'sim' || txt.toLowerCase() === 'true' || title.includes('serp') || ariaLabel.includes('serp')) {
+            serpAtivo = true;
+          }
+        }
+
+        const defCell = distinctCells.find(c => isCellForCol(c, 'deficiencia'));
+        if (defCell) {
+          const txt = (defCell.innerText || defCell.getAttribute('title') || '').trim();
+          if (txt === '1' || txt.toLowerCase() === 'sim' || txt.toLowerCase() === 'true') {
+            deficienciaAltasHabilidades = true;
+          }
+        }
+
+        // Varredura de segurança em todas as células da linha
         distinctCells.forEach(c => {
           const txt = (c.innerText || c.getAttribute('title') || '').trim();
-          if (txt === '1' || txt.toLowerCase() === 'sim') {
-            const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
-            const title = (c.getAttribute('title') || '').toLowerCase();
-            const colAttr = c.getAttribute('aria-colindex') || c.closest('[aria-colindex]')?.getAttribute('aria-colindex');
-            const cAria = colAttr ? parseInt(colAttr, 10) : null;
+          const title = (c.getAttribute('title') || '').toLowerCase();
+          const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
+          const hasIcon = Boolean(c.querySelector('svg, i, .check, [role="img"], polygon, path, circle'));
+          const hasCheck = hasIcon || /[✓✔√☑]/.test(txt);
+          const hasPositiveNum = (txt === '1' || txt.toLowerCase() === 'sim' || txt.toLowerCase() === 'true');
 
-            if (ariaLabel.includes('ganhando') || title.includes('ganhando')) {
-              ganhandoMundo = true;
-            } else if (ariaLabel.includes('deficiên') || ariaLabel.includes('deficien') || title.includes('deficiên') || title.includes('deficien')) {
-              deficienciaAltasHabilidades = true;
-            } else if (cAria && colMap.ganhando.ariaCol && cAria === colMap.ganhando.ariaCol) {
-              ganhandoMundo = true;
-            } else if (cAria && colMap.deficiencia.ariaCol && cAria === colMap.deficiencia.ariaCol) {
-              deficienciaAltasHabilidades = true;
-            } else {
-              const cRect = c.getBoundingClientRect();
-              if (cRect.width > 0) {
-                const cMid = (cRect.left + cRect.right) / 2;
-                if (divisaDefGanhando !== null) {
-                  if (cMid >= divisaDefGanhando) {
-                    ganhandoMundo = true;
-                  } else {
-                    deficienciaAltasHabilidades = true;
-                  }
+          // 1. Textos explícitos em labels/titles
+          if (title.includes('ganhando') || ariaLabel.includes('ganhando')) {
+            if (hasCheck || hasPositiveNum) ganhandoMundo = true;
+          }
+          if (title.includes('serp') || ariaLabel.includes('serp')) {
+            if (hasCheck || hasPositiveNum) serpAtivo = true;
+          }
+          if (title.includes('deficiên') || title.includes('deficien') || ariaLabel.includes('deficiên') || ariaLabel.includes('deficien')) {
+            if (hasPositiveNum) deficienciaAltasHabilidades = true;
+          }
+
+          // 2. Se a célula contiver ícone ou marca de checkmark (Ganhando Mundo e SERP usam ícone checkmark verde)
+          if (hasCheck) {
+            const rect = c.getBoundingClientRect();
+            if (rect.width > 0) {
+              const cMid = (rect.left + rect.right) / 2;
+
+              if (divisaGanhandoSerp !== null && cMid < divisaGanhandoSerp) {
+                // Fica à esquerda da coluna SERP -> Pertence a Ganhando Mundo
+                if (divisaDefGanhando !== null && cMid >= divisaDefGanhando) {
+                  ganhandoMundo = true;
                 } else if (colMap.deficiencia.right > 0 && cMid > (colMap.deficiencia.right - 5)) {
                   ganhandoMundo = true;
-                } else if (colMap.ganhando.left > 0 && cMid >= (colMap.ganhando.left - 10)) {
+                } else if (isCellForCol(c, 'ganhando')) {
                   ganhandoMundo = true;
-                } else {
-                  deficienciaAltasHabilidades = true;
                 }
+              } else if (divisaGanhandoSerp !== null && cMid >= divisaGanhandoSerp) {
+                // Fica na coluna SERP ou à direita
+                serpAtivo = true;
+              } else if (isCellForCol(c, 'ganhando')) {
+                ganhandoMundo = true;
+              } else if (isCellForCol(c, 'serp')) {
+                serpAtivo = true;
+              }
+            }
+          }
+
+          // 3. Se contiver o número 1 (Deficiência / Altas Habilidades)
+          if (hasPositiveNum && !hasIcon) {
+            const rect = c.getBoundingClientRect();
+            if (rect.width > 0) {
+              const cMid = (rect.left + rect.right) / 2;
+              if (divisaDefGanhando !== null && cMid < divisaDefGanhando) {
+                deficienciaAltasHabilidades = true;
+              } else if (divisaDefGanhando !== null && divisaGanhandoSerp !== null && cMid >= divisaDefGanhando && cMid < divisaGanhandoSerp) {
+                ganhandoMundo = true;
+              } else if (isCellForCol(c, 'deficiencia')) {
+                deficienciaAltasHabilidades = true;
+              } else if (isCellForCol(c, 'ganhando')) {
+                ganhandoMundo = true;
               }
             }
           }
@@ -548,34 +623,6 @@
         if (ganhandoMundo) {
           console.warn('✈️ [Leopoldina] Aluno Ganhando Mundo capturado:', nome, cgm, turma);
           setStatus(`✈️ Aluno Ganhando Mundo capturado: ${nome}`, '#0284c7');
-        }
-
-        // 6. SERP? (Checkmark ou ícone)
-        let serpAtivo = false;
-        const serpCell = distinctCells.find(c => isCellForCol(c, 'serp'));
-        if (serpCell) {
-          const txt = (serpCell.innerText || serpCell.getAttribute('title') || '').trim();
-          const hasIcon = Boolean(serpCell.querySelector('svg, i, .check, [role="img"]'));
-          if (hasIcon || /[✓✔√☑]/.test(txt) || txt.toLowerCase() === 'sim' || (serpCell.getAttribute('title') || '').toLowerCase().includes('sim')) {
-            serpAtivo = true;
-          }
-        }
-
-        if (!serpAtivo) {
-          distinctCells.forEach(c => {
-            const txt = (c.innerText || c.getAttribute('title') || '').trim();
-            const title = (c.getAttribute('title') || '').toLowerCase();
-            const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
-            const hasIcon = Boolean(c.querySelector('svg, i, .check, [role="img"]'));
-            if (
-              /[✓✔√☑]/.test(txt) ||
-              (hasIcon && (title.includes('serp') || ariaLabel.includes('serp'))) ||
-              (title.includes('serp') && title.includes('sim')) ||
-              (ariaLabel.includes('serp') && ariaLabel.includes('sim'))
-            ) {
-              serpAtivo = true;
-            }
-          });
         }
 
         // 7. IDADE (Inteiro entre 5 e 99)
@@ -628,6 +675,12 @@
           if (aluno.amparoLegalVigencia && !prev.amparoLegalVigencia) { prev.amparoLegalVigencia = aluno.amparoLegalVigencia; mudou = true; }
           if (aluno.idade && !prev.idade) { prev.idade = aluno.idade; mudou = true; }
           if (aluno.mediaGeral && !prev.mediaGeral) { prev.mediaGeral = aluno.mediaGeral; mudou = true; }
+          if (aluno.semanaAtual && !prev.semanaAtual) { prev.semanaAtual = aluno.semanaAtual; mudou = true; }
+          if (aluno.semanaAnterior && !prev.semanaAnterior) { prev.semanaAnterior = aluno.semanaAnterior; mudou = true; }
+          if (aluno.turma && (!prev.turma || prev.turma.includes('Período') || prev.turma.includes('Periodo')) && (aluno.turma.includes('Série') || aluno.turma.includes('Serie'))) {
+            prev.turma = aluno.turma;
+            mudou = true;
+          }
           if (mudou) {
             alunosCapturados.set(cgm, prev);
           }
