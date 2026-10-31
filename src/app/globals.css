@@ -20,68 +20,76 @@
 
 /* 1. Superfícies de Containers, Painéis e Fundo */
 .dark body,
-.dark .bg-slate-50 {
+.dark .bg-slate-50,
+.dark [class*="bg-slate-50"] {
   background-color: #090d16 !important;
 }
 
-.dark .bg-white {
+.dark .bg-white,
+.dark [class*="bg-white"] {
   background-color: #0f172a !important;
 }
 
-.dark .bg-slate-100 {
+.dark .bg-slate-100,
+.dark [class*="bg-slate-100"] {
   background-color: #1e293b !important;
 }
 
-.dark .bg-slate-200 {
-  background-color: #334155 !important;
-}
-
-.dark .hover\:bg-slate-50:hover,
-.dark .hover\:bg-slate-50\/70:hover {
+.dark .bg-slate-200,
+.dark [class*="bg-slate-200"] {
   background-color: #1e293b !important;
 }
 
-.dark .hover\:bg-slate-100:hover {
+.dark [class*="hover:bg-slate-50"]:hover,
+.dark [class*="hover:bg-slate-100"]:hover {
   background-color: #334155 !important;
 }
 
 /* 2. Bordas e Divisores */
 .dark .border-slate-100,
-.dark .border-slate-200 {
+.dark .border-slate-200,
+.dark [class*="border-slate-100"],
+.dark [class*="border-slate-200"] {
   border-color: #1e293b !important;
 }
 
-.dark .border-slate-300 {
+.dark .border-slate-300,
+.dark [class*="border-slate-300"] {
   border-color: #334155 !important;
 }
 
 .dark .divide-slate-100 > * + *,
-.dark .divide-slate-200 > * + * {
+.dark .divide-slate-200 > * + *,
+.dark [class*="divide-slate-100"] > * + *,
+.dark [class*="divide-slate-200"] > * + * {
   border-color: #1e293b !important;
 }
 
 /* 3. Tipografia e Cores de Texto (Legibilidade e Contraste) */
-.dark .text-slate-900 {
+.dark .text-slate-900,
+.dark [class*="text-slate-900"] {
   color: #f8fafc !important;
 }
 
-.dark .text-slate-800 {
+.dark .text-slate-800,
+.dark [class*="text-slate-800"] {
   color: #f1f5f9 !important;
 }
 
-.dark .text-slate-700 {
-  color: #cbd5e1 !important;
+.dark .text-slate-700,
+.dark [class*="text-slate-700"] {
+  color: #e2e8f0 !important;
 }
 
-.dark .text-slate-600 {
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark [class*="text-slate-600"],
+.dark [class*="text-slate-500"] {
   color: #94a3b8 !important;
 }
 
-.dark .text-slate-500 {
-  color: #94a3b8 !important;
-}
-
-.dark .text-slate-400 {
+.dark .text-slate-400,
+.dark [class*="text-slate-400"] {
   color: #64748b !important;
 }
 
@@ -133,83 +141,99 @@
   border-color: #1e293b !important;
 }
 
-/* 6. Chips, Badges e Tags Coloridas */
-.dark .bg-sky-50 {
+/* 6. Chips, Badges e Tags Coloridas (incluindo variantes de opacidade) */
+.dark .bg-sky-50,
+.dark [class*="bg-sky-50"] {
   background-color: rgba(14, 165, 233, 0.16) !important;
   color: #38bdf8 !important;
   border-color: rgba(14, 165, 233, 0.3) !important;
 }
 
-.dark .bg-emerald-50 {
+.dark .bg-emerald-50,
+.dark [class*="bg-emerald-50"] {
   background-color: rgba(16, 185, 129, 0.16) !important;
   color: #34d399 !important;
   border-color: rgba(16, 185, 129, 0.3) !important;
 }
 
-.dark .bg-amber-50 {
+.dark .bg-amber-50,
+.dark [class*="bg-amber-50"] {
   background-color: rgba(245, 158, 11, 0.16) !important;
   color: #fbbf24 !important;
   border-color: rgba(245, 158, 11, 0.3) !important;
 }
 
-.dark .bg-purple-50 {
+.dark .bg-purple-50,
+.dark [class*="bg-purple-50"] {
   background-color: rgba(168, 85, 247, 0.16) !important;
   color: #c084fc !important;
   border-color: rgba(168, 85, 247, 0.3) !important;
 }
 
 .dark .bg-rose-50,
-.dark .bg-red-50 {
+.dark .bg-red-50,
+.dark [class*="bg-rose-50"],
+.dark [class*="bg-red-50"] {
   background-color: rgba(244, 63, 94, 0.16) !important;
   color: #fb7185 !important;
   border-color: rgba(244, 63, 94, 0.3) !important;
 }
 
-.dark .bg-indigo-50 {
+.dark .bg-indigo-50,
+.dark [class*="bg-indigo-50"] {
   background-color: rgba(99, 102, 241, 0.16) !important;
   color: #818cf8 !important;
   border-color: rgba(99, 102, 241, 0.3) !important;
 }
 
-.dark .bg-teal-50 {
+.dark .bg-teal-50,
+.dark [class*="bg-teal-50"] {
   background-color: rgba(20, 184, 166, 0.16) !important;
   color: #2dd4bf !important;
   border-color: rgba(20, 184, 166, 0.3) !important;
 }
 
-.dark .bg-cyan-50 {
+.dark .bg-cyan-50,
+.dark [class*="bg-cyan-50"] {
   background-color: rgba(6, 182, 212, 0.16) !important;
   color: #22d3ee !important;
   border-color: rgba(6, 182, 212, 0.3) !important;
 }
 
-.dark .bg-emerald-100 {
+.dark .bg-emerald-100,
+.dark [class*="bg-emerald-100"] {
   background-color: rgba(16, 185, 129, 0.25) !important;
   color: #6ee7b7 !important;
 }
 
-.dark .bg-amber-100 {
+.dark .bg-amber-100,
+.dark [class*="bg-amber-100"] {
   background-color: rgba(245, 158, 11, 0.25) !important;
   color: #fcd34d !important;
 }
 
-.dark .bg-sky-100 {
+.dark .bg-sky-100,
+.dark [class*="bg-sky-100"] {
   background-color: rgba(14, 165, 233, 0.25) !important;
   color: #7dd3fc !important;
 }
 
 .dark .bg-rose-100,
-.dark .bg-red-100 {
+.dark .bg-red-100,
+.dark [class*="bg-rose-100"],
+.dark [class*="bg-red-100"] {
   background-color: rgba(244, 63, 94, 0.25) !important;
   color: #fda4af !important;
 }
 
-.dark .bg-indigo-100 {
+.dark .bg-indigo-100,
+.dark [class*="bg-indigo-100"] {
   background-color: rgba(99, 102, 241, 0.25) !important;
   color: #a5b4fc !important;
 }
 
-.dark .bg-purple-100 {
+.dark .bg-purple-100,
+.dark [class*="bg-purple-100"] {
   background-color: rgba(168, 85, 247, 0.25) !important;
   color: #d8b4fe !important;
 }
@@ -225,6 +249,39 @@
 
 .dark table tbody tr:hover .sticky {
   background-color: #1e293b !important;
+}
+
+/* 8. Botões Desativados */
+.dark button:disabled,
+.dark [class*="disabled:bg-slate-300"]:disabled {
+  background-color: #1e293b !important;
+  color: #64748b !important;
+  border-color: #334155 !important;
+}
+
+/* 9. Diálogos e Modais */
+.dark dialog {
+  background-color: transparent !important;
+}
+
+.dark dialog [class*="bg-slate-50"] {
+  background-color: #0f172a !important;
+}
+
+.dark dialog [class*="bg-white"] {
+  background-color: #0f172a !important;
+}
+
+/* 10. WhatsApp Visual Simulator no Modo Escuro */
+.dark [class*="bg-[#efeae2]"] {
+  background-color: #0b141a !important;
+  border-color: #1e293b !important;
+}
+
+.dark [class*="bg-[#efeae2]"] [class*="bg-white"] {
+  background-color: #005c4b !important;
+  color: #e9edef !important;
+  border-color: #005c4b !important;
 }
 
 body {

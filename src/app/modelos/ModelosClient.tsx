@@ -676,20 +676,20 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
                 {/* COLUNA DIREITA (Simulador Visual WhatsApp em Tempo Real) - 5 colunas */}
                 <div className="lg:col-span-5 flex flex-col space-y-3">
-                  <div className="bg-slate-100 border border-slate-200 rounded-xl p-3.5 flex-1 flex flex-col space-y-2.5">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                      <span className="font-bold text-slate-800 text-[11px] flex items-center space-x-1.5">
+                  <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex-1 flex flex-col space-y-2.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                      <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px] flex items-center space-x-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                         <span>Prévia em Tempo Real (WhatsApp)</span>
                       </span>
 
                       {/* Alternador de Turno */}
-                      <div className="flex items-center space-x-1 bg-white p-0.5 rounded-lg border border-slate-200">
+                      <div className="flex items-center space-x-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
                         <button
                           type="button"
                           onClick={() => setPreviewShift("MANHA")}
                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
-                            previewShift === "MANHA" ? "bg-amber-500 text-white" : "text-slate-600 hover:bg-slate-100"
+                            previewShift === "MANHA" ? "bg-amber-500 text-white" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                           }`}
                           title="Simular Turno da Manhã"
                         >
@@ -700,7 +700,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                           type="button"
                           onClick={() => setPreviewShift("TARDE")}
                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
-                            previewShift === "TARDE" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                            previewShift === "TARDE" ? "bg-sky-600 text-white" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                           }`}
                           title="Simular Turno da Tarde"
                         >
@@ -711,7 +711,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
                           type="button"
                           onClick={() => setPreviewShift("NOITE")}
                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-0.5 ${
-                            previewShift === "NOITE" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                            previewShift === "NOITE" ? "bg-indigo-600 text-white" : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                           }`}
                           title="Simular Turno da Noite"
                         >
@@ -722,17 +722,17 @@ export default function ModelosClient({ initialTemplates }: Props) {
                     </div>
 
                     {/* Balão Visual do WhatsApp */}
-                    <div className="flex-1 bg-[#efeae2] p-3 rounded-xl border border-slate-300/80 overflow-y-auto max-h-[280px] lg:max-h-[360px] flex flex-col justify-end">
-                      <div className="bg-white p-3 rounded-lg rounded-tl-none shadow-xs border border-slate-200 text-slate-800 text-[11px] leading-relaxed whitespace-pre-wrap font-sans relative">
+                    <div className="flex-1 bg-[#efeae2] dark:bg-[#0b141a] p-3 rounded-xl border border-slate-300/80 dark:border-slate-800 overflow-y-auto max-h-[280px] lg:max-h-[360px] flex flex-col justify-end transition-colors">
+                      <div className="bg-white dark:bg-[#005c4b] p-3 rounded-lg rounded-tl-none shadow-xs border border-slate-200 dark:border-emerald-800 text-slate-800 dark:text-emerald-50 text-[11px] leading-relaxed whitespace-pre-wrap font-sans relative transition-colors">
                         {simulatedMessage || "(Preencha o formulário para visualizar como a mensagem será enviada à família)"}
-                        <div className="text-[9px] text-slate-400 text-right mt-1.5">
+                        <div className="text-[9px] text-slate-400 dark:text-emerald-200/70 text-right mt-1.5">
                           12:00 • Enviado via WhatsApp
                         </div>
                       </div>
                     </div>
 
                     {/* Dica Pedagógica */}
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-[10px] text-slate-500 space-y-1">
+                    <div className="bg-white dark:bg-slate-800/80 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
                       <div className="font-bold text-slate-700 flex items-center space-x-1">
                         <Info className="w-3 h-3 text-sky-600" />
                         <span>Dica de Redação Pedagógica:</span>

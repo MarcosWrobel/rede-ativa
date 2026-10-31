@@ -1025,9 +1025,9 @@ export default function AtaEditorModal({
                 </div>
 
                 {viewMinuteData.agreementsSummary && (
-                  <div className="p-3 bg-sky-50/70 border border-sky-200 rounded-xl">
-                    <span className="font-extrabold text-sky-900 block mb-0.5">Síntese dos Combinados:</span>
-                    <p className="text-slate-700">{viewMinuteData.agreementsSummary}</p>
+                  <div className="p-3 bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-xl">
+                    <span className="font-extrabold text-sky-900 dark:text-sky-300 block mb-0.5">Síntese dos Combinados:</span>
+                    <p className="text-slate-700 dark:text-slate-300">{viewMinuteData.agreementsSummary}</p>
                   </div>
                 )}
 

@@ -78,19 +78,19 @@ export default function AtaDialog({
       className={`dialog-ata p-0 bg-transparent backdrop:bg-slate-900/60 backdrop:backdrop-blur-xs overscroll-contain w-[98vw] ${maxWidthClass} mx-auto my-auto rounded-3xl shadow-2xl open:animate-in open:fade-in open:zoom-in-95 border border-slate-200/80 focus:outline-none`}
       style={{ maxWidth: "min(98vw, 1560px)", width: "98vw" }}
     >
-      <div className="bg-white rounded-3xl overflow-hidden flex flex-col max-h-[96vh] w-full">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden flex flex-col max-h-[96vh] w-full border border-slate-200 dark:border-slate-800">
         {/* Cabeçalho */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-900">
           <div>
-            <h2 id="dialog-title" className="text-xl font-black text-slate-900 tracking-tight">
+            <h2 id="dialog-title" className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
               {title}
             </h2>
-            {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+            {description && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p>}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            className="p-2.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
