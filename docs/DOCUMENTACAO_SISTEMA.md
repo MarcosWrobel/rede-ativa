@@ -12,7 +12,7 @@ O **Sistema de Busca Ativa, Comunicação Escolar & Livro de Atas Digital** foi 
 - Permitir a **importação cadastral oficial em lote direto do SERE/SEED-PR** nos formatos nativos exportados pelo sistema estadual (`.xls` BIFF8, `.xlsx`, `.pdf` e `.csv`), mesclando turmas técnicas duplas e filtrando programas complementares.
 - Prover um **Livro Oficial de Atas Pedagógicas Digital** juridicamente amparado pela **Lei Federal nº 14.063/2020**, **MP nº 2.200-2/2001**, **ECA** e **LGPD**, com numeração anual sequencial atômica, selo `SHA-256`, coleta de assinatura híbrida (tela ou QR Code móvel com biometria **WebAuthn/FIDO2**), termos de aditamento encadeados (*"Em tempo"*) e emissão do Livro Anual em PDF A4.
 - Reduzir o tempo que a equipe pedagógica gasta redigindo comunicados e atas, oferecendo ditado por voz (`pt-BR`) e assistência generativa com **Google Gemini** (com JSON estruturado e *fallback* determinístico local).
-- Prover **Fila Assistida por Turma via WhatsApp Web (`wa.me`)**, permitindo acionar múltiplos faltosos com reuso de guia única sem custos de API externa.
+- Prover **Fila Assistida por Turma via WhatsApp com Janela Dedicada Compacta (Linux)** e detecção de plataforma (Mobile nativo vs Desktop direto), permitindo acionar múltiplos faltosos com reuso contínuo de janela sem barras de navegação e sem custos de API externa.
 - Emitir **Dossiês Oficiais em PDF A4** auditados para o Conselho Tutelar, Ministério Público e SERP/FICAI, com anonimização automática de outros menores citados em atas conjuntas (Art. 17 e 143 do ECA).
 - Prover uma **Extensão Chrome Multissistema (Manifest V3)** para extrair dados oficiais do Power BI e do SERP sem exigir credenciais da SEED-PR em servidores externos.
 
@@ -199,7 +199,7 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 | `POST` | `/api/students/:id/contacts` | Sessão Web | Gestão de múltiplos contatos familiares do aluno. |
 | `POST` | `/api/students/:id/justifications` | Sessão Web | Registro de atestados médicos e justificativas com vigência. |
 | `POST` | `/api/students/:id/attendances` | Sessão Web | Registro legado de comparecimento presencial simples. |
-| `POST` | `/api/messages/send` | Sessão Web | Registro de disparo WhatsApp e geração de URL `wa.me`. |
+| `POST` | `/api/messages/send` | Sessão Web | Registro de disparo WhatsApp e geração adaptativa de URL (`wa.me` para mobile, `web.whatsapp.com/send` para desktop). |
 | `PATCH` | `/api/messages/status` | Sessão Web | Confirmação de entrega (`SENT`) ou invalidação cadastral (`FAILED_NO_WHATSAPP`). |
 | `POST` | `/api/messages/reply` | Sessão Web | Registro de retorno familiar e categoria de causa. |
 | `GET` | `/api/messages` | Sessão Web | Histórico paginado com filtros *server-side*. |
@@ -223,7 +223,9 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 
 ## 8. Qualidade, Testes & Conformidade Jurídica
 
-- **Suíte de Testes Automatizados (Vitest — 52 testes em 9 arquivos, 100% de aprovação)**:
+- **Suíte de Testes Automatizados (Vitest — 59 testes em 10 arquivos, 100% de aprovação)**:
+  - `src/lib/__tests__/clientDispatcher.test.ts` (5 testes): Controle de despacho, preferência em localStorage (`leopoldina_whatsapp_dispatch_mode`), chave liga/desliga de extensão e fallbacks síncronos.
+  - `src/lib/__tests__/whatsappPhase4.test.ts` (6 testes): Fila assistida, detecção de User-Agent (mobile vs desktop), URL adaptativa, saneamento de números e classificação de retornos.
   - `src/lib/__tests__/ataCrypto.test.ts` (6 testes): Determinismo e sensibilidade a adulteração do hash `SHA-256`, *hash-chaining* de adendos, códigos de verificação, mascaramento LGPD e anonimização ECA de terceiros menores.
   - `src/lib/__tests__/escolaSign.test.ts` (8 testes): Assinatura digital institucional `@escola.pr.gov.br` em 1 clique para servidores, professores e estudantes, validação de domínio e certificação SEED-PR.
   - `src/lib/__tests__/nreAtaFormalize.test.ts` (3 testes): Formatação canônica por extenso da data do NRE, rigor no fuso horário oficial `America/Sao_Paulo` (UTC-3), preservação de edições prévias e ausência de entrelinhas.
@@ -231,7 +233,6 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
   - `src/lib/__tests__/messageFormatter.test.ts` (8 testes): Interpolação de tags dinâmicas e saudações por turno.
   - `src/lib/__tests__/studentMatcher.test.ts` (8 testes): Pareamento `O(1)` por CGM e nome normalizado sem acentos.
   - `src/lib/__tests__/pedagogicalClassifier.test.ts` (6 testes): Detecção de queda abrupta e vigência de atestados.
-  - `src/lib/__tests__/whatsappPhase4.test.ts` (4 testes): Fila assistida, saneamento de números e classificação de retornos.
   - `src/lib/__tests__/phase5Features.test.ts` (3 testes): Contexto multi-escola e interpolação institucional.
 - **Conformidade Legal (Lei nº 14.063/2020, MP 2.200-2/2001, ECA e LGPD)**:
   - Assinatura eletrônica institucional qualificada pela fé pública do servidor autenticado via `@escola.pr.gov.br` + IP + timestamp.

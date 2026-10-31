@@ -67,6 +67,8 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
   Modo **"Fila por Turma"** em [`src/app/busca-ativa/BuscaAtivaClient.tsx`](../src/app/busca-ativa/BuscaAtivaClient.tsx) + [`src/lib/whatsappProvider.ts`](../src/lib/whatsappProvider.ts) com reuso de aba única e salto inteligente de atestados vigentes.
 - [x] **`AUT-03`** `[P3 | Esforço: G]` **Formalização & Classificação de Retorno com IA Gemini + Webhook Futuro**  
   Rota [`src/app/api/ai/classify-reply/route.ts`](../src/app/api/ai/classify-reply/route.ts) com JSON estruturado + *fallback* determinístico local, estatísticas de causas em `/relatorios` e webhook passivo futuro.
+- [x] **`AUT-04`** `[P2 | Esforço: M]` **Janela Dedicada Compacta (Linux) & Detecção de Plataforma Mobile/Desktop**  
+  Implementação de `isMobileDevice` e `buildWhatsAppDispatchUrl` em [`src/lib/whatsappProvider.ts`](../src/lib/whatsappProvider.ts), Janela Dedicada Compacta (tipo popup minimalista 480x760px à direita) gerenciada pela extensão Chrome (`extension/background.js`) e componente de alternância liga/desliga (`WhatsAppDispatchToggle.tsx`).
 
 ---
 
@@ -128,7 +130,7 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 | **Sprint 2** | Alta Performance & Histórico Completo | `PERF-01` a `PERF-05`, `QUAL-01`, `QUAL-02` | ✅ Concluído |
 | **Sprint 3** | Respaldo Jurídico & Prevenção | `PED-01`, `PED-02`, `PED-03` | ✅ Concluído |
 | **Sprint 4** | Visão 360º da Família | `PED-04`, `PED-05` | ✅ Concluído |
-| **Sprint 5** | Automação WhatsApp & IA | `AUT-01` a `AUT-03` | ✅ Concluído |
+| **Sprint 5** | Automação WhatsApp & IA | `AUT-01` a `AUT-04` | ✅ Concluído |
 | **Sprint 6** | Expansão Regional & Mobile PWA | `ESC-01` a `ESC-03` | ✅ Concluído |
 | **Sprint 7** | Importação SERE (`.xls`/`.pdf`) & Equipe | `SERE-01` a `SERE-03` | ✅ Concluído |
 | **Sprint 8** | Livro Oficial de Atas Digital & Biometria | `ATA-01` a `ATA-05` | ✅ Concluído |

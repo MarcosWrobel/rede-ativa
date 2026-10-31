@@ -45,7 +45,7 @@ flowchart TD
         APILayer["API Routes (/api/*)\nZod Schemas + Audit Logger"]
         CryptoEngine["Mecanismo Criptográfico (SHA-256)\nataCrypto.ts + nreAtaFormatter.ts"]
         AIEngine["Integração de IA (Google Gemini)\nFormalização de Atas & Classificação"]
-        WAProvider["Provedor WhatsApp (AUT-01 a AUT-03)\nModo Fila wa.me / Gateway HTTP"]
+        WAProvider["Provedor WhatsApp (AUT-01 a AUT-03)\nJanela Dedicada Compacta / URLs Adaptativas / Gateway HTTP"]
     end
 
     subgraph Persistence ["Camada de Dados & Nuvem"]
@@ -156,7 +156,10 @@ Como os sistemas da Celepar e SEED-PR não oferecem APIs REST públicas para esc
    - Ambas as extrações disparam requisições `POST` diretamente para `/api/frequencia/sync` e `/api/serp/sync`, autenticadas pelo `SYNC_API_TOKEN` com timing seguro (`crypto.timingSafeEqual`).
 
 ### 3.6. Engenharia de IA Aplicada e Mensageria
-- **Disparo WhatsApp Sem Custos (`wa.me`):** A função [`buildWaMeUrl()`](file:///home/marcoswrobel/Documents/Registro/src/lib/whatsappProvider.ts#L56-L60) normaliza o telefone para o padrão brasileiro (`55 + DDD + 9 dígitos`) e codifica a mensagem contextual. No modo de Fila Assistida por Turma, o sistema reutiliza a mesma janela/aba do navegador (`WA_ME_REUSABLE_WINDOW_NAME = "leopoldina_whatsapp_dispatch"`), permitindo que a pedagoga acione dezenas de famílias sem poluir o navegador com abas abertas.
+- **Disparo WhatsApp com Detecção Adaptativa e Janela Dedicada Compacta:**
+  - **Detecção de Plataforma (`src/lib/whatsappProvider.ts`):** O sistema inspeciona o ambiente via `isMobileDevice()`. No Mobile (Android/iOS), gera URLs nativas `https://wa.me/...` que abrem diretamente no aplicativo instalado no smartphone. No Desktop (Linux/Windows), gera `https://web.whatsapp.com/send/?phone=...`, eliminando 100% da tela intermediária estática da Meta ("Baixar WhatsApp / Ir para o app").
+  - **Janela Dedicada Compacta (Linux / Chrome Extension):** A extensão Manifest V3 gerencia janelas do tipo `popup` (`chrome.windows.create`, 480x760px) fixadas no canto direito da tela. Essa janela não possui barra de abas, barra de favoritos nem omnibox, proporcionando a experiência de um mini-aplicativo desktop nativo. Durante toda a Fila de Busca Ativa, a mesma janela é mantida e focada (`chrome.tabs.update`), prevenindo a desconexão de sessão (*"Usar aqui"*) e garantindo privacidade LGPD (em 480px, o WhatsApp Web oculta o painel geral de conversas).
+  - **Controle Liga/Desliga (`src/lib/clientDispatcher.ts`):** A secretária pode alternar com 1 clique entre o *Modo Janela Compacta* e o *Modo Convencional (Nova Aba)*, com preferência persistida em `localStorage`.
 - **Classificador e Formalizador Híbrido:**
   - O sistema tenta contatar os modelos de ponta **Google Gemini** (`gemini-3.5-flash`, `gemini-3.8-flash` ou `gemini-3.5-flash-lite`) com saída estruturada via JSON Schema.
   - Caso a API Key não esteja configurada ou ocorra oscilação de conectividade, ativam-se instantaneamente os mecanismos de fallback determinísticos locais: [`generateLocalAtaMinuta()`](file:///home/marcoswrobel/Documents/Registro/src/lib/nreAtaFormatter.ts#L330-L394) e [`classifyGuardianReplyHeuristic()`](file:///home/marcoswrobel/Documents/Registro/src/lib/whatsappProvider.ts#L241-L316). O sistema nunca trava na ausência da IA.

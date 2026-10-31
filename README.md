@@ -1,7 +1,7 @@
 # Sistema de Busca Ativa, Comunicação Escolar & Livro de Atas Digital
 **Colégio Estadual Leopoldina B. Pedroso — Ponta Grossa / Paraná**
 
-Aplicação web institucional para gestão de busca ativa escolar, comunicação ágil e acolhedora com famílias via WhatsApp (`wa.me`), monitoramento de infrequência em tempo real, importação cadastral oficial SERE (`.xls` / `.pdf`), controle de atestados médicos, **Livro Oficial de Atas Pedagógicas Digital** com validade jurídica (Lei nº 14.063/2020, Hash `SHA-256` e Biometria Móvel WebAuthn), emissão de dossiês individuais (Conselho Tutelar / SERP) e triagem/redação assistida com Inteligência Artificial.
+Aplicação web institucional para gestão de busca ativa escolar, comunicação ágil e acolhedora com famílias via WhatsApp (com detecção inteligente Mobile/Desktop e Janela Dedicada Compacta no Linux), monitoramento de infrequência em tempo real, importação cadastral oficial SERE (`.xls` / `.pdf`), controle de atestados médicos, **Livro Oficial de Atas Pedagógicas Digital** com validade jurídica (Lei nº 14.063/2020, Hash `SHA-256` e Biometria Móvel WebAuthn), emissão de dossiês individuais (Conselho Tutelar / SERP) e triagem/redação assistida com Inteligência Artificial.
 
 ---
 
@@ -15,9 +15,9 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 - **Importação Oficial SERE/SEED-PR**: Leitura nativa multiformato com `xlsx` (planilhas `.xls` BIFF8 / `.xlsx`), `unpdf` (relatórios `.pdf`) e parser `.csv` (`UTF-8` / `Windows-1252`)
 - **Rotinas Automatizadas**: Vercel Cron semanal (`/api/cron/weekly-digest`) para diagnóstico executivo e fila de intervenção às segundas-feiras
 - **Inteligência Artificial**: Google Gemini API (`@google/genai` 2026) — Redação de comunicados, formalização de atas com rigor gramatical NRE/SEED-PR, fuso horário oficial `America/Sao_Paulo`, thinking tokens otimizados (`thinkingLevel: "low"`) e classificação de retornos com JSON estruturado
-- **Automação de Mensageria**: Fluxo operacional gratuito e ilimitado via WhatsApp Web (`wa.me`) com reuso de guia única (`leopoldina_whatsapp_dispatch`) e camada plugável para gateways futuros
-- **Extensão Chrome**: Manifest V3 para extração segura de dados do Power BI estadual e do portal SERP/Celepar
-- **Testes & Qualidade**: Vitest com **52 testes unitários automatizados** em 9 suítes cobrindo criptografia/anonimização de atas, assinaturas `@escola.pr.gov.br`, diretrizes NRE com IA, parser SERE (`.xls`/`.pdf`/`.csv`), classificadores pedagógicos, pareamento, schemas Zod e multi-escola
+- **Automação de Mensageria & Janela Dedicada**: Despacho com detecção de plataforma: mobile nativo (`wa.me`) e desktop direto (`web.whatsapp.com/send`). No Linux/Chrome, a extensão opera com **Janela Dedicada Compacta (Popup Minimalista 480x760px)** fixada à direita da tela, sem abas, sem barra de endereços, com layout foco/LGPD e controle liga/desliga opcional
+- **Extensão Chrome**: Manifest V3 (v1.4.1) para extração segura de dados do Power BI estadual, portal SERP/Celepar e gerenciamento nativo da Janela Compacta do WhatsApp Web via `chrome.windows.create`
+- **Testes & Qualidade**: Vitest com **59 testes unitários automatizados** em 10 suítes cobrindo criptografia/anonimização de atas, assinaturas `@escola.pr.gov.br`, diretrizes NRE com IA, parser SERE (`.xls`/`.pdf`/`.csv`), classificadores pedagógicos, pareamento, schemas Zod, multi-escola, detecção mobile/desktop e client dispatcher
 
 ---
 
@@ -25,7 +25,7 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 
 | Módulo | Rota | Descrição |
 | :--- | :--- | :--- |
-| **Busca Ativa** | `/busca-ativa` | Disparo individual ou **Fila Guiada por Turma** via `wa.me`, salto automático de atestados médicos, múltiplos contatos familiares e confirmação de entrega com saneamento de números. |
+| **Busca Ativa** | `/busca-ativa` | Disparo individual ou **Fila Guiada por Turma** com abertura em **Janela Dedicada Compacta (Linux)** ou mobile (`wa.me`), salto automático de atestados médicos, múltiplos contatos familiares e confirmação de entrega com saneamento de números. |
 | **Livro de Atas Digital** | `/atas` | Substituição jurídica do caderno manuscrito: numeração sequencial anual imutável, editor bimodal widescreen, ditado por voz + IA Gemini 2026, assinatura digital institucional `@escola.pr.gov.br` em 1 clique, assinatura em tela ou **QR Code Móvel com Biometria**, adendos *"Em tempo"*, PDF A4 em folha única (`1 of 1`) com brasão oficial e Livro Anual (`/atas/livro/[ano]`). |
 | **Validação & Assinatura** | `/validar/ata/[code]`<br>`/assinar/ata/[token]` | Portal público LGPD-safe para conferência de autenticidade (`SHA-256`) via QR Code e página móvel temporária para assinatura com biometria do celular dos responsáveis. |
 | **Boletim Semanal** | `/boletim` | Diagnóstico semanal automatizado (Vercel Cron) com alertas de alunos críticos sem busca recente, casos SERP, taxa de retorno dos pais e exportação A4 para reuniões pedagógicas. |
@@ -50,8 +50,8 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
    - Transforma solicitações informais das pedagogas em modelos acolhedores e padronizados com saudações automáticas para manhã, tarde ou noite.
 3. **Formalização e Classificação de Retornos dos Pais**:
    - Transforma mensagens informais recebidas no WhatsApp em texto administrativo formal e classifica a causa da ausência (🩺 Saúde, 🚌 Transporte/Clima, 💼 Trabalho, 🧳 Viagem, ⚠️ Vulnerabilidade, 📌 Sem Justificativa, 📝 Outros), com *fallback* determinístico local.
-4. **Fila Guiada por Turma via `wa.me`**:
-   - Disparo assistido sem custos de API externa, reutilizando guia única do navegador e saneando números sem WhatsApp (`FAILED_NO_WHATSAPP`) para proteção jurídica da escola.
+4. **Fila Guiada por Turma com Janela Dedicada Compacta (Linux)**:
+   - Disparo assistido sem custos de API externa, detecção automática de ambiente (Mobile nativo via `wa.me` vs Desktop direto via `web.whatsapp.com/send`), reuso contínuo de janela popup minimalista (480x760px) sem abas e sem barra de URL via extensão Manifest V3, saneamento de números sem WhatsApp (`FAILED_NO_WHATSAPP`) e controle de alternância liga/desliga (Modo Janela Compacta vs Modo Convencional).
 
 ---
 
