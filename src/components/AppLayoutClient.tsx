@@ -44,7 +44,7 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 print:bg-white flex">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 print:bg-white flex transition-colors">
       {/* Sidebar */}
       <div className="print:hidden">
         <Sidebar
@@ -71,7 +71,7 @@ export default function AppLayoutClient({ children, currentUser }: AppLayoutClie
           {children}
         </main>
 
-        <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500 print:hidden">
+        <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-6 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden transition-colors">
           Colégio Estadual Leopoldina B. Pedroso — Sistema de Busca Ativa & Comunicação Escolar 2026. Protegido por autenticação institucional @escola.pr.gov.br.
         </footer>
       </div>
