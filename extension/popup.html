@@ -98,6 +98,23 @@
     </label>
   </div>
 
+  <details id="popup-settings" style="margin-top: 10px; font-size: 11px; color: #475569; background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+    <summary style="cursor: pointer; font-weight: 600; color: #334155; user-select: none;">⚙️ Chave & Servidor (Vercel / Nuvem)</summary>
+    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+      <div>
+        <label style="display: block; font-weight: 600; margin-bottom: 2px;">URL do Servidor:</label>
+        <input id="popup-cfg-url" type="text" placeholder="https://seu-app.vercel.app" style="width: 100%; box-sizing: border-box; padding: 5px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace;" />
+      </div>
+      <div>
+        <label style="display: block; font-weight: 600; margin-bottom: 2px;">Chave de Sincronização:</label>
+        <input id="popup-cfg-token" type="password" placeholder="Cole o token SYNC_API_TOKEN" style="width: 100%; box-sizing: border-box; padding: 5px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;" />
+      </div>
+      <button id="btn-popup-save-cfg" type="button" class="btn btn-outline" style="margin-top: 4px; padding: 6px; font-size: 11px;">
+        💾 Salvar Configurações
+      </button>
+    </div>
+  </details>
+
   <div id="popup-status" class="status">Abra a página do Power BI para capturar.</div>
 
   <script src="popup.js"></script>
