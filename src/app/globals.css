@@ -395,11 +395,11 @@ progress.queue-progress::-moz-progress-bar {
   }
 }
 
-/* Formatação A4 limpa para impressão de Dossiê Individual e Relatórios */
+/* Formatação A4 limpa para impressão de Dossiê Individual, Atas e Relatórios */
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm;
+    margin: 8mm 10mm;
   }
 
   body {
