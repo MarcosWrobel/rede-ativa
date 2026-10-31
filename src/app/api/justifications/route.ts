@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);
 
     const schoolCondition = school?.id
-      ? { OR: [{ schoolId: school.id }, { schoolId: null }] }
+      ? { schoolId: school.id }
       : {};
 
     const where: any = {

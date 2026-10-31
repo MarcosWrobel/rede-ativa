@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkIsAdmin } from "@/lib/roles";
 import { safeQueryList } from "@/lib/safePhase3Queries";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import AlunosClient from "./AlunosClient";
 import { redirect } from "next/navigation";
 
@@ -12,6 +13,9 @@ export default async function AlunosPage() {
   if (!session?.user) {
     redirect("/login");
   }
+
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const schoolId = currentSchool.id;
 
   const now = new Date();
   const recentCutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
@@ -24,7 +28,7 @@ export default async function AlunosPage() {
   try {
     const results = await Promise.all([
       prisma.student.findMany({
-        where: { active: true },
+        where: { schoolId, active: true },
         include: {
           classGroup: true,
           _count: { select: { messageLogs: true } },
@@ -32,16 +36,18 @@ export default async function AlunosPage() {
         orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
       }),
       prisma.classGroup.findMany({
+        where: { schoolId },
         orderBy: { name: "asc" },
       }),
       safeQueryList(() =>
         prisma.absenceJustification.findMany({
-          where: { endDate: { gte: recentCutoff } },
+          where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
       ),
       safeQueryList(() =>
         prisma.studentContact.findMany({
+          where: { student: { schoolId } },
           select: { id: true, studentId: true, whatsappValid: true },
         })
       ),

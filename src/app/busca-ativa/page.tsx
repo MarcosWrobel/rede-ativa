@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeQueryList } from "@/lib/safePhase3Queries";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import BuscaAtivaClient from "./BuscaAtivaClient";
 import { redirect } from "next/navigation";
 
@@ -15,6 +16,9 @@ export default async function BuscaAtivaPage({
   if (!session?.user) {
     redirect("/login");
   }
+
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const schoolId = currentSchool.id;
 
   let sp: { studentId?: string; phone?: string; mode?: string; turmaId?: string } = {};
   try {
@@ -38,11 +42,12 @@ export default async function BuscaAtivaPage({
   try {
     const results = await Promise.all([
       prisma.classGroup.findMany({
+        where: { schoolId },
         select: { id: true, name: true, segment: true, shift: true },
         orderBy: { name: "asc" },
       }),
       prisma.messageTemplate.findMany({
-        where: { active: true },
+        where: { active: true, OR: [{ schoolId }, { schoolId: null }] },
         select: {
           id: true,
           title: true,
@@ -54,7 +59,7 @@ export default async function BuscaAtivaPage({
         orderBy: { title: "asc" },
       }),
       prisma.student.findMany({
-        where: { active: true },
+        where: { schoolId, active: true },
         select: {
           id: true,
           cgm: true,
@@ -75,6 +80,7 @@ export default async function BuscaAtivaPage({
         orderBy: { name: "asc" },
       }),
       prisma.messageLog.findMany({
+        where: { student: { schoolId } },
         take: 150,
         orderBy: { sentAt: "desc" },
         select: {
@@ -87,12 +93,13 @@ export default async function BuscaAtivaPage({
       }),
       safeQueryList(() =>
         prisma.absenceJustification.findMany({
-          where: { endDate: { gte: recentCutoff } },
+          where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
       ),
       safeQueryList(() =>
         prisma.studentContact.findMany({
+          where: { student: { schoolId } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         })
       ),

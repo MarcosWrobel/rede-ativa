@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
-import { ensureDefaultSchool } from "@/lib/currentSchool";
+import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
 import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone } from "@/lib/sereParser";
@@ -24,7 +24,8 @@ export async function POST(req: Request) {
     const { turmas, students, transferredStudents, options } = parsed.data;
 
     // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por ADMIN)
-    let schoolRecord = await ensureDefaultSchool();
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    let schoolRecord: any = currentSchool;
     if (
       schoolRecord &&
       options.updateSchoolInfo &&

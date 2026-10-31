@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { checkIsAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { safeQueryList } from "@/lib/safePhase3Queries";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import FaltasClient from "./FaltasClient";
 import { redirect } from "next/navigation";
 
@@ -12,6 +13,9 @@ export default async function FaltasPage() {
   if (!session?.user) {
     redirect("/login");
   }
+
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const schoolId = currentSchool.id;
 
   // Contabiliza tanto comunicados vinculados a modelos marcados como "Relacionado a Faltas" (isAbsenceRelated)
   // quanto registros históricos migrados sem vínculo de modelo que contenham termos de ausência no motivo.
@@ -42,6 +46,7 @@ export default async function FaltasPage() {
       prisma.messageLog.findMany({
         take: 1000,
         where: {
+          student: { schoolId },
           OR: [
             { template: { isAbsenceRelated: true } },
             ...absenceKeywords.map((kw) => ({
@@ -75,6 +80,7 @@ export default async function FaltasPage() {
         },
       }),
       prisma.lowAttendanceRecord.findMany({
+        where: { student: { schoolId } },
         select: {
           id: true,
           attendancePercent: true,
@@ -104,11 +110,12 @@ export default async function FaltasPage() {
         orderBy: { attendancePercent: "asc" },
       }),
       prisma.classGroup.findMany({
+        where: { schoolId },
         select: { id: true, name: true, segment: true, shift: true },
         orderBy: { name: "asc" },
       }),
       prisma.messageTemplate.findMany({
-        where: { active: true },
+        where: { active: true, OR: [{ schoolId }, { schoolId: null }] },
         orderBy: { title: "asc" },
         select: {
           id: true,
@@ -121,17 +128,19 @@ export default async function FaltasPage() {
       }),
       safeQueryList(() =>
         prisma.absenceJustification.findMany({
-          where: { endDate: { gte: recentCutoff } },
+          where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
       ),
       safeQueryList(() =>
         prisma.studentContact.findMany({
+          where: { student: { schoolId } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         })
       ),
       safeQueryList(() =>
         prisma.attendanceSnapshot.findMany({
+          where: { student: { schoolId } },
           take: 1000,
           orderBy: { recordedAt: "desc" },
         })

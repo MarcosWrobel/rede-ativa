@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { 
   Send, 
   History, 
@@ -29,6 +30,9 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const schoolId = currentSchool.id;
+
   let totalStudents = 0;
   let totalLogs = 0;
   let totalReplied = 0;
@@ -38,18 +42,19 @@ export default async function DashboardPage() {
 
   try {
     const results = await Promise.all([
-      prisma.student.count({ where: { active: true } }),
-      prisma.messageLog.count(),
-      prisma.messageLog.count({ where: { guardianReplied: true } }),
+      prisma.student.count({ where: { schoolId, active: true } }),
+      prisma.messageLog.count({ where: { student: { schoolId } } }),
+      prisma.messageLog.count({ where: { student: { schoolId }, guardianReplied: true } }),
       prisma.messageLog.findMany({
+        where: { student: { schoolId } },
         take: 6,
         orderBy: { sentAt: "desc" },
         include: {
           student: { include: { classGroup: true } },
         },
       }),
-      prisma.lowAttendanceRecord.count(),
-      prisma.pedagogicalMinute.count({ where: { status: "FINALIZED" } }),
+      prisma.lowAttendanceRecord.count({ where: { student: { schoolId } } }),
+      prisma.pedagogicalMinute.count({ where: { schoolId, status: "FINALIZED" } }),
     ]);
     totalStudents = results[0];
     totalLogs = results[1];

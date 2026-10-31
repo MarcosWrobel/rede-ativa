@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { cookies } from "next/headers";
 
 export interface SchoolContext {
   id: string;
@@ -28,72 +29,94 @@ export const DEFAULT_SCHOOL: SchoolContext = {
 
 /**
  * Obtém os dados da escola atual para emissão de documentos, cabeçalhos e disparos.
- * Caso nenhum id seja informado ou não haja escola cadastrada, retorna os dados padrão do Colégio Leopoldina.
+ * Prioridade:
+ * 1. Cookie ativo de instituição selecionada no painel (`active_school_id`)
+ * 2. schoolId explicitamente fornecido (da sessão ou parâmetro)
+ * 3. Primeira escola ativa no banco de dados
+ * 4. Fallback padrão para o Colégio Estadual Leopoldina
  */
 export async function getCurrentSchool(schoolId?: string | null): Promise<SchoolContext> {
-  if (!schoolId) {
-    try {
-      const firstSchool = await prisma.school.findFirst({
-        where: { active: true },
-        orderBy: { createdAt: "asc" },
-      });
-      if (firstSchool) {
-        return {
-          id: firstSchool.id,
-          inepCode: firstSchool.inepCode,
-          name: firstSchool.name,
-          city: firstSchool.city,
-          state: firstSchool.state,
-          nre: firstSchool.nre,
-          network: (firstSchool as any).network || "ESTADUAL",
-          phone: firstSchool.phone,
-          email: firstSchool.email,
-          logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
-        };
-      }
+  let targetId: string | null = null;
 
-      // Se a tabela School estiver vazia, cria a escola padrão no banco de dados para garantir que a FK exista
-      const created = await ensureDefaultSchool();
-      if (created) {
-        return {
-          id: created.id,
-          inepCode: created.inepCode,
-          name: created.name,
-          city: created.city,
-          state: created.state,
-          nre: created.nre,
-          network: (created as any).network || "ESTADUAL",
-          phone: created.phone,
-          email: created.email,
-          logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
-        };
-      }
-    } catch {
-      // Falha de conexão ou tabela ainda em processo de migração: fallback gracioso
-      return DEFAULT_SCHOOL;
+  // 1. Prioridade máxima: cookie da instituição ativa selecionada pelo usuário no painel
+  try {
+    const cookieStore = await cookies();
+    const cookieVal = cookieStore.get("active_school_id")?.value;
+    if (cookieVal && cookieVal.trim()) {
+      targetId = cookieVal.trim();
     }
-    return DEFAULT_SCHOOL;
+  } catch {
+    // Fora do ciclo de requisição HTTP (ex: testes unitários, scripts locais, CLI)
   }
 
+  // 2. Se não houver cookie, utiliza o schoolId explicitamente fornecido
+  if (!targetId && schoolId && schoolId.trim()) {
+    targetId = schoolId.trim();
+  }
+
+  if (targetId) {
+    try {
+      const school = await prisma.school.findUnique({
+        where: { id: targetId },
+      });
+      if (school && school.active !== false) {
+        return {
+          id: school.id,
+          inepCode: school.inepCode,
+          name: school.name,
+          city: school.city,
+          state: school.state,
+          nre: school.nre,
+          network: (school as any).network || "ESTADUAL",
+          phone: school.phone,
+          email: school.email,
+          logoUrl: school.logoUrl || DEFAULT_SCHOOL.logoUrl,
+        };
+      }
+    } catch (err) {
+      console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
+    }
+  }
+
+  // 3. Fallback: primeira escola ativa cadastrada no banco de dados
   try {
-    const school = await prisma.school.findUnique({
-      where: { id: schoolId },
+    const firstSchool = await prisma.school.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: "asc" },
     });
-    if (school) {
+    if (firstSchool) {
       return {
-        id: school.id,
-        inepCode: school.inepCode,
-        name: school.name,
-        city: school.city,
-        state: school.state,
-        nre: school.nre,
-        network: (school as any).network || "ESTADUAL",
-        phone: school.phone,
-        email: school.email,
-        logoUrl: school.logoUrl || DEFAULT_SCHOOL.logoUrl,
+        id: firstSchool.id,
+        inepCode: firstSchool.inepCode,
+        name: firstSchool.name,
+        city: firstSchool.city,
+        state: firstSchool.state,
+        nre: firstSchool.nre,
+        network: (firstSchool as any).network || "ESTADUAL",
+        phone: firstSchool.phone,
+        email: firstSchool.email,
+        logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
+      };
+    }
+
+    // Se a tabela School estiver vazia, cria a escola padrão no banco de dados para garantir que a FK exista
+    const created = await ensureDefaultSchool();
+    if (created) {
+      return {
+        id: created.id,
+        inepCode: created.inepCode,
+        name: created.name,
+        city: created.city,
+        state: created.state,
+        nre: created.nre,
+        network: (created as any).network || "ESTADUAL",
+        phone: created.phone,
+        email: created.email,
+        logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
       };
     }
   } catch {
+    // Falha de conexão ou tabela ainda em processo de migração: fallback gracioso
     return DEFAULT_SCHOOL;
   }
 

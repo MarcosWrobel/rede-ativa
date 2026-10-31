@@ -48,14 +48,14 @@ export interface WeeklyDigestData {
   }>;
 }
 
-export async function compileWeeklyDigest(): Promise<WeeklyDigestData> {
-  const school = await getCurrentSchool();
+export async function compileWeeklyDigest(targetSchoolId?: string): Promise<WeeklyDigestData> {
+  const school = await getCurrentSchool(targetSchoolId);
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   // 1. Alunos ativos e registros de baixa frequência
   const studentsWithLowAtt = await prisma.student.findMany({
-    where: { active: true },
+    where: { schoolId: school.id, active: true },
     include: {
       classGroup: true,
       lowAttendanceRecord: true,
@@ -145,6 +145,7 @@ export async function compileWeeklyDigest(): Promise<WeeklyDigestData> {
   // 2. Disparos e respostas nos últimos 7 dias
   const logsLast7Days = await prisma.messageLog.findMany({
     where: {
+      student: { schoolId: school.id },
       sentAt: { gte: sevenDaysAgo },
     },
     select: {
@@ -173,6 +174,7 @@ export async function compileWeeklyDigest(): Promise<WeeklyDigestData> {
   // 4. Quedas abruptas recentes a partir de snapshots
   const recentSnapshots = await prisma.attendanceSnapshot.findMany({
     where: {
+      student: { schoolId: school.id },
       recordedAt: { gte: sevenDaysAgo },
       weeklyPercent: { not: null },
       previousWeeklyPercent: { not: null },

@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { compileWeeklyDigest } from "@/lib/weeklyDigest";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { redirect } from "next/navigation";
 import BoletimClient from "./BoletimClient";
 
@@ -11,9 +12,11 @@ export default async function BoletimPage() {
     redirect("/login");
   }
 
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+
   let initialDigest: any = null;
   try {
-    initialDigest = await compileWeeklyDigest();
+    initialDigest = await compileWeeklyDigest(currentSchool.id);
   } catch (err) {
     console.error("[BoletimPage] Erro ao compilar resumo semanal:", err);
   }

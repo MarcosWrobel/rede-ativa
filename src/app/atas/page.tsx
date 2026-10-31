@@ -21,7 +21,7 @@ export default async function AtasPage() {
   let formattedStudents: any[] = [];
   try {
     const students = await prisma.student.findMany({
-      where: { active: true },
+      where: { schoolId: school.id, active: true },
       select: {
         id: true,
         name: true,

@@ -16,7 +16,7 @@ export default async function AtestadosPage() {
   const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);
 
   const schoolCondition = school?.id
-    ? { OR: [{ schoolId: school.id }, { schoolId: null }] }
+    ? { schoolId: school.id }
     : {};
 
   let justifications: any[] = [];
@@ -52,6 +52,7 @@ export default async function AtestadosPage() {
         },
       }),
       prisma.classGroup.findMany({
+        where: school?.id ? { schoolId: school.id } : undefined,
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),

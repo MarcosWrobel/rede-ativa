@@ -4,6 +4,8 @@ import AppLayoutClient from "@/components/AppLayoutClient";
 import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { prisma } from "@/lib/prisma";
+import { isBootstrapAdminEmail } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -51,13 +53,44 @@ export default async function RootLayout({
   }
 
   const sessionUser = session?.user as any;
+  const isRootAdmin = isBootstrapAdminEmail(sessionUser?.email) || sessionUser?.role === "ADMIN";
+
+  let userSchoolsList = Array.isArray(sessionUser?.schools) ? sessionUser.schools : [];
+  if (isRootAdmin) {
+    try {
+      const allActiveSchools = await prisma.school.findMany({
+        where: { active: true },
+        select: {
+          id: true,
+          name: true,
+          inepCode: true,
+          city: true,
+          network: true,
+          logoUrl: true,
+        },
+        orderBy: { name: "asc" },
+      });
+      userSchoolsList = allActiveSchools.map((s) => ({
+        schoolId: s.id,
+        name: s.name,
+        inepCode: s.inepCode,
+        city: s.city,
+        network: (s as any).network || "ESTADUAL",
+        logoUrl: s.logoUrl || null,
+        role: "ADMIN",
+      }));
+    } catch (e) {
+      console.warn("[RootLayout] Falha não crítica ao buscar escolas para admin:", e);
+    }
+  }
+
   const currentUser = session?.user
     ? {
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",
         role: sessionUser?.role || "PEDAGOGA",
-        schoolId: sessionUser?.schoolId || currentSchool?.id || null,
-        schools: Array.isArray(sessionUser?.schools) ? sessionUser.schools : [],
+        schoolId: currentSchool?.id || sessionUser?.schoolId || null,
+        schools: userSchoolsList,
       }
     : null;
 

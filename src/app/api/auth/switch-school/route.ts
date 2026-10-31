@@ -81,7 +81,7 @@ export async function POST(req: Request) {
       req,
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       activeSchool: {
         id: targetSchool.id,
@@ -91,6 +91,14 @@ export async function POST(req: Request) {
         network: (targetSchool as any).network || "ESTADUAL",
       },
     });
+
+    response.cookies.set("active_school_id", schoolId, {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30, // 30 dias
+      sameSite: "lax",
+    });
+
+    return response;
   } catch (error: any) {
     console.error("[POST /api/auth/switch-school] Erro:", error);
     return NextResponse.json({ error: "Erro ao alternar instituição escolar" }, { status: 500 });

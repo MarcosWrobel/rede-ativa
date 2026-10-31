@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import ModelosClient from "./ModelosClient";
 import { redirect } from "next/navigation";
 
@@ -11,9 +12,14 @@ export default async function ModelosPage() {
     redirect("/login");
   }
 
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+
   let templates: any[] = [];
   try {
     templates = await prisma.messageTemplate.findMany({
+      where: {
+        OR: [{ schoolId: currentSchool.id }, { schoolId: null }],
+      },
       orderBy: [{ segment: "asc" }, { title: "asc" }],
     });
   } catch (err) {

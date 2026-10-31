@@ -33,9 +33,18 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { studentId, attendancePercent, enrollmentDetail, actionsTaken } = await req.json();
     if (!studentId) {
       return NextResponse.json({ error: "Aluno obrigatório" }, { status: 400 });
+    }
+
+    const targetStudent = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, schoolId: true },
+    });
+    if (!targetStudent || (targetStudent.schoolId && targetStudent.schoolId !== currentSchool.id)) {
+      return NextResponse.json({ error: "Estudante não encontrado na instituição atual." }, { status: 404 });
     }
 
     const record = await prisma.lowAttendanceRecord.upsert({

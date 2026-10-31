@@ -3,18 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function GET(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
 
-    const where: any = { active: true };
+    const where: any = {
+      active: true,
+      OR: [{ schoolId: currentSchool.id }, { schoolId: null }],
+    };
     if (segment && segment !== "TODOS") {
-      where.OR = [{ segment }, { segment: "TODOS" }];
+      where.AND = [{ OR: [{ segment }, { segment: "TODOS" }] }];
     }
 
     const templates = await prisma.messageTemplate.findMany({
@@ -33,6 +38,7 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const parsed = templateCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -47,6 +53,7 @@ export async function POST(req: Request) {
         prefixText,
         suffixText,
         isAbsenceRelated,
+        schoolId: currentSchool.id,
       },
     });
 

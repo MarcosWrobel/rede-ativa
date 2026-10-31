@@ -81,6 +81,7 @@ export default async function EncaminhamentosPage() {
         },
       }),
       prisma.classGroup.findMany({
+        where: { schoolId: school.id },
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),

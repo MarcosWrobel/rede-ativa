@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkIsAdmin } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import HistoricoClient from "./HistoricoClient";
 import { redirect } from "next/navigation";
 
@@ -14,6 +15,8 @@ export default async function HistoricoPage() {
     redirect("/login");
   }
 
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const schoolId = currentSchool.id;
   const isAdmin = checkIsAdmin(session);
 
   let logs: any[] = [];
@@ -24,6 +27,7 @@ export default async function HistoricoPage() {
   try {
     const results = await Promise.all([
       prisma.messageLog.findMany({
+        where: { student: { schoolId } },
         take: INITIAL_PAGE_SIZE,
         orderBy: { sentAt: "desc" },
         include: {
@@ -32,11 +36,15 @@ export default async function HistoricoPage() {
           },
         },
       }),
-      prisma.messageLog.count(),
+      prisma.messageLog.count({
+        where: { student: { schoolId } },
+      }),
       prisma.classGroup.findMany({
+        where: { schoolId },
         orderBy: { name: "asc" },
       }),
       prisma.messageLog.findMany({
+        where: { student: { schoolId } },
         distinct: ["sentByName"],
         select: { sentByName: true },
         orderBy: { sentByName: "asc" },
