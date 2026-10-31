@@ -53,7 +53,7 @@ interface NavSection {
 }
 
 export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMobileOpen }: SidebarProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const [collapsed, setCollapsed] = useState(false);
 
   // Load user preference for sidebar state

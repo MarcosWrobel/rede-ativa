@@ -25,7 +25,7 @@ interface AppLayoutClientProps {
 }
 
 export default function AppLayoutClient({ children, currentUser, currentSchool }: AppLayoutClientProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 

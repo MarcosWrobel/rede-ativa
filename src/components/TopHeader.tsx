@@ -17,7 +17,7 @@ interface TopHeaderProps {
 }
 
 export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: TopHeaderProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
 
   if (pathname === "/login") return null;
 

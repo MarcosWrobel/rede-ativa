@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Building2, ChevronDown, Check, Plus, Settings, Landmark, ShieldCheck } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 interface SchoolOption {
   schoolId: string;
@@ -32,7 +31,6 @@ export default function SchoolSelector({
   userSchools = [],
   isAdmin = false,
 }: SchoolSelectorProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
