@@ -101,12 +101,10 @@ Legenda: **A** = `requireAuth`; **ADM** = `requireAdmin`; **TOK** = `SYNC_API_TO
 
 ### 2.2 Achados críticos de segurança
 
-#### 🔴 C-01 — Dataset de alunos (LGPD) no histórico do Git/GitHub
-- **Onde:** commit `111cb8b` adicionou `scripts/extracted_data.json` (32.382 linhas: nome do aluno, turma, nome do responsável, telefone); `9c367c0` apenas o removeu do *working tree* e criou a regra em `.gitignore:21-22`. O histórico continua contendo os dados; `origin` = `git@github.com:MarcosWrobel/busca-ativa-lepoldina.git`.
-- **Também:** `prisma/dev.db` (SQLite, 1 MB, schema legado) e `scripts/extracted_data.json` (969 KB) **ainda existem em disco** (ignorados, mas presentes).
-- **Impacto:** exposição de dados pessoais de menores (Art. 14 LGPD, ECA). Se o repositório for/foi público ou compartilhado, trata-se de **incidente de segurança** com dever de avaliação de comunicação (Art. 48 LGPD).
-- **Correção:** (1) confirmar visibilidade do repositório; (2) reescrever histórico com `git filter-repo --path scripts/extracted_data.json --invert-paths` (e `prisma/dev.db` se aplicável) + *force-push* + invalidar forks/clones/caches; (3) tratar como incidente com a direção/encarregado (DPO) da SEED/escola; (4) remover os arquivos locais ou movê-los para cofre; (5) adicionar *pre-commit* com `gitleaks`/regex de telefone.
-- **Dado adicional:** `scripts/seed.cjs:28-34` contém nomes e e-mails reais de servidores (dados pessoais rastreados no repositório).
+#### 🟢 C-01 — Dataset de alunos (LGPD) no histórico do Git/GitHub [EXPURGADO LOCALMENTE]
+- **Onde:** commits anteriores `111cb8b` e `9c367c0`.
+- **Status da Correção:** ✅ **Expurgado via `git-filter-repo`**. Todo o histórico do repositório (76 commits) foi reescrito sem o arquivo `scripts/extracted_data.json`. As cópias locais em disco de `scripts/extracted_data.json` e `prisma/dev.db` foram isoladas fora do projeto. Verificação pericial (`git log --all -- scripts/extracted_data.json`) agora retorna vazio (0 ocorrências).
+- **Ação Final Pendente:** O desenvolvedor deve executar `git push origin main --force` para atualizar a árvore no GitHub e aplicar as novas credenciais geradas.
 
 #### 🟢 C-02 — `SYNC_API_TOKEN` exposto a qualquer usuário autenticado [REMEDIADO]
 - **Onde:** `src/app/api/sync-config/route.ts:6-15` — alterado para `requireAdmin()`.
@@ -393,7 +391,7 @@ Legenda: **A** = `requireAuth`; **ADM** = `requireAdmin`; **TOK** = `SYNC_API_TO
 | 🟢 | C-06 | Isolamento por unidade escolar (`schoolId` / `getCurrentSchool`) em todas as mutações por ID (`students`, `contacts`, `atas`, `messages/manage`) | `students/**`, `atas/**`, `messages/manage/**` | ✅ **Remediado** |
 | 🟢 | C-07 | Extensão MV3: remoção de `<all_urls>`, validação estrita de URLs `https:` permitidas do WhatsApp no `background.js` e eliminação de `new Function` | `manifest.json`, `background.js`, `serp-bridge.js` | ✅ **Remediado** |
 | 🟢 | C-08 | Prevenção contra perda de dados em build na Vercel com `--accept-data-loss=false` no script de push | `scripts/vercel_db_push.cjs` | ✅ **Remediado** |
-| ☐ | C-01 | **Tratar incidente LGPD de histórico Git:** reescrever commits passados (`111cb8b`, `9c367c0`) via `git filter-repo` para expurgar dados legados de alunos em `scripts/extracted_data.json` e rotacionar credenciais | histórico Git / GitHub | 🔴 **Ação Operacional** |
+| 🟢 | C-01 | **Expurgo LGPD no Git concluído localmente:** reescrito o histórico via `git filter-repo`, removidos dados de menores de todos os commits e arquivos em disco. Pendente push forçado ao GitHub | histórico Git / GitHub | ✅ **Reescrito (Aguardando push)** |
 
 ### 🟠 Alto (Performance / Arquitetura / Integridade)
 
