@@ -503,7 +503,7 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
           <div className="text-xs text-slate-500 dark:text-slate-400">
             {tokenCreatedAt && (
-              <span>Chave em vigor gerada em: {new Date(tokenCreatedAt).toLocaleString("pt-BR")}</span>
+              <span suppressHydrationWarning>Chave em vigor gerada em: {new Date(tokenCreatedAt).toLocaleDateString("pt-BR")}</span>
             )}
           </div>
 

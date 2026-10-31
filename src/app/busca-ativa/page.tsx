@@ -16,7 +16,7 @@ export default async function BuscaAtivaPage({
     redirect("/login");
   }
 
-  const sp = await searchParams;
+  const sp = (await searchParams) || {};
   const recentCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
   const [classGroups, templates, rawStudents, recentJustifications, allContacts] =
@@ -106,10 +106,10 @@ export default async function BuscaAtivaPage({
       classGroups={classGroups}
       templates={templates}
       initialStudents={initialStudents}
-      initialSelectedStudentId={sp.studentId || ""}
-      initialCustomPhone={sp.phone || ""}
-      initialMode={sp.mode === "fila" ? "fila" : "individual"}
-      initialTurmaId={sp.turmaId || ""}
+      initialSelectedStudentId={sp?.studentId || ""}
+      initialCustomPhone={sp?.phone || ""}
+      initialMode={sp?.mode === "fila" ? "fila" : "individual"}
+      initialTurmaId={sp?.turmaId || ""}
       currentUser={{
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",

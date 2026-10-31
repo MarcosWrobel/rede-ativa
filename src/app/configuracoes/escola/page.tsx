@@ -33,8 +33,10 @@ export default async function EscolaSettingsPage() {
   }
 
   // Check if school has active sync token
-  const schoolRecord = await prisma.school.findUnique({
-    where: { id: currentSchool.id },
+  const schoolRecord = await prisma.school.findFirst({
+    where: {
+      OR: [{ id: currentSchool.id }, { inepCode: currentSchool.inepCode }],
+    },
     select: {
       id: true,
       name: true,
