@@ -19,6 +19,7 @@ import {
   Sparkles,
   PhoneOff,
   Stethoscope,
+  MessageSquare,
 } from "lucide-react";
 import { isBootstrapAdminEmail } from "@/lib/roles";
 import ModalDialog from "@/components/ModalDialog";
@@ -688,67 +689,70 @@ export default function HistoricoClient({
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+        <div className="overflow-x-auto relative">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
               <tr>
-                <th className="px-4 py-3">Data / Hora</th>
-                <th className="px-4 py-3">Aluno</th>
-                <th className="px-4 py-3">Turma</th>
-                <th className="px-4 py-3">Motivo</th>
-                <th className="px-4 py-3">Telefone / Entrega</th>
-                <th className="px-4 py-3">Pedagoga</th>
-                <th className="px-4 py-3 text-center">Retornou?</th>
-                <th className="px-4 py-3">Retorno & Classificação</th>
-                {isAdmin && <th className="px-4 py-3 text-center">Ações (ADM)</th>}
+                <th className="px-3 py-3 whitespace-nowrap">Data / Hora</th>
+                <th className="px-3 py-3">Aluno</th>
+                <th className="px-2.5 py-3">Turma</th>
+                <th className="px-3 py-3">Motivo</th>
+                <th className="px-3 py-3">Telefone / Entrega</th>
+                <th className="px-2.5 py-3">Pedagoga</th>
+                <th className="px-2.5 py-3 text-center">Retornou?</th>
+                <th className="px-3 py-3">Retorno & Classificação</th>
+                <th className="sticky right-0 z-20 bg-slate-50 dark:bg-slate-800 px-3 py-3 text-center border-l border-slate-200 dark:border-slate-700 shadow-[-6px_0_10px_-2px_rgba(0,0,0,0.06)] min-w-[110px]">
+                  Ações
+                </th>
               </tr>
             </thead>
             <tbody
-              className={`divide-y divide-slate-100 transition-opacity ${
+              className={`divide-y divide-slate-100 dark:divide-slate-800 transition-opacity ${
                 isLoading ? "opacity-60" : "opacity-100"
               }`}
             >
               {logs.map((log) => {
                 const dt = new Date(log.sentAt);
                 return (
-                  <tr key={log.id} className="hover:bg-slate-50/70 transition">
-                    <td className="px-4 py-3 font-mono text-slate-500 whitespace-nowrap">
-                      {dt.toLocaleDateString("pt-BR")}{" "}
-                      <span className="text-[10px] text-slate-400">
+                  <tr key={log.id} className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition">
+                    <td className="px-3 py-2.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap text-[11px] leading-tight">
+                      <div className="font-semibold">{dt.toLocaleDateString("pt-BR")}</div>
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500">
                         {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                      </span>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">
+                    <td className="px-3 py-2.5 font-semibold text-slate-900 dark:text-slate-100 max-w-[170px]">
                       <Link
                         href={`/alunos/${log.student.id}`}
-                        className="hover:text-sky-700 hover:underline"
+                        className="hover:text-sky-700 dark:hover:text-sky-400 hover:underline block truncate"
+                        title={log.student.name}
                       >
                         {log.student.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                    <td className="px-2.5 py-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                       {log.student.classGroup.name}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-block px-2 py-0.5 rounded-full font-medium bg-sky-50 text-sky-700 border border-sky-100">
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <span className="inline-block px-2 py-0.5 rounded-full font-medium bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-100 dark:border-sky-800 text-[11px]">
                         {log.reasonTitle}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="font-mono text-slate-600">{log.phoneUsed}</div>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <div className="font-mono text-slate-600 dark:text-slate-400 text-[11px]">{log.phoneUsed}</div>
                       <div className="mt-0.5">{renderDeliveryBadge(log)}</div>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-medium">
+                    <td className="px-2.5 py-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium text-[11px] max-w-[110px] truncate" title={log.sentByName}>
                       {log.sentByName}
                     </td>
-                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                    <td className="px-2.5 py-2.5 text-center whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => handleToggleReply(log)}
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold transition shadow-xs ${
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold transition shadow-xs cursor-pointer ${
                           log.guardianReplied
-                            ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
-                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 hover:bg-emerald-200"
+                            : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200"
                         }`}
                         title="Clique para alternar o status de resposta"
                       >
@@ -762,57 +766,65 @@ export default function HistoricoClient({
                         )}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 min-w-[230px]">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-0.5 min-w-0">
-                          {log.replyCategory && (
-                            <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
-                              {REPLY_CATEGORY_LABELS[log.replyCategory as ReplyCategory] ||
-                                log.replyCategory}
-                            </span>
-                          )}
-                          <span className="block truncate max-w-xs text-[11px] italic text-slate-500">
-                            {log.replyNotes || "Nenhuma anotação"}
+                    <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400 max-w-[220px]">
+                      <div className="space-y-0.5 min-w-0">
+                        {log.replyCategory && (
+                          <span className="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                            {REPLY_CATEGORY_LABELS[log.replyCategory as ReplyCategory] ||
+                              log.replyCategory}
                           </span>
-                        </div>
+                        )}
+                        <span className="block truncate text-[11px] italic text-slate-500 dark:text-slate-400" title={log.replyNotes || ""}>
+                          {log.replyNotes || "Nenhuma anotação"}
+                        </span>
+                      </div>
+                    </td>
+                    {/* Coluna Sticky de Ações Fixa à Direita */}
+                    <td className="sticky right-0 z-10 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 px-3 py-2.5 text-center whitespace-nowrap border-l border-slate-200 dark:border-slate-800 shadow-[-6px_0_10px_-2px_rgba(0,0,0,0.06)] transition-colors">
+                      <div className="flex items-center justify-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => handleOpenNoteModal(log)}
-                          className="text-[11px] font-bold text-sky-600 hover:text-sky-800 underline whitespace-nowrap shrink-0"
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                            log.replyNotes
+                              ? "bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 hover:bg-sky-100 border border-sky-200 dark:border-sky-800"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 border border-slate-200 dark:border-slate-700"
+                          }`}
+                          title={log.replyNotes ? "Editar retorno / anotação" : "Registrar retorno familiar"}
                         >
-                          {log.replyNotes ? "Editar" : "+ Registrar"}
+                          <MessageSquare className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                          <span>{log.replyNotes ? "Editar" : "+ Nota"}</span>
                         </button>
+
+                        {isAdmin && (
+                          <div className="flex items-center gap-0.5 border-l border-slate-200 dark:border-slate-700 pl-1.5 ml-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(log)}
+                              className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition"
+                              title="Editar registro"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveDeleteLog(log)}
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
+                              title="Excluir registro"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </td>
-                    {isAdmin && (
-                      <td className="px-4 py-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center space-x-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(log)}
-                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                            title="Editar todos os campos deste registro"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveDeleteLog(log)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                            title="Excluir este registro"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
               {logs.length === 0 && !isLoading && (
                 <tr>
                   <td
-                    colSpan={isAdmin ? 9 : 8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     Nenhum envio encontrado com os filtros selecionados.

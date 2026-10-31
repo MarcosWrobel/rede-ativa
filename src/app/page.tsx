@@ -66,7 +66,7 @@ export default async function DashboardPage() {
           btnText: "Monitorar Faltas",
         },
         {
-          title: "Disparo WhatsApp & Fila",
+          title: "Enviar Mensagem",
           desc: "Envio individual ou Fila Assistida por Turma com salto automático de atestados.",
           href: "/busca-ativa",
           icon: Send,
@@ -88,7 +88,7 @@ export default async function DashboardPage() {
       desc: "Gestão cadastral, atestados ágeis, livro oficial de atas e acompanhamento de combinados",
       cards: [
         {
-          title: "Alunos, Turmas & SERE",
+          title: "Alunos e Turmas",
           desc: "Base cadastral completa, importação em lote SERE (.xls/.pdf), Prontuário 360º e Dossiê A4.",
           href: "/alunos",
           icon: Users,

@@ -85,7 +85,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
         },
         {
           href: "/busca-ativa",
-          label: "Disparo WhatsApp & Fila",
+          label: "Enviar Mensagem",
           icon: Send,
           description: "Envio individual e fila assistida por turma via wa.me",
         },
@@ -103,7 +103,7 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
       items: [
         {
           href: "/alunos",
-          label: "Alunos, Turmas & SERE",
+          label: "Alunos e Turmas",
           icon: Users,
           description: "Base de alunos, importação SERE, Prontuário 360 e Dossiê A4",
         },

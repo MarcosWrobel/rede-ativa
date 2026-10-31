@@ -45,8 +45,24 @@ export default async function RootLayout({
     : null;
 
   return (
-    <html lang="pt-BR">
-      <body className="bg-slate-50 text-slate-900 min-h-screen">
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var theme = localStorage.getItem('leopoldina_theme');
+                if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                }
+              } catch (_) {}
+            `,
+          }}
+        />
+      </head>
+      <body className="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-150">
         <AppLayoutClient currentUser={currentUser}>
           {children}
         </AppLayoutClient>
