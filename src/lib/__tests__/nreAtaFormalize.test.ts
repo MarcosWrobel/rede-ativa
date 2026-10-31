@@ -13,6 +13,15 @@ describe("Formalização & Revisão de Atas com Diretrizes NRE/SEED-PR", () => {
     expect(d2.diaExtenso).toBe("primeiro");
     expect(d2.mesExtenso).toBe("maio");
     expect(d2.dataExtensoCompleta).toBe("Ao primeiro dia do mês de maio do ano de dois mil e vinte e seis");
+
+    // Teste de fuso horário crítico: 21h22 no Paraná (UTC-3) equivale a 00h22 do dia 31 em UTC.
+    // O sistema deve preservar estritamente o dia 30 do Paraná!
+    const dUtcMidnight = formatAtaDateExtenso("2026-10-31T00:22:21.000Z");
+    expect(dUtcMidnight.diaExtenso).toBe("trinta");
+    expect(dUtcMidnight.mesExtenso).toBe("outubro");
+    expect(dUtcMidnight.anoExtenso).toBe("dois mil e vinte e seis");
+    expect(dUtcMidnight.horaFormatada).toBe("21h22");
+    expect(dUtcMidnight.dataExtensoCompleta).toBe("Aos trinta dias do mês de outubro do ano de dois mil e vinte e seis");
   });
 
   it("gera texto corrido contínuo no pretérito perfeito com cláusula de fechamento do NRE", () => {

@@ -46,14 +46,33 @@ export function formatAtaDateExtenso(dateInput?: string | Date | null): {
   }
   const validDate = isNaN(d.getTime()) ? new Date() : d;
 
-  const day = validDate.getDate();
+  // Extrai componentes estritamente no fuso horário oficial do Paraná (America/Sao_Paulo - UTC-3)
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  });
+
+  const parts = dtf.formatToParts(validDate);
+  const partMap: Record<string, string> = {};
+  for (const p of parts) {
+    partMap[p.type] = p.value;
+  }
+
+  const day = parseInt(partMap.day || "1", 10);
+  const monthIdx = parseInt(partMap.month || "10", 10) - 1;
+  const year = parseInt(partMap.year || "2026", 10);
+  const hours = parseInt(partMap.hour || "0", 10);
+  const minutes = parseInt(partMap.minute || "0", 10);
+
   const diaExtenso = DIAS_EXTENSO[day] || String(day);
-  const mesExtenso = MESES[validDate.getMonth()] || "outubro";
-  const year = validDate.getFullYear();
+  const mesExtenso = MESES[monthIdx] || "outubro";
   const anoExtenso = convertYearToExtenso(year);
 
-  const hours = validDate.getHours();
-  const minutes = validDate.getMinutes();
   const horaFormatada = `${String(hours).padStart(2, "0")}h${String(minutes).padStart(2, "0")}`;
 
   const dataExtensoCompleta =

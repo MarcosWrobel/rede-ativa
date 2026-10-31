@@ -251,17 +251,37 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
           // Garante a data real por extenso na abertura sem alucinação
           const prefixoDataObrigatorio = dateInfo.dataExtensoCompleta;
           if (!cleanSummary.startsWith(prefixoDataObrigatorio)) {
-            // Se o modelo começou com uma fórmula alternativa ou data alucinada, substitui o trecho inicial
-            const matchAbertura = cleanSummary.match(/^(?:Aos?\s+[^,]+|No dia\s+[^,]+|Em\s+[^,]+),\s*(?:nas dependências|\s*realizou-se|\s*reuniram-se)/i);
+            // Substitui todo o bloco de abertura até "com a presença" ou "referente a"
+            const matchAbertura = cleanSummary.match(/^(?:Aos?|No dia|Em|Nesta data)\s+[^,]+(?:,[^,]+)*?,\s*(?:nas dependências[^\.,]+?realizou-se atendimento\s*|realizou-se atendimento\s*)/i);
             if (matchAbertura) {
               cleanSummary = cleanSummary.replace(
                 matchAbertura[0],
-                `${prefixoDataObrigatorio}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento`
+                `${prefixoDataObrigatorio}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento `
               );
-            } else if (!cleanSummary.toLowerCase().includes(dateInfo.mesExtenso.toLowerCase())) {
-              cleanSummary = `${prefixoDataObrigatorio}, ${cleanSummary}`;
+            } else {
+              // Se tiver uma abertura genérica até a primeira vírgula seguida de dependências
+              const fallbackMatch = cleanSummary.match(/^(?:Aos?|No dia|Em|Nesta data)\s+[^,]+,\s*/i);
+              if (fallbackMatch) {
+                cleanSummary = cleanSummary.replace(
+                  fallbackMatch[0],
+                  `${prefixoDataObrigatorio}, `
+                );
+              } else if (!cleanSummary.toLowerCase().includes(dateInfo.mesExtenso.toLowerCase())) {
+                cleanSummary = `${prefixoDataObrigatorio}, ${cleanSummary}`;
+              }
             }
           }
+
+          // Higienização contra qualquer repetição ou eco na abertura
+          cleanSummary = cleanSummary.replace(
+            /(?:nas dependências\s+da\s+Equipe\s+Pedagógica\s+deste\s+estabelecimento\s+de\s+ensino,?\s*realizou-se\s+atendimento\s*)+/gi,
+            "nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento "
+          );
+          cleanSummary = cleanSummary.replace(
+            /(?:da\s+Equipe\s+Pedagógica\s+deste\s+estabelecimento\s+de\s+ensino,?\s*realizou-se\s+atendimento\s*)+/gi,
+            "da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento "
+          );
+          cleanSummary = cleanSummary.replace(/\s{2,}/g, " ").trim();
 
           structured.formalSummary = cleanSummary;
         }
