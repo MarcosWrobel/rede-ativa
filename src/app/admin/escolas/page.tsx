@@ -35,7 +35,7 @@ export default async function AdminEscolasPage() {
       _count: {
         select: {
           students: true,
-          classes: true,
+          classGroups: true,
           users: true,
           userSchools: true,
         },
@@ -56,7 +56,7 @@ export default async function AdminEscolasPage() {
     logoUrl: s.logoUrl,
     hasSyncToken: Boolean(s.syncTokenHash),
     studentsCount: s._count.students,
-    classesCount: s._count.classes,
+    classesCount: s._count.classGroups,
     staffCount: s._count.userSchools || s._count.users,
     createdAt: s.createdAt.toISOString(),
   }));
