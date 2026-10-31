@@ -15,9 +15,13 @@ export default async function AtestadosPage() {
   const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
   const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);
 
+  const schoolCondition = school?.id
+    ? { OR: [{ schoolId: school.id }, { schoolId: null }] }
+    : {};
+
   const [justifications, totalCount, activeCount, classes, students] = await Promise.all([
     prisma.absenceJustification.findMany({
-      where: { student: { schoolId: school.id } },
+      where: { student: { ...schoolCondition, active: true } },
       take: 100,
       orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
       include: {
@@ -33,20 +37,19 @@ export default async function AtestadosPage() {
         },
       },
     }),
-    prisma.absenceJustification.count({ where: { student: { schoolId: school.id } } }),
+    prisma.absenceJustification.count({ where: { student: { ...schoolCondition, active: true } } }),
     prisma.absenceJustification.count({
       where: {
-        student: { schoolId: school.id },
+        student: { ...schoolCondition, active: true },
         endDate: { gte: startOfTodayBrasilia },
       },
     }),
     prisma.classGroup.findMany({
-      where: { schoolId: school.id, active: true },
       select: { id: true, name: true, shift: true },
       orderBy: { name: "asc" },
     }),
     prisma.student.findMany({
-      where: { schoolId: school.id, active: true },
+      where: { ...schoolCondition, active: true },
       select: {
         id: true,
         name: true,

@@ -124,7 +124,6 @@ export async function GET(req: Request) {
         },
       }),
       prisma.classGroup.findMany({
-        where: { schoolId: school.id, active: true },
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),

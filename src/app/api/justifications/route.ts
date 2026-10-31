@@ -40,9 +40,14 @@ export async function GET(req: Request) {
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
     const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);
 
+    const schoolCondition = school?.id
+      ? { OR: [{ schoolId: school.id }, { schoolId: null }] }
+      : {};
+
     const where: any = {
       student: {
-        schoolId: school.id,
+        ...schoolCondition,
+        active: true,
       },
     };
 
@@ -90,16 +95,15 @@ export async function GET(req: Request) {
         },
       }),
       prisma.absenceJustification.count({
-        where: { student: { schoolId: school.id } },
+        where: { student: { ...schoolCondition, active: true } },
       }),
       prisma.absenceJustification.count({
         where: {
-          student: { schoolId: school.id },
+          student: { ...schoolCondition, active: true },
           endDate: { gte: startOfTodayBrasilia },
         },
       }),
       prisma.classGroup.findMany({
-        where: { schoolId: school.id, active: true },
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),
