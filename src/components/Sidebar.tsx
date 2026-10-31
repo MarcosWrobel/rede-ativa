@@ -20,7 +20,9 @@ import {
   ChevronRight,
   Menu,
   X,
-  LayoutDashboard
+  LayoutDashboard,
+  Stethoscope,
+  ListTodo
 } from "lucide-react";
 
 interface SidebarProps {
@@ -106,10 +108,22 @@ export default function Sidebar({ currentUser, mobileOpen, setMobileOpen }: Side
           description: "Base de alunos, importação SERE, Prontuário 360 e Dossiê A4",
         },
         {
+          href: "/atestados",
+          label: "Painel de Atestados",
+          icon: Stethoscope,
+          description: "Lançamento rápido e controle de atestados médicos e licenças",
+        },
+        {
           href: "/atas",
           label: "Livro de Atas Digital",
           icon: BookOpenCheck,
           description: "Atas eletrônicas, assinaturas digitais, fé pública e Livro Anual",
+        },
+        {
+          href: "/encaminhamentos",
+          label: "Combinados & Prazos",
+          icon: ListTodo,
+          description: "Acompanhamento e baixa em compromissos e prazos de atas",
         },
       ],
     },

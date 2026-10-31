@@ -743,6 +743,16 @@ export default function FaltasClient({
             <span>Sincronizar Power BI</span>
           </button>
 
+          {/* Lançamento Rápido de Atestados */}
+          <Link
+            href="/atestados"
+            title="Lançar e gerenciar atestados médicos e licenças"
+            className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
+          >
+            <Stethoscope className="w-4 h-4 text-emerald-600" />
+            <span>Lançar Atestado</span>
+          </Link>
+
           {/* Fila por Turma (wa.me) */}
           <Link
             href={

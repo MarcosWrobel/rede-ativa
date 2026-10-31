@@ -16,7 +16,9 @@ import {
   ArrowRight, 
   Clock, 
   CheckCircle2, 
-  School
+  School,
+  Stethoscope,
+  ListTodo
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +85,7 @@ export default async function DashboardPage() {
     },
     {
       title: "2. Registro Pedagógico & Documentação",
-      desc: "Gestão cadastral, prontuários 360º, dossiês e livro oficial de atas com fé pública",
+      desc: "Gestão cadastral, atestados ágeis, livro oficial de atas e acompanhamento de combinados",
       cards: [
         {
           title: "Alunos, Turmas & SERE",
@@ -94,12 +96,28 @@ export default async function DashboardPage() {
           btnText: "Gerenciar Alunos",
         },
         {
+          title: "Painel de Atestados",
+          desc: "Lançamento ágil de atestados médicos com cálculo automático, atalhos de dias e tabela filtrável.",
+          href: "/atestados",
+          icon: Stethoscope,
+          color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+          btnText: "Lançar Atestados",
+        },
+        {
           title: "Livro de Atas Digital",
           desc: "Lavratura bimodal com IA Gemini, assinaturas digitais @escola/biometria e Livro Anual.",
           href: "/atas",
           icon: BookOpenCheck,
           color: "bg-indigo-50 text-indigo-700 border-indigo-200",
           btnText: "Acessar Livro de Atas",
+        },
+        {
+          title: "Combinados & Encaminhamentos",
+          desc: "Acompanhamento de prazos, cobrança de compromissos pedagógicos e baixa com notas de devolutiva.",
+          href: "/encaminhamentos",
+          icon: ListTodo,
+          color: "bg-violet-50 text-violet-700 border-violet-200",
+          btnText: "Acompanhar Prazos",
         },
       ],
     },
