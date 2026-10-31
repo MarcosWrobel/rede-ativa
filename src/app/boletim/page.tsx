@@ -11,7 +11,12 @@ export default async function BoletimPage() {
     redirect("/login");
   }
 
-  const initialDigest = await compileWeeklyDigest();
+  let initialDigest: any = null;
+  try {
+    initialDigest = await compileWeeklyDigest();
+  } catch (err) {
+    console.error("[BoletimPage] Erro ao compilar resumo semanal:", err);
+  }
 
   return (
     <BoletimClient

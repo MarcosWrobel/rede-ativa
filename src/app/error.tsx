@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
-import Link from "next/link";
 
 export default function ErrorBoundary({
   error,
@@ -39,19 +38,25 @@ export default function ErrorBoundary({
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <button
             type="button"
-            onClick={() => reset()}
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.location.reload();
+              } else {
+                reset();
+              }
+            }}
             className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl transition shadow-xs"
           >
             <RefreshCw className="w-4 h-4" />
-            <span>Tentar Novamente</span>
+            <span>Recarregar Página</span>
           </button>
-          <Link
-            href="/busca-ativa"
+          <a
+            href="/"
             className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
           >
             <Home className="w-4 h-4" />
-            <span>Ir para Busca Ativa</span>
-          </Link>
+            <span>Página Inicial</span>
+          </a>
         </div>
       </div>
     </div>

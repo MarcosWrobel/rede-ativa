@@ -16,33 +16,47 @@ export default async function AlunosPage() {
   const now = new Date();
   const recentCutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
 
-  const [students, classGroups, recentJustifications, allContacts] = await Promise.all([
-    prisma.student.findMany({
-      where: { active: true },
-      include: {
-        classGroup: true,
-        _count: { select: { messageLogs: true } },
-      },
-      orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
-    }),
-    prisma.classGroup.findMany({
-      orderBy: { name: "asc" },
-    }),
-    safeQueryList(() =>
-      prisma.absenceJustification.findMany({
-        where: { endDate: { gte: recentCutoff } },
-        orderBy: { endDate: "desc" },
-      })
-    ),
-    safeQueryList(() =>
-      prisma.studentContact.findMany({
-        select: { id: true, studentId: true, whatsappValid: true },
-      })
-    ),
-  ]);
+  let students: any[] = [];
+  let classGroups: any[] = [];
+  let recentJustifications: any[] = [];
+  let allContacts: any[] = [];
+
+  try {
+    const results = await Promise.all([
+      prisma.student.findMany({
+        where: { active: true },
+        include: {
+          classGroup: true,
+          _count: { select: { messageLogs: true } },
+        },
+        orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
+      }),
+      prisma.classGroup.findMany({
+        orderBy: { name: "asc" },
+      }),
+      safeQueryList(() =>
+        prisma.absenceJustification.findMany({
+          where: { endDate: { gte: recentCutoff } },
+          orderBy: { endDate: "desc" },
+        })
+      ),
+      safeQueryList(() =>
+        prisma.studentContact.findMany({
+          select: { id: true, studentId: true, whatsappValid: true },
+        })
+      ),
+    ]);
+    students = results[0] || [];
+    classGroups = results[1] || [];
+    recentJustifications = results[2] || [];
+    allContacts = results[3] || [];
+  } catch (err) {
+    console.error("[AlunosPage] Erro ao buscar registros:", err);
+  }
 
   const justMap = new Map<string, any[]>();
   recentJustifications.forEach((j: any) => {
+    if (!j?.studentId) return;
     const arr = justMap.get(j.studentId) || [];
     arr.push(j);
     justMap.set(j.studentId, arr);
@@ -50,6 +64,7 @@ export default async function AlunosPage() {
 
   const contactsCountMap = new Map<string, number>();
   allContacts.forEach((c: any) => {
+    if (!c?.studentId) return;
     contactsCountMap.set(c.studentId, (contactsCountMap.get(c.studentId) || 0) + 1);
   });
 
@@ -59,13 +74,11 @@ export default async function AlunosPage() {
     extraContactsCount: contactsCountMap.get(s.id) || 0,
   }));
 
-  const isAdmin = checkIsAdmin(session);
-
   return (
     <AlunosClient
       initialStudents={enrichedStudents}
       classGroups={classGroups}
-      isAdmin={isAdmin}
+      isAdmin={checkIsAdmin(session)}
     />
   );
 }

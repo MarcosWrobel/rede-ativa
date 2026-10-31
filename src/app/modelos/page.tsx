@@ -11,9 +11,14 @@ export default async function ModelosPage() {
     redirect("/login");
   }
 
-  const templates = await prisma.messageTemplate.findMany({
-    orderBy: [{ segment: "asc" }, { title: "asc" }],
-  });
+  let templates: any[] = [];
+  try {
+    templates = await prisma.messageTemplate.findMany({
+      orderBy: [{ segment: "asc" }, { title: "asc" }],
+    });
+  } catch (err) {
+    console.error("[ModelosPage] Erro ao buscar templates:", err);
+  }
 
   return <ModelosClient initialTemplates={templates} />;
 }

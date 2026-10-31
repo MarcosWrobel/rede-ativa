@@ -11,10 +11,15 @@ export default async function RelatoriosPage() {
     redirect("/login");
   }
 
-  const initialSummary = await getReportsSummary({
-    segment: "TODOS",
-    schoolId: (session.user as any)?.schoolId,
-  });
+  let initialSummary: any = null;
+  try {
+    initialSummary = await getReportsSummary({
+      segment: "TODOS",
+      schoolId: (session.user as any)?.schoolId,
+    });
+  } catch (err) {
+    console.error("[RelatoriosPage] Erro ao carregar resumo de relatórios:", err);
+  }
 
   return <RelatoriosClient initialSummary={initialSummary} />;
 }

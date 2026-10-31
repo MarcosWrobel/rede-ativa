@@ -16,26 +16,39 @@ export default async function HistoricoPage() {
 
   const isAdmin = checkIsAdmin(session);
 
-  const [logs, totalCount, classGroups, pedagogaRows] = await Promise.all([
-    prisma.messageLog.findMany({
-      take: INITIAL_PAGE_SIZE,
-      orderBy: { sentAt: "desc" },
-      include: {
-        student: {
-          include: { classGroup: true },
+  let logs: any[] = [];
+  let totalCount = 0;
+  let classGroups: any[] = [];
+  let pedagogaRows: any[] = [];
+
+  try {
+    const results = await Promise.all([
+      prisma.messageLog.findMany({
+        take: INITIAL_PAGE_SIZE,
+        orderBy: { sentAt: "desc" },
+        include: {
+          student: {
+            include: { classGroup: true },
+          },
         },
-      },
-    }),
-    prisma.messageLog.count(),
-    prisma.classGroup.findMany({
-      orderBy: { name: "asc" },
-    }),
-    prisma.messageLog.findMany({
-      distinct: ["sentByName"],
-      select: { sentByName: true },
-      orderBy: { sentByName: "asc" },
-    }),
-  ]);
+      }),
+      prisma.messageLog.count(),
+      prisma.classGroup.findMany({
+        orderBy: { name: "asc" },
+      }),
+      prisma.messageLog.findMany({
+        distinct: ["sentByName"],
+        select: { sentByName: true },
+        orderBy: { sentByName: "asc" },
+      }),
+    ]);
+    logs = results[0] || [];
+    totalCount = results[1] || 0;
+    classGroups = results[2] || [];
+    pedagogaRows = results[3] || [];
+  } catch (err) {
+    console.error("[HistoricoPage] Erro ao carregar histórico:", err);
+  }
 
   const pedagogas = pedagogaRows
     .map((r) => r.sentByName)
