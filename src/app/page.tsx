@@ -7,12 +7,15 @@ import {
   History, 
   AlertTriangle, 
   BarChart3, 
+  FileSpreadsheet,
   Users, 
+  FileText,
+  BookOpenCheck,
   ShieldCheck, 
+  UserCheck,
   ArrowRight, 
   Clock, 
   CheckCircle2, 
-  TrendingUp,
   School
 } from "lucide-react";
 
@@ -31,6 +34,7 @@ export default async function DashboardPage() {
     totalReplied,
     recentLogs,
     lowAttendanceCount,
+    totalMinutes,
   ] = await Promise.all([
     prisma.student.count({ where: { active: true } }),
     prisma.messageLog.count(),
@@ -43,56 +47,113 @@ export default async function DashboardPage() {
       },
     }),
     prisma.lowAttendanceRecord.count(),
+    prisma.pedagogicalMinute.count({ where: { status: "FINALIZED" } }),
   ]);
 
-  const cards = [
+  const sections = [
     {
-      title: "Painel de Envio",
-      desc: "Selecionar turma, aluno e disparar mensagem via WhatsApp com registro e prévia instantânea.",
-      href: "/busca-ativa",
-      icon: Send,
-      color: "bg-sky-50 text-sky-700 border-sky-200",
-      btnText: "Iniciar Envios",
+      title: "1. Busca Ativa & Frequência",
+      desc: "Identificação de infrequência, disparos via WhatsApp e acompanhamento de retornos",
+      cards: [
+        {
+          title: "Painel de Frequência & Alertas",
+          desc: "Alunos em risco crítico (<75%), alertas de queda abrupta e protocolos do SERP/Celepar.",
+          href: "/faltas",
+          icon: AlertTriangle,
+          color: "bg-amber-50 text-amber-700 border-amber-200",
+          btnText: "Monitorar Faltas",
+        },
+        {
+          title: "Disparo WhatsApp & Fila",
+          desc: "Envio individual ou Fila Assistida por Turma com salto automático de atestados.",
+          href: "/busca-ativa",
+          icon: Send,
+          color: "bg-sky-50 text-sky-700 border-sky-200",
+          btnText: "Iniciar Envios",
+        },
+        {
+          title: "Histórico & Retornos",
+          desc: "Controle de mensagens enviadas, confirmação de entrega e triagem de justificativas com IA.",
+          href: "/historico",
+          icon: History,
+          color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+          btnText: "Ver Histórico",
+        },
+      ],
     },
     {
-      title: "Histórico de Envios",
-      desc: "Consultar os 3.300+ envios registrados, filtrar por período e marcar retornos dos pais.",
-      href: "/historico",
-      icon: History,
-      color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      btnText: "Ver Histórico",
+      title: "2. Registro Pedagógico & Documentação",
+      desc: "Gestão cadastral, prontuários 360º, dossiês e livro oficial de atas com fé pública",
+      cards: [
+        {
+          title: "Alunos, Turmas & SERE",
+          desc: "Base cadastral completa, importação em lote SERE (.xls/.pdf), Prontuário 360º e Dossiê A4.",
+          href: "/alunos",
+          icon: Users,
+          color: "bg-blue-50 text-blue-700 border-blue-200",
+          btnText: "Gerenciar Alunos",
+        },
+        {
+          title: "Livro de Atas Digital",
+          desc: "Lavratura bimodal com IA Gemini, assinaturas digitais @escola/biometria e Livro Anual.",
+          href: "/atas",
+          icon: BookOpenCheck,
+          color: "bg-indigo-50 text-indigo-700 border-indigo-200",
+          btnText: "Acessar Livro de Atas",
+        },
+      ],
     },
     {
-      title: "Busca-ativa",
-      desc: "Ranking de acionamentos por infrequência, acompanhamento SERP e métricas do Power BI.",
-      href: "/faltas",
-      icon: AlertTriangle,
-      color: "bg-amber-50 text-amber-700 border-amber-200",
-      btnText: "Monitorar Faltas",
+      title: "3. Diagnóstico & Gestão",
+      desc: "Visão estratégica, diagnósticos semanais automatizados e relatórios para a direção",
+      cards: [
+        {
+          title: "Boletim Semanal",
+          desc: "Diagnóstico executivo automatizado (Vercel Cron) para reuniões pedagógicas e direção.",
+          href: "/boletim",
+          icon: FileSpreadsheet,
+          color: "bg-teal-50 text-teal-700 border-teal-200",
+          btnText: "Ver Boletim",
+        },
+        {
+          title: "Relatórios & Estatísticas",
+          desc: "Gráficos de ocorrências por trimestre, produtividade pedagógica e causas de ausência.",
+          href: "/relatorios",
+          icon: BarChart3,
+          color: "bg-purple-50 text-purple-700 border-purple-200",
+          btnText: "Ver Relatórios",
+        },
+      ],
     },
     {
-      title: "Relatórios & Estatísticas",
-      desc: "Gráficos de ocorrências por motivo, produtividade por pedagoga e índices de retorno.",
-      href: "/relatorios",
-      icon: BarChart3,
-      color: "bg-purple-50 text-purple-700 border-purple-200",
-      btnText: "Ver Relatórios",
-    },
-    {
-      title: "Alunos & Turmas",
-      desc: "Cadastrar novos alunos, ajustar telefones dos responsáveis e gerenciar turmas.",
-      href: "/alunos",
-      icon: Users,
-      color: "bg-blue-50 text-blue-700 border-blue-200",
-      btnText: "Gerenciar Alunos",
-    },
-    {
-      title: "Trilha de Auditoria",
-      desc: "Registro imutável de quem realizou cada envio, edição de aluno ou alteração no sistema.",
-      href: "/auditoria",
-      icon: ShieldCheck,
-      color: "bg-slate-50 text-slate-700 border-slate-200",
-      btnText: "Ver Auditoria",
+      title: "4. Sistema & Governança",
+      desc: "Padronização institucional de comunicados, controle de acessos e auditoria",
+      cards: [
+        {
+          title: "Modelos de Mensagem",
+          desc: "Padronização de comunicados institucionais por turno e assistente de redação Gemini IA.",
+          href: "/modelos",
+          icon: FileText,
+          color: "bg-cyan-50 text-cyan-700 border-cyan-200",
+          btnText: "Gerenciar Modelos",
+        },
+        {
+          title: "Equipe & Acessos",
+          desc: "Autorização de servidores institucionais (@escola.pr.gov.br) e controle de perfis.",
+          href: "/equipe",
+          icon: UserCheck,
+          color: "bg-rose-50 text-rose-700 border-rose-200",
+          btnText: "Gerenciar Equipe",
+        },
+        {
+          title: "Trilha de Auditoria",
+          desc: "Registro imutável de ações, IPs de origem e conformidade LGPD para todos os atos.",
+          href: "/auditoria",
+          icon: ShieldCheck,
+          color: "bg-slate-50 text-slate-700 border-slate-200",
+          btnText: "Ver Auditoria",
+        },
+      ],
     },
   ];
 
@@ -113,88 +174,112 @@ export default async function DashboardPage() {
               Olá, {session?.user?.name || "Equipe Pedagógica"}!
             </h1>
             <p className="text-sky-100 text-sm mt-1 max-w-xl">
-              Bem-vinda ao sistema centralizado de Busca Ativa e Comunicação Escolar. Todos os contatos e alterações são gravados com sua identificação institucional.
+              Painel centralizado de Busca Ativa, Registro Pedagógico e Livro de Atas Digital com fé pública.
             </p>
           </div>
         </div>
-        <Link
-          href="/busca-ativa"
-          className="inline-flex items-center space-x-2 bg-white text-sky-800 hover:bg-sky-50 font-bold px-5 py-3 rounded-xl shadow-sm transition whitespace-nowrap"
-        >
-          <Send className="w-4 h-4" />
-          <span>Fazer Novo Envio</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/busca-ativa"
+            className="inline-flex items-center space-x-2 bg-white text-sky-800 hover:bg-sky-50 font-bold px-4 py-2.5 rounded-xl shadow-sm transition whitespace-nowrap text-xs"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Disparo WhatsApp</span>
+          </Link>
+          <Link
+            href="/atas"
+            className="inline-flex items-center space-x-2 bg-sky-950/40 hover:bg-sky-950/60 text-white font-bold px-4 py-2.5 rounded-xl border border-white/20 shadow-sm transition whitespace-nowrap text-xs"
+          >
+            <BookOpenCheck className="w-3.5 h-3.5" />
+            <span>Livro de Atas</span>
+          </Link>
+        </div>
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total de Alunos</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{totalStudents}</div>
-          <div className="text-xs text-slate-500 mt-1">Fundamental, Médio e Noturno</div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total de Estudantes</div>
+          <div className="text-2xl font-black text-slate-900 mt-1">{totalStudents}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Cadastrados e ativos</div>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Mensagens Enviadas</div>
-          <div className="text-2xl font-bold text-sky-600 mt-1">{totalLogs.toLocaleString()}</div>
-          <div className="text-xs text-slate-500 mt-1">Histórico completo migrado</div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagens Enviadas</div>
+          <div className="text-2xl font-black text-sky-600 mt-1">{totalLogs.toLocaleString()}</div>
+          <div className="text-xs text-slate-500 mt-0.5">{totalReplied} retornos confirmados</div>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Retornos Confirmados</div>
-          <div className="text-2xl font-bold text-emerald-600 mt-1">{totalReplied}</div>
-          <div className="text-xs text-slate-500 mt-1">Respostas dos responsáveis</div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Infrequência & Risco</div>
+          <div className="text-2xl font-black text-amber-600 mt-1">{lowAttendanceCount}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Alunos em acompanhamento SERP</div>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Busca Ativa / CT</div>
-          <div className="text-2xl font-bold text-amber-600 mt-1">{lowAttendanceCount}</div>
-          <div className="text-xs text-slate-500 mt-1">Alunos em acompanhamento</div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Atas Lavradas no Livro</div>
+          <div className="text-2xl font-black text-indigo-600 mt-1">{totalMinutes}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Com fé pública e Hash SHA-256</div>
         </div>
       </div>
 
-      {/* Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.href}
-              className="bg-white rounded-xl border border-slate-200 p-6 shadow-2xs hover:shadow-md transition flex flex-col justify-between"
-            >
-              <div>
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border mb-4 ${card.color}`}>
-                  <Icon className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900">{card.title}</h3>
-                <p className="text-sm text-slate-600 mt-2 leading-relaxed">{card.desc}</p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-100">
-                <Link
-                  href={card.href}
-                  className="inline-flex items-center text-sm font-semibold text-sky-600 hover:text-sky-800 transition group"
-                >
-                  <span>{card.btnText}</span>
-                  <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition" />
-                </Link>
-              </div>
+      {/* Categorized Sections */}
+      <div className="space-y-8">
+        {sections.map((section) => (
+          <div key={section.title} className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-1 border-b border-slate-200">
+              <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-800">
+                {section.title}
+              </h2>
+              <span className="text-xs text-slate-500">{section.desc}</span>
             </div>
-          );
-        })}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {section.cards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <div
+                    key={card.href}
+                    className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs hover:shadow-md transition flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center border mb-3 ${card.color}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <h3 className="text-base font-bold text-slate-900 group-hover:text-sky-600 transition">
+                        {card.title}
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">{card.desc}</p>
+                    </div>
+                    <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+                      <Link
+                        href={card.href}
+                        className="inline-flex items-center text-xs font-bold text-sky-600 hover:text-sky-800 transition"
+                      >
+                        <span>{card.btnText}</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-1 group-hover:translate-x-1 transition" />
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Recent Activity Table */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-2xs">
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+          <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
             <Clock className="w-4 h-4 text-sky-600" />
             <span>Últimos Envios Registrados</span>
           </h2>
-          <Link href="/historico" className="text-xs font-semibold text-sky-600 hover:text-sky-800">
+          <Link href="/historico" className="text-xs font-bold text-sky-600 hover:text-sky-800">
             Ver todos ({totalLogs}) &rarr;
           </Link>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 bg-slate-50 uppercase">
+            <thead className="text-xs text-slate-500 bg-slate-50 uppercase font-semibold">
               <tr>
                 <th className="px-4 py-2.5 rounded-l-lg">Aluno</th>
                 <th className="px-4 py-2.5">Turma</th>

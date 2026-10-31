@@ -18,22 +18,33 @@ export default function TopHeader({ currentUser, onOpenMobile }: TopHeaderProps)
   if (pathname === "/login") return null;
 
   const pageTitles: Record<string, { title: string; subtitle: string }> = {
-    "/": { title: "Visão Geral", subtitle: "Painel de controle e métricas" },
-    "/busca-ativa": { title: "Painel de Envio", subtitle: "Disparo e registro de contatos escolares" },
-    "/historico": { title: "Histórico de Envios", subtitle: "Controle de contatos e retornos dos pais" },
-    "/faltas": { title: "Busca-ativa", subtitle: "Acompanhamento de infrequência e Conselho Tutelar" },
-    "/relatorios": { title: "Relatórios & Estatísticas", subtitle: "Indicadores de ocorrências e comunicação" },
+    "/": { title: "Visão Geral", subtitle: "Painel de controle e métricas gerais" },
+    "/faltas": { title: "Painel de Frequência & Alertas", subtitle: "Monitoramento de infrequência, risco crítico e SERP" },
+    "/busca-ativa": { title: "Disparo WhatsApp & Fila", subtitle: "Envio individual e fila assistida por turma via wa.me" },
+    "/historico": { title: "Histórico & Retornos", subtitle: "Controle de contatos e retornos familiares com IA" },
+    "/alunos": { title: "Alunos, Turmas & SERE", subtitle: "Gestão cadastral, prontuários 360º e importação oficial" },
+    "/atas": { title: "Livro de Atas Digital", subtitle: "Atendimento pedagógico, assinaturas digitais e fé pública" },
     "/boletim": { title: "Boletim Semanal", subtitle: "Diagnóstico executivo de busca ativa e infrequência" },
-    "/alunos": { title: "Alunos & Turmas", subtitle: "Gestão cadastral de estudantes" },
-    "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação" },
+    "/relatorios": { title: "Relatórios & Estatísticas", subtitle: "Indicadores de ocorrências, causas e metas" },
+    "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação institucional" },
     "/equipe": { title: "Equipe & Acessos", subtitle: "Controle institucional de servidores autorizados" },
-    "/auditoria": { title: "Trilha de Auditoria", subtitle: "Histórico imutável de conformidade" },
+    "/auditoria": { title: "Trilha de Auditoria", subtitle: "Histórico imutável de conformidade e auditoria com IP" },
   };
 
-  const currentInfo = pageTitles[pathname] || {
-    title: "Colégio Leopoldina",
-    subtitle: "Sistema de Busca Ativa",
-  };
+  let currentInfo = pageTitles[pathname];
+  if (!currentInfo) {
+    if (pathname.includes("/dossie")) {
+      currentInfo = { title: "Dossiê Oficial do Estudante", subtitle: "Relatório técnico em conformidade com o ECA para CT/MP/SERP" };
+    } else if (pathname.startsWith("/alunos/")) {
+      currentInfo = { title: "Prontuário 360º do Aluno", subtitle: "Ficha individual com frequência, atestados e linha do tempo" };
+    } else if (pathname.includes("/imprimir")) {
+      currentInfo = { title: "Impressão da Ata Oficial", subtitle: "Documento oficial A4 com fé pública e assinaturas" };
+    } else if (pathname.startsWith("/atas/livro/")) {
+      currentInfo = { title: "Livro Anual Consolidado", subtitle: "Termo de abertura, atas sequenciais e encerramento anual" };
+    } else {
+      currentInfo = { title: "Colégio Leopoldina", subtitle: "Sistema de Busca Ativa & Atas" };
+    }
+  }
 
   return (
     <header className="h-14 bg-white border-b border-slate-200 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 lg:px-8">

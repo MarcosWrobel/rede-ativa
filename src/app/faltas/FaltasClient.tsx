@@ -1795,6 +1795,27 @@ export default function FaltasClient({
                     </div>
                   </div>
                 )}
+
+                {/* Ações Rápidas de Navegação / Prontuário / Dossiê */}
+                <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    href={`/alunos/${activeStudentData.student.id}`}
+                    target="_blank"
+                    className="inline-flex items-center space-x-1.5 text-xs font-bold text-sky-700 hover:text-sky-900 bg-white hover:bg-sky-50 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Abrir Prontuário 360º</span>
+                  </Link>
+
+                  <Link
+                    href={`/alunos/${activeStudentData.student.id}/dossie`}
+                    target="_blank"
+                    className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Dossiê A4 (CT/MP)</span>
+                  </Link>
+                </div>
               </div>
 
               {/* Alerta de Atestado Vigente no Drawer (PED-03) */}

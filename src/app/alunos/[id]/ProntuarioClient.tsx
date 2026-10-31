@@ -362,6 +362,18 @@ export default function ProntuarioClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingMinute(null);
+              setIsAtaEditorOpen(true);
+            }}
+            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+          >
+            <BookOpenCheck className="w-3.5 h-3.5 text-sky-400" />
+            <span>Lavrar Ata Digital</span>
+          </button>
+
           <Link
             href={`/busca-ativa?studentId=${student.id}`}
             className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition"
@@ -372,7 +384,7 @@ export default function ProntuarioClient({
 
           <Link
             href={`/alunos/${student.id}/dossie`}
-            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold shadow-xs transition"
           >
             <FileText className="w-3.5 h-3.5 text-amber-400" />
             <span>Emitir Dossiê Oficial (PDF)</span>
