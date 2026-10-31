@@ -9,7 +9,6 @@ export const PUBLIC_PREFIXES = ["/validar/ata/", "/assinar/ata/"];
 
 export const SELF_AUTH_API_PREFIXES = [
   "/api/auth/",
-  "/api/db-diagnostics",
   "/api/frequencia/sync",
   "/api/serp/sync",
   "/api/atas/public/",
