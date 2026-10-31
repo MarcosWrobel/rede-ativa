@@ -6,21 +6,42 @@ import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
-const createSchoolSchema = z.object({
-  inepCode: z
-    .string()
-    .min(4, "Código INEP ou identificador deve ter no mínimo 4 caracteres")
-    .max(12, "Código INEP inválido")
-    .regex(/^\d+$/, "Código INEP deve conter apenas números"),
-  name: z.string().min(3, "Nome da instituição deve ter no mínimo 3 caracteres"),
-  city: z.string().min(2, "Município é obrigatório").default("Tibagi"),
-  state: z.string().length(2, "UF deve ter 2 letras").default("PR"),
-  nre: z.string().optional().nullable(),
-  network: z.enum(["ESTADUAL", "MUNICIPAL", "PRIVADA"]).default("MUNICIPAL"),
-  phone: z.string().optional().nullable(),
-  email: z.string().email("E-mail institucional inválido").optional().nullable(),
-  logoUrl: z.string().optional().nullable(),
-});
+const createSchoolSchema = z
+  .object({
+    inepCode: z.string().optional(),
+    inep: z.string().optional(),
+    name: z.string().min(3, "Nome da instituição deve ter no mínimo 3 caracteres"),
+    city: z.string().optional(),
+    municipality: z.string().optional(),
+    state: z.string().default("PR"),
+    nre: z.string().optional().nullable(),
+    network: z.enum(["ESTADUAL", "MUNICIPAL", "PRIVADA"]).default("MUNICIPAL"),
+    phone: z.string().optional().nullable(),
+    email: z.string().optional().nullable(),
+    logoUrl: z.string().optional().nullable(),
+  })
+  .transform((d) => {
+    const rawInep = (d.inepCode || d.inep || "").trim();
+    const rawCity = (d.city || d.municipality || "Tibagi").trim();
+    const rawEmail = (d.email || "").trim() || null;
+    const rawPhone = (d.phone || "").trim() || null;
+    return {
+      ...d,
+      inepCode: rawInep,
+      city: rawCity,
+      email: rawEmail,
+      phone: rawPhone,
+      state: (d.state || "PR").trim().toUpperCase(),
+    };
+  })
+  .refine((d) => d.inepCode.length >= 4, {
+    message: "Código INEP ou identificador deve ter no mínimo 4 caracteres",
+    path: ["inepCode"],
+  })
+  .refine((d) => !d.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email), {
+    message: "E-mail institucional inválido",
+    path: ["email"],
+  });
 
 export async function GET() {
   try {

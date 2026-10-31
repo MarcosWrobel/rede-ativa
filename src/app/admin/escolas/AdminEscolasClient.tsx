@@ -101,10 +101,23 @@ export default function AdminEscolasClient({
     setFeedback(null);
 
     try {
+      const payload = {
+        name: formData.name.trim(),
+        inepCode: formData.inep.trim(),
+        inep: formData.inep.trim(),
+        network: formData.network,
+        city: formData.municipality.trim(),
+        municipality: formData.municipality.trim(),
+        state: formData.state.trim().toUpperCase(),
+        phone: formData.phone.trim() || null,
+        email: formData.email.trim() || null,
+        logoUrl: formData.logoUrl || null,
+      };
+
       const res = await fetch("/api/schools", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -117,25 +130,28 @@ export default function AdminEscolasClient({
         message: `Escola "${data.school.name}" cadastrada com sucesso!`,
       });
 
+      const sc = data.school;
+      const shortName = sc.name.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "");
+
       // Append new school to list
       setSchools((prev) => [
         ...prev,
         {
-          id: data.school.id,
-          name: data.school.name,
-          shortName: data.school.shortName,
-          inep: data.school.inep,
-          network: data.school.network,
-          municipality: data.school.municipality,
-          state: data.school.state,
-          phone: data.school.phone,
-          email: data.school.email,
-          logoUrl: data.school.logoUrl,
+          id: sc.id,
+          name: sc.name,
+          shortName,
+          inep: sc.inepCode || sc.inep,
+          network: sc.network,
+          municipality: sc.city || sc.municipality,
+          state: sc.state,
+          phone: sc.phone,
+          email: sc.email,
+          logoUrl: sc.logoUrl,
           hasSyncToken: false,
           studentsCount: 0,
           classesCount: 0,
           staffCount: 1,
-          createdAt: new Date().toISOString(),
+          createdAt: sc.createdAt || new Date().toISOString(),
         },
       ]);
 
