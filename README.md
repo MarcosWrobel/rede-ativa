@@ -14,10 +14,10 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 - **Autenticação, Fé Pública & Segurança**: NextAuth.js v5 (Google OAuth `@escola.pr.gov.br`), Proxy Middleware global (`proxy.ts`), Allowlist de equipe (`/equipe`), integridade criptográfica `SHA-256`, biometria local **WebAuthn / FIDO2 (Passkeys)** e trilha de auditoria completa com IP
 - **Importação Oficial SERE/SEED-PR**: Leitura nativa multiformato com `xlsx` (planilhas `.xls` BIFF8 / `.xlsx`), `unpdf` (relatórios `.pdf`) e parser `.csv` (`UTF-8` / `Windows-1252`)
 - **Rotinas Automatizadas**: Vercel Cron semanal (`/api/cron/weekly-digest`) para diagnóstico executivo e fila de intervenção às segundas-feiras
-- **Inteligência Artificial**: Google Gemini API (`@google/genai`) — Redação de comunicados, formalização jurídica/pedagógica de atas (ECA-safe) com ditado por voz e classificação de retornos com JSON estruturado
+- **Inteligência Artificial**: Google Gemini API (`@google/genai` 2026) — Redação de comunicados, formalização de atas com rigor gramatical NRE/SEED-PR, fuso horário oficial `America/Sao_Paulo`, thinking tokens otimizados (`thinkingLevel: "low"`) e classificação de retornos com JSON estruturado
 - **Automação de Mensageria**: Fluxo operacional gratuito e ilimitado via WhatsApp Web (`wa.me`) com reuso de guia única (`leopoldina_whatsapp_dispatch`) e camada plugável para gateways futuros
 - **Extensão Chrome**: Manifest V3 para extração segura de dados do Power BI estadual e do portal SERP/Celepar
-- **Testes & Qualidade**: Vitest com **41 testes unitários automatizados** em 7 suítes cobrindo criptografia/anonimização de atas, parser SERE (`.xls`/`.pdf`/`.csv`), classificadores pedagógicos, pareamento, schemas Zod e multi-escola
+- **Testes & Qualidade**: Vitest com **52 testes unitários automatizados** em 9 suítes cobrindo criptografia/anonimização de atas, assinaturas `@escola.pr.gov.br`, diretrizes NRE com IA, parser SERE (`.xls`/`.pdf`/`.csv`), classificadores pedagógicos, pareamento, schemas Zod e multi-escola
 
 ---
 
@@ -26,7 +26,7 @@ Aplicação web institucional para gestão de busca ativa escolar, comunicação
 | Módulo | Rota | Descrição |
 | :--- | :--- | :--- |
 | **Busca Ativa** | `/busca-ativa` | Disparo individual ou **Fila Guiada por Turma** via `wa.me`, salto automático de atestados médicos, múltiplos contatos familiares e confirmação de entrega com saneamento de números. |
-| **Livro de Atas Digital** | `/atas` | Substituição jurídica do caderno manuscrito: numeração sequencial anual imutável, editor bimodal widescreen, ditado por voz + IA Gemini, assinatura em tela ou **QR Code Móvel com Biometria**, adendos *"Em tempo"*, PDF A4 e Livro Anual (`/atas/livro/[ano]`). |
+| **Livro de Atas Digital** | `/atas` | Substituição jurídica do caderno manuscrito: numeração sequencial anual imutável, editor bimodal widescreen, ditado por voz + IA Gemini 2026, assinatura digital institucional `@escola.pr.gov.br` em 1 clique, assinatura em tela ou **QR Code Móvel com Biometria**, adendos *"Em tempo"*, PDF A4 em folha única (`1 of 1`) com brasão oficial e Livro Anual (`/atas/livro/[ano]`). |
 | **Validação & Assinatura** | `/validar/ata/[code]`<br>`/assinar/ata/[token]` | Portal público LGPD-safe para conferência de autenticidade (`SHA-256`) via QR Code e página móvel temporária para assinatura com biometria do celular dos responsáveis. |
 | **Boletim Semanal** | `/boletim` | Diagnóstico semanal automatizado (Vercel Cron) com alertas de alunos críticos sem busca recente, casos SERP, taxa de retorno dos pais e exportação A4 para reuniões pedagógicas. |
 | **Prontuário 360º** | `/alunos/[id]` | Visão integral do aluno: indicadores do B.I., múltiplos contatos, controle de atestados médicos vigentes, atas oficiais do Livro Digital e linha do tempo de WhatsApp. |

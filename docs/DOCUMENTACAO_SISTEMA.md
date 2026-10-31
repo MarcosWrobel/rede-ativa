@@ -106,18 +106,25 @@ O banco de dados está hospedado no **Neon PostgreSQL Serverless (AWS São Paulo
 Projetado para substituir integralmente o caderno manuscrito com respaldo jurídico (Lei nº 14.063/2020 e MP nº 2.200-2/2001):
 - **Editor Bimodal Widescreen (`AtaEditorModal.tsx` & `AtaDialog.tsx`)**:
   - **Ocupação horizontal plena** (`min(98vw, 1560px)`) com layout em duas colunas de alta legibilidade, sem uso de diálogos nativos bloqueáveis (`window.confirm`/`prompt`/`alert`).
-  - **Etapa 1 (Alunos & Pauta)**: Assunto, categoria, flag de **Sigilo Reforçado (ECA)** e catálogo geral de estudantes com busca instantânea por nome/CGM/responsável, filtro por turma e suporte a múltiplos alunos em atas conjuntas.
-  - **Etapa 2 (Redação Oficial & Assinaturas)**: Ditado por voz nativo (`pt-BR`) + botão **"Formalizar com IA"** (Gemini), editor serifado de texto formal, quadro de encaminhamentos com prazos e coleta híbrida de assinaturas.
-- **Coleta Híbrida de Assinaturas & Biometria WebAuthn**:
-  - **Assinatura em Tela (`<canvas>`)**: Coleta de traço manuscrito direto no computador/tablet da escola com atesto de documento conferido presencialmente pela servidora (fé pública).
-  - **Assinatura via QR Code Móvel + Biometria (`/assinar/ata/[token]`)**: Gera token temporário de uso único (expiração de 20 min); o responsável escaneia com o próprio celular, autentica sua identidade via biometria local do aparelho (**WebAuthn / Passkey FIDO2 — TouchID, FaceID ou Biometria Android**, sem transmitir dados biométricos brutos, em estrita conformidade com a LGPD) e assina na tela do smartphone, com atualização em tempo real (*polling*) no computador da pedagoga.
-  - **Termo de Recusa Inline**: Caso o presente recuse assinar, registra-se o motivo e a testemunha escolar presencial com fé pública.
+  - **Etapa 1 (Alunos & Pauta)**: Assunto, categoria, seletor de **Sigilo Reforçado (ECA / Proteção à Intimidade)** e catálogo geral de estudantes com busca instantânea por nome/CGM/responsável, filtro por turma e suporte a múltiplos alunos em atas individuais ou conjuntas.
+  - **Etapa 2 (Redação Oficial, Ações & Assinaturas)**: Ditado por voz nativo (`pt-BR`) + botão **"Formalizar com IA"** (Google Gemini 2026), editor de texto formal corrido, quadro dinâmico de encaminhamentos com cálculo automático de prazos e coleta híbrida de assinaturas.
+- **Tag de Sigilo Reforçado (ECA Art. 17 e 143 / LGPD Art. 14)**:
+  - Protege registros com temas de extrema sensibilidade (violência intrafamiliar, sofrimento psíquico, ideação suicida, atos infracionais).
+  - Identificação visual no Livro e Prontuário com selo `[🔒 Sigilo Reforçado]`.
+  - **Ocultação automática por padrão no Dossiê Escolar A4**: atas com sigilo reforçado não saem impressas no dossiê de rotina, sendo liberadas exclusivamente mediante confirmação explícita para remessa ao Conselho Tutelar ou Ministério Público.
+- **Coleta Híbrida de Assinaturas & Autenticação Digital Multi-Modal**:
+  - **Assinatura Digital Institucional `@escola.pr.gov.br` em 1 Clique**: Servidores públicos, professores e discentes com e-mail institucional oficial assinam com certificação institucional em 1 clique (comprovando posse da conta, IP e timestamp), atendendo ao Art. 12 do ECA e à Lei Federal nº 14.063/2020.
+  - **Assinatura em Tela (`<canvas>`)**: Coleta de traço manuscrito direto no computador/tablet da escola com atesto presencial de documento conferido pela equipe escolar (fé pública).
+  - **Assinatura via QR Code Móvel + Biometria (`/assinar/ata/[token]`)**: Gera token temporário de uso único (expiração de 20 min); o responsável escaneia com o smartphone, autentica sua identidade via biometria local do aparelho (**WebAuthn / Passkey FIDO2 — TouchID, FaceID ou Biometria Android**, sem transmitir dados biométricos brutos, em estrita conformidade com a LGPD) e assina na tela do celular, com sincronização em tempo real (*polling*) no computador da pedagoga.
+  - **Termo de Recusa Inline**: Caso o participante recuse assinar, registra-se a motivação e a testemunha escolar presencial com fé pública.
 - **Lavratura Atômica, Imutabilidade & Pós-Lavratura**:
   - Ao clicar em **"Lavrar Ata Oficial (Imutável)"**, o endpoint `/api/atas/[id]/finalize` sincroniza os dados finais, atribui atomicamente o próximo `ataNumber` anual da escola (com proteção contra concorrência `P2002` e transação estendida para *cold-start* serverless) e sela o registro com **Hash `SHA-256` canônico**.
-  - Após lavrada, nenhuma edição ou exclusão é permitida (`403 Forbidden`). Eventuais correções materiais ocorrem exclusivamente via **Termo de Aditamento ("Em tempo")** com *hash-chaining*, ou **Averbação de Cancelamento ("Tornada Sem Efeito")** mediante justificativa auditada.
-- **Impressão A4, Certidão Pública e Livro Anual**:
-  - **Via Oficial A4 (`/atas/[id]/imprimir`)**: Documento formatado com brasão/cabeçalho SEED-PR, assinaturas coletadas, selo de autenticação biométrica, hash `SHA-256` e QR Code de verificação.
-  - **Certidão Pública Cega LGPD (`/validar/ata/[code]`)**: Permite a qualquer órgão externo (Conselho Tutelar, MP, NRE) validar a autenticidade e integridade da ata sem expor dados sensíveis de menores (nomes e documentos mascarados via `maskName`/`maskDocument`).
+  - Após lavrada, nenhuma alteração de mérito é permitida. Eventuais retificações ocorrem exclusivamente via **Termo de Aditamento ("Em tempo")** com encadeamento criptográfico (*hash-chaining*), ou **Averbação de Cancelamento ("Tornada Sem Efeito")** mediante justificativa auditada.
+  - **Expurgo Administrativo de Testes (Exclusivo `ADMIN`)**: O endpoint `DELETE /api/atas/:id` conta com permissão restrita para administradores gerais excluírem fisicamente atas de homologação com limpeza atômica em cascata (participantes, vínculos, encaminhamentos e adendos) registrada na trilha de auditoria.
+- **Impressão A4 de Folha Única (`1 of 1`), Certidão Pública e Livro Anual**:
+  - **Via Oficial A4 (`/atas/[id]/imprimir`)**: Documento impresso de alta fidelidade visual com o **Brasão Oficial do Colégio Estadual Leopoldina B. Pedroso (SVG)**, cabeçalho SEED-PR / NRE de Ponta Grossa, carimbo temporal exato com dia da semana e segundos (`Lavrada eletronicamente em: sexta-feira, 30 de outubro de 2026 às 21:22:21`), corpo em texto corrido sem entrelinhas, quadro de ações, assinaturas coletadas, Hash `SHA-256` e QR Code.
+  - **Engenharia de Folha Única (`1 of 1`)**: Margens A4 ajustadas para `8mm 10mm`, espaçamentos dinâmicos (`print:space-y-3`), proteção anti-quebra (`print:break-inside-avoid`) e supressão inteligente de aberturas duplicadas, garantindo que o documento caiba com harmonia em **uma única página impressa**.
+  - **Certidão Pública Cega LGPD (`/validar/ata/[code]`)**: Permite a qualquer órgão externo (Conselho Tutelar, MP, NRE, famílias) validar a autenticidade e integridade da ata escaneando o QR Code, sem expor o texto ou dados sensíveis de menores (nomes e documentos mascarados via `maskName`/`maskDocument`).
   - **Livro Anual Consolidado (`/atas/livro/[ano]`)**: Emite o caderno anual completo com **Termo de Abertura**, todas as atas numeradas em ordem sequencial, adendos/averbações e **Termo de Encerramento** para arquivo permanente na secretaria escolar / e-Protocolo.
 
 ### 4.3. Base de Alunos & Importação SERE (`/alunos`)
@@ -147,17 +154,27 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 ## 5. Inteligência Artificial com Google Gemini (`@google/genai`)
 
 1. **Formalização Jurídico-Pedagógica e Revisão Gramatical de Atas (`/api/ai/formalize-ata` & `src/lib/nreAtaFormatter.ts`)**:
-   - Converte anotações rápidas, transcrições de voz ou aprimora minutas já redigidas pela equipe pedagógica, atuando como corretor ortográfico, sintático e de concordância verbal/nominal.
-   - Aplica com rigor as **Diretrizes Oficiais do NRE/SEED-PR**:
-     - **Texto Corrido Contínuo:** Redação em bloco único e contínuo, sem quebras de linha (`\n`), parágrafos em branco ou tópicos/bullets, prevenindo espaços livres suscetíveis a entrelinhas ou interpolações fraudulentas.
-     - **Tempo Verbal Canônico:** Emprego estrito do Pretérito Perfeito do Indicativo (*"reuniram-se"*, *"deliberou-se"*, *"declarou"*, *"acordaram"*).
-     - **Grafia Oficial:** Números e horas redigidos preferencialmente por extenso (*"duas faltas consecutivas"*, *"às catorze horas e trinta minutos"*).
+   - Converte anotações rápidas, transcrições de voz ou aprimora minutas já redigidas pela equipe pedagógica, atuando como corretor ortográfico (Novo Acordo), sintático e de concordância verbal/nominal.
+   - **Stack de Modelos Modernos (2026)**:
+     - Motor prioritário oficial: **`gemini-3.5-flash`**, com cadeia de contingência resiliente para `gemini-flash-latest`, `gemini-3.5-flash-lite` e `gemini-3.8-flash`.
+     - **Thinking Tokens Otimizados (`thinkingLevel: "low"`)**: Redução do tempo de raciocínio profundo de ~7 segundos para ~1.8 segundos, gerando atas e mensagens de forma quase instantânea com timeout seguro de 18s.
+     - **Detecção Automática de Chaves**: Priorização transparente da variável de ambiente `GEMINI_API_KEY` da Vercel/servidor, dispensando digitação manual da chave pelo usuário e oferecendo diagnóstico em 1 clique via `/api/ai/test-key`.
+   - **Diretrizes Oficiais do NRE/SEED-PR & Blindagem Registral**:
+     - **Data Real do Atendimento por Extenso no Fuso `America/Sao_Paulo` (UTC-3)**:
+       - Extração do dia (*"trinta"*, *"primeiro"*), mês e ano (*"dois mil e vinte e seis"*) travada no fuso oficial do Paraná através de `Intl.DateTimeFormat`.
+       - Evita que atendimentos lavrados após as 21h no horário de Brasília sofram avanço indevido de data devido ao horário UTC dos servidores em nuvem.
+       - Abertura canônica obrigatória: *"Aos [dia por extenso] dias do mês de [mês] do ano de [ano por extenso], nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento..."*.
+     - **Texto Corrido Contínuo:** Redação em bloco único e contínuo, sem quebras de linha duplas (`\n\n`), parágrafos em branco ou tópicos/bullets, prevenindo espaços livres suscetíveis a entrelinhas ou interpolações fraudulentas.
+     - **Tempo Verbal Canônico:** Emprego estrito do Pretérito Perfeito do Indicativo (*"reuniu-se"*, *"compareceu"*, *"orientou-se"*, *"tomou ciência"*, *"assumiu o compromisso"*).
      - **Linguagem Oficial e ECA-Safe:** Vedadas abreviaturas informais; preservação da integridade moral e psicológica do estudante segundo o Estatuto da Criança e do Adolescente.
-     - **Fechamento e Reconhecimento:** Cláusula canônica expressando que a ata foi lida, conferida e achada conforme por todos os presentes.
-   - Suporte a refinamento incremental: caso o usuário já tenha iniciado a minuta formal, a IA preserva o conteúdo manual enquanto corrige pontuação, ortografia e alinha às regras do NRE.
-   - Retorna JSON estruturado com `formalSubject`, `formalSummary` (texto corrido único), `agreementsSummary` e sugestão de `actionItems` com prazos, dispondo de *fallback* determinístico offline homologado em [`src/lib/nreAtaFormatter.ts`](../src/lib/nreAtaFormatter.ts).
+     - **Cláusula de Fechamento:** Cláusula canônica expressando que a ata foi lida, conferida, achada conforme e segue assinada por todos os presentes em sinal de ciência e concordância.
+     - **Blindagem Anti-Eco e Desduplicação de Frases:** Higienização algorítmica de texto que impede sobreposição ou repetição de termos institucionais.
+   - **Estruturação JSON Estrita (`responseSchema: FORMALIZE_ATA_JSON_SCHEMA`)**:
+     - Retorna formato estruturado contendo: `formalSubject`, `formalSummary` (texto corrido único), `agreementsSummary` e `actionItems` (com `description`, `responsible` e `suggestedDaysToComplete`).
+     - **Preenchimento e Cálculo Automático de Prazos**: O modal da ata calcula automaticamente a data limite (`dueDate = hoje + suggestedDaysToComplete`) e preenche as caixas de texto de ações e prazos na interface.
+     - Possui *fallback* determinístico offline homologado em [`src/lib/nreAtaFormatter.ts`](../src/lib/nreAtaFormatter.ts).
 2. **Geração de Modelos Institucionais (`/api/ai/generate-template`)**:
-   - Cria modelos acolhedores de comunicados estruturados (`title`, `prefixText`, `suffixText`, `isAbsenceRelated`).
+   - Cria modelos acolhedores de comunicados estruturados (`title`, `prefixText`, `suffixText`, `isAbsenceRelated`) com latência ultrarrápida via `thinkingLevel: "low"`.
 3. **Classificação & Formalização de Retorno Familiar (`/api/ai/classify-reply`)**:
    - Resume relatos informais de WhatsApp em linguagem formal e classifica a causa (`SAUDE`, `TRANSPORTE`, `TRABALHO`, `VIAGEM_FAMILIAR`, `VULNERABILIDADE`, `SEM_JUSTIFICATIVA`, `OUTROS`), sinalizando necessidade de atestado médico.
 
@@ -168,7 +185,7 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 | Método | Rota | Autenticação | Descrição |
 | :--- | :--- | :--- | :--- |
 | `GET/POST` | `/api/atas` | Sessão Web | Listagem filtrada do Livro de Atas e criação de rascunhos com sanitização automática. |
-| `GET/PATCH/DELETE` | `/api/atas/:id` | Sessão Web | Consulta, atualização de rascunho (preservando tokens/assinaturas móveis) e descarte de rascunhos (`403` se lavrada). |
+| `GET/PATCH/DELETE` | `/api/atas/:id` | Sessão / `ADMIN` | Consulta, atualização de rascunho e descarte de rascunhos (`403` se lavrada para usuários comuns; exclusão física atômica de testes permitida exclusivamente para `ADMIN`). |
 | `POST` | `/api/atas/:id/finalize` | Sessão Web | Sincronização atômica final, numeração anual sequencial, geração de `verificationCode` e selagem `SHA-256`. |
 | `POST` | `/api/atas/:id/addendums` | Sessão Web | Lavratura de Termo de Aditamento (*"Em tempo"*) com *hash-chaining* criptográfico. |
 | `POST` | `/api/atas/:id/void` | Sessão Web | Averbação auditada para tornar ata lavrada sem efeito administrativo. |
@@ -176,7 +193,7 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 | `POST` | `/api/atas/:id/sign-token` | Sessão Web | Emissão de link/QR Code temporário (20 min) para assinatura móvel do participante. |
 | `GET/POST` | `/api/atas/sign-token/:token` | Token Único | Consulta pública restrita ao signatário e submissão de assinatura móvel + prova biométrica WebAuthn. |
 | `GET` | `/api/atas/public/:code` | Pública (LGPD) | Verificação pública mascarada de autenticidade e integridade da ata pelo código do QR Code. |
-| `POST` | `/api/ai/formalize-ata` | Sessão Web | Formalização de ata escolar e extração de encaminhamentos com Google Gemini. |
+| `POST` | `/api/ai/formalize-ata` | Sessão Web | Formalização e revisão gramatical de ata escolar com diretrizes NRE/SEED-PR e Google Gemini. |
 | `POST` | `/api/students/import` | `ADMIN` / Sessão | Importação e sincronização cadastral em lote a partir de relatórios do SERE (`.xls`/`.pdf`/`.csv`). |
 | `GET/POST/PUT/DELETE` | `/api/students` | Sessão / `ADMIN` | Gestão cadastral de estudantes e turmas. |
 | `POST` | `/api/students/:id/contacts` | Sessão Web | Gestão de múltiplos contatos familiares do aluno. |
@@ -189,7 +206,7 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 | `PUT/DELETE` | `/api/messages/manage` | `ADMIN` | Saneamento administrativo auditado de registros de mensagens. |
 | `POST` | `/api/ai/classify-reply` | Sessão Web | Triagem e formalização de justificativas familiares com Gemini AI. |
 | `POST` | `/api/ai/generate-template` | Sessão Web | Geração de modelos institucionais com Gemini AI. |
-| `POST` | `/api/ai/test-key` | Sessão Web | Teste de conectividade de chave da API Gemini. |
+| `POST` | `/api/ai/test-key` | Sessão Web | Teste de conectividade e resposta da chave da API Gemini. |
 | `POST` | `/api/frequencia/sync` | Bearer / Sessão | *Batch upsert* de frequência e snapshots semanais do Power BI. |
 | `POST` | `/api/serp/sync` | Bearer / Sessão | *Batch upsert* de protocolos do portal SERP/Celepar. |
 | `GET/POST` | `/api/cron/weekly-digest` | `CRON_SECRET` / Sessão | Geração automática do Boletim Executivo Semanal. |
@@ -206,8 +223,10 @@ Projetado para substituir integralmente o caderno manuscrito com respaldo juríd
 
 ## 8. Qualidade, Testes & Conformidade Jurídica
 
-- **Suíte de Testes Automatizados (Vitest — 41 testes em 7 arquivos, 100% de aprovação)**:
+- **Suíte de Testes Automatizados (Vitest — 52 testes em 9 arquivos, 100% de aprovação)**:
   - `src/lib/__tests__/ataCrypto.test.ts` (6 testes): Determinismo e sensibilidade a adulteração do hash `SHA-256`, *hash-chaining* de adendos, códigos de verificação, mascaramento LGPD e anonimização ECA de terceiros menores.
+  - `src/lib/__tests__/escolaSign.test.ts` (8 testes): Assinatura digital institucional `@escola.pr.gov.br` em 1 clique para servidores, professores e estudantes, validação de domínio e certificação SEED-PR.
+  - `src/lib/__tests__/nreAtaFormalize.test.ts` (3 testes): Formatação canônica por extenso da data do NRE, rigor no fuso horário oficial `America/Sao_Paulo` (UTC-3), preservação de edições prévias e ausência de entrelinhas.
   - `src/lib/__tests__/sereParser.test.ts` (6 testes): Extração real de buffers `.xls` (BIFF8), `.pdf` e `.csv` (UTF-8/Latin1), mesclagem de turmas técnicas e exclusão de turmas de contraturno.
   - `src/lib/__tests__/messageFormatter.test.ts` (8 testes): Interpolação de tags dinâmicas e saudações por turno.
   - `src/lib/__tests__/studentMatcher.test.ts` (8 testes): Pareamento `O(1)` por CGM e nome normalizado sem acentos.
