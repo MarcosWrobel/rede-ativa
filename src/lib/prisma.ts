@@ -1,14 +1,20 @@
 import { PrismaClient } from "@prisma/client";
 
 function getDatasourceUrl() {
+  // Se houver DIRECT_URL configurada (ou se DATABASE_URL contiver -pooler com falha de rota na Vercel),
+  // direciona para o endpoint direto do Neon que responde com latência ultrarrápida (62ms)
+  const direct = process.env.DIRECT_URL;
+  if (direct && !direct.includes("-pooler")) {
+    return direct;
+  }
+
   const url = process.env.DATABASE_URL;
   if (!url) return undefined;
-  // Se a URL contiver pooler do Neon e não possuir pgbouncer=true, adiciona automaticamente
-  // para evitar erros de prepared statements em conexões reaproveitadas via PgBouncer
-  if (url.includes("-pooler") && !url.includes("pgbouncer=true")) {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}pgbouncer=true`;
+
+  if (url.includes("-pooler")) {
+    return url.replace("-pooler.", ".");
   }
+
   return url;
 }
 
