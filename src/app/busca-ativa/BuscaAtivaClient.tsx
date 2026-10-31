@@ -37,6 +37,8 @@ import {
   WA_ME_REUSABLE_WINDOW_NAME,
   type DeliveryStatus,
 } from "@/lib/whatsappProvider";
+import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
+import WhatsAppDispatchToggle from "@/components/whatsapp/WhatsAppDispatchToggle";
 
 interface Props {
   classGroups: any[];
@@ -338,7 +340,7 @@ export default function BuscaAtivaClient({
         deliveryStatus: data.deliveryStatus || "LINK_OPENED",
       });
 
-      window.open(data.whatsappUrl, WA_ME_REUSABLE_WINDOW_NAME);
+      dispatchWhatsAppToBrowser(data.whatsappUrl);
     } catch (err: any) {
       setErrorMessage(err.message || "Erro ao processar envio.");
     } finally {
@@ -460,7 +462,7 @@ export default function BuscaAtivaClient({
     try {
       // Se já abriu para este aluno, apenas reabre a aba sem duplicar log no banco
       if (currentQueueItem.logId && currentQueueItem.whatsappUrl) {
-        window.open(currentQueueItem.whatsappUrl, WA_ME_REUSABLE_WINDOW_NAME);
+        dispatchWhatsAppToBrowser(currentQueueItem.whatsappUrl);
         return;
       }
 
@@ -485,7 +487,7 @@ export default function BuscaAtivaClient({
         outcome: "OPENED",
       });
 
-      window.open(data.whatsappUrl, WA_ME_REUSABLE_WINDOW_NAME);
+      dispatchWhatsAppToBrowser(data.whatsappUrl);
     } catch (err: any) {
       setQueueError(err.message || "Erro ao abrir WhatsApp para este aluno.");
     } finally {
@@ -609,13 +611,16 @@ export default function BuscaAtivaClient({
               }`}
             >
               <ListChecks className="w-3.5 h-3.5" />
-              <span>Fila por Turma (wa.me)</span>
+              <span>Fila por Turma</span>
             </button>
           </div>
 
-          <div className="inline-flex items-center px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-800 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse" />
-            {currentUser.name}
+          <div className="flex items-center space-x-3">
+            <WhatsAppDispatchToggle compact />
+            <div className="inline-flex items-center px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-800 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse" />
+              {currentUser.name}
+            </div>
           </div>
         </div>
       </div>
@@ -1080,6 +1085,10 @@ export default function BuscaAtivaClient({
                       href={lastSentSuccess.whatsappUrl}
                       target={WA_ME_REUSABLE_WINDOW_NAME}
                       rel="noopener noreferrer"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        dispatchWhatsAppToBrowser(lastSentSuccess.whatsappUrl);
+                      }}
                       className="inline-flex items-center font-bold text-sky-800 underline hover:text-sky-950 ml-auto"
                     >
                       Reabrir conversa <ExternalLink className="w-3 h-3 ml-1" />
@@ -1103,7 +1112,7 @@ export default function BuscaAtivaClient({
                 >
                   <Send className="w-4 h-4" />
                   <span>
-                    {isSending ? "Registrando e abrindo..." : "Abrir WhatsApp (wa.me) & Gravar"}
+                    {isSending ? "Registrando e abrindo..." : "Abrir WhatsApp & Gravar"}
                   </span>
                 </button>
               </div>
@@ -1399,15 +1408,18 @@ export default function BuscaAtivaClient({
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span id={queueProgressLabelId} className="text-sm font-extrabold text-slate-900">
-                Progresso da Fila Assistida via WhatsApp Web (wa.me)
+                Progresso da Fila Assistida via WhatsApp Web
               </span>
 
-              <div
-                role="status"
-                aria-live="polite"
-                className="text-xs font-bold text-sky-800 bg-sky-50 px-3 py-1 rounded-full border border-sky-200"
-              >
-                {completedQueueCount} de {queueItems.length} concluídos
+              <div className="flex items-center space-x-2">
+                <WhatsAppDispatchToggle compact />
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="text-xs font-bold text-sky-800 bg-sky-50 px-3 py-1 rounded-full border border-sky-200"
+                >
+                  {completedQueueCount} de {queueItems.length} concluídos
+                </div>
               </div>
             </div>
 
@@ -1496,8 +1508,8 @@ export default function BuscaAtivaClient({
                     <ExternalLink className="w-4 h-4" />
                     <span>
                       {currentQueueItem.outcome === "OPENED"
-                        ? "Reabrir no WhatsApp (wa.me)"
-                        : "1. Abrir no WhatsApp (wa.me)"}
+                        ? "Reabrir no WhatsApp"
+                        : "1. Abrir no WhatsApp"}
                     </span>
                   </button>
 

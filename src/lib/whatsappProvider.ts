@@ -53,10 +53,67 @@ export const REPLY_CATEGORY_OPTIONS: Array<{ value: ReplyCategory; label: string
   { value: "OUTROS", label: "📝 Outros Motivos" },
 ];
 
-export function buildWaMeUrl(phoneDigits: string, messageText: string): string {
-  const cleanDigits = normalizeWhatsAppPhone(phoneDigits);
+/**
+ * Detecta se o cliente é um dispositivo móvel (Android, iOS) ou Desktop (Linux, Windows, macOS).
+ */
+export function isMobileDevice(userAgent?: string): boolean {
+  if (typeof window !== "undefined" && !userAgent) {
+    const navAny = navigator as any;
+    if (navAny?.userAgentData?.mobile !== undefined) {
+      return Boolean(navAny.userAgentData.mobile);
+    }
+    userAgent = navigator.userAgent;
+  }
+  if (!userAgent) return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile/i.test(userAgent);
+}
+
+export interface BuildWhatsAppUrlOptions {
+  userAgent?: string;
+  forcePlatform?: "mobile" | "desktop";
+}
+
+/**
+ * Constrói a URL otimizada para a plataforma:
+ * - Mobile (Android/iOS): https://wa.me/55... (abre direto no app oficial do WhatsApp)
+ * - Desktop (Linux/PC): https://web.whatsapp.com/send/?phone=55...&text=... (abre direto no WhatsApp Web, sem landing page do wa.me)
+ */
+export function buildWhatsAppDispatchUrl(
+  phoneDigits: string,
+  messageText: string,
+  options?: BuildWhatsAppUrlOptions
+): string {
+  const cleanDigits = phoneDigits ? normalizeWhatsAppPhone(phoneDigits) : "";
   const encodedText = encodeURIComponent(messageText);
-  return `https://wa.me/${cleanDigits}?text=${encodedText}`;
+
+  const isMobile =
+    options?.forcePlatform === "mobile"
+      ? true
+      : options?.forcePlatform === "desktop"
+      ? false
+      : isMobileDevice(options?.userAgent);
+
+  if (isMobile) {
+    return cleanDigits
+      ? `https://wa.me/${cleanDigits}?text=${encodedText}`
+      : `https://wa.me/?text=${encodedText}`;
+  }
+
+  // Desktop (Linux, etc): direto no WhatsApp Web sem landing page intermediária
+  return cleanDigits
+    ? `https://web.whatsapp.com/send/?phone=${cleanDigits}&text=${encodedText}`
+    : `https://web.whatsapp.com/send/?text=${encodedText}`;
+}
+
+/**
+ * Alias retrocompatível com buildWhatsAppDispatchUrl.
+ */
+export function buildWaMeUrl(
+  phoneDigits: string,
+  messageText: string,
+  options?: BuildWhatsAppUrlOptions
+): string {
+  return buildWhatsAppDispatchUrl(phoneDigits, messageText, options);
 }
 
 export interface DispatchResult {
@@ -68,17 +125,24 @@ export interface DispatchResult {
 
 /**
  * Camada plugável de transporte WhatsApp (AUT-02).
- * Permanece 100% em modo wa.me (gratuito/oficial via navegador) por padrão,
+ * Opera em modo direto de navegador (gratuito/oficial) por padrão,
  * com suporte opcional futuro a HTTP Gateway caso WHATSAPP_PROVIDER="HTTP_GATEWAY" seja configurado.
  */
 export async function dispatchWhatsAppMessage({
   phoneDigits,
   messageText,
+  userAgent,
+  forcePlatform,
 }: {
   phoneDigits: string;
   messageText: string;
+  userAgent?: string;
+  forcePlatform?: "mobile" | "desktop";
 }): Promise<DispatchResult> {
-  const whatsappUrl = buildWaMeUrl(phoneDigits, messageText);
+  const whatsappUrl = buildWhatsAppDispatchUrl(phoneDigits, messageText, {
+    userAgent,
+    forcePlatform,
+  });
   const configuredMode = (process.env.WHATSAPP_PROVIDER || "WA_ME").toUpperCase();
   const gatewayUrl = process.env.WHATSAPP_GATEWAY_URL?.trim();
   const gatewayToken = process.env.WHATSAPP_GATEWAY_TOKEN?.trim();

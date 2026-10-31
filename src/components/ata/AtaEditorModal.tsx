@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
+import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
+import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 import {
   Sparkles,
   Mic,
@@ -925,19 +927,27 @@ export default function AtaEditorModal({
               <span>Imprimir / Salvar PDF Oficial A4</span>
             </a>
 
-            {finalizedAta.agreementsSummary && (
-              <a
-                href={`https://wa.me/?text=${encodeURIComponent(
-                  `*Colégio Estadual Leopoldina B. Pedroso*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition shadow-sm"
-              >
-                <Share2 className="w-4 h-4" />
-                <span>Enviar Combinados via WhatsApp</span>
-              </a>
-            )}
+            {finalizedAta.agreementsSummary && (() => {
+              const waUrl = buildWhatsAppDispatchUrl(
+                "",
+                `*Colégio Estadual Leopoldina B. Pedroso*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
+              );
+              return (
+                <a
+                  href={waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    dispatchWhatsAppToBrowser(waUrl);
+                  }}
+                  className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition shadow-sm cursor-pointer"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>Enviar Combinados via WhatsApp</span>
+                </a>
+              );
+            })()}
 
             <button
               type="button"
@@ -2383,17 +2393,27 @@ export default function AtaEditorModal({
                             )}
                           </button>
 
-                          <a
-                            href={`https://wa.me/?text=${encodeURIComponent(
+                          {(() => {
+                            const waUrl = buildWhatsAppDispatchUrl(
+                              "",
                               `Olá, ${qrModalInfo.name}! Segue o link oficial para ciência e assinatura digital do atendimento pedagógico no Colégio Leopoldina: ${qrModalInfo.url}`
-                            )}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition flex items-center space-x-1.5 cursor-pointer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Enviar via WhatsApp</span>
-                          </a>
+                            );
+                            return (
+                              <a
+                                href={waUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  dispatchWhatsAppToBrowser(waUrl);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition flex items-center space-x-1.5 cursor-pointer"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>Enviar via WhatsApp</span>
+                              </a>
+                            );
+                          })()}
 
                           <a
                             href={qrModalInfo.url}

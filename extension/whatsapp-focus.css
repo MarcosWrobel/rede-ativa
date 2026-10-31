@@ -1,0 +1,28 @@
+/**
+ * whatsapp-focus.css — Estilo Minimalista e Modo Foco / LGPD para o WhatsApp Web
+ * Otimizado para Janela Compacta Dedicada no Linux (~480px de largura).
+ */
+
+/* Garante que o contêiner do aplicativo utilize toda a janela do popup */
+#app {
+  min-width: 100% !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Oculta banners promocionais de baixar aplicativo desktop (já que estamos no Linux) */
+[data-testid="banner-download-desktop"],
+[aria-label*="Baixar o WhatsApp"],
+[data-testid*="download-app-banner"] {
+  display: none !important;
+}
+
+/* Otimização da barra de digitação para garantir visibilidade máxima do botão de envio */
+footer {
+  min-height: 56px !important;
+}
+
+/* Previne scrollbar horizontal acidental no popup */
+body {
+  overflow-x: hidden !important;
+}

@@ -43,9 +43,11 @@ export async function POST(req: Request) {
     }
 
     const sentByName = authCheck.userName;
+    const userAgent = req.headers.get("user-agent") || undefined;
     const dispatch = await dispatchWhatsAppMessage({
       phoneDigits: digits,
       messageText: messageContent,
+      userAgent,
     });
 
     const resolvedStatus = initialDeliveryStatus || dispatch.initialStatus;

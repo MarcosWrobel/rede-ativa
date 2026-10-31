@@ -21,7 +21,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import type { WeeklyDigestData } from "@/lib/weeklyDigest";
-import { buildWaMeUrl } from "@/lib/whatsappProvider";
+import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
+import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 
 interface Props {
   initialData: WeeklyDigestData;
@@ -329,7 +330,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {data.actionQueue.map((st) => {
-                    const waLink = buildWaMeUrl(
+                    const waLink = buildWhatsAppDispatchUrl(
                       st.phone,
                       `Olá, responsáveis pelo(a) aluno(a) ${st.name}. Entramos em contato do ${data.school.name} a respeito da frequência escolar.`
                     );
@@ -382,6 +383,10 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                               href={waLink}
                               target="_blank"
                               rel="noopener noreferrer"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                dispatchWhatsAppToBrowser(waLink);
+                              }}
                               className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-xs transition"
                               title="Abrir WhatsApp direto para a família"
                             >

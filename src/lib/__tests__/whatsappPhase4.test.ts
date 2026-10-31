@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWaMeUrl,
+  buildWhatsAppDispatchUrl,
   classifyGuardianReplyHeuristic,
   dispatchWhatsAppMessage,
   evaluateQueueCandidate,
+  isMobileDevice,
 } from "../whatsappProvider";
 import {
   aiClassifyReplySchema,
@@ -12,17 +14,57 @@ import {
 } from "../schemas";
 
 describe("Fase 4 — Fluxo wa.me, Fila Assistida por Turma e Classificação de Retorno", () => {
-  it("constrói URL wa.me normalizada com código DDI 55 e opera em modo WA_ME por padrão", async () => {
-    const url = buildWaMeUrl("(42) 99988-7766", "Bom dia! Teste escolar");
-    expect(url).toBe("https://wa.me/5542999887766?text=Bom%20dia!%20Teste%20escolar");
+  it("detecta corretamente dispositivos móveis vs desktop pelo User-Agent", () => {
+    const androidUa =
+      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+    const iphoneUa =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1";
+    const linuxDesktopUa =
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    const windowsDesktopUa =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    const dispatch = await dispatchWhatsAppMessage({
+    expect(isMobileDevice(androidUa)).toBe(true);
+    expect(isMobileDevice(iphoneUa)).toBe(true);
+    expect(isMobileDevice(linuxDesktopUa)).toBe(false);
+    expect(isMobileDevice(windowsDesktopUa)).toBe(false);
+  });
+
+  it("constrói URL adaptativa: wa.me para Mobile e web.whatsapp.com/send para Desktop Linux", async () => {
+    // 1. Mobile (Android/iOS)
+    const mobileUrl = buildWhatsAppDispatchUrl("(42) 99988-7766", "Bom dia! Teste escolar", {
+      forcePlatform: "mobile",
+    });
+    expect(mobileUrl).toBe("https://wa.me/5542999887766?text=Bom%20dia!%20Teste%20escolar");
+
+    // 2. Desktop (Linux / Escola)
+    const desktopUrl = buildWhatsAppDispatchUrl("(42) 99988-7766", "Bom dia! Teste escolar", {
+      forcePlatform: "desktop",
+    });
+    expect(desktopUrl).toBe(
+      "https://web.whatsapp.com/send/?phone=5542999887766&text=Bom%20dia!%20Teste%20escolar"
+    );
+
+    // 3. Dispatch no servidor respeitando cabeçalho User-Agent
+    const androidUa = "Mozilla/5.0 (Linux; Android 14; Mobile)";
+    const dispatchMobile = await dispatchWhatsAppMessage({
       phoneDigits: "42999887766",
       messageText: "Mensagem institucional",
+      userAgent: androidUa,
     });
-    expect(dispatch.mode).toBe("WA_ME");
-    expect(dispatch.initialStatus).toBe("LINK_OPENED");
-    expect(dispatch.whatsappUrl).toContain("https://wa.me/5542999887766");
+    expect(dispatchMobile.mode).toBe("WA_ME");
+    expect(dispatchMobile.initialStatus).toBe("LINK_OPENED");
+    expect(dispatchMobile.whatsappUrl).toContain("https://wa.me/5542999887766");
+
+    const linuxUa = "Mozilla/5.0 (X11; Linux x86_64)";
+    const dispatchDesktop = await dispatchWhatsAppMessage({
+      phoneDigits: "42999887766",
+      messageText: "Mensagem institucional",
+      userAgent: linuxUa,
+    });
+    expect(dispatchDesktop.whatsappUrl).toContain(
+      "https://web.whatsapp.com/send/?phone=5542999887766"
+    );
   });
 
   it("evaluateQueueCandidate desmarca alunos com atestado médico vigente e alterna para contato válido se o principal não tiver WhatsApp", () => {

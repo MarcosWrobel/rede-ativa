@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusEl = document.getElementById('popup-status');
   const subtitleEl = document.getElementById('popup-mode-subtitle');
   const btnScan = document.getElementById('btn-popup-autoscroll');
+  const toggleWhatsAppTab = document.getElementById('toggle-whatsapp-tab');
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const isPowerBi = Boolean(tab && tab.url && tab.url.includes('powerbi.com'));
@@ -26,9 +27,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Carrega dados salvos no storage
   if (chrome.storage && chrome.storage.local) {
-    const res = await chrome.storage.local.get(['leopoldina_alunos_frequencia']);
+    const res = await chrome.storage.local.get(['leopoldina_alunos_frequencia', 'opt_whatsapp_tab_reuse']);
     const lista = res.leopoldina_alunos_frequencia || [];
     countEl.textContent = `${lista.length} alunos`;
+
+    if (toggleWhatsAppTab) {
+      toggleWhatsAppTab.checked = res.opt_whatsapp_tab_reuse !== false; // default true
+      toggleWhatsAppTab.addEventListener('change', () => {
+        chrome.storage.local.set({ opt_whatsapp_tab_reuse: toggleWhatsAppTab.checked });
+      });
+    }
   }
 
   // Rastrear

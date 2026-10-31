@@ -55,6 +55,8 @@ import {
   WA_ME_REUSABLE_WINDOW_NAME,
   type DeliveryStatus,
 } from "@/lib/whatsappProvider";
+import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
+import WhatsAppDispatchToggle from "@/components/whatsapp/WhatsAppDispatchToggle";
 
 interface Props {
   rankedAbsences: any[];
@@ -314,8 +316,8 @@ export default function FaltasClient({
         deliveryStatus: data.deliveryStatus || "LINK_OPENED",
       });
 
-      // Abre na guia única reutilizável do WhatsApp Web
-      window.open(data.whatsappUrl, WA_ME_REUSABLE_WINDOW_NAME);
+      // Abre ou foca na aba/janela única reutilizável do WhatsApp Web
+      dispatchWhatsAppToBrowser(data.whatsappUrl);
     } catch (err: any) {
       setMessageError(err.message || "Erro ao processar envio.");
     } finally {
@@ -2133,10 +2135,14 @@ export default function FaltasClient({
                       href={messageSuccessInfo.whatsappUrl}
                       target={WA_ME_REUSABLE_WINDOW_NAME}
                       rel="noopener noreferrer"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        dispatchWhatsAppToBrowser(messageSuccessInfo.whatsappUrl);
+                      }}
                       className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-bold transition ml-auto"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Reabrir wa.me</span>
+                      <span>Reabrir WhatsApp</span>
                     </a>
                   </div>
                 </div>
@@ -2146,13 +2152,16 @@ export default function FaltasClient({
 
             {/* Rodapé Fixo de Ação */}
             <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setIsDrawerOpen(false)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-medium transition text-xs"
-              >
-                Fechar
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-medium transition text-xs"
+                >
+                  Fechar
+                </button>
+                <WhatsAppDispatchToggle compact />
+              </div>
 
               <button
                 type="button"
