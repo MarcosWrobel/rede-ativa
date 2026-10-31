@@ -317,34 +317,64 @@
   ];
 
   // Identifica a posição das colunas no cabeçalho do Power BI
+  // Identifica a posição das colunas no cabeçalho do Power BI (aria-colindex e coordenadas X)
   function detectarIndicesColunas() {
-    const headerElements = Array.from(document.querySelectorAll('[role="columnheader"], .columnHeaders .headerCell, .headerRow .header, .pivotTableHeaderWrap, th'));
+    const headerCandidates = Array.from(
+      document.querySelectorAll('[role="columnheader"], .columnHeaders .headerCell, th, .headerRow .header')
+    );
+
     const map = {
-      turma: -1,
-      mediaGeral: -1,
-      semanaAtual: -1,
-      semanaAnterior: -1,
-      amparo: -1,
-      deficiencia: -1,
-      ganhando: -1,
-      serp: -1,
-      idade: -1,
+      turma: { ariaCol: 1, left: -1, right: -1, found: false },
+      mediaGeral: { ariaCol: 2, left: -1, right: -1, found: false },
+      semanaAtual: { ariaCol: 3, left: -1, right: -1, found: false },
+      semanaAnterior: { ariaCol: 4, left: -1, right: -1, found: false },
+      amparo: { ariaCol: 5, left: -1, right: -1, found: false },
+      deficiencia: { ariaCol: 6, left: -1, right: -1, found: false },
+      ganhando: { ariaCol: 7, left: -1, right: -1, found: false },
+      serp: { ariaCol: 8, left: -1, right: -1, found: false },
+      idade: { ariaCol: 9, left: -1, right: -1, found: false },
     };
 
-    headerElements.forEach((h, idx) => {
+    headerCandidates.forEach((h) => {
       const txt = (h.innerText || h.getAttribute('title') || '').toLowerCase().trim();
-      const colAttr = h.getAttribute('aria-colindex');
-      const colIdx = colAttr ? parseInt(colAttr, 10) - 1 : idx;
+      if (!txt) return;
 
-      if (txt.includes('amparo')) map.amparo = colIdx;
-      else if (txt.includes('deficiên') || txt.includes('deficien')) map.deficiencia = colIdx;
-      else if (txt.includes('ganhando')) map.ganhando = colIdx;
-      else if (txt.includes('serp')) map.serp = colIdx;
-      else if (txt.includes('idade')) map.idade = colIdx;
-      else if (txt.includes('semana atual')) map.semanaAtual = colIdx;
-      else if (txt.includes('semana anterior')) map.semanaAnterior = colIdx;
-      else if (txt.includes('média') || txt.includes('media')) map.mediaGeral = colIdx;
-      else if (txt.includes('turma')) map.turma = colIdx;
+      const colAttr = h.getAttribute('aria-colindex') || h.closest('[aria-colindex]')?.getAttribute('aria-colindex');
+      const parsedCol = colAttr ? parseInt(colAttr, 10) : null;
+      const rect = h.getBoundingClientRect();
+
+      const assign = (key, fallbackCol) => {
+        if (parsedCol) {
+          map[key].ariaCol = parsedCol;
+        } else if (!map[key].found) {
+          map[key].ariaCol = fallbackCol;
+        }
+        if (rect.width > 0) {
+          map[key].left = rect.left;
+          map[key].right = rect.right;
+        }
+        map[key].found = true;
+      };
+
+      if (txt.includes('ganhando')) {
+        assign('ganhando', 7);
+      } else if (txt.includes('deficiên') || txt.includes('deficien')) {
+        assign('deficiencia', 6);
+      } else if (txt.includes('amparo')) {
+        assign('amparo', 5);
+      } else if (txt.includes('serp')) {
+        assign('serp', 8);
+      } else if (txt.includes('idade')) {
+        assign('idade', 9);
+      } else if (txt.includes('semana atual')) {
+        assign('semanaAtual', 3);
+      } else if (txt.includes('semana anterior')) {
+        assign('semanaAnterior', 4);
+      } else if (txt.includes('média') || txt.includes('media')) {
+        assign('mediaGeral', 2);
+      } else if (txt.includes('turma')) {
+        assign('turma', 1);
+      }
     });
 
     return map;
@@ -372,45 +402,45 @@
         const cgm = matchCgm[0];
         const existente = alunosCapturados.get(cgm);
 
-        // Se já capturou este CGM com nome real, percentuais e novos campos preenchidos, pula
-        if (existente && existente.nome && existente.nome !== 'Aluno' && existente.mediaGeral && existente.amparoLegalVigencia !== undefined) {
-          return;
-        }
-
         const partes = fullText.split('\n').map(p => p.trim()).filter(Boolean);
         const percentuais = fullText.match(percentRegex) || [];
 
-        // Células individuais da linha (para extração precisa por coluna)
-        const cells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell'));
-        
-        // Função auxiliar para obter texto de célula pelo índice da coluna
-        const getCellTextByCol = (targetColIdx, fallbackIdx) => {
-          if (targetColIdx >= 0) {
-            // Tenta encontrar célula com aria-colindex correspondente
-            const byAria = cells.find(c => {
-              const a = c.getAttribute('aria-colindex');
-              return a && parseInt(a, 10) - 1 === targetColIdx;
-            });
-            if (byAria) return (byAria.innerText || byAria.getAttribute('title') || '').trim();
+        // Células individuais da linha (desduplica nós aninhados)
+        const allCells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell, td'));
+        const distinctCells = allCells.filter(c => !allCells.some(other => other !== c && other.contains(c)));
+
+        // Helper para testar se uma célula pertence a uma coluna específica
+        const isCellForCol = (c, colKey) => {
+          const target = colMap[colKey];
+          if (!target) return false;
+
+          const cAria = c.getAttribute('aria-colindex') || c.closest('[aria-colindex]')?.getAttribute('aria-colindex');
+          if (cAria) {
+            const parsed = parseInt(cAria, 10);
+            if (parsed === target.ariaCol) return true;
           }
-          if (fallbackIdx !== undefined && fallbackIdx >= 0 && fallbackIdx < cells.length) {
-            const c = cells[fallbackIdx];
-            return (c.innerText || c.getAttribute('title') || '').trim();
+
+          if (target.left > 0 && target.right > 0) {
+            const rect = c.getBoundingClientRect();
+            if (rect.width > 0) {
+              const center = (rect.left + rect.right) / 2;
+              if (center >= target.left - 6 && center <= target.right + 6) {
+                return true;
+              }
+            }
           }
-          return '';
+          return false;
         };
 
-        // 1. Procura especificamente a parte que tem o padrão do Power BI: "NOME DO ALUNO - 10..."
+        // 1. Nome do Aluno
         let alunoParte = partes.find(p => /^[A-Za-zÀ-ÿ\s\.\']+\s*-\s*10\d*/.test(p.trim()));
-
-        // 2. Se não achar com prefixo de CGM, procura pelo texto com nome de pessoa
         if (!alunoParte) {
           alunoParte = partes.find(p => {
             const limpo = p.toLowerCase().trim();
             if (limpo.length < 5) return false;
             if (/^\d+$/.test(limpo)) return false;
             if (p.includes('%')) return false;
-            if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(limpo)) return false; // descarta datas
+            if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(limpo)) return false;
             if (IGNORAR_NOMES.some(ig => limpo.includes(ig))) return false;
             if (limpo.includes('série') || limpo.includes('serie') || limpo.includes('período') || limpo.includes('periodo') || limpo.includes('seriação')) return false;
             return /[A-Za-zÀ-ÿ]{3,}/.test(p);
@@ -421,64 +451,155 @@
           ? alunoParte.replace(/\s*-\s*\d+.*$/, '').replace(/…/g, '').trim()
           : (existente && existente.nome !== 'Aluno' ? existente.nome : 'Aluno');
 
-        // Isola a Turma
+        // 2. Turma
         const turma = partes.find(p => 
           p.includes('Série') || p.includes('Serie') || 
           p.includes('Período') || p.includes('Periodo') || 
           p.includes('Manhã') || p.includes('Tarde') || p.includes('Noite') || p.includes('Sem Seriação')
         ) || (existente ? existente.turma : '');
 
-        // --- Extração das Novas Colunas ---
-        // A. Amparo Legal Vigência Máx (Data DD/MM/AAAA)
-        const cellAmparoTxt = getCellTextByCol(colMap.amparo, 4);
-        const matchAmparoDate = cellAmparoTxt.match(dateRegex) || fullText.match(dateRegex);
-        const amparoLegalVigencia = matchAmparoDate ? matchAmparoDate[1] : (existente?.amparoLegalVigencia || null);
-
-        // B. Deficiência / Altas Habilidades (1 ou vazio)
-        const cellDefTxt = getCellTextByCol(colMap.deficiencia, 5);
-        const deficienciaAltasHabilidades = cellDefTxt === '1' || cellDefTxt.toLowerCase() === 'sim' ||
-          (existente ? existente.deficienciaAltasHabilidades : false);
-
-        // C. Ganhando Mundo (Intercâmbio Internacional - 1 ou vazio)
-        const cellGanhandoTxt = getCellTextByCol(colMap.ganhando, 6);
-        const ganhandoMundo = cellGanhandoTxt === '1' || cellGanhandoTxt.toLowerCase() === 'sim' ||
-          (existente ? existente.ganhandoMundo : false);
-
-        // D. SERP? (Checkmark ou vazio)
-        const cellSerpTxt = getCellTextByCol(colMap.serp, 7);
-        const serpAtivo = cellSerpTxt.includes('✓') || cellSerpTxt.includes('✔') ||
-          cellSerpTxt.toLowerCase() === 'sim' || (existente ? existente.serpAtivo : false);
-
-        // E. IDADE (Inteiro)
-        const cellIdadeTxt = getCellTextByCol(colMap.idade, cells.length > 8 ? 8 : cells.length - 1);
-        let idade = null;
-        if (/^\d{1,2}$/.test(cellIdadeTxt)) {
-          const num = parseInt(cellIdadeTxt, 10);
-          if (num >= 5 && num <= 99) idade = num;
+        // 3. Amparo Legal Vigência Máx (Data DD/MM/AAAA)
+        let amparoLegalVigencia = null;
+        const amparoCell = distinctCells.find(c => isCellForCol(c, 'amparo'));
+        if (amparoCell) {
+          const txt = (amparoCell.innerText || amparoCell.getAttribute('title') || '').trim();
+          const m = txt.match(dateRegex);
+          if (m) amparoLegalVigencia = m[1];
         }
-        if (!idade && existente?.idade) {
-          idade = existente.idade;
+        if (!amparoLegalVigencia) {
+          const m = fullText.match(dateRegex);
+          if (m) amparoLegalVigencia = m[1];
+        }
+
+        // 4. Deficiência / Altas Habilidades (1 ou vazio)
+        let deficienciaAltasHabilidades = false;
+        const defCell = distinctCells.find(c => isCellForCol(c, 'deficiencia'));
+        if (defCell) {
+          const txt = (defCell.innerText || defCell.getAttribute('title') || '').trim();
+          if (txt === '1' || txt.toLowerCase() === 'sim') {
+            deficienciaAltasHabilidades = true;
+          }
+        }
+
+        // 5. Ganhando Mundo (Intercâmbio Internacional - 1 ou vazio)
+        let ganhandoMundo = false;
+        const ganhandoCell = distinctCells.find(c => isCellForCol(c, 'ganhando'));
+        if (ganhandoCell) {
+          const txt = (ganhandoCell.innerText || ganhandoCell.getAttribute('title') || '').trim();
+          if (txt === '1' || txt.toLowerCase() === 'sim') {
+            ganhandoMundo = true;
+          }
+        }
+
+        // Heurística de Resolução para colunas com "1" (Deficiência vs Ganhando Mundo)
+        distinctCells.forEach(c => {
+          const txt = (c.innerText || c.getAttribute('title') || '').trim();
+          if (txt === '1' || txt.toLowerCase() === 'sim') {
+            const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
+            const title = (c.getAttribute('title') || '').toLowerCase();
+
+            if (ariaLabel.includes('ganhando') || title.includes('ganhando')) {
+              ganhandoMundo = true;
+            } else if (ariaLabel.includes('deficiên') || ariaLabel.includes('deficien') || title.includes('deficiên') || title.includes('deficien')) {
+              deficienciaAltasHabilidades = true;
+            } else if (colMap.ganhando.left > 0 && colMap.deficiencia.left > 0) {
+              const cRect = c.getBoundingClientRect();
+              if (cRect.width > 0) {
+                const cMid = (cRect.left + cRect.right) / 2;
+                const distDef = Math.abs(cMid - (colMap.deficiencia.left + colMap.deficiencia.right) / 2);
+                const distGanhando = Math.abs(cMid - (colMap.ganhando.left + colMap.ganhando.right) / 2);
+                if (distGanhando < distDef) {
+                  ganhandoMundo = true;
+                } else {
+                  deficienciaAltasHabilidades = true;
+                }
+              }
+            }
+          }
+        });
+
+        // 6. SERP? (Checkmark ou ícone)
+        let serpAtivo = false;
+        const serpCell = distinctCells.find(c => isCellForCol(c, 'serp'));
+        if (serpCell) {
+          const txt = (serpCell.innerText || serpCell.getAttribute('title') || '').trim();
+          const hasIcon = Boolean(serpCell.querySelector('svg, i, .check, [role="img"]'));
+          if (hasIcon || /[✓✔√☑]/.test(txt) || txt.toLowerCase() === 'sim' || (serpCell.getAttribute('title') || '').toLowerCase().includes('sim')) {
+            serpAtivo = true;
+          }
+        }
+
+        if (!serpAtivo) {
+          distinctCells.forEach(c => {
+            const txt = (c.innerText || c.getAttribute('title') || '').trim();
+            const title = (c.getAttribute('title') || '').toLowerCase();
+            const ariaLabel = (c.getAttribute('aria-label') || '').toLowerCase();
+            const hasIcon = Boolean(c.querySelector('svg, i, .check, [role="img"]'));
+            if (
+              /[✓✔√☑]/.test(txt) ||
+              (hasIcon && (title.includes('serp') || ariaLabel.includes('serp'))) ||
+              (title.includes('serp') && title.includes('sim')) ||
+              (ariaLabel.includes('serp') && ariaLabel.includes('sim'))
+            ) {
+              serpAtivo = true;
+            }
+          });
+        }
+
+        // 7. IDADE (Inteiro entre 5 e 99)
+        let idade = null;
+        const idadeCell = distinctCells.find(c => isCellForCol(c, 'idade'));
+        if (idadeCell) {
+          const txt = (idadeCell.innerText || idadeCell.getAttribute('title') || '').trim();
+          if (/^\d{1,2}$/.test(txt)) {
+            const num = parseInt(txt, 10);
+            if (num >= 5 && num <= 99) idade = num;
+          }
+        }
+        if (!idade) {
+          for (let i = partes.length - 1; i >= 0; i--) {
+            const p = partes[i];
+            if (/^\d{2}$/.test(p)) {
+              const num = parseInt(p, 10);
+              if (num >= 10 && num <= 25) {
+                idade = num;
+                break;
+              }
+            }
+          }
         }
 
         const aluno = {
           cgm: cgm,
           nome: nome,
           turma: turma,
-          mediaGeral: percentuais[0] || (existente ? existente.mediaGeral : ''),
-          semanaAtual: percentuais[1] || (existente ? existente.semanaAtual : ''),
-          semanaAnterior: percentuais[2] || (existente ? existente.semanaAnterior : ''),
-          amparoLegalVigencia: amparoLegalVigencia,
-          deficienciaAltasHabilidades: deficienciaAltasHabilidades,
-          ganhandoMundo: ganhandoMundo,
-          serpAtivo: serpAtivo,
-          idade: idade,
+          mediaGeral: percentuais[0] || existente?.mediaGeral || '',
+          semanaAtual: percentuais[1] || existente?.semanaAtual || '',
+          semanaAnterior: percentuais[2] || existente?.semanaAnterior || '',
+          amparoLegalVigencia: amparoLegalVigencia || existente?.amparoLegalVigencia || null,
+          deficienciaAltasHabilidades: deficienciaAltasHabilidades || existente?.deficienciaAltasHabilidades || false,
+          ganhandoMundo: ganhandoMundo || existente?.ganhandoMundo || false,
+          serpAtivo: serpAtivo || existente?.serpAtivo || false,
+          idade: idade || existente?.idade || null,
           capturadoEm: new Date().toISOString()
         };
 
         if (!alunosCapturados.has(cgm)) {
           novos++;
+          alunosCapturados.set(cgm, aluno);
+        } else {
+          const prev = alunosCapturados.get(cgm);
+          let mudou = false;
+          if (aluno.ganhandoMundo && !prev.ganhandoMundo) { prev.ganhandoMundo = true; mudou = true; }
+          if (aluno.serpAtivo && !prev.serpAtivo) { prev.serpAtivo = true; mudou = true; }
+          if (aluno.deficienciaAltasHabilidades && !prev.deficienciaAltasHabilidades) { prev.deficienciaAltasHabilidades = true; mudou = true; }
+          if (aluno.amparoLegalVigencia && !prev.amparoLegalVigencia) { prev.amparoLegalVigencia = aluno.amparoLegalVigencia; mudou = true; }
+          if (aluno.idade && !prev.idade) { prev.idade = aluno.idade; mudou = true; }
+          if (aluno.mediaGeral && !prev.mediaGeral) { prev.mediaGeral = aluno.mediaGeral; mudou = true; }
+          if (mudou) {
+            alunosCapturados.set(cgm, prev);
+          }
         }
-        alunosCapturados.set(cgm, aluno);
       }
     });
 

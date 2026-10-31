@@ -501,22 +501,22 @@ export default function HistoricoClient({
   return (
     <div className="space-y-6">
       {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
+          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center space-x-2">
             <History className="w-6 h-6 text-sky-600" />
             <span>Histórico de Envios & Retorno dos Pais</span>
             {isAdmin && (
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-wider">
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800 uppercase tracking-wider">
                 Modo Administrador
               </span>
             )}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Busca paginada com rastreio de entrega (wa.me) e triagem inteligente de justificativas dos responsáveis.
           </p>
         </div>
-        <div className="flex items-center space-x-2 text-xs text-slate-500 font-medium">
+        <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
           {isLoading && <Loader2 className="w-4 h-4 animate-spin text-sky-600" />}
           <span>
             Total encontrado: <strong>{total.toLocaleString("pt-BR")}</strong> registros
@@ -525,7 +525,7 @@ export default function HistoricoClient({
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 text-xs">
           {/* Search Input */}
           <div className="relative lg:col-span-2">
@@ -538,7 +538,7 @@ export default function HistoricoClient({
                 setSearchTerm(e.target.value);
                 setPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
 
@@ -550,7 +550,7 @@ export default function HistoricoClient({
               setSelectedTurma("");
               setPage(1);
             }}
-            className="border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white"
+            className="border border-slate-300 dark:border-slate-700 rounded-lg p-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
           >
             <option value="TODOS">Todos os Níveis</option>
             <option value="FUNDAMENTAL">Ensino Fundamental</option>
@@ -565,7 +565,7 @@ export default function HistoricoClient({
               setSelectedTurma(e.target.value);
               setPage(1);
             }}
-            className="border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white"
+            className="border border-slate-300 dark:border-slate-700 rounded-lg p-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
           >
             <option value="">Todas as Turmas</option>
             {classGroups
@@ -586,7 +586,7 @@ export default function HistoricoClient({
               setSelectedPedagoga(e.target.value);
               setPage(1);
             }}
-            className="border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white"
+            className="border border-slate-300 dark:border-slate-700 rounded-lg p-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
           >
             <option value="">Todas as Pedagogas</option>
             {pedagogas.map((ped) => (
@@ -603,7 +603,7 @@ export default function HistoricoClient({
               setSelectedReplyFilter(e.target.value);
               setPage(1);
             }}
-            className="border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white"
+            className="border border-slate-300 dark:border-slate-700 rounded-lg p-2 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
           >
             <option value="TODOS">Retorno: Todos</option>
             <option value="SIM">Retornou (Sim)</option>
@@ -612,13 +612,13 @@ export default function HistoricoClient({
         </div>
 
         {/* Date Range + Delivery & Category Filters Row */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="inline-flex items-center space-x-1 font-semibold text-slate-600">
+            <span className="inline-flex items-center space-x-1 font-semibold text-slate-600 dark:text-slate-400">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
               <span>Período:</span>
             </span>
-            <label className="inline-flex items-center space-x-1 text-slate-600">
+            <label className="inline-flex items-center space-x-1 text-slate-600 dark:text-slate-300">
               <span>De</span>
               <input
                 type="date"
@@ -627,10 +627,10 @@ export default function HistoricoClient({
                   setDateFrom(e.target.value);
                   setPage(1);
                 }}
-                className="border border-slate-300 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white font-mono text-xs"
+                className="border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 font-mono text-xs"
               />
             </label>
-            <label className="inline-flex items-center space-x-1 text-slate-600">
+            <label className="inline-flex items-center space-x-1 text-slate-600 dark:text-slate-300">
               <span>Até</span>
               <input
                 type="date"
@@ -639,7 +639,7 @@ export default function HistoricoClient({
                   setDateTo(e.target.value);
                   setPage(1);
                 }}
-                className="border border-slate-300 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white font-mono text-xs"
+                className="border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 font-mono text-xs"
               />
             </label>
 
@@ -649,7 +649,7 @@ export default function HistoricoClient({
                 setSelectedDeliveryFilter(e.target.value);
                 setPage(1);
               }}
-              className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-slate-50 focus:bg-white"
+              className="border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
             >
               <option value="TODOS">Entrega: Todas</option>
               <option value="SENT">Enviados (Confirmados)</option>
@@ -663,7 +663,7 @@ export default function HistoricoClient({
                 setSelectedCategoryFilter(e.target.value);
                 setPage(1);
               }}
-              className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-slate-50 focus:bg-white"
+              className="border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800"
             >
               <option value="TODOS">Causa/Categoria: Todas</option>
               {REPLY_CATEGORY_OPTIONS.map((opt) => (
@@ -678,7 +678,7 @@ export default function HistoricoClient({
             <button
               type="button"
               onClick={handleClearFilters}
-              className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition"
+              className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Limpar Filtros</span>
@@ -688,7 +688,7 @@ export default function HistoricoClient({
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto relative">
           <table className="w-full text-xs text-left border-collapse">
             <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
@@ -836,7 +836,7 @@ export default function HistoricoClient({
         </div>
 
         {/* Pagination Bar */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
           <div>
             Página <strong>{page}</strong> de <strong>{totalPages}</strong> • Exibindo{" "}
             <strong>{logs.length}</strong> de <strong>{total.toLocaleString("pt-BR")}</strong>{" "}
@@ -847,15 +847,20 @@ export default function HistoricoClient({
               type="button"
               disabled={page <= 1 || isLoading}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40 hover:bg-slate-100 transition"
+              className="p-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              title="Página Anterior"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
+            <span className="font-bold font-mono px-2 text-slate-700 dark:text-slate-300">
+              {page} / {totalPages}
+            </span>
             <button
               type="button"
               disabled={page >= totalPages || isLoading}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="p-1.5 rounded border border-slate-300 bg-white disabled:opacity-40 hover:bg-slate-100 transition"
+              className="p-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              title="Próxima Página"
             >
               <ChevronRight className="w-4 h-4" />
             </button>

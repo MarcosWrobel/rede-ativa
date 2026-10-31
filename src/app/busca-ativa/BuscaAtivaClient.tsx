@@ -628,11 +628,11 @@ export default function BuscaAtivaClient({
           {/* Left Column: Segment, Turma, Student & Reason selection */}
           <div className="lg:col-span-5 space-y-5">
             {/* 1. Nível / Segmento Tabs */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
                 1. Nível de Ensino / Turno
               </label>
-              <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-lg">
+              <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
                 {["TODOS", "FUNDAMENTAL", "MEDIO", "NOTURNO"].map((seg) => (
                   <button
                     key={seg}
@@ -644,8 +644,8 @@ export default function BuscaAtivaClient({
                     }}
                     className={`py-1.5 text-xs font-semibold rounded-md transition ${
                       selectedSegment === seg
-                        ? "bg-white text-sky-700 shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-300 shadow-xs"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
                     }`}
                   >
                     {seg === "MEDIO" ? "MÉDIO" : seg}
@@ -655,9 +655,9 @@ export default function BuscaAtivaClient({
             </div>
 
             {/* 2. Turma & Student Selection */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-1.5">
                   2. Selecione a Turma
                 </label>
                 <select
@@ -666,7 +666,7 @@ export default function BuscaAtivaClient({
                     setSelectedTurmaId(e.target.value);
                     setSelectedStudentId("");
                   }}
-                  className="w-full text-sm border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
+                  className="w-full text-sm border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
                 >
                   <option value="">Todas as Turmas ({filteredClassGroups.length})</option>
                   {filteredClassGroups.map((cg) => (
@@ -678,13 +678,13 @@ export default function BuscaAtivaClient({
               </div>
 
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-1.5">
                   3. Selecione o Aluno ({filteredStudents.length} disponíveis)
                 </label>
                 <select
                   value={selectedStudentId}
                   onChange={(e) => handleSelectStudent(e.target.value)}
-                  className="w-full text-sm border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 font-medium transition"
+                  className="w-full text-sm border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 font-medium transition"
                 >
                   <option value="">-- Escolha um aluno na lista --</option>
                   {filteredStudents.map((st) => {
@@ -896,8 +896,8 @@ export default function BuscaAtivaClient({
             </div>
 
             {/* 4. Reason / Template Selection */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
                 4. Selecione o Motivo da Mensagem
               </label>
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -911,14 +911,16 @@ export default function BuscaAtivaClient({
                       className={`w-full text-left p-2.5 rounded-lg border text-xs font-medium transition flex items-center justify-between ${
                         isSelected
                           ? "bg-sky-600 text-white border-sky-600 shadow-xs"
-                          : "bg-slate-50/50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                          : "bg-slate-50/50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
                       }`}
                     >
                       <span>{t.title}</span>
                       {t.isAbsenceRelated && (
                         <span
                           className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                            isSelected ? "bg-white/20 text-white" : "bg-red-50 text-red-600"
+                            isSelected
+                              ? "bg-white/20 text-white"
+                              : "bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400 border border-transparent dark:border-red-900/50"
                           }`}
                         >
                           Falta
@@ -933,12 +935,12 @@ export default function BuscaAtivaClient({
 
           {/* Right Column: Live Message Preview & WhatsApp Action */}
           <div className="lg:col-span-7 space-y-5">
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-2xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center space-x-2">
                   <Edit3 className="w-5 h-5 text-sky-600" />
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
                       Prévia da Mensagem (Editável)
                     </h2>
                     <p className="text-[11px] text-slate-400">
@@ -948,8 +950,8 @@ export default function BuscaAtivaClient({
                 </div>
 
                 {/* Seletor Rápido de Período / Turno */}
-                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto">
-                  <span className="text-[11px] font-bold text-slate-500 px-1.5 hidden md:inline">
+                <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 self-start sm:self-auto">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 px-1.5 hidden md:inline">
                     Período:
                   </span>
                   <button
@@ -958,7 +960,7 @@ export default function BuscaAtivaClient({
                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
                       activeShift === "MANHA"
                         ? "bg-amber-500 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
                     }`}
                   >
                     <Sun className="w-3.5 h-3.5" />
@@ -970,7 +972,7 @@ export default function BuscaAtivaClient({
                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
                       activeShift === "TARDE"
                         ? "bg-sky-600 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
                     }`}
                   >
                     <Sunset className="w-3.5 h-3.5" />
@@ -982,7 +984,7 @@ export default function BuscaAtivaClient({
                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
                       activeShift === "NOITE"
                         ? "bg-indigo-600 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
                     }`}
                   >
                     <Moon className="w-3.5 h-3.5" />
@@ -997,7 +999,7 @@ export default function BuscaAtivaClient({
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
                   placeholder="Selecione um aluno e um motivo à esquerda para gerar o texto da mensagem automaticamente..."
-                  className="w-full text-sm font-sans p-4 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 leading-relaxed transition shadow-inner"
+                  className="w-full text-sm font-sans p-4 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 leading-relaxed transition shadow-inner"
                 />
               </div>
 
@@ -1108,17 +1110,17 @@ export default function BuscaAtivaClient({
             </div>
 
             {/* Quick Instructions Guide */}
-            <div className="bg-sky-50/50 rounded-xl border border-sky-100 p-5 text-xs text-sky-950 space-y-2">
-              <h3 className="font-bold text-sky-900 flex items-center space-x-1.5 text-sm">
-                <HelpCircle className="w-4 h-4 text-sky-700" />
+            <div className="bg-sky-50/50 dark:bg-slate-900 rounded-xl border border-sky-100 dark:border-slate-800 p-5 text-xs text-sky-950 dark:text-slate-300 space-y-2">
+              <h3 className="font-bold text-sky-900 dark:text-sky-400 flex items-center space-x-1.5 text-sm">
+                <HelpCircle className="w-4 h-4 text-sky-700 dark:text-sky-400" />
                 <span>Dica Rápida: Precisa avisar vários alunos faltosos de uma mesma turma?</span>
               </h3>
-              <p className="text-slate-700 leading-relaxed">
+              <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
                 Alterne no topo para{" "}
                 <button
                   type="button"
                   onClick={() => setDispatchMode("fila")}
-                  className="font-bold text-sky-700 underline hover:text-sky-900"
+                  className="font-bold text-sky-700 dark:text-sky-400 underline hover:text-sky-900 dark:hover:text-sky-300"
                 >
                   Fila por Turma (wa.me)
                 </button>{" "}
