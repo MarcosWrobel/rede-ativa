@@ -130,7 +130,7 @@ export default function BuscaAtivaClient({
   // Filtered students by segment and turma
   const filteredStudents = useMemo(() => {
     return studentsState.filter((s) => {
-      const matchSegment = selectedSegment === "TODOS" || s.classGroup.segment === selectedSegment;
+      const matchSegment = selectedSegment === "TODOS" || s.classGroup?.segment === selectedSegment;
       const matchTurma = !selectedTurmaId || s.classGroupId === selectedTurmaId;
       return matchSegment && matchTurma;
     });
@@ -704,7 +704,7 @@ export default function BuscaAtivaClient({
                     return (
                       <option key={st.id} value={st.id}>
                         {prefix}
-                        {st.name} — {st.classGroup.name}
+                        {st.name} — {st.classGroup?.name || "Sem Turma"}
                       </option>
                     );
                   })}
@@ -720,7 +720,7 @@ export default function BuscaAtivaClient({
                         {selectedStudent.name}
                       </span>
                       <span className="text-slate-600">
-                        Turma: <strong>{selectedStudent.classGroup.name}</strong> • Responsável:{" "}
+                        Turma: <strong>{selectedStudent.classGroup?.name || "Sem Turma"}</strong> • Responsável:{" "}
                         <strong>
                           {selectedGuardianName || selectedStudent.guardianName || "Não informado"}
                         </strong>
@@ -1457,7 +1457,7 @@ export default function BuscaAtivaClient({
                     {currentQueueItem.student.name}
                   </h2>
                   <p className="text-xs text-slate-600">
-                    Turma: <strong>{currentQueueItem.student.classGroup.name}</strong> • Responsável:{" "}
+                    Turma: <strong>{currentQueueItem.student.classGroup?.name || "Sem Turma"}</strong> • Responsável:{" "}
                     <strong>{currentQueueItem.guardianName || "Não informado"}</strong>
                   </p>
                 </div>

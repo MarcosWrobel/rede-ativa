@@ -16,11 +16,27 @@ export default async function BuscaAtivaPage({
     redirect("/login");
   }
 
-  const sp = (await searchParams) || {};
+  let sp: { studentId?: string; phone?: string; mode?: string; turmaId?: string } = {};
+  try {
+    if (searchParams) {
+      sp = (await searchParams) || {};
+    }
+  } catch (e) {
+    console.warn("[BuscaAtivaPage] Erro ao ler searchParams:", e);
+    sp = {};
+  }
+
   const recentCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-  const [classGroups, templates, rawStudents, recentJustifications, allContacts] =
-    await Promise.all([
+  let classGroups: any[] = [];
+  let templates: any[] = [];
+  let rawStudents: any[] = [];
+  let recentLogs: any[] = [];
+  let recentJustifications: any[] = [];
+  let allContacts: any[] = [];
+
+  try {
+    const results = await Promise.all([
       prisma.classGroup.findMany({
         select: { id: true, name: true, segment: true, shift: true },
         orderBy: { name: "asc" },
@@ -55,18 +71,19 @@ export default async function BuscaAtivaPage({
           lowAttendanceRecord: {
             select: { attendancePercent: true, actionsTaken: true, enrollmentDetail: true },
           },
-          messageLogs: {
-            take: 3,
-            orderBy: { sentAt: "desc" },
-            select: {
-              id: true,
-              reasonTitle: true,
-              sentByName: true,
-              sentAt: true,
-            },
-          },
         },
         orderBy: { name: "asc" },
+      }),
+      prisma.messageLog.findMany({
+        take: 150,
+        orderBy: { sentAt: "desc" },
+        select: {
+          id: true,
+          studentId: true,
+          reasonTitle: true,
+          sentByName: true,
+          sentAt: true,
+        },
       }),
       safeQueryList(() =>
         prisma.absenceJustification.findMany({
@@ -81,8 +98,19 @@ export default async function BuscaAtivaPage({
       ),
     ]);
 
+    classGroups = results[0] || [];
+    templates = results[1] || [];
+    rawStudents = results[2] || [];
+    recentLogs = results[3] || [];
+    recentJustifications = results[4] || [];
+    allContacts = results[5] || [];
+  } catch (err) {
+    console.error("[BuscaAtivaPage] Erro ao carregar dados do banco:", err);
+  }
+
   const justMap = new Map<string, any[]>();
   recentJustifications.forEach((j: any) => {
+    if (!j?.studentId) return;
     const arr = justMap.get(j.studentId) || [];
     arr.push(j);
     justMap.set(j.studentId, arr);
@@ -90,13 +118,25 @@ export default async function BuscaAtivaPage({
 
   const contactsMap = new Map<string, any[]>();
   allContacts.forEach((c: any) => {
+    if (!c?.studentId) return;
     const arr = contactsMap.get(c.studentId) || [];
     arr.push(c);
     contactsMap.set(c.studentId, arr);
   });
 
+  const logsMap = new Map<string, any[]>();
+  recentLogs.forEach((l: any) => {
+    if (!l?.studentId) return;
+    const list = logsMap.get(l.studentId) || [];
+    if (list.length < 3) {
+      list.push(l);
+      logsMap.set(l.studentId, list);
+    }
+  });
+
   const initialStudents = rawStudents.map((s) => ({
     ...s,
+    messageLogs: logsMap.get(s.id) || [],
     justifications: justMap.get(s.id) || [],
     contacts: contactsMap.get(s.id) || [],
   }));
