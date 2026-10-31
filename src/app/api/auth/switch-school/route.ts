@@ -7,7 +7,10 @@ import { z } from "zod";
 export const dynamic = "force-dynamic";
 
 const switchSchoolSchema = z.object({
-  schoolId: z.string().min(1, "ID da escola é obrigatório"),
+  schoolId: z.string().optional(),
+  targetSchoolId: z.string().optional(),
+}).refine((data) => Boolean(data.schoolId || data.targetSchoolId), {
+  message: "ID da escola é obrigatório",
 });
 
 export async function POST(req: Request) {
@@ -21,7 +24,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const { schoolId } = parsed.data;
+    const schoolId = (parsed.data.schoolId || parsed.data.targetSchoolId)!;
     const isRootAdmin = isBootstrapAdminEmail(authCheck.email);
 
     // 1. Verifica se a escola existe e está ativa

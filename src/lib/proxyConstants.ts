@@ -17,4 +17,4 @@ export const SELF_AUTH_API_PREFIXES = [
   "/api/webhooks/whatsapp",
 ];
 
-export const ADMIN_PAGE_PREFIXES = ["/auditoria", "/equipe"];
+export const ADMIN_PAGE_PREFIXES = ["/auditoria", "/equipe", "/admin", "/configuracoes"];
