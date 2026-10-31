@@ -3,6 +3,7 @@ import {
   computeMinuteHash,
   computeAddendumHash,
   generateVerificationCode,
+  verifyMinuteIntegrity,
   maskName,
   maskDocument,
   anonymizeOtherMinorsInText,
@@ -54,6 +55,35 @@ describe("ataCrypto - Integridade Criptográfica e Conformidade LGPD/ECA", () =>
     };
     const hashAltered = computeMinuteHash(alteredPayload);
     expect(hashOriginal).not.toBe(hashAltered);
+  });
+
+  it("detecta adulteração fraudulenta no desenho da assinatura do participante (Lei 14.063/2020)", () => {
+    const hashOriginal = computeMinuteHash(samplePayload);
+    const alteredSigPayload = {
+      ...samplePayload,
+      participants: [
+        {
+          ...samplePayload.participants[0],
+          signatureData: "data:image/png;base64,assinatura_adulterada_diferente",
+        },
+        samplePayload.participants[1],
+      ],
+    };
+    const hashAlteredSig = computeMinuteHash(alteredSigPayload);
+    expect(hashOriginal).not.toBe(hashAlteredSig);
+  });
+
+  it("valida integridade estrita via verifyMinuteIntegrity", () => {
+    const hashOriginal = computeMinuteHash(samplePayload);
+    const verification = verifyMinuteIntegrity(samplePayload, hashOriginal);
+    expect(verification.isValid).toBe(true);
+    expect(verification.computedHash).toBe(hashOriginal);
+
+    const failVerification = verifyMinuteIntegrity(
+      { ...samplePayload, isConfidential: true },
+      hashOriginal
+    );
+    expect(failVerification.isValid).toBe(false);
   });
 
   it("calcula hash-chaining consistente para Termo de Aditamento", () => {

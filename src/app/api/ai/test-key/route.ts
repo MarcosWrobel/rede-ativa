@@ -17,7 +17,6 @@ export async function GET() {
 
     return NextResponse.json({
       hasServerKey: Boolean(envKey && envKey.trim().length > 10),
-      maskedKey: envKey && envKey.trim().length > 10 ? `${envKey.trim().slice(0, 6)}...${envKey.trim().slice(-4)}` : null,
     });
   } catch {
     return NextResponse.json({ hasServerKey: false });
@@ -56,7 +55,6 @@ export async function POST(req: Request) {
     }
 
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
-    const maskedKey = `${cleanApiKey.slice(0, 6)}...${cleanApiKey.slice(-4)}`;
     const source = headerKey ? "informada_no_navegador" : bodyKey ? "informada_no_formulario" : "variavel_vercel";
 
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
@@ -107,7 +105,6 @@ export async function POST(req: Request) {
         respondingModel,
         sampleReply,
         durationMs,
-        maskedKey,
         source,
       });
     }
@@ -121,7 +118,9 @@ export async function POST(req: Request) {
           ? parsed[0]?.error?.message
           : parsed?.error?.message;
         if (detail) errorMessage = detail;
-      } catch (e) {}
+      } catch (parseError) {
+        console.debug("[AI Test Key JSON Parse Error]", parseError);
+      }
     }
 
     return NextResponse.json(
@@ -129,7 +128,6 @@ export async function POST(req: Request) {
         success: false,
         error: `Google Gemini recusou a conexão: ${errorMessage}`,
         durationMs,
-        maskedKey,
         source,
       },
       { status: 400 }

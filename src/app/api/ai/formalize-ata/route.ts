@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/permissions";
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { generateLocalAtaMinuta, formatAtaDateExtenso } from "@/lib/nreAtaFormatter";
+import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 
 export const maxDuration = 45;
 export const dynamic = "force-dynamic";
@@ -130,19 +131,23 @@ DIRETRIZES OBRIGATÓRIAS DO NRE/SEED-PR E REVISÃO GRAMATICAL:
 7. CLÁUSULA DE CIÊNCIA E FECHAMENTO: Conclua obrigatoriamente o texto declarando que nada mais havendo a tratar, a ata foi lida, conferida, achada conforme e segue assinada por todos os presentes em sinal de ciência e concordância.
 8. PRESERVAÇÃO DE EDIÇÃO PRÉVIA: Se for fornecido um texto já existente (existingSummary), considere que a pedagoga já pode ter realizado ajustes manuais. Nesse caso, PRESERVE o conteúdo e as intenções já expressas, focando em corrigir erros de concordância, ortografia, sintaxe, ajustar tempos verbais e garantir o enquadramento estrito nas diretrizes acima.`;
 
+    const pseudonymizer = createAiPseudonymizer(studentNames, guardianNames);
+    const maskedRawNotes = pseudonymizer.maskText(rawNotes || "");
+    const maskedExistingSummary = pseudonymizer.maskText(existingSummary || "");
+
     const inputPrompt = `DADOS DO ATENDIMENTO:
 - Data e Hora Oficiais do Atendimento: ${dateInfo.dataExtensoCompleta}, às ${dateInfo.horaFormatada}
-- Estudante(s): ${studentNames.join(", ") || "Conforme identificado em registro"}
-- Responsável(is) / Presentes: ${guardianNames.join(", ") || "Responsável legal presente"}
+- Estudante(s): ${pseudonymizer.maskedStudentNames.join(", ") || "Conforme identificado em registro"}
+- Responsável(is) / Presentes: ${pseudonymizer.maskedGuardianNames.join(", ") || "Responsável legal presente"}
 - Natureza da Ocorrência: ${category}
 ${
-  existingSummary && existingSummary.trim().length >= 5
-    ? `- Texto Formal Já em Edição pela Pedagoga (REVISAR E AJUSTAR SEM PERDER O SENTIDO):\n"""\n${existingSummary.trim()}\n"""\n`
+  maskedExistingSummary && maskedExistingSummary.trim().length >= 5
+    ? `- Texto Formal Já em Edição pela Pedagoga (REVISAR E AJUSTAR SEM PERDER O SENTIDO):\n"""\n${maskedExistingSummary.trim()}\n"""\n`
     : ""
 }
 - Anotações / Tópicos Brutos da Reunião (ou transcrição de voz):
 """
-${rawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente)"}
+${maskedRawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente)"}
 """
 
 REGRAS DE FORMATAÇÃO DO JSON DE RESPOSTA:
@@ -319,6 +324,23 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
               };
             })
             .filter((a: any) => a.description && a.description.length > 0);
+        }
+
+        // Restaura nomes reais a partir dos pseudônimos LGPD/ECA
+        if (structured.formalSubject) {
+          structured.formalSubject = pseudonymizer.unmaskText(structured.formalSubject);
+        }
+        if (structured.formalSummary) {
+          structured.formalSummary = pseudonymizer.unmaskText(structured.formalSummary);
+        }
+        if (structured.agreementsSummary) {
+          structured.agreementsSummary = pseudonymizer.unmaskText(structured.agreementsSummary);
+        }
+        if (Array.isArray(structured.actionItems)) {
+          structured.actionItems = structured.actionItems.map((item: any) => ({
+            ...item,
+            description: pseudonymizer.unmaskText(item.description),
+          }));
         }
 
         return NextResponse.json({

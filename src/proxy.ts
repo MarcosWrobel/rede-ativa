@@ -3,19 +3,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authConfig } from "@/lib/auth.config";
 import { checkIsAdmin } from "@/lib/roles";
+import {
+  PUBLIC_PATHS,
+  PUBLIC_PREFIXES,
+  SELF_AUTH_API_PREFIXES,
+  ADMIN_PAGE_PREFIXES,
+} from "@/lib/proxyConstants";
 
 const { auth: proxyAuth } = NextAuth(authConfig);
-
-const PUBLIC_PATHS = ["/login"];
-const PUBLIC_PREFIXES = ["/validar/ata/", "/assinar/ata/"];
-const SELF_AUTH_API_PREFIXES = [
-  "/api/auth/",
-  "/api/frequencia/sync",
-  "/api/serp/sync",
-  "/api/atas/public/",
-  "/api/atas/sign-token/",
-];
-const ADMIN_PAGE_PREFIXES = ["/auditoria", "/equipe"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -55,8 +50,10 @@ export async function proxy(req: NextRequest) {
   return NextResponse.next();
 }
 
+export default proxy;
+
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|logo\\.svg|extensao-leopoldina\\.zip).*)",
+    "/((?!_next/static|_next/image|favicon.ico|logo\\.svg|extensao-leopoldina\\.zip|manifest\\.json|icon-.*\\.png).*)",
   ],
 };

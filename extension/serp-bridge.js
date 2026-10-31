@@ -25,16 +25,7 @@
         return;
       }
 
-      // 2. Se foi passado o código da chamada (ex: "paginar(2, 119);")
-      if (scriptCode) {
-        console.log(`[SERP-BRIDGE] Executando via Function: ${scriptCode}`);
-        const fn = new Function(scriptCode);
-        fn();
-        window.dispatchEvent(new CustomEvent('LEO_SERP_BRIDGE_EXECUTADO', { detail: { sucesso: true, metodo: 'new Function' } }));
-        return;
-      }
-
-      // 3. Procura no DOM o link com href correspondente e clica no contexto da página
+      // 2. Procura no DOM o link com href correspondente e clica no contexto da página
       const links = document.querySelectorAll('a[href*="paginar"]');
       for (const a of links) {
         const href = a.getAttribute('href') || '';
@@ -46,7 +37,7 @@
         }
       }
 
-      // 4. Procura formulários com campo de página
+      // 3. Procura formulários com campo de página
       const form = document.querySelector('form');
       const inputPagina = document.querySelector('input[name="pagina"], input[name="numPagina"], input[id*="pagina"]');
       if (form && inputPagina) {

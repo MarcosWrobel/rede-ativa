@@ -7,9 +7,6 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- Starting Database Seeding (Optimized Batch Mode) ---');
 
-  const rawData = fs.readFileSync(path.join(__dirname, 'extracted_data.json'), 'utf-8');
-  const data = JSON.parse(rawData);
-
   // 0. Seed Default School
   const defaultSchool = await prisma.school.upsert({
     where: { inepCode: '41042730' },
@@ -57,6 +54,16 @@ async function main() {
   userMap['natiele'] = userMap['natiele.pacheco.santos@escola.pr.gov.br'];
   console.log('Seeded official users.');
 
+  const dataPath = path.join(__dirname, 'extracted_data.json');
+  if (!fs.existsSync(dataPath)) {
+    console.log('[SEED] Arquivo extracted_data.json não encontrado (LGPD). Escola padrão e usuários oficiais configurados com sucesso.');
+    console.log('--- Database Seeding Completed Early (Clean Environment Mode) ---');
+    return;
+  }
+
+  const rawData = fs.readFileSync(dataPath, 'utf-8');
+  const data = JSON.parse(rawData);
+
   function getUserId(pedagogaName) {
     if (!pedagogaName) return null;
     const lower = pedagogaName.toLowerCase();
@@ -81,9 +88,9 @@ async function main() {
       const key = `${seg}_${s.turma}`;
       if (!classGroupMap[key]) {
         const cg = await prisma.classGroup.upsert({
-          where: { name: s.turma },
-          update: { segment: seg, shift },
-          create: { name: s.turma, segment: seg, shift },
+          where: { schoolId_name: { schoolId: defaultSchool.id, name: s.turma } },
+          update: { segment: seg, shift, schoolId: defaultSchool.id },
+          create: { name: s.turma, segment: seg, shift, schoolId: defaultSchool.id },
         });
         classGroupMap[key] = cg;
         classGroupMap[s.turma] = cg;

@@ -66,6 +66,7 @@ interface Props {
   currentUser?: {
     name: string;
     email: string;
+    isAdmin?: boolean;
   };
 }
 
@@ -74,7 +75,7 @@ export default function FaltasClient({
   lowAttendance, 
   classGroups,
   templates = [],
-  currentUser = { name: "Equipe Pedagógica", email: "" }
+  currentUser = { name: "Equipe Pedagógica", email: "", isAdmin: false }
 }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"serp" | "ranking">("serp");
@@ -111,11 +112,16 @@ export default function FaltasClient({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [importError, setImportError] = useState("");
-  const [copyTokenStatus, setCopyTokenStatus] = useState<"idle" | "copied" | "missing">("idle");
+  const [copyTokenStatus, setCopyTokenStatus] = useState<"idle" | "copied" | "missing" | "unauthorized">("idle");
 
   const handleCopyExtensionToken = async () => {
     try {
       const res = await fetch("/api/sync-config");
+      if (res.status === 403) {
+        setCopyTokenStatus("unauthorized");
+        setTimeout(() => setCopyTokenStatus("idle"), 4500);
+        return;
+      }
       const data = await res.json();
       if (res.ok && data.configured && data.syncToken) {
         await navigator.clipboard.writeText(data.syncToken);
@@ -703,14 +709,16 @@ export default function FaltasClient({
             <span>Baixar Extensão (.ZIP)</span>
           </a>
 
-          {/* Botão Autenticado para Copiar Chave da Extensão */}
+          {/* Botão Autenticado para Copiar Chave da Extensão (Restrito a ADMIN) */}
           <button
             type="button"
             onClick={handleCopyExtensionToken}
-            title="Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome"
+            title={currentUser?.isAdmin ? "Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome" : "Acesso restrito a Administradores da Escola"}
             className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition cursor-pointer ${
               copyTokenStatus === "copied"
                 ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : copyTokenStatus === "unauthorized"
+                ? "border-rose-300 bg-rose-50 text-rose-800"
                 : copyTokenStatus === "missing"
                 ? "border-amber-300 bg-amber-50 text-amber-800"
                 : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
@@ -720,6 +728,11 @@ export default function FaltasClient({
               <>
                 <Check className="w-4 h-4 text-emerald-600" />
                 <span>Chave Copiada!</span>
+              </>
+            ) : copyTokenStatus === "unauthorized" ? (
+              <>
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+                <span>Apenas Administradores</span>
               </>
             ) : copyTokenStatus === "missing" ? (
               <>

@@ -8,8 +8,24 @@
 const POPUP_WIDTH = 480;
 const POPUP_HEIGHT = 760;
 
+function isAllowedWhatsAppUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    return host === "web.whatsapp.com" || host === "wa.me" || host === "api.whatsapp.com";
+  } catch {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && request.url) {
+    if (!isAllowedWhatsAppUrl(request.url)) {
+      sendResponse({ success: false, error: "URL de destino não permitida. Apenas domínios WhatsApp são aceitos." });
+      return false;
+    }
+
     handleWhatsAppDispatch(request.url)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));

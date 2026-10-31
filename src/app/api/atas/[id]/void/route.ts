@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { z } from "zod";
 
@@ -27,6 +28,14 @@ export async function POST(
 
     if (!minute) {
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     if (minute.status !== "FINALIZED") {

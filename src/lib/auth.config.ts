@@ -48,6 +48,9 @@ export const authConfig: NextAuthConfig = {
         if (token.name) {
           session.user.name = String(token.name);
         }
+        if (token.schoolId) {
+          (session.user as any).schoolId = String(token.schoolId);
+        }
       }
       return session;
     },

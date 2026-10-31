@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { z } from "zod";
 
@@ -125,6 +126,14 @@ export async function GET(
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
     }
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json({ success: true, minute });
   } catch (error: any) {
     console.error("[GET /api/atas/[id]] Erro:", error);
@@ -148,6 +157,14 @@ export async function PATCH(
 
     if (!existing) {
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     // REGRA DE OURO JURÍDICA: Se já foi lavrada (FINALIZED) ou cancelada (VOIDED),
@@ -234,14 +251,16 @@ export async function PATCH(
             : "PENDING";
         const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
 
-        const bioVerified = shouldClear || isRefused ? false : (p.biometricVerified ?? match?.biometricVerified ?? false);
-        const bioDevice = shouldClear || isRefused ? null : (p.biometricDeviceType || match?.biometricDeviceType || null);
-        const bioTime = bioVerified ? (match?.biometricAuthTime || new Date()) : null;
+        // HARDENING JURÍDICO (Lei 14.063/2020): Provas de biometria e autenticação OIDC Google NÃO podem
+        // ser forjadas via payload de PATCH. Preservam estritamente o estado verificado no banco via sign-token.
+        const bioVerified = shouldClear || isRefused ? false : (match?.biometricVerified ?? false);
+        const bioDevice = shouldClear || isRefused ? null : (match?.biometricDeviceType || null);
+        const bioTime = bioVerified ? (match?.biometricAuthTime || null) : null;
 
-        const verifiedEmail = shouldClear || isRefused ? null : (p.verifiedEmail || match?.verifiedEmail || null);
-        const verifiedGoogleName = shouldClear || isRefused ? null : (p.verifiedGoogleName || match?.verifiedGoogleName || null);
-        const verifiedGoogleSub = shouldClear || isRefused ? null : (p.verifiedGoogleSub || match?.verifiedGoogleSub || null);
-        const emailVerifiedAt = verifiedEmail ? (match?.emailVerifiedAt || new Date()) : null;
+        const verifiedEmail = shouldClear || isRefused ? null : (match?.verifiedEmail || null);
+        const verifiedGoogleName = shouldClear || isRefused ? null : (match?.verifiedGoogleName || null);
+        const verifiedGoogleSub = shouldClear || isRefused ? null : (match?.verifiedGoogleSub || null);
+        const emailVerifiedAt = verifiedEmail ? (match?.emailVerifiedAt || null) : null;
 
         const effectiveSigMode = isRefused
           ? "REFUSED"
@@ -355,6 +374,14 @@ export async function DELETE(
 
     if (!existing) {
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     const isAdmin = authCheck.role === "ADMIN";

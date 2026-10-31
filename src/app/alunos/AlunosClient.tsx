@@ -51,6 +51,7 @@ export default function AlunosClient({
   const [formClassId, setFormClassId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; name: string } | null>(null);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -174,8 +175,13 @@ export default function AlunosClient({
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja inativar o aluno ${name}?`)) return;
+  const handleDelete = (id: string, name: string) => {
+    setDeleteCandidate({ id, name });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteCandidate) return;
+    const { id } = deleteCandidate;
     try {
       const res = await fetch(`/api/students?id=${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -183,6 +189,8 @@ export default function AlunosClient({
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setDeleteCandidate(null);
     }
   };
 
@@ -552,6 +560,36 @@ export default function AlunosClient({
             </button>
           </div>
         </form>
+      </ModalDialog>
+
+      {/* Confirmation Modal for Student Inactivation */}
+      <ModalDialog
+        open={Boolean(deleteCandidate)}
+        onClose={() => setDeleteCandidate(null)}
+        title="Confirmar Inativação"
+        subtitle="Registro de Matrícula e Frequência"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-700">
+            Tem certeza que deseja inativar o estudante <strong>{deleteCandidate?.name}</strong>?
+          </p>
+          <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setDeleteCandidate(null)}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmDelete}
+              className="px-4 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-sm"
+            >
+              Confirmar Inativação
+            </button>
+          </div>
+        </div>
       </ModalDialog>
 
       {/* SERE Batch Import Modal */}

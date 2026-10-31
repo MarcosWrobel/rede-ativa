@@ -3,23 +3,32 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, studentCreateSchema, studentUpdateSchema } from "@/lib/schemas";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function GET(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
     const classGroupId = searchParams.get("classGroupId");
     const search = searchParams.get("search");
+    const pageParam = searchParams.get("page");
+    const pageSizeParam = searchParams.get("pageSize");
 
-    const where: any = { active: true };
+    const where: any = { active: true, schoolId: currentSchool.id };
     if (classGroupId) where.classGroupId = classGroupId;
     if (segment) where.classGroup = { segment };
     if (search) {
       where.name = { contains: search.toUpperCase() };
     }
+
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10)) : undefined;
+    const pageSize = pageSizeParam ? Math.min(500, Math.max(1, parseInt(pageSizeParam, 10))) : undefined;
+    const take = pageSize;
+    const skip = page && pageSize ? (page - 1) * pageSize : undefined;
 
     const students = await prisma.student.findMany({
       where,
@@ -28,6 +37,8 @@ export async function GET(req: Request) {
         _count: { select: { messageLogs: true } },
       },
       orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
+      ...(take ? { take } : {}),
+      ...(skip ? { skip } : {}),
     });
 
     return NextResponse.json(students);
@@ -41,6 +52,7 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const parsed = studentCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -58,6 +70,7 @@ export async function POST(req: Request) {
         guardianName: guardianName?.trim() || "Responsável",
         phone: cleanDigits,
         classGroupId,
+        schoolId: currentSchool.id,
       },
       include: { classGroup: true },
     });
@@ -91,6 +104,7 @@ export async function PUT(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const parsed = studentUpdateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -102,6 +116,13 @@ export async function PUT(req: Request) {
       where: { id },
       include: { classGroup: true },
     });
+
+    if (!previous || previous.schoolId !== currentSchool.id) {
+      return NextResponse.json(
+        { error: "Estudante não encontrado nesta unidade escolar" },
+        { status: 404 }
+      );
+    }
 
     const cleanDigits = phone !== undefined ? phone.replace(/\D/g, "") : previous?.phone;
     const cleanCgm =
@@ -148,9 +169,22 @@ export async function DELETE(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "ID ausente" }, { status: 400 });
+
+    const previous = await prisma.student.findUnique({
+      where: { id },
+      include: { classGroup: true },
+    });
+
+    if (!previous || previous.schoolId !== currentSchool.id) {
+      return NextResponse.json(
+        { error: "Estudante não encontrado nesta unidade escolar" },
+        { status: 404 }
+      );
+    }
 
     const student = await prisma.student.update({
       where: { id },

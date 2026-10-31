@@ -11,7 +11,10 @@ export default async function RelatoriosPage() {
     redirect("/login");
   }
 
-  const initialSummary = await getReportsSummary({ segment: "TODOS" });
+  const initialSummary = await getReportsSummary({
+    segment: "TODOS",
+    schoolId: (session.user as any)?.schoolId,
+  });
 
   return <RelatoriosClient initialSummary={initialSummary} />;
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,8 @@ export async function GET(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
 
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
@@ -22,7 +25,9 @@ export async function GET(req: Request) {
     const dateFrom = (searchParams.get("dateFrom") || "").trim();
     const dateTo = (searchParams.get("dateTo") || "").trim();
 
-    const andFilters: any[] = [];
+    const andFilters: any[] = [
+      { student: { schoolId: currentSchool.id } }
+    ];
 
     if (search) {
       andFilters.push({

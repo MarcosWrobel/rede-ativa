@@ -1,10 +1,12 @@
 import { prisma } from "./prisma";
+import { getCurrentSchool } from "./currentSchool";
 import { REPLY_CATEGORY_LABELS, type ReplyCategory } from "./whatsappProvider";
 
 export interface ReportsFilterParams {
   segment?: string;
   dateFrom?: string;
   dateTo?: string;
+  schoolId?: string;
 }
 
 export interface ReportsSummary {
@@ -25,8 +27,11 @@ export interface ReportsSummary {
 }
 
 export async function getReportsSummary(params: ReportsFilterParams = {}): Promise<ReportsSummary> {
-  const { segment = "TODOS", dateFrom, dateTo } = params;
-  const andFilters: any[] = [];
+  const { segment = "TODOS", dateFrom, dateTo, schoolId } = params;
+  const currentSchool = await getCurrentSchool(schoolId);
+  const andFilters: any[] = [
+    { student: { schoolId: currentSchool.id } }
+  ];
 
   if (segment && segment !== "TODOS") {
     andFilters.push({

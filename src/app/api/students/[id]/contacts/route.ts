@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit } from "@/lib/audit";
 import {
   formatZodError,
@@ -23,9 +24,10 @@ export async function POST(
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (!student) {
-      return NextResponse.json({ error: "Aluno não encontrado." }, { status: 404 });
+    if (!student || student.schoolId !== currentSchool.id) {
+      return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
     }
 
     const cleanPhone = parsed.data.phone.replace(/\D/g, "");
@@ -103,15 +105,16 @@ export async function PUT(
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { contactId, name, kinship, phone, isPrimary, whatsappValid, notes } = parsed.data;
 
     const existing = await prisma.studentContact.findFirst({
       where: { id: contactId, studentId },
-      include: { student: { select: { name: true } } },
+      include: { student: { select: { name: true, schoolId: true } } },
     });
 
-    if (!existing) {
-      return NextResponse.json({ error: "Contato não encontrado." }, { status: 404 });
+    if (!existing || existing.student.schoolId !== currentSchool.id) {
+      return NextResponse.json({ error: "Contato não encontrado nesta unidade escolar." }, { status: 404 });
     }
 
     const cleanPhone = phone ? phone.replace(/\D/g, "") : existing.phone;
@@ -182,6 +185,7 @@ export async function DELETE(
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const { id: studentId } = await context.params;
     const { searchParams } = new URL(req.url);
     const contactId = searchParams.get("contactId");
@@ -191,11 +195,11 @@ export async function DELETE(
 
     const existing = await prisma.studentContact.findFirst({
       where: { id: contactId, studentId },
-      include: { student: { select: { name: true } } },
+      include: { student: { select: { name: true, schoolId: true } } },
     });
 
-    if (!existing) {
-      return NextResponse.json({ error: "Contato não encontrado." }, { status: 404 });
+    if (!existing || existing.student.schoolId !== currentSchool.id) {
+      return NextResponse.json({ error: "Contato não encontrado nesta unidade escolar." }, { status: 404 });
     }
 
     await prisma.studentContact.delete({ where: { id: contactId } });

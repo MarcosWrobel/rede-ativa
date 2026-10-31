@@ -56,7 +56,7 @@ model User {
 
 model ClassGroup {
   id        String    @id @default(cuid())
-  name      String    @unique // e.g. "6º 1", "1º ADM", "2º Série"
+  name      String    // e.g. "6º 1", "1º ADM", "2º Série"
   segment   String    // FUNDAMENTAL | MEDIO | NOTURNO
   shift     String    @default("MANHA") // MANHA | TARDE | NOITE
   schoolId  String?
@@ -65,6 +65,7 @@ model ClassGroup {
 
   students  Student[]
 
+  @@unique([schoolId, name])
   @@index([segment, shift])
   @@index([schoolId])
 }
@@ -77,7 +78,7 @@ model Student {
   guardianName         String?
   phone                String                // e.g. "42988189394"
   classGroupId         String
-  classGroup           ClassGroup            @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  classGroup           ClassGroup            @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
   schoolId             String?
   school               School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   active               Boolean               @default(true)

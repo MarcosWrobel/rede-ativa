@@ -125,6 +125,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         (user as any).dbId = dbUser.id;
         (user as any).role = isRootAdmin ? "ADMIN" : dbUser.role;
         (user as any).active = isRootAdmin ? true : dbUser.active;
+        (user as any).schoolId = dbUser.schoolId;
 
         await logAudit({
           action: "USER_LOGIN",
@@ -148,6 +149,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.userId = (user as any).dbId || user.id;
         token.role = isRootAdmin ? "ADMIN" : (user as any).role || "PEDAGOGA";
         token.active = isRootAdmin ? true : (user as any).active !== false;
+        token.schoolId = (user as any).schoolId;
         token.checkedAt = Date.now();
         return token;
       }
@@ -159,13 +161,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         try {
           const dbUser = await prisma.user.findUnique({
             where: { email },
-            select: { id: true, role: true, active: true, name: true },
+            select: { id: true, role: true, active: true, name: true, schoolId: true },
           });
           if (dbUser) {
             token.userId = dbUser.id;
             token.name = dbUser.name;
             token.role = isRootAdmin ? "ADMIN" : dbUser.role;
             token.active = isRootAdmin ? true : dbUser.active;
+            token.schoolId = dbUser.schoolId;
           } else if (!isRootAdmin) {
             token.active = false;
           }

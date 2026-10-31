@@ -17,8 +17,19 @@ if (!dbUrl) {
   process.exit(1);
 }
 
+function getNeonSqlEndpoint(connectionString) {
+  try {
+    const cleanUrl = connectionString.replace(/^prisma\+/, "");
+    const parsed = new URL(cleanUrl);
+    return `https://${parsed.host}/sql`;
+  } catch (err) {
+    throw new Error(`Falha ao derivar endpoint Neon a partir de DATABASE_URL: ${err.message}`);
+  }
+}
+
 async function queryNeon(sql, params = []) {
-  const res = await fetch("https://ep-delicate-leaf-b6hzdz3t.c-2.sa-east-1.aws.neon.tech/sql", {
+  const neonEndpoint = getNeonSqlEndpoint(dbUrl);
+  const res = await fetch(neonEndpoint, {
     method: "POST",
     headers: {
       "Neon-Connection-String": dbUrl,

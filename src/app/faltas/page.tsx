@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { checkIsAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import FaltasClient from "./FaltasClient";
@@ -199,6 +200,7 @@ export default async function FaltasPage() {
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",
+        isAdmin: checkIsAdmin(session),
       }}
     />
   );

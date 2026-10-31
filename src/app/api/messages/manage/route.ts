@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 // PUT: Editar campos de um registro do histórico (Restrito a ADMIN)
 export async function PUT(req: Request) {
@@ -38,6 +39,14 @@ export async function PUT(req: Request) {
 
     if (!previous) {
       return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     const updateData: any = {};
@@ -135,6 +144,14 @@ export async function DELETE(req: Request) {
 
     if (!previous) {
       return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     await prisma.messageLog.delete({

@@ -15,7 +15,7 @@
     window.postMessage(
       {
         type: "LEOPOLDINA_EXTENSION_READY",
-        version: "1.4.0",
+        version: "1.4.1",
       },
       "*"
     );
@@ -25,6 +25,18 @@
       if (event.source !== window || !event.data) return;
 
       if (event.data.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && event.data.url) {
+        // Validação defensiva prévia da URL antes de encaminhar ao service worker
+        try {
+          const parsed = new URL(event.data.url);
+          const host = parsed.hostname.toLowerCase();
+          if (parsed.protocol !== "https:" || (host !== "web.whatsapp.com" && host !== "wa.me" && host !== "api.whatsapp.com")) {
+            console.warn("[Sincronizador Leopoldina] URL ignorada por segurança:", event.data.url);
+            return;
+          }
+        } catch {
+          return;
+        }
+
         chrome.storage.local.get(["opt_whatsapp_tab_reuse"], (res) => {
           if (res && res.opt_whatsapp_tab_reuse === false) {
             // Usuário desligou a função na extensão: opera no modo convencional

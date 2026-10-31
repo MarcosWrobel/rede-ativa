@@ -1,5 +1,5 @@
-// Service Worker mínimo para suporte PWA offline fallback e instalação mobile
-const CACHE_NAME = "leopoldina-pwa-v1";
+// Service Worker para suporte PWA offline fallback e instalação mobile (v1.1.0)
+const CACHE_NAME = "leopoldina-pwa-v1.1.0";
 const PRECACHE_URLS = [
   "/busca-ativa",
   "/manifest.json",

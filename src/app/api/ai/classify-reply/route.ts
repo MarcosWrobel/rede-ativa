@@ -6,6 +6,7 @@ import {
   type ReplyCategory,
 } from "@/lib/whatsappProvider";
 import { GoogleGenAI } from "@google/genai";
+import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 
 export const maxDuration = 45;
 export const dynamic = "force-dynamic";
@@ -85,11 +86,14 @@ Regras:
 2. Escreva "formalSummary" em terceira pessoa (ex.: "Responsável informou via WhatsApp que...").
 3. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
 
-    const inputPrompt = `Estudante: ${studentName || "Não informado"}
+    const pseudonymizer = createAiPseudonymizer(studentName ? [studentName] : [], []);
+    const maskedReply = pseudonymizer.maskText(rawReply);
+
+    const inputPrompt = `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
 Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
 Mensagem recebida do responsável via WhatsApp:
 """
-${rawReply}
+${maskedReply}
 """`;
 
     const modelsToTry = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
@@ -144,16 +148,17 @@ ${rawReply}
       const catCheck = replyCategoryEnum.safeParse(aiObj.category);
       const validCategory: ReplyCategory = catCheck.success ? catCheck.data : "OUTROS";
 
+      const rawFormalSummary = String(aiObj.formalSummary || "").trim() || classifyGuardianReplyHeuristic(rawReply).formalSummary;
+      const rawFollowUp = String(aiObj.suggestedFollowUp || "").trim() || "Acompanhar assiduidade nos próximos dias letivos.";
+
       return NextResponse.json({
         success: true,
         usedFallback: false,
         classification: {
-          formalSummary: String(aiObj.formalSummary || "").trim() || classifyGuardianReplyHeuristic(rawReply).formalSummary,
+          formalSummary: pseudonymizer.unmaskText(rawFormalSummary),
           category: validCategory,
           requiresMedicalCertificate: Boolean(aiObj.requiresMedicalCertificate),
-          suggestedFollowUp:
-            String(aiObj.suggestedFollowUp || "").trim() ||
-            "Acompanhar assiduidade nos próximos dias letivos.",
+          suggestedFollowUp: pseudonymizer.unmaskText(rawFollowUp),
         },
       });
     } catch {

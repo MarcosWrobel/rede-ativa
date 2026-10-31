@@ -151,7 +151,23 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ success: true, minutes, year, school });
+    const includeSignatures = searchParams.get("includeSignatures") === "true";
+
+    const responseMinutes = includeSignatures
+      ? minutes
+      : minutes.map((m) => ({
+          ...m,
+          physicalSignedScanData: m.physicalSignedScanData ? true : false,
+          participants: m.participants.map((p) => {
+            const { signatureData, ...rest } = p;
+            return {
+              ...rest,
+              hasSignature: Boolean(signatureData),
+            };
+          }),
+        }));
+
+    return NextResponse.json({ success: true, minutes: responseMinutes, year, school });
   } catch (error: any) {
     console.error("[GET /api/atas] Erro:", error);
     return NextResponse.json({ error: error.message || "Erro ao listar atas" }, { status: 500 });
@@ -242,15 +258,15 @@ export async function POST(req: Request) {
             phone: p.phone || null,
             signatureMode: p.signatureMode || "PENDING",
             signatureData: p.signatureData || null,
-            signedAt: p.signatureData || p.verifiedEmail ? new Date() : null,
-            biometricVerified: p.biometricVerified || false,
-            biometricDeviceType: p.biometricDeviceType || null,
-            biometricAuthTime: p.biometricVerified ? new Date() : null,
+            signedAt: p.signatureData ? new Date() : null,
+            biometricVerified: false,
+            biometricDeviceType: null,
+            biometricAuthTime: null,
             expectedEmail: p.expectedEmail || null,
-            verifiedEmail: p.verifiedEmail || null,
-            verifiedGoogleSub: p.verifiedGoogleSub || null,
-            verifiedGoogleName: p.verifiedGoogleName || null,
-            emailVerifiedAt: p.verifiedEmail ? new Date() : null,
+            verifiedEmail: null,
+            verifiedGoogleSub: null,
+            verifiedGoogleName: null,
+            emailVerifiedAt: null,
             refusalReason: p.refusalReason || null,
             witnessName: p.witnessName || null,
           })),

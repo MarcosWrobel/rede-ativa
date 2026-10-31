@@ -67,7 +67,9 @@
     },
     {
       "matches": [
-        "<all_urls>"
+        "https://*.vercel.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "js": ["registro-bridge.js"],
       "world": "ISOLATED",

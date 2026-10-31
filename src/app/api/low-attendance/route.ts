@@ -2,13 +2,19 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function GET() {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+
     const records = await prisma.lowAttendanceRecord.findMany({
+      where: {
+        student: { schoolId: currentSchool.id },
+      },
       include: {
         student: {
           include: { classGroup: true },

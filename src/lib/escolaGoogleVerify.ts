@@ -77,20 +77,23 @@ export async function verifyEscolaGoogleIdToken(
     const info: GoogleTokenInfo = await res.json();
     const email = (info.email || "").toLowerCase().trim();
 
-    // 1. Validação estrita do domínio institucional
-    if (!email.endsWith("@escola.pr.gov.br") && info.hd !== "escola.pr.gov.br") {
+    // 1. Validação estrita do domínio institucional (exige terminação E hosted domain oficial da SEED-PR)
+    if (!email.endsWith("@escola.pr.gov.br") || info.hd !== "escola.pr.gov.br") {
       return {
         ok: false,
         error: `A conta conectada (${email}) não pertence ao domínio @escola.pr.gov.br. Utilize o e-mail institucional oficial emitido pela SEED-PR.`,
       };
     }
 
-    // 2. Validação do Client ID se configurado
+    // 2. Validação do Client ID se configurado (rejeição estrita contra cross-client token injection)
     const configuredClientId =
       expectedClientId || process.env.GOOGLE_CLIENT_ID || "";
     if (configuredClientId && info.aud && info.aud !== configuredClientId) {
-      console.warn(`[ESCOLA-AUTH] Client ID divergente: recebido ${info.aud}, esperado ${configuredClientId}`);
-      // Permitimos caso haja compatibilidade de client web
+      console.error(`[ESCOLA-AUTH] Client ID divergente rejeitado: recebido ${info.aud}, esperado ${configuredClientId}`);
+      return {
+        ok: false,
+        error: "Credencial inválida: token de autenticação emitido para outra aplicação.",
+      };
     }
 
     // 3. Validação de e-mail verificado

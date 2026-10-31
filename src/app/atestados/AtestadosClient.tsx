@@ -18,6 +18,7 @@ import {
   X,
   Filter
 } from "lucide-react";
+import ModalDialog from "@/components/ModalDialog";
 import { JUSTIFICATION_TYPE_LABELS } from "@/lib/pedagogicalClassifier";
 
 interface StudentOption {
@@ -74,6 +75,8 @@ export default function AtestadosClient({
   const [tableStatusFilter, setTableStatusFilter] = useState("ACTIVE"); // ACTIVE | EXPIRED | ALL
   const [tableTypeFilter, setTableTypeFilter] = useState("ALL");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; studentName: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Filtra alunos para o autocomplete do formulário
   const filteredStudentOptions = useMemo(() => {
@@ -174,10 +177,16 @@ export default function AtestadosClient({
   };
 
   // Exclusão de atestado lançado com erro
-  const handleDeleteJustification = async (id: string, studentName: string) => {
-    if (!confirm(`Deseja realmente remover o atestado de ${studentName}?`)) return;
+  const handleDeleteJustification = (id: string, studentName: string) => {
+    setDeleteError(null);
+    setDeleteCandidate({ id, studentName });
+  };
 
+  const confirmDeleteJustification = async () => {
+    if (!deleteCandidate) return;
+    const { id } = deleteCandidate;
     setDeletingId(id);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/justifications/${id}`, {
         method: "DELETE",
@@ -190,8 +199,9 @@ export default function AtestadosClient({
         ...prev,
         total: Math.max(0, prev.total - 1),
       }));
+      setDeleteCandidate(null);
     } catch (err: any) {
-      alert(err.message || "Não foi possível remover o atestado.");
+      setDeleteError(err.message || "Não foi possível remover o atestado.");
     } finally {
       setDeletingId(null);
     }
@@ -688,6 +698,45 @@ export default function AtestadosClient({
           </table>
         </div>
       </div>
+
+      {/* Confirmation Modal for Justification Deletion */}
+      <ModalDialog
+        open={Boolean(deleteCandidate)}
+        onClose={() => setDeleteCandidate(null)}
+        title="Remover Atestado / Justificativa"
+        subtitle="Registro Oficial de Frequência"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-700">
+            Deseja realmente remover o atestado de <strong>{deleteCandidate?.studentName}</strong>?
+          </p>
+
+          {deleteError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>{deleteError}</p>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setDeleteCandidate(null)}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteJustification}
+              disabled={Boolean(deletingId)}
+              className="px-4 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-sm disabled:opacity-50"
+            >
+              {deletingId ? "Removendo..." : "Confirmar Remoção"}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
     </div>
   );
 }

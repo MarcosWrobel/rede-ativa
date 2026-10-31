@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     const dateFrom = (searchParams.get("dateFrom") || "").trim();
     const dateTo = (searchParams.get("dateTo") || "").trim();
 
-    const summary = await getReportsSummary({ segment, dateFrom, dateTo });
+    const summary = await getReportsSummary({ segment, dateFrom, dateTo, schoolId: authCheck.schoolId });
     return NextResponse.json(summary);
   } catch (error: any) {
     console.error("Erro ao agregar relatórios:", error);

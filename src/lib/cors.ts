@@ -33,14 +33,15 @@ function isTrustedSyncOrigin(origin: string | null): boolean {
 
 export function getSyncCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin");
-  const allowedOrigin = isTrustedSyncOrigin(origin)
-    ? origin!
-    : process.env.NEXTAUTH_URL || "https://app.powerbi.com";
-
-  return {
-    "Access-Control-Allow-Origin": allowedOrigin,
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-sync-token",
     Vary: "Origin",
   };
+
+  if (origin && isTrustedSyncOrigin(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+
+  return headers;
 }

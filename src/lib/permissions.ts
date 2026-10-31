@@ -11,6 +11,7 @@ export type AuthCheckSuccess = {
   email: string;
   userName: string;
   role: "ADMIN" | "PEDAGOGA";
+  schoolId?: string;
 };
 
 export type AuthCheckFailure = {
@@ -43,6 +44,7 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
   }
 
   const isAdmin = checkIsAdmin(session);
+  const schoolId = (session.user as any)?.schoolId || undefined;
 
   return {
     ok: true,
@@ -51,6 +53,7 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
     email,
     userName: session.user.name || email.split("@")[0],
     role: isAdmin ? "ADMIN" : "PEDAGOGA",
+    schoolId,
   };
 }
 

@@ -112,7 +112,9 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
               ? parsed[0]?.error?.message
               : parsed?.error?.message;
             if (detail) lastErrorMsg = detail;
-          } catch (e) {}
+          } catch (parseError) {
+            console.debug("[AI Template JSON Parse Error]", parseError);
+          }
         }
 
         // Se a chave API for comprovadamente inválida, interrompe sem testar outros modelos

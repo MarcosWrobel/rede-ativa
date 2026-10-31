@@ -31,6 +31,7 @@ export interface MinuteCanonicalPayload {
   ataNumber: number;
   attendedAt: string; // ISO
   category: string;
+  isConfidential?: boolean;
   subject: string;
   summary: string;
   agreementsSummary?: string | null;
@@ -42,6 +43,7 @@ export interface MinuteCanonicalPayload {
 
 /**
  * Normaliza e gera Hash SHA-256 canônico determinístico da ata.
+ * Inclui o hash criptográfico SHA-256 das assinaturas digitais capturadas (Lei 14.063/2020).
  */
 export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
   const normalized = {
@@ -50,6 +52,7 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
     ataNumber: payload.ataNumber,
     attendedAt: payload.attendedAt,
     category: payload.category.trim(),
+    isConfidential: Boolean(payload.isConfidential),
     subject: payload.subject.trim(),
     summary: payload.summary.trim(),
     agreementsSummary: (payload.agreementsSummary || "").trim(),
@@ -59,15 +62,19 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
       .map((s) => ({
         studentId: s.studentId,
         name: s.name.trim(),
+        className: s.className?.trim() || "",
         cgm: s.cgm?.trim() || "",
       })),
     participants: [...payload.participants]
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
       .map((p) => ({
         role: p.role,
         name: p.name.trim(),
         doc: (p.documentNumber || "").replace(/\D/g, ""),
         mode: p.signatureMode,
+        sigHash: p.signatureData
+          ? crypto.createHash("sha256").update(p.signatureData.trim()).digest("hex")
+          : "",
         hasSig: Boolean(p.signatureData),
         bio: Boolean(p.biometricVerified),
         email: (p.verifiedEmail || "").toLowerCase().trim(),
@@ -84,6 +91,21 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
 
   const canonicalJson = JSON.stringify(normalized);
   return crypto.createHash("sha256").update(canonicalJson, "utf8").digest("hex");
+}
+
+/**
+ * Recalcula e valida a integridade estrita do selo da ata lavrada.
+ */
+export function verifyMinuteIntegrity(
+  payload: MinuteCanonicalPayload,
+  storedHash: string
+): { isValid: boolean; computedHash: string; storedHash: string } {
+  const computedHash = computeMinuteHash(payload);
+  return {
+    isValid: computedHash.toLowerCase() === (storedHash || "").toLowerCase().trim(),
+    computedHash,
+    storedHash,
+  };
 }
 
 /**

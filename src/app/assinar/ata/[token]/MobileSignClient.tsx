@@ -188,7 +188,7 @@ export default function MobileSignClient({
   // Dispara o prompt biométrico nativo do aparelho (TouchID / FaceID / Biometria Android)
   const handleTriggerBiometrics = async () => {
     if (!window.PublicKeyCredential) {
-      alert("Seu aparelho não possui suporte ao padrão biométrico seguro (WebAuthn).");
+      setGoogleAuthError("Seu aparelho não possui suporte ao padrão biométrico seguro (WebAuthn).");
       return;
     }
 
@@ -230,7 +230,7 @@ export default function MobileSignClient({
       }
     } catch (err: any) {
       console.warn("Autenticação biométrica cancelada ou indisponível:", err);
-      alert(
+      setGoogleAuthError(
         "A leitura biométrica não foi concluída. Você pode assinar normalmente no quadro abaixo com o dedo."
       );
     } finally {
@@ -241,12 +241,12 @@ export default function MobileSignClient({
   // Submissão da assinatura
   const handleSubmit = async (preferEscolaAuth = false) => {
     if (preferEscolaAuth && !googleIdToken) {
-      alert("Conecte sua conta @escola.pr.gov.br antes de confirmar.");
+      setGoogleAuthError("Conecte sua conta @escola.pr.gov.br antes de confirmar.");
       return;
     }
 
     if (!preferEscolaAuth && !signatureData) {
-      alert("Por favor, faça sua assinatura no quadro antes de confirmar.");
+      setGoogleAuthError("Por favor, faça sua assinatura no quadro antes de confirmar.");
       return;
     }
 
@@ -282,7 +282,6 @@ export default function MobileSignClient({
       setSuccess(true);
     } catch (err: any) {
       setGoogleAuthError(err.message || "Erro ao registrar assinatura.");
-      alert(err.message || "Erro ao enviar assinatura");
     } finally {
       setSubmitting(false);
     }

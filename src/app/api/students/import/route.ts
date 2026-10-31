@@ -47,8 +47,10 @@ export async function POST(req: Request) {
     }
     const schoolId = schoolRecord?.id || null;
 
-    // 2. Sincroniza Turmas (ClassGroups)
-    const existingClassGroups = await prisma.classGroup.findMany();
+    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola
+    const existingClassGroups = await prisma.classGroup.findMany({
+      where: schoolId ? { schoolId } : undefined,
+    });
     const existingByName = new Map(
       existingClassGroups.map((cg) => [cg.name.trim().toUpperCase(), cg])
     );

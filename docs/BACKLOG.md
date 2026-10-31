@@ -134,4 +134,5 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 | **Sprint 6** | Expansão Regional & Mobile PWA | `ESC-01` a `ESC-03` | ✅ Concluído |
 | **Sprint 7** | Importação SERE (`.xls`/`.pdf`) & Equipe | `SERE-01` a `SERE-03` | ✅ Concluído |
 | **Sprint 8** | Livro Oficial de Atas Digital & Biometria | `ATA-01` a `ATA-05` | ✅ Concluído |
-| **Sprint 9+** | Alertas de Prazos, Scan Híbrido & e-Protocolo | `FUT-01` a `FUT-04` | 📋 Planejado |
+| **Sprint 9** | Auditoria Técnica, Multi-Escola & LGPD | `SEC-01` a `SEC-04`, `DB-01`, `DB-02`, `LGPD-01`, `PERF-01`, `UX-01`, `TEST-01`, `SCRIPT-01` | ✅ Concluído |
+| **Sprint 10+** | Alertas de Prazos, Scan Híbrido & e-Protocolo | `FUT-01` a `FUT-04` | 📋 Planejado |
