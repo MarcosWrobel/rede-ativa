@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sincronizador Leopoldina (Power BI & SERP)",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Extrai dados de frequência do Power BI e fichas da Rede de Proteção (SERP) para o Sistema de Busca Ativa.",
   "icons": {
     "16": "icons/icon16.png",

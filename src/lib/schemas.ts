@@ -158,6 +158,11 @@ export const frequenciaSyncItemSchema = z.object({
   mediaGeral: z.union([z.string(), z.number()]).optional().nullable(),
   semanaAtual: z.union([z.string(), z.number()]).optional().nullable(),
   semanaAnterior: z.union([z.string(), z.number()]).optional().nullable(),
+  amparoLegalVigencia: z.string().optional().nullable(),
+  deficienciaAltasHabilidades: z.union([z.boolean(), z.number(), z.string()]).optional().nullable(),
+  ganhandoMundo: z.union([z.boolean(), z.number(), z.string()]).optional().nullable(),
+  serpAtivo: z.union([z.boolean(), z.number(), z.string()]).optional().nullable(),
+  idade: z.union([z.number(), z.string()]).optional().nullable(),
 });
 
 export const frequenciaSyncSchema = z.object({

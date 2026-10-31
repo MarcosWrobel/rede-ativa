@@ -60,6 +60,9 @@ export default async function FaltasPage() {
             name: true,
             phone: true,
             guardianName: true,
+            isExchangeStudent: true,
+            isSpecialNeeds: true,
+            age: true,
             classGroupId: true,
             classGroup: {
               select: { id: true, name: true, segment: true, shift: true },
@@ -85,6 +88,9 @@ export default async function FaltasPage() {
             name: true,
             phone: true,
             guardianName: true,
+            isExchangeStudent: true,
+            isSpecialNeeds: true,
+            age: true,
             classGroupId: true,
             classGroup: {
               select: { id: true, name: true, segment: true, shift: true },

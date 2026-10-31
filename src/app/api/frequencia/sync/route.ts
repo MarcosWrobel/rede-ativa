@@ -96,6 +96,16 @@ export async function POST(req: Request) {
     const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
 
     const pendingCgmUpdates = new Map<string, string>(); // studentId -> cgm
+    const pendingStudentUpdates = new Map<
+      string,
+      {
+        isExchangeStudent?: boolean;
+        isSpecialNeeds?: boolean;
+        age?: number | null;
+      }
+    >();
+    const pendingAmparos = new Map<string, { vigenciaStr: string; date: Date }>();
+
     const batchRecords = new Map<
       string,
       {
@@ -109,6 +119,33 @@ export async function POST(req: Request) {
       }
     >();
     const naoEncontrados: Array<{ nome: string; cgm?: string; turma?: string }> = [];
+
+    // Helper para parsear data brasileira DD/MM/AAAA
+    function parseBrDate(val?: string | null): Date | null {
+      if (!val) return null;
+      const match = String(val).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (!match) return null;
+      const [, d, m, y] = match;
+      const date = new Date(Number(y), Number(m) - 1, Number(d), 23, 59, 59);
+      return isNaN(date.getTime()) ? null : date;
+    }
+
+    // Helper para parsear flag booleana (1, true, "1", "sim", "✓")
+    function parseBooleanFlag(val?: boolean | number | string | null): boolean {
+      if (val === true || val === 1 || val === "1") return true;
+      if (typeof val === "string") {
+        const lower = val.toLowerCase().trim();
+        return lower === "true" || lower === "sim" || lower === "1" || lower === "✓";
+      }
+      return false;
+    }
+
+    // Helper para parsear idade (inteiro positivo entre 10 e 99)
+    function parseAge(val?: number | string | null): number | null {
+      if (val === undefined || val === null || val === "") return null;
+      const num = typeof val === "number" ? Math.round(val) : parseInt(String(val).replace(/\D/g, ""), 10);
+      return !isNaN(num) && num >= 5 && num <= 99 ? num : null;
+    }
 
     // 3. Pareamento em memória (O(N)) e preparação dos lotes deduplicados
     for (const item of alunos) {
@@ -132,6 +169,28 @@ export async function POST(req: Request) {
       }
 
       if (studentId) {
+        // Enriquecimento cadastral: Ganhando Mundo, Deficiência e Idade
+        const isExchangeStudent = parseBooleanFlag(item.ganhandoMundo);
+        const isSpecialNeeds = parseBooleanFlag(item.deficienciaAltasHabilidades);
+        const age = parseAge(item.idade);
+
+        if (isExchangeStudent || isSpecialNeeds || age !== null) {
+          const current = pendingStudentUpdates.get(studentId) || {};
+          if (isExchangeStudent) current.isExchangeStudent = true;
+          if (isSpecialNeeds) current.isSpecialNeeds = true;
+          if (age !== null) current.age = age;
+          pendingStudentUpdates.set(studentId, current);
+        }
+
+        // Amparo Legal Vigência Máx (Automação de Atestado / Dispensa Legal)
+        const amparoDate = parseBrDate(item.amparoLegalVigencia);
+        if (amparoDate) {
+          pendingAmparos.set(studentId, {
+            vigenciaStr: item.amparoLegalVigencia!.trim(),
+            date: amparoDate,
+          });
+        }
+
         const percent = parseAttendancePercent(item.mediaGeral);
         if (percent !== null) {
           const semAtual = item.semanaAtual !== undefined && item.semanaAtual !== null ? String(item.semanaAtual).trim() : "";
@@ -242,6 +301,78 @@ export async function POST(req: Request) {
       }
     }
 
+    // 5c. Atualiza atributos adicionais do estudante (Ganhando Mundo, PCD / Altas Habilidades, Idade)
+    let estudantesEnriquecidos = 0;
+    if (pendingStudentUpdates.size > 0) {
+      const studentUpdateEntries = Array.from(pendingStudentUpdates.entries());
+      const CHUNK = 100;
+      for (let i = 0; i < studentUpdateEntries.length; i += CHUNK) {
+        const slice = studentUpdateEntries.slice(i, i + CHUNK);
+        await prisma.$transaction(
+          slice.map(([id, data]) =>
+            prisma.student.update({
+              where: { id },
+              data,
+            })
+          )
+        );
+      }
+      estudantesEnriquecidos = studentUpdateEntries.length;
+    }
+
+    // 5d. Automação de Amparo Legal Vigente (Criação/Prorrogação de Atestados / Dispensa Legal)
+    let amparosCriados = 0;
+    let amparosAtualizados = 0;
+    if (pendingAmparos.size > 0) {
+      const studentIdsWithAmparo = Array.from(pendingAmparos.keys());
+      const existingJusts = await prisma.absenceJustification.findMany({
+        where: {
+          studentId: { in: studentIdsWithAmparo },
+          type: "DISPENSA_LEGAL",
+        },
+        select: {
+          id: true,
+          studentId: true,
+          endDate: true,
+        },
+      });
+
+      const existingMap = new Map<string, { id: string; endDate: Date }>();
+      existingJusts.forEach((j) => existingMap.set(j.studentId, j));
+
+      for (const [studentId, amparo] of pendingAmparos.entries()) {
+        const existing = existingMap.get(studentId);
+        if (!existing) {
+          await prisma.absenceJustification.create({
+            data: {
+              studentId,
+              type: "DISPENSA_LEGAL",
+              startDate: new Date(),
+              endDate: amparo.date,
+              notes: `Sincronizado automaticamente via Power BI (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
+              createdByName: userName,
+              createdByEmail: userEmail,
+            },
+          });
+          amparosCriados++;
+        } else {
+          // Se a data de término for diferente (ex: foi prorrogada no Power BI)
+          const existingTime = new Date(existing.endDate).setHours(0, 0, 0, 0);
+          const newTime = new Date(amparo.date).setHours(0, 0, 0, 0);
+          if (existingTime !== newTime) {
+            await prisma.absenceJustification.update({
+              where: { id: existing.id },
+              data: {
+                endDate: amparo.date,
+                notes: `Sincronizado automaticamente via Power BI (Amparo Legal Vigência Máx atualizada para: ${amparo.vigenciaStr})`,
+              },
+            });
+            amparosAtualizados++;
+          }
+        }
+      }
+    }
+
     const atualizados = rowsToUpsert.length;
     const emRiscoCount = rowsToUpsert.filter((r) => r.percent < 75).length;
 
@@ -256,6 +387,9 @@ export async function POST(req: Request) {
         cgmVinculados,
         emRiscoCount,
         naoEncontradosCount: naoEncontrados.length,
+        estudantesEnriquecidos,
+        amparosCriados,
+        amparosAtualizados,
         authMethod,
       },
       user: {
@@ -273,6 +407,9 @@ export async function POST(req: Request) {
         atualizados,
         cgmVinculados,
         emRiscoCount,
+        estudantesEnriquecidos,
+        amparosCriados,
+        amparosAtualizados,
         naoEncontradosTotal: naoEncontrados.length,
         naoEncontrados: naoEncontrados.slice(0, 15),
       },

@@ -125,4 +125,14 @@ describe("Fase 4 — Fluxo wa.me, Fila Assistida por Turma e Classificação de 
 
     expect(aiClassifyReplySchema.safeParse({ rawReply: "oi" }).success).toBe(false);
   });
+
+  it("desmarca alunos do programa de intercâmbio Ganhando Mundo na Fila da Busca Ativa", () => {
+    const exchangeCandidate = evaluateQueueCandidate({
+      phone: "42999554433",
+      guardianName: "Carlos Pereira",
+      isExchangeStudent: true,
+    });
+    expect(exchangeCandidate.eligibleByDefault).toBe(false);
+    expect(exchangeCandidate.skipReason).toBe("INTERCAMBIO_GANHANDO_MUNDO");
+  });
 });

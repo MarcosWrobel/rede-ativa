@@ -648,8 +648,13 @@ export default function AtestadosClient({
                         {j.cidCode || "—"}
                       </td>
 
-                      <td className="px-3 py-3 text-slate-600 max-w-xs truncate" title={j.notes || ""}>
-                        {j.notes || "—"}
+                      <td className="px-3 py-3 text-slate-600 max-w-xs" title={j.notes || ""}>
+                        {j.notes?.includes("Power BI") && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 mb-1 block w-fit">
+                            🏛️ Power BI / Amparo Legal
+                          </span>
+                        )}
+                        <span className="truncate block">{j.notes || "—"}</span>
                       </td>
 
                       <td className="px-3 py-3 text-[10px] text-slate-500 whitespace-nowrap">

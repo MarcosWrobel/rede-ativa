@@ -45,6 +45,9 @@ export default async function BuscaAtivaPage({
           name: true,
           guardianName: true,
           phone: true,
+          isExchangeStudent: true,
+          isSpecialNeeds: true,
+          age: true,
           classGroupId: true,
           classGroup: {
             select: { id: true, name: true, segment: true, shift: true },

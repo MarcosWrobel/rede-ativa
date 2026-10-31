@@ -125,7 +125,7 @@ export async function dispatchWhatsAppMessage({
 
 export interface QueueCandidateEvaluation {
   eligibleByDefault: boolean;
-  skipReason: "ATESTADO_VIGENTE" | "SEM_WHATSAPP" | "JA_ACIONADO_HOJE" | null;
+  skipReason: "ATESTADO_VIGENTE" | "SEM_WHATSAPP" | "JA_ACIONADO_HOJE" | "INTERCAMBIO_GANHANDO_MUNDO" | null;
   resolvedPhone: string;
   resolvedGuardianName: string;
   usedFallbackContact: boolean;
@@ -139,6 +139,8 @@ export function evaluateQueueCandidate(
   student: {
     phone: string;
     guardianName?: string | null;
+    isExchangeStudent?: boolean;
+    isSpecialNeeds?: boolean;
     contacts?: Array<{
       name: string;
       phone: string;
@@ -162,6 +164,17 @@ export function evaluateQueueCandidate(
   const activeJust = getActiveJustification(student.justifications || [], referenceDate);
   const contacts = student.contacts || [];
   const primaryDigits = normalizeWhatsAppPhone(student.phone || "");
+
+  // Alunos em intercâmbio (Ganhando Mundo) são pulados por padrão
+  if (student.isExchangeStudent) {
+    return {
+      eligibleByDefault: false,
+      skipReason: "INTERCAMBIO_GANHANDO_MUNDO",
+      resolvedPhone: student.phone || "",
+      resolvedGuardianName: student.guardianName || "",
+      usedFallbackContact: false,
+    };
+  }
 
   // Verifica se o telefone principal está explicitamente marcado como inválido nos contatos
   const primaryFlaggedInvalid = contacts.some(

@@ -689,9 +689,16 @@ export default function BuscaAtivaClient({
                   <option value="">-- Escolha um aluno na lista --</option>
                   {filteredStudents.map((st) => {
                     const hasActiveJust = getActiveJustification(st.justifications) !== null;
+                    const prefix = st.isExchangeStudent
+                      ? "✈️ [Intercâmbio] "
+                      : hasActiveJust
+                      ? "🩺 [Atestado] "
+                      : st.isSpecialNeeds
+                      ? "♿ [AEE] "
+                      : "";
                     return (
                       <option key={st.id} value={st.id}>
-                        {hasActiveJust ? "🩺 " : ""}
+                        {prefix}
                         {st.name} — {st.classGroup.name}
                       </option>
                     );
@@ -734,6 +741,21 @@ export default function BuscaAtivaClient({
                       </Link>
                     </div>
                   </div>
+
+                  {/* Alerta de Intercâmbio Ganhando Mundo */}
+                  {selectedStudent.isExchangeStudent && (
+                    <div className="p-2.5 bg-blue-100 border border-blue-300 rounded-lg text-blue-950 flex items-start space-x-2">
+                      <span className="text-base shrink-0">✈️</span>
+                      <div>
+                        <strong className="block font-extrabold">
+                          Aluno em Intercâmbio Oficial (Ganhando Mundo)
+                        </strong>
+                        <span className="text-[11px] block">
+                          Este(a) estudante está participando do programa internacional Ganhando Mundo no exterior. Cobranças de frequência e avisos de infrequência devem ser suspensos.
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Alerta de Atestado Médico Vigente (PED-03) */}
                   {activeJustification && (
@@ -1304,6 +1326,12 @@ export default function BuscaAtivaClient({
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-bold text-slate-900">{student.name}</span>
+
+                              {evalResult.skipReason === "INTERCAMBIO_GANHANDO_MUNDO" && (
+                                <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 font-bold text-[10px]">
+                                  <span>✈️ Ganhando Mundo</span>
+                                </span>
+                              )}
 
                               {evalResult.skipReason === "ATESTADO_VIGENTE" && (
                                 <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px]">

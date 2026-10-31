@@ -83,7 +83,7 @@ export default function FaltasClient({
   const [selectedShift, setSelectedShift] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
   const [selectedRiskRange, setSelectedRiskRange] = useState<
-    "TODOS" | "CRITICO" | "ATENCAO" | "REGULAR" | "QUEDA_ABRUPTA"
+    "TODOS" | "CRITICO" | "ATENCAO" | "REGULAR" | "QUEDA_ABRUPTA" | "GANHANDO_MUNDO" | "ATESTADO" | "PCD"
   >("TODOS");
   const [selectedActionStatus, setSelectedActionStatus] = useState<
     "TODOS" | "COM_ACAO" | "SEM_ACAO" | "CONSELHO_TUTELAR" | "MINISTERIO_PUBLICO" | "EM_ACOMPANHAMENTO"
@@ -438,12 +438,15 @@ export default function FaltasClient({
       const matchShift = selectedShift === "TODOS" || st.classGroup.shift === selectedShift;
       const matchTurma = !selectedTurma || st.classGroupId === selectedTurma;
 
-      // Faixa de Risco & Queda Abrupta
+      // Faixa de Risco & Queda Abrupta & Filtros Especiais
       const p = rec.attendancePercent;
       let matchRisk = true;
       if (selectedRiskRange === "CRITICO") matchRisk = p < 75;
       else if (selectedRiskRange === "ATENCAO") matchRisk = p >= 75 && p < 85;
       else if (selectedRiskRange === "REGULAR") matchRisk = p >= 85;
+      else if (selectedRiskRange === "GANHANDO_MUNDO") matchRisk = !!st.isExchangeStudent;
+      else if (selectedRiskRange === "ATESTADO") matchRisk = getActiveJustification(st.justifications) !== null;
+      else if (selectedRiskRange === "PCD") matchRisk = !!st.isSpecialNeeds;
       else if (selectedRiskRange === "QUEDA_ABRUPTA") {
         const wAtual = detailInfo.semanaAtual
           ? parseFloat(detailInfo.semanaAtual.replace("%", "").replace(",", "."))
@@ -1008,6 +1011,9 @@ export default function FaltasClient({
               { id: "ATENCAO", label: `⚠️ Em Atenção (75-85%) (${kpis.atencao})` },
               { id: "QUEDA_ABRUPTA", label: `📉 Queda Abrupta (${kpis.quedasAbruptas})` },
               { id: "REGULAR", label: `✅ Regular (≥85%) (${kpis.regular})` },
+              { id: "GANHANDO_MUNDO", label: "✈️ Ganhando Mundo" },
+              { id: "ATESTADO", label: "🩺 Com Atestado" },
+              { id: "PCD", label: "♿ PCD / AEE" },
             ].map((chip) => {
               const isSelected = selectedRiskRange === chip.id;
               return (
@@ -1171,6 +1177,22 @@ export default function FaltasClient({
                             >
                               {rec.student.name}
                             </Link>
+                            {rec.student.isExchangeStudent && (
+                              <span
+                                title="Estudante em Intercâmbio Oficial (Ganhando Mundo)"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 font-bold text-[10px]"
+                              >
+                                <span>✈️ Ganhando Mundo</span>
+                              </span>
+                            )}
+                            {rec.student.isSpecialNeeds && (
+                              <span
+                                title="Estudante com Deficiência / Altas Habilidades (AEE)"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 font-bold text-[10px]"
+                              >
+                                <span>♿ AEE / PCD</span>
+                              </span>
+                            )}
                             {(() => {
                               const activeJust = getActiveJustification(rec.student.justifications);
                               if (!activeJust) return null;
@@ -1209,6 +1231,11 @@ export default function FaltasClient({
                             {cgm && (
                               <span className="bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
                                 CGM: {cgm}
+                              </span>
+                            )}
+                            {rec.student.age && (
+                              <span className="bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 font-sans font-semibold text-slate-700">
+                                {rec.student.age} anos
                               </span>
                             )}
                             {rec.student.phone && (

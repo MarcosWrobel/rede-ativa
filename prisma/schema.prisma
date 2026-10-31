@@ -81,6 +81,9 @@ model Student {
   schoolId             String?
   school               School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   active               Boolean               @default(true)
+  isExchangeStudent    Boolean               @default(false) // Aluno do programa Ganhando Mundo (Intercâmbio Internacional)
+  isSpecialNeeds       Boolean               @default(false) // Aluno com Deficiência / Altas Habilidades (AEE)
+  age                  Int?                  // Idade oficial (Power BI / SERE)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 

@@ -80,9 +80,17 @@
               <span style="font-size: 12px; color: #64748b; font-weight: 500;">Alunos Capturados:</span>
               <span id="leo-panel-count" style="font-size: 16px; font-weight: 800; color: #0f172a;">0</span>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
               <span style="font-size: 12px; color: #64748b; font-weight: 500;">Alerta Infrequência (&lt; 75%):</span>
-              <span id="leo-panel-risco" style="font-size: 14px; font-weight: 700; color: #ef4444;">0</span>
+              <span id="leo-panel-risco" style="font-size: 13px; font-weight: 700; color: #ef4444;">0</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 12px; color: #64748b; font-weight: 500;">🩺 Amparo Legal Vigente:</span>
+              <span id="leo-panel-amparo" style="font-size: 13px; font-weight: 700; color: #8b5cf6;">0</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12px; color: #64748b; font-weight: 500;">✈️ Ganhando Mundo:</span>
+              <span id="leo-panel-ganhando" style="font-size: 13px; font-weight: 700; color: #0284c7;">0</span>
             </div>
           </div>
 
@@ -267,11 +275,19 @@
   function atualizarContadores() {
     const total = alunosCapturados.size;
     let risco = 0;
+    let amparos = 0;
+    let ganhando = 0;
 
     alunosCapturados.forEach(a => {
       const freqNum = parseFloat((a.mediaGeral || '').replace('%', '').replace(',', '.'));
       if (!isNaN(freqNum) && freqNum < 75) {
         risco++;
+      }
+      if (a.amparoLegalVigencia) {
+        amparos++;
+      }
+      if (a.ganhandoMundo) {
+        ganhando++;
       }
     });
 
@@ -283,6 +299,12 @@
 
     const pRisco = document.getElementById('leo-panel-risco');
     if (pRisco) pRisco.textContent = `${risco} alunos`;
+
+    const pAmparo = document.getElementById('leo-panel-amparo');
+    if (pAmparo) pAmparo.textContent = `${amparos} alunos`;
+
+    const pGanhando = document.getElementById('leo-panel-ganhando');
+    if (pGanhando) pGanhando.textContent = `${ganhando} alunos`;
   }
 
   // Palavras de interface e metadados a ignorar
@@ -294,11 +316,47 @@
     'formatacao condicional', 'formatação condicional adicional', 'formatacao condicional adicional'
   ];
 
+  // Identifica a posição das colunas no cabeçalho do Power BI
+  function detectarIndicesColunas() {
+    const headerElements = Array.from(document.querySelectorAll('[role="columnheader"], .columnHeaders .headerCell, .headerRow .header, .pivotTableHeaderWrap, th'));
+    const map = {
+      turma: -1,
+      mediaGeral: -1,
+      semanaAtual: -1,
+      semanaAnterior: -1,
+      amparo: -1,
+      deficiencia: -1,
+      ganhando: -1,
+      serp: -1,
+      idade: -1,
+    };
+
+    headerElements.forEach((h, idx) => {
+      const txt = (h.innerText || h.getAttribute('title') || '').toLowerCase().trim();
+      const colAttr = h.getAttribute('aria-colindex');
+      const colIdx = colAttr ? parseInt(colAttr, 10) - 1 : idx;
+
+      if (txt.includes('amparo')) map.amparo = colIdx;
+      else if (txt.includes('deficiên') || txt.includes('deficien')) map.deficiencia = colIdx;
+      else if (txt.includes('ganhando')) map.ganhando = colIdx;
+      else if (txt.includes('serp')) map.serp = colIdx;
+      else if (txt.includes('idade')) map.idade = colIdx;
+      else if (txt.includes('semana atual')) map.semanaAtual = colIdx;
+      else if (txt.includes('semana anterior')) map.semanaAnterior = colIdx;
+      else if (txt.includes('média') || txt.includes('media')) map.mediaGeral = colIdx;
+      else if (txt.includes('turma')) map.turma = colIdx;
+    });
+
+    return map;
+  }
+
   // Extrai linhas visíveis da tabela
   function extrairLinhasVisiveis() {
     const cgmRegex = /\b10\d{8}\b/;
     const percentRegex = /\d{1,3}[,\.]\d{1,2}%/g;
+    const dateRegex = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/;
 
+    const colMap = detectarIndicesColunas();
     const rows = document.querySelectorAll('[role="row"], .row, .tr');
     let novos = 0;
 
@@ -314,13 +372,33 @@
         const cgm = matchCgm[0];
         const existente = alunosCapturados.get(cgm);
 
-        // Se já capturou este CGM com nome real e percentuais, não precisa refazer
-        if (existente && existente.nome && existente.nome !== 'Aluno' && existente.mediaGeral) {
+        // Se já capturou este CGM com nome real, percentuais e novos campos preenchidos, pula
+        if (existente && existente.nome && existente.nome !== 'Aluno' && existente.mediaGeral && existente.amparoLegalVigencia !== undefined) {
           return;
         }
 
         const partes = fullText.split('\n').map(p => p.trim()).filter(Boolean);
         const percentuais = fullText.match(percentRegex) || [];
+
+        // Células individuais da linha (para extração precisa por coluna)
+        const cells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell'));
+        
+        // Função auxiliar para obter texto de célula pelo índice da coluna
+        const getCellTextByCol = (targetColIdx, fallbackIdx) => {
+          if (targetColIdx >= 0) {
+            // Tenta encontrar célula com aria-colindex correspondente
+            const byAria = cells.find(c => {
+              const a = c.getAttribute('aria-colindex');
+              return a && parseInt(a, 10) - 1 === targetColIdx;
+            });
+            if (byAria) return (byAria.innerText || byAria.getAttribute('title') || '').trim();
+          }
+          if (fallbackIdx !== undefined && fallbackIdx >= 0 && fallbackIdx < cells.length) {
+            const c = cells[fallbackIdx];
+            return (c.innerText || c.getAttribute('title') || '').trim();
+          }
+          return '';
+        };
 
         // 1. Procura especificamente a parte que tem o padrão do Power BI: "NOME DO ALUNO - 10..."
         let alunoParte = partes.find(p => /^[A-Za-zÀ-ÿ\s\.\']+\s*-\s*10\d*/.test(p.trim()));
@@ -332,7 +410,7 @@
             if (limpo.length < 5) return false;
             if (/^\d+$/.test(limpo)) return false;
             if (p.includes('%')) return false;
-            if (/\d{2}\/\d{2}\/\d{4}/.test(limpo)) return false; // descarta datas
+            if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(limpo)) return false; // descarta datas
             if (IGNORAR_NOMES.some(ig => limpo.includes(ig))) return false;
             if (limpo.includes('série') || limpo.includes('serie') || limpo.includes('período') || limpo.includes('periodo') || limpo.includes('seriação')) return false;
             return /[A-Za-zÀ-ÿ]{3,}/.test(p);
@@ -350,6 +428,38 @@
           p.includes('Manhã') || p.includes('Tarde') || p.includes('Noite') || p.includes('Sem Seriação')
         ) || (existente ? existente.turma : '');
 
+        // --- Extração das Novas Colunas ---
+        // A. Amparo Legal Vigência Máx (Data DD/MM/AAAA)
+        const cellAmparoTxt = getCellTextByCol(colMap.amparo, 4);
+        const matchAmparoDate = cellAmparoTxt.match(dateRegex) || fullText.match(dateRegex);
+        const amparoLegalVigencia = matchAmparoDate ? matchAmparoDate[1] : (existente?.amparoLegalVigencia || null);
+
+        // B. Deficiência / Altas Habilidades (1 ou vazio)
+        const cellDefTxt = getCellTextByCol(colMap.deficiencia, 5);
+        const deficienciaAltasHabilidades = cellDefTxt === '1' || cellDefTxt.toLowerCase() === 'sim' ||
+          (existente ? existente.deficienciaAltasHabilidades : false);
+
+        // C. Ganhando Mundo (Intercâmbio Internacional - 1 ou vazio)
+        const cellGanhandoTxt = getCellTextByCol(colMap.ganhando, 6);
+        const ganhandoMundo = cellGanhandoTxt === '1' || cellGanhandoTxt.toLowerCase() === 'sim' ||
+          (existente ? existente.ganhandoMundo : false);
+
+        // D. SERP? (Checkmark ou vazio)
+        const cellSerpTxt = getCellTextByCol(colMap.serp, 7);
+        const serpAtivo = cellSerpTxt.includes('✓') || cellSerpTxt.includes('✔') ||
+          cellSerpTxt.toLowerCase() === 'sim' || (existente ? existente.serpAtivo : false);
+
+        // E. IDADE (Inteiro)
+        const cellIdadeTxt = getCellTextByCol(colMap.idade, cells.length > 8 ? 8 : cells.length - 1);
+        let idade = null;
+        if (/^\d{1,2}$/.test(cellIdadeTxt)) {
+          const num = parseInt(cellIdadeTxt, 10);
+          if (num >= 5 && num <= 99) idade = num;
+        }
+        if (!idade && existente?.idade) {
+          idade = existente.idade;
+        }
+
         const aluno = {
           cgm: cgm,
           nome: nome,
@@ -357,6 +467,11 @@
           mediaGeral: percentuais[0] || (existente ? existente.mediaGeral : ''),
           semanaAtual: percentuais[1] || (existente ? existente.semanaAtual : ''),
           semanaAnterior: percentuais[2] || (existente ? existente.semanaAnterior : ''),
+          amparoLegalVigencia: amparoLegalVigencia,
+          deficienciaAltasHabilidades: deficienciaAltasHabilidades,
+          ganhandoMundo: ganhandoMundo,
+          serpAtivo: serpAtivo,
+          idade: idade,
           capturadoEm: new Date().toISOString()
         };
 
@@ -452,7 +567,19 @@
       }
     }
 
-    const headers = ['CGM', 'Nome', 'Turma', 'Media_Geral_Presenca', 'Presenca_Semana_Atual', 'Presenca_Semana_Anterior'];
+    const headers = [
+      'CGM',
+      'Nome',
+      'Turma',
+      'Media_Geral_Presenca',
+      'Presenca_Semana_Atual',
+      'Presenca_Semana_Anterior',
+      'Amparo_Legal_Vigencia_Max',
+      'Deficiencia_Altas_Habilidades',
+      'Ganhando_Mundo',
+      'SERP',
+      'Idade'
+    ];
     const rows = [headers.join(';')];
 
     alunosCapturados.forEach(a => {
@@ -462,7 +589,12 @@
         `"${a.turma.replace(/"/g, '""')}"`,
         `"${a.mediaGeral}"`,
         `"${a.semanaAtual}"`,
-        `"${a.semanaAnterior}"`
+        `"${a.semanaAnterior}"`,
+        `"${a.amparoLegalVigencia || ''}"`,
+        `"${a.deficienciaAltasHabilidades ? '1' : ''}"`,
+        `"${a.ganhandoMundo ? '1' : ''}"`,
+        `"${a.serpAtivo ? 'Sim' : ''}"`,
+        `"${a.idade ?? ''}"`
       ].join(';'));
     });
 
@@ -532,7 +664,13 @@
         const resJson = await resp.json();
         const atualizados = resJson.atualizados ?? lista.length;
         const emRisco = resJson.emRiscoCount ?? 0;
-        setStatus(`🚀 Sincronizado na nuvem! ${atualizados} atualizados (${emRisco} em risco).`, '#10b981');
+        const amparos = resJson.amparosCriados ?? 0;
+        const enriquecidos = resJson.estudantesEnriquecidos ?? 0;
+        let extras = [];
+        if (amparos > 0) extras.push(`${amparos} atestados criados`);
+        if (enriquecidos > 0) extras.push(`${enriquecidos} enriquecidos`);
+        const extraText = extras.length > 0 ? ` (${extras.join(', ')})` : '';
+        setStatus(`🚀 Sincronizado na nuvem! ${atualizados} alunos (${emRisco} em risco)${extraText}.`, '#10b981');
       } else if (resp.status === 401) {
         setStatus(`❌ Erro 401: Chave de Sincronização inválida no servidor.`, '#ef4444');
       } else {
