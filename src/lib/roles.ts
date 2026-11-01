@@ -6,6 +6,53 @@ export type RoleLevel =
   | "GESTOR_ESCOLAR"      // Nível 3: Diretor(a) / Secretaria da Unidade Escolar
   | "PEDAGOGA";           // Nível 4: Equipe pedagógica operacional
 
+export interface RoleOption {
+  value: RoleLevel;
+  label: string;
+  shortLabel: string;
+  description: string;
+  badgeClass: string;
+}
+
+export const ROLE_OPTIONS: RoleOption[] = [
+  {
+    value: "SUPERADMIN",
+    label: "Admin (Meu acesso)",
+    shortLabel: "Admin",
+    description: "Administrador Global da Plataforma SaaS",
+    badgeClass: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300 border-indigo-200",
+  },
+  {
+    value: "GESTAO_SECRETARIA",
+    label: "Gestor (Acesso Gestor SEMEC)",
+    shortLabel: "Gestor SEMEC",
+    description: "Gestão da Secretaria Municipal de Educação / Mantenedora",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-200",
+  },
+  {
+    value: "GESTOR_ESCOLAR",
+    label: "Direção (Gestor da escola)",
+    shortLabel: "Direção",
+    description: "Diretor(a) / Gestor da Unidade Escolar",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-300 border-sky-200",
+  },
+  {
+    value: "PEDAGOGA",
+    label: "Pedagógico (Equipe pedagógica)",
+    shortLabel: "Pedagógico",
+    description: "Equipe Pedagógica / Operacional da Escola",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-200",
+  },
+];
+
+export function getRoleOption(role?: string | null): RoleOption {
+  const norm = (role || "").toUpperCase();
+  if (norm === "SUPERADMIN" || norm === "ADMIN") return ROLE_OPTIONS[0];
+  if (norm === "GESTAO_SECRETARIA") return ROLE_OPTIONS[1];
+  if (norm === "GESTOR_ESCOLAR") return ROLE_OPTIONS[2];
+  return ROLE_OPTIONS[3]; // PEDAGOGA / PEDAGOGICO default
+}
+
 /**
  * Verifica se o e-mail é o administrador raiz institucional da plataforma SaaS.
  * Usa correspondência exata (nunca substring parcial).

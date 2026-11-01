@@ -5,27 +5,33 @@ import { isBootstrapAdminEmail, requireAdmin, checkIsSuperAdmin } from "@/lib/pe
 import { formatZodError, userCreateSchema } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const authCheck = await requireAdmin();
     if (!authCheck.ok) return authCheck.response;
 
+    const url = new URL(req.url);
+    const viewAll = url.searchParams.get("all") === "true";
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const isSuper = checkIsSuperAdmin(authCheck.session);
 
-    const whereClause: any = isSuper
-      ? {}
-      : {
-          OR: [
-            { schoolId: currentSchool.id },
-            { schools: { some: { schoolId: currentSchool.id } } },
-          ],
-        };
+    // Por padrão, filtra estritamente pela escola ativa.
+    // Apenas SuperAdmin com flag explícita ?all=true visualiza o catálogo global.
+    const whereClause: any =
+      viewAll && isSuper
+        ? {}
+        : {
+            OR: [
+              { schoolId: currentSchool.id },
+              { schools: { some: { schoolId: currentSchool.id, active: true } } },
+            ],
+          };
 
     const users = await prisma.user.findMany({
       where: whereClause,
       include: {
         schools: {
+          where: viewAll && isSuper ? undefined : { schoolId: currentSchool.id },
           include: {
             school: {
               select: { id: true, name: true, inepCode: true, network: true },
@@ -62,15 +68,18 @@ export async function POST(req: Request) {
       );
     }
 
-    const { email: rawEmail, name: rawName, role } = parsed.data;
+    const { email: rawEmail, name: rawName, role: rawRole } = parsed.data;
+    const isSuperAdminEmail = isBootstrapAdminEmail(rawEmail);
+    const effectiveRole = isSuperAdminEmail ? "SUPERADMIN" : rawRole || "PEDAGOGA";
 
-    const existing = await prisma.user.findUnique({ where: { email: rawEmail } });
-    if (existing) {
-      return NextResponse.json(
-        { error: "Este e-mail já está cadastrado na equipe. Você pode reativá-lo ou alterar o perfil na tabela." },
-        { status: 409 }
-      );
-    }
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const targetSchoolId = currentSchool.id;
+
+    // Busca os dados da escola ativa para verificar eventual vínculo com Rede Municipal
+    const schoolDb = await prisma.school.findUnique({
+      where: { id: targetSchoolId },
+      select: { id: true, networkId: true, name: true },
+    });
 
     const defaultName =
       rawName ||
@@ -79,48 +88,110 @@ export async function POST(req: Request) {
         .replace(/[._-]+/g, " ")
         .replace(/\b\w/g, (l) => l.toUpperCase());
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    const targetSchoolId = currentSchool.id;
-
-    const created = await prisma.user.create({
-      data: {
-        email: rawEmail,
-        name: defaultName,
-        role: isBootstrapAdminEmail(rawEmail) ? "SUPERADMIN" : role,
-        schoolId: targetSchoolId,
-        active: true,
-      },
+    const existing = await prisma.user.findUnique({
+      where: { email: rawEmail },
       include: {
-        _count: {
-          select: { messageLogs: true, repliedLogs: true },
-        },
+        schools: { where: { schoolId: targetSchoolId } },
       },
     });
 
-    await prisma.userSchool.upsert({
-      where: {
-        userId_schoolId: {
-          userId: created.id,
-          schoolId: targetSchoolId,
+    let targetUser: any;
+
+    if (existing) {
+      const activeLink = existing.schools.find((s) => s.schoolId === targetSchoolId && s.active);
+      if (activeLink) {
+        return NextResponse.json(
+          { error: `Este e-mail já faz parte da equipe de ${schoolDb?.name || "esta escola"}. Altere o perfil diretamente na tabela abaixo.` },
+          { status: 409 }
+        );
+      }
+
+      // Usuário já existe no SaaS (ex: em outra escola) — adiciona o vínculo com a escola atual
+      await prisma.userSchool.upsert({
+        where: {
+          userId_schoolId: {
+            userId: existing.id,
+            schoolId: targetSchoolId,
+          },
         },
-      },
-      update: { role: created.role, active: true },
-      create: {
-        userId: created.id,
-        schoolId: targetSchoolId,
-        role: created.role,
-        active: true,
-      },
-    });
+        update: { role: effectiveRole, active: true },
+        create: {
+          userId: existing.id,
+          schoolId: targetSchoolId,
+          role: effectiveRole,
+          active: true,
+        },
+      });
+
+      targetUser = await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          // Se o usuário não tinha schoolId primário, vincula a esta escola
+          ...(existing.schoolId ? {} : { schoolId: targetSchoolId }),
+          // Atualiza role se foi atribuído um perfil superior
+          ...(effectiveRole === "SUPERADMIN" || effectiveRole === "GESTAO_SECRETARIA" || effectiveRole === "GESTOR_ESCOLAR"
+            ? { role: effectiveRole }
+            : {}),
+          active: true,
+        },
+        include: {
+          schools: { where: { schoolId: targetSchoolId } },
+          _count: { select: { messageLogs: true, repliedLogs: true } },
+        },
+      });
+    } else {
+      // Cria novo usuário na plataforma vinculado à escola ativa
+      targetUser = await prisma.user.create({
+        data: {
+          email: rawEmail,
+          name: defaultName,
+          role: effectiveRole,
+          schoolId: targetSchoolId,
+          active: true,
+          schools: {
+            create: {
+              schoolId: targetSchoolId,
+              role: effectiveRole,
+              active: true,
+            },
+          },
+        },
+        include: {
+          schools: { where: { schoolId: targetSchoolId } },
+          _count: { select: { messageLogs: true, repliedLogs: true } },
+        },
+      });
+    }
+
+    // Se o perfil for Gestão da Secretaria e a escola pertencer a uma rede municipal, vincula em UserNetwork
+    if (effectiveRole === "GESTAO_SECRETARIA" && schoolDb?.networkId) {
+      await prisma.userNetwork.upsert({
+        where: {
+          userId_networkId: {
+            userId: targetUser.id,
+            networkId: schoolDb.networkId,
+          },
+        },
+        update: { role: "GESTAO_SECRETARIA", active: true },
+        create: {
+          userId: targetUser.id,
+          networkId: schoolDb.networkId,
+          role: "GESTAO_SECRETARIA",
+          active: true,
+        },
+      });
+    }
 
     await logAudit({
       action: "CREATE_USER",
       entityType: "User",
-      entityId: created.id,
+      entityId: targetUser.id,
       details: {
-        authorizedEmail: created.email,
-        name: created.name,
-        role: created.role,
+        authorizedEmail: targetUser.email,
+        name: targetUser.name,
+        role: effectiveRole,
+        schoolId: targetSchoolId,
+        schoolName: schoolDb?.name,
       },
       user: {
         id: authCheck.userId,
@@ -130,7 +201,7 @@ export async function POST(req: Request) {
       req,
     });
 
-    return NextResponse.json(created, { status: 201 });
+    return NextResponse.json(targetUser, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -148,10 +219,16 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "ID do usuário é obrigatório." }, { status: 400 });
     }
 
-    const target = await prisma.user.findUnique({ where: { id } });
+    const target = await prisma.user.findUnique({
+      where: { id },
+      include: { schools: true },
+    });
     if (!target) {
       return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const targetSchoolId = currentSchool.id;
 
     const isSelf = target.email.toLowerCase().trim() === authCheck.email;
     const isRoot = isBootstrapAdminEmail(target.email);
@@ -163,29 +240,55 @@ export async function PUT(req: Request) {
       );
     }
 
-    if ((isSelf || isRoot) && role && role !== "ADMIN") {
+    if ((isSelf || isRoot) && role && role !== "SUPERADMIN" && role !== "ADMIN") {
       return NextResponse.json(
-        { error: "Não é permitido remover o perfil ADMIN da própria conta ou do administrador raiz." },
+        { error: "Não é permitido rebaixar o perfil ADMIN da própria conta ou do administrador raiz." },
         { status: 400 }
       );
     }
 
-    const nextRole =
-      role !== undefined ? (role === "ADMIN" ? "ADMIN" : "PEDAGOGA") : target.role;
+    const validRoles = ["SUPERADMIN", "ADMIN", "GESTAO_SECRETARIA", "GESTOR_ESCOLAR", "PEDAGOGA"];
+    let nextRole = target.role;
+    if (role !== undefined && validRoles.includes(role)) {
+      nextRole = role;
+    }
+
     const nextActive = active !== undefined ? Boolean(active) : target.active;
     const nextName = name !== undefined && String(name).trim() ? String(name).trim() : target.name;
 
+    // Atualiza o perfil global do usuário
     const updated = await prisma.user.update({
       where: { id },
       data: {
         name: nextName,
-        role: isRoot ? "ADMIN" : nextRole,
+        role: isRoot ? "SUPERADMIN" : nextRole,
         active: isRoot ? true : nextActive,
       },
       include: {
+        schools: { where: { schoolId: targetSchoolId } },
         _count: {
           select: { messageLogs: true, repliedLogs: true },
         },
+      },
+    });
+
+    // Atualiza também o vínculo local do usuário com esta escola ativa
+    await prisma.userSchool.upsert({
+      where: {
+        userId_schoolId: {
+          userId: id,
+          schoolId: targetSchoolId,
+        },
+      },
+      update: {
+        role: isRoot ? "SUPERADMIN" : nextRole,
+        active: isRoot ? true : nextActive,
+      },
+      create: {
+        userId: id,
+        schoolId: targetSchoolId,
+        role: isRoot ? "SUPERADMIN" : nextRole,
+        active: isRoot ? true : nextActive,
       },
     });
 
@@ -195,8 +298,9 @@ export async function PUT(req: Request) {
       entityId: updated.id,
       details: {
         targetEmail: updated.email,
+        schoolId: targetSchoolId,
         before: { name: target.name, role: target.role, active: target.active },
-        after: { name: updated.name, role: updated.role, active: updated.active },
+        after: { name: updated.name, role: nextRole, active: updated.active },
       },
       user: {
         id: authCheck.userId,

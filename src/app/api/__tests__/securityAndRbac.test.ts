@@ -6,6 +6,8 @@ import {
   checkIsSchoolManager,
   isBootstrapAdminEmail,
   BOOTSTRAP_ADMIN_EMAIL,
+  ROLE_OPTIONS,
+  getRoleOption,
 } from "@/lib/roles";
 import { SELF_AUTH_API_PREFIXES } from "@/lib/proxyConstants";
 
@@ -179,6 +181,23 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(getLandingRoute(gestorSession)).toBe("/gestao");
       expect(getLandingRoute(pedagogaSession)).toBe("/busca-ativa");
       expect(getLandingRoute(null)).toBe("/login");
+    });
+
+    it("Catálogo e mapeamento de papéis (Admin, Gestor SEMEC, Direção e Pedagógico)", () => {
+      expect(ROLE_OPTIONS).toHaveLength(4);
+      expect(ROLE_OPTIONS.map((r) => r.value)).toEqual([
+        "SUPERADMIN",
+        "GESTAO_SECRETARIA",
+        "GESTOR_ESCOLAR",
+        "PEDAGOGA",
+      ]);
+
+      expect(getRoleOption("SUPERADMIN").label).toBe("Admin (Meu acesso)");
+      expect(getRoleOption("ADMIN").label).toBe("Admin (Meu acesso)");
+      expect(getRoleOption("GESTAO_SECRETARIA").label).toBe("Gestor (Acesso Gestor SEMEC)");
+      expect(getRoleOption("GESTOR_ESCOLAR").label).toBe("Direção (Gestor da escola)");
+      expect(getRoleOption("PEDAGOGA").label).toBe("Pedagógico (Equipe pedagógica)");
+      expect(getRoleOption(null).label).toBe("Pedagógico (Equipe pedagógica)");
     });
   });
 });
