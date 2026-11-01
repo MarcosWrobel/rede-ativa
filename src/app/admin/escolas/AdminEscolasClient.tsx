@@ -18,6 +18,10 @@ import {
   Phone,
   Mail,
   MapPin,
+  Trash2,
+  Eraser,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 
 interface SchoolItem {
@@ -56,7 +60,74 @@ export default function AdminEscolasClient({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sanitizingId, setSanitizingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleDeleteSchool = async (school: SchoolItem) => {
+    if (school.inep === "41042730" || school.name.toLowerCase().includes("leopoldina")) {
+      alert("O Colégio Estadual Leopoldina B. Pedroso é a escola sede e não pode ser excluído.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ ATENÇÃO: Tem certeza absoluta que deseja EXCLUIR DEFINITIVAMENTE a instituição "${school.name}"?\n\nTodos os alunos, turmas, atas e vínculos associados a esta escola serão apagados permanentemente do banco de dados.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(school.id);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(`/api/schools/${school.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao excluir escola.");
+      }
+
+      setSchools((prev) => prev.filter((s) => s.id !== school.id));
+      setFeedback({ type: "success", message: data.message || `Escola "${school.name}" excluída com sucesso.` });
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "Falha ao excluir instituição." });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSanitizeSchool = async (school: SchoolItem) => {
+    const confirmed = window.confirm(
+      `🧹 HIGIENIZAÇÃO DE BANCO: Deseja limpar todos os dados operacionais da escola "${school.name}"?\n\nIsso apagará todos os estudantes, turmas, histórico de mensagens e atas desta escola, retornando a unidade ao estado inicial zerado (0 alunos, 0 turmas).\n\nA instituição em si e seus modelos de mensagem serão preservados.`
+    );
+    if (!confirmed) return;
+
+    setSanitizingId(school.id);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(`/api/schools/${school.id}/sanitize`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao higienizar escola.");
+      }
+
+      setSchools((prev) =>
+        prev.map((s) =>
+          s.id === school.id
+            ? { ...s, studentsCount: 0, classesCount: 0 }
+            : s
+        )
+      );
+      setFeedback({ type: "success", message: data.message || `Dados da escola "${school.name}" higienizados com sucesso.` });
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "Falha ao higienizar dados da escola." });
+    } finally {
+      setSanitizingId(null);
+    }
+  };
 
   // New School Form State
   const [formData, setFormData] = useState({
@@ -372,11 +443,53 @@ export default function AdminEscolasClient({
                   )}
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5">
+                  {s.inep === "41042730" ? (
+                    <span
+                      title="Instituição sede de produção permanente"
+                      className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 text-[10px] font-semibold border border-slate-200 dark:border-slate-700 cursor-help"
+                    >
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      <span>Sede</span>
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        disabled={sanitizingId === s.id || deletingId === s.id}
+                        onClick={() => handleSanitizeSchool(s)}
+                        title="Higienizar dados operacionais (zerar estudantes e turmas)"
+                        className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:border-amber-300 dark:hover:text-amber-400 dark:hover:border-amber-700 bg-white dark:bg-slate-800 text-[11px] font-semibold transition disabled:opacity-50"
+                      >
+                        {sanitizingId === s.id ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Eraser className="w-3 h-3 text-amber-500" />
+                        )}
+                        <span className="hidden sm:inline">Higienizar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={deletingId === s.id || sanitizingId === s.id}
+                        onClick={() => handleDeleteSchool(s)}
+                        title="Excluir instituição e todos os registros permanentemente"
+                        className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 bg-white dark:bg-slate-800 text-[11px] font-semibold transition disabled:opacity-50"
+                      >
+                        {deletingId === s.id ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3 text-red-500" />
+                        )}
+                        <span className="hidden sm:inline">Excluir</span>
+                      </button>
+                    </>
+                  )}
+
                   {isActive ? (
                     <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-xs font-bold border border-sky-200 dark:border-sky-800">
                       <Check className="w-3.5 h-3.5" />
-                      <span>Escola Ativa</span>
+                      <span>Ativa</span>
                     </span>
                   ) : (
                     <button
@@ -391,7 +504,7 @@ export default function AdminEscolasClient({
                           <span>Alternando...</span>
                         </>
                       ) : (
-                        <span>Alternar Contexto</span>
+                        <span>Alternar</span>
                       )}
                     </button>
                   )}

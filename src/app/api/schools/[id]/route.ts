@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSchoolAdmin } from "@/lib/permissions";
+import { requireSchoolAdmin, requireSuperAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { z } from "zod";
@@ -142,5 +142,99 @@ export async function PUT(
   } catch (error: any) {
     console.error("[PUT /api/schools/[id]] Erro:", error);
     return NextResponse.json({ error: error.message || "Erro ao atualizar instituição" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const authCheck = await requireSuperAdmin();
+    if (!authCheck.ok) return authCheck.response;
+
+    const { id } = await params;
+    const target = await prisma.school.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            students: true,
+            classGroups: true,
+            pedagogicalMinutes: true,
+            userSchools: true,
+          },
+        },
+      },
+    });
+
+    if (!target) {
+      return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
+    }
+
+    // Proteção absoluta da escola sede Colégio Leopoldina
+    if (target.inepCode === "41042730" || target.name.toLowerCase().includes("leopoldina")) {
+      return NextResponse.json(
+        { error: "O Colégio Estadual Leopoldina B. Pedroso é a escola sede da plataforma e não pode ser excluído." },
+        { status: 403 }
+      );
+    }
+
+    // Executa a exclusão de todas as dependências em transação atômica
+    await prisma.$transaction(async (tx) => {
+      await tx.messageLog.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.absenceJustification.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.studentContact.deleteMany({ where: { student: { schoolId: id } } });
+      await tx.pedagogicalMinuteStudent.deleteMany({
+        where: {
+          OR: [{ minute: { schoolId: id } }, { student: { schoolId: id } }],
+        },
+      });
+      await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } });
+      await tx.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } });
+      await tx.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } });
+      await tx.pedagogicalMinute.deleteMany({ where: { schoolId: id } });
+      await tx.student.deleteMany({ where: { schoolId: id } });
+      await tx.classGroup.deleteMany({ where: { schoolId: id } });
+      await tx.messageTemplate.deleteMany({ where: { schoolId: id } });
+      await tx.userSchool.deleteMany({ where: { schoolId: id } });
+      await tx.user.updateMany({
+        where: { schoolId: id },
+        data: { schoolId: null },
+      });
+      await tx.school.delete({ where: { id } });
+    });
+
+    await logAudit({
+      action: "DELETE_SCHOOL",
+      entityType: "School",
+      entityId: id,
+      details: {
+        deletedSchoolName: target.name,
+        inepCode: target.inepCode,
+        network: target.network,
+        city: target.city,
+      },
+      user: {
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
+      },
+      req,
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: `Instituição escolar "${target.name}" excluída com sucesso juntamente com todos os seus registros associados.`,
+    });
+  } catch (error: any) {
+    console.error("[DELETE /api/schools/[id]] Erro:", error);
+    return NextResponse.json(
+      { error: error.message || "Erro ao excluir instituição escolar" },
+      { status: 500 }
+    );
   }
 }

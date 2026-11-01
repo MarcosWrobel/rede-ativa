@@ -36,7 +36,9 @@ export type AuditAction =
   | "UPDATE_ATA_ACTION"
   | "UPDATE_DELIVERY_STATUS"
   | "WEBHOOK_REPLY"
-  | "GENERATE_WEEKLY_DIGEST";
+  | "GENERATE_WEEKLY_DIGEST"
+  | "DELETE_SCHOOL"
+  | "SANITIZE_SCHOOL";
 
 export interface AuditUser {
   id?: string;

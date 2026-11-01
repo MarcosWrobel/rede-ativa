@@ -19,6 +19,9 @@ import {
   RefreshCw,
   Activity,
   Layers,
+  Trash2,
+  Eraser,
+  Lock,
 } from "lucide-react";
 
 interface AdminClientProps {
@@ -70,14 +73,68 @@ export default function AdminClient({
   currentUser,
 }: AdminClientProps) {
   const [search, setSearch] = useState("");
+  const [schoolList, setSchoolList] = useState(schools);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sanitizingId, setSanitizingId] = useState<string | null>(null);
 
-  const filteredSchools = schools.filter(
+  const filteredSchools = schoolList.filter(
     (s) =>
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.city.toLowerCase().includes(search.toLowerCase()) ||
       s.inepCode.includes(search)
   );
+
+  const handleDeleteSchool = async (school: (typeof schools)[0]) => {
+    if (school.inepCode === "41042730" || school.name.toLowerCase().includes("leopoldina")) {
+      alert("O Colégio Estadual Leopoldina B. Pedroso é a escola sede e não pode ser excluído.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ ATENÇÃO: Tem certeza absoluta que deseja EXCLUIR DEFINITIVAMENTE a instituição "${school.name}"?\n\nTodos os alunos, turmas, atas e vínculos associados a esta escola serão apagados permanentemente do banco de dados.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(school.id);
+    try {
+      const res = await fetch(`/api/schools/${school.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao excluir escola.");
+      }
+      setSchoolList((prev) => prev.filter((s) => s.id !== school.id));
+      alert(data.message || "Escola excluída com sucesso.");
+    } catch (err: any) {
+      alert(err.message || "Falha ao excluir instituição.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSanitizeSchool = async (school: (typeof schools)[0]) => {
+    const confirmed = window.confirm(
+      `🧹 HIGIENIZAÇÃO DE BANCO: Deseja limpar todos os dados operacionais da escola "${school.name}"?\n\nIsso apagará todos os estudantes, turmas, histórico de mensagens e atas desta escola, retornando a unidade ao estado inicial zerado (0 alunos, 0 turmas).\n\nA instituição em si e seus modelos de mensagem serão preservados.`
+    );
+    if (!confirmed) return;
+
+    setSanitizingId(school.id);
+    try {
+      const res = await fetch(`/api/schools/${school.id}/sanitize`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao higienizar escola.");
+      }
+      setSchoolList((prev) =>
+        prev.map((s) => (s.id === school.id ? { ...s, studentsCount: 0, classesCount: 0 } : s))
+      );
+      alert(data.message || "Escola higienizada com sucesso.");
+    } catch (err: any) {
+      alert(err.message || "Falha ao higienizar dados da escola.");
+    } finally {
+      setSanitizingId(null);
+    }
+  };
 
   const handleAccessSchool = async (schoolId: string) => {
     setSwitchingId(schoolId);
@@ -343,19 +400,63 @@ export default function AdminClient({
                   </td>
                   <td className="px-4 py-3 text-center text-slate-500">{s.classesCount}</td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => handleAccessSchool(s.id)}
-                      disabled={switchingId === s.id}
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-lg transition"
-                    >
-                      {switchingId === s.id ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
+                    <div className="flex items-center justify-end space-x-1.5">
+                      {s.inepCode === "41042730" ? (
+                        <span
+                          title="Unidade sede de produção protegida contra exclusão"
+                          className="inline-flex items-center space-x-1 px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 text-[10px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700"
+                        >
+                          <Lock className="w-3 h-3 text-slate-400" />
+                          <span>Sede</span>
+                        </span>
                       ) : (
-                        <ExternalLink className="w-3 h-3" />
+                        <>
+                          <button
+                            type="button"
+                            disabled={sanitizingId === s.id || deletingId === s.id}
+                            onClick={() => handleSanitizeSchool(s)}
+                            title="Higienizar dados operacionais (zerar estudantes e turmas de teste)"
+                            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:border-amber-300 dark:hover:text-amber-400 dark:hover:border-amber-700 bg-white dark:bg-slate-800 text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            {sanitizingId === s.id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Eraser className="w-3 h-3 text-amber-500" />
+                            )}
+                            <span className="hidden lg:inline">Higienizar</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={deletingId === s.id || sanitizingId === s.id}
+                            onClick={() => handleDeleteSchool(s)}
+                            title="Excluir instituição e todos os dados permanentemente"
+                            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 bg-white dark:bg-slate-800 text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            {deletingId === s.id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3 h-3 text-red-500" />
+                            )}
+                            <span className="hidden lg:inline">Excluir</span>
+                          </button>
+                        </>
                       )}
-                      <span>Acessar Escola</span>
-                    </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAccessSchool(s.id)}
+                        disabled={switchingId === s.id}
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-lg transition"
+                      >
+                        {switchingId === s.id ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <ExternalLink className="w-3 h-3" />
+                        )}
+                        <span>Acessar</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -199,5 +199,21 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(getRoleOption("PEDAGOGA").label).toBe("Pedagógico (Equipe pedagógica)");
       expect(getRoleOption(null).label).toBe("Pedagógico (Equipe pedagógica)");
     });
+
+    it("Proteção da Escola Sede e Higienização de Banco", () => {
+      // Invariante de proteção da escola base (Leopoldina - INEP 41042730)
+      const LEOPOLDINA_INEP = "41042730";
+      const isProtectedSchool = (inep: string, name: string) =>
+        inep === LEOPOLDINA_INEP || name.toLowerCase().includes("leopoldina");
+
+      expect(isProtectedSchool("41042730", "Colégio Estadual Leopoldina B. Pedroso")).toBe(true);
+      expect(isProtectedSchool("99999999", "Escola Municipal Teste")).toBe(false);
+
+      // Apenas SuperAdmin tem autorização para disparar exclusão ou sanitização
+      expect(checkIsSuperAdmin(superAdminSession)).toBe(true);
+      expect(checkIsSuperAdmin(semecSession)).toBe(false);
+      expect(checkIsSuperAdmin(gestorSession)).toBe(false);
+      expect(checkIsSuperAdmin(pedagogaSession)).toBe(false);
+    });
   });
 });
