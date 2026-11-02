@@ -40,7 +40,8 @@ export type AuditAction =
   | "CREATE_SCHOOL"
   | "UPDATE_SCHOOL"
   | "DELETE_SCHOOL"
-  | "SANITIZE_SCHOOL";
+  | "SANITIZE_SCHOOL"
+  | "CREATE_CLASS_GROUP";
 
 export interface AuditUser {
   id?: string;

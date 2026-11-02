@@ -13,6 +13,7 @@ import {
   HelpCircle,
   Search,
   PhoneOff,
+  Download,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
 import {
@@ -111,6 +112,29 @@ export default function SereImportModal({
   const handleClose = () => {
     if (isImporting) return;
     onClose();
+  };
+
+  const handleDownloadSampleCsv = () => {
+    const sampleRows = [
+      "CGM;NOME DO ALUNO;TURMA;TURNO;TELEFONE;RESPONSAVEL;SITUACAO",
+      "1018613001;ALICE MENEZES DA SILVA;6º Ano A;Manhã;41991234567;MARIA MENEZES;Matriculado",
+      "1018613002;BRUNO CARVALHO DE OLIVEIRA;6º Ano A;Manhã;41992345678;JOAO CARVALHO;Matriculado",
+      "1018613003;CLARA LUZ PEREIRA;1º Ano Médio B;Tarde;41993456789;FERNANDA LUZ;Matriculado",
+      "1018613004;DANIEL SOUZA DOS SANTOS;1º Ano Médio B;Tarde;41994567890;ROBERTO SOUZA;Matriculado",
+      "1018613005;EDUARDA LIMA ROCHA;EJA Fase I;Noite;41995678901;CARLA LIMA;Matriculado",
+    ].join("\r\n");
+
+    const blob = new Blob(["\uFEFF" + sampleRows], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "modelo_importacao_sere_exemplo.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const processFiles = async (fileList: FileList | File[]) => {
@@ -436,6 +460,24 @@ export default function SereImportModal({
                 </li>
               </ol>
             </details>
+
+            {/* Atalho para download de modelo de testes */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-sky-50/70 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                <span className="text-xs text-slate-700 dark:text-slate-300">
+                  Deseja testar uma escola ou cadastrar via planilha padronizada?
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadSampleCsv}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300 font-bold text-xs shadow-2xs transition cursor-pointer self-start sm:self-auto"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-600" />
+                <span>Baixar Planilha Modelo (Exemplo CSV)</span>
+              </button>
+            </div>
 
             <div
               onDragOver={(e) => {

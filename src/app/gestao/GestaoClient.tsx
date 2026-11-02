@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   GraduationCap,
@@ -16,7 +17,11 @@ import {
   UserCheck,
   Clock,
   Sparkles,
+  Plus,
+  Loader2,
+  CheckCircle2,
 } from "lucide-react";
+import ModalDialog from "@/components/ModalDialog";
 
 interface GestaoClientProps {
   school: {
@@ -67,8 +72,67 @@ export default function GestaoClient({
   criticalStudents,
   currentUser,
 }: GestaoClientProps) {
+  const [classes, setClasses] = useState(classesSummary);
+  const [totalClassesCount, setTotalClassesCount] = useState(metrics.totalClasses);
+  const [isAddClassModalOpen, setIsAddClassModalOpen] = useState(false);
+  const [newClassName, setNewClassName] = useState("");
+  const [newClassSegment, setNewClassSegment] = useState<
+    "FUNDAMENTAL" | "MEDIO" | "NOTURNO" | "INFANTIL" | "EJA"
+  >("FUNDAMENTAL");
+  const [newClassShift, setNewClassShift] = useState<
+    "MANHA" | "TARDE" | "NOITE" | "INTEGRAL"
+  >("MANHA");
+  const [isSubmittingClass, setIsSubmittingClass] = useState(false);
+  const [classError, setClassError] = useState("");
+  const [classSuccessToast, setClassSuccessToast] = useState("");
+
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClassName.trim()) {
+      setClassError("Informe o nome da turma.");
+      return;
+    }
+
+    setIsSubmittingClass(true);
+    setClassError("");
+
+    try {
+      const res = await fetch("/api/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newClassName.trim(),
+          segment: newClassSegment,
+          shift: newClassShift,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao cadastrar turma.");
+      }
+
+      setClasses((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setTotalClassesCount((prev) => prev + 1);
+      setIsAddClassModalOpen(false);
+      setClassSuccessToast(`Turma "${data.name}" cadastrada com sucesso!`);
+      setTimeout(() => setClassSuccessToast(""), 4000);
+    } catch (err: any) {
+      setClassError(err.message || "Erro inesperado ao salvar turma.");
+    } finally {
+      setIsSubmittingClass(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {classSuccessToast && (
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{classSuccessToast}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="relative overflow-hidden bg-gradient-to-br from-indigo-950 via-slate-900 to-sky-950 rounded-2xl p-6 sm:p-8 text-white border border-slate-800 shadow-lg">
         <div className="absolute top-0 right-0 -mt-6 -mr-6 w-56 h-56 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -136,7 +200,7 @@ export default function GestaoClient({
             {metrics.totalStudents}
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Em {metrics.totalClasses} turmas ativas
+            Em {totalClassesCount} turmas ativas
           </div>
         </div>
 
@@ -332,23 +396,53 @@ export default function GestaoClient({
 
         {/* Classes Summary */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-white flex items-center space-x-2">
               <GraduationCap className="w-4 h-4 text-sky-600" />
               <span>Quadro de Turmas da Unidade</span>
             </h3>
-            <Link href="/alunos" className="text-xs font-bold text-sky-600 hover:text-sky-800">
-              Enturmação completa &rarr;
-            </Link>
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNewClassName("");
+                  setNewClassSegment("FUNDAMENTAL");
+                  setNewClassShift("MANHA");
+                  setClassError("");
+                  setIsAddClassModalOpen(true);
+                }}
+                className="inline-flex items-center space-x-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-sky-600 hover:bg-sky-700 text-white transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nova Turma</span>
+              </button>
+              <Link href="/alunos" className="text-xs font-bold text-sky-600 hover:text-sky-800">
+                Enturmação &rarr;
+              </Link>
+            </div>
           </div>
 
-          {classesSummary.length === 0 ? (
+          {classes.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-500">
-              Nenhuma turma cadastrada nesta escola ainda. Utilize a importação de alunos para cadastrar.
+              <p>Nenhuma turma cadastrada nesta escola ainda.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewClassName("");
+                  setNewClassSegment("FUNDAMENTAL");
+                  setNewClassShift("MANHA");
+                  setClassError("");
+                  setIsAddClassModalOpen(true);
+                }}
+                className="mt-3 inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 font-bold hover:bg-sky-100 transition border border-sky-200 dark:border-sky-800 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Cadastrar Primeira Turma</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {classesSummary.slice(0, 9).map((cg) => (
+              {classes.slice(0, 9).map((cg) => (
                 <div
                   key={cg.id}
                   className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-center"
@@ -364,6 +458,99 @@ export default function GestaoClient({
           )}
         </div>
       </div>
+
+      {/* Modal Nova Turma */}
+      <ModalDialog
+        open={isAddClassModalOpen}
+        onClose={() => setIsAddClassModalOpen(false)}
+        title="Cadastrar Nova Turma"
+        subtitle="Adicione uma turma manual para enturmação de alunos nesta escola."
+      >
+        <form onSubmit={handleCreateClass} className="space-y-4 text-xs">
+          {classError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 font-medium">
+              {classError}
+            </div>
+          )}
+
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
+              Nome da Turma *:
+            </label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="Ex: 6º Ano A, 1º Ano Médio B, EJA Fase I..."
+              value={newClassName}
+              onChange={(e) => setNewClassName(e.target.value)}
+              className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Dica: Use nomenclaturas padronizadas (ex: &ldquo;6º Ano A&rdquo; ou &ldquo;1ª Série Noturno&rdquo;).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
+                Segmento / Nível *:
+              </label>
+              <select
+                value={newClassSegment}
+                onChange={(e) => setNewClassSegment(e.target.value as any)}
+                className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
+              >
+                <option value="FUNDAMENTAL">Ensino Fundamental</option>
+                <option value="MEDIO">Ensino Médio</option>
+                <option value="NOTURNO">Noturno / EJA</option>
+                <option value="INFANTIL">Educação Infantil</option>
+                <option value="EJA">EJA Geral</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
+                Turno *:
+              </label>
+              <select
+                value={newClassShift}
+                onChange={(e) => setNewClassShift(e.target.value as any)}
+                className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
+              >
+                <option value="MANHA">Manhã</option>
+                <option value="TARDE">Tarde</option>
+                <option value="NOITE">Noite</option>
+                <option value="INTEGRAL">Integral</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-2 flex justify-end space-x-2">
+            <button
+              type="button"
+              onClick={() => setIsAddClassModalOpen(false)}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-medium hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmittingClass}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold flex items-center space-x-1.5 disabled:opacity-50"
+            >
+              {isSubmittingClass ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Cadastrando...</span>
+                </>
+              ) : (
+                <span>Criar Turma</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 }

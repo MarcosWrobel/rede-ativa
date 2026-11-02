@@ -32,6 +32,12 @@ export const studentUpdateSchema = z.object({
   classGroupId: z.string().trim().min(1).optional(),
 });
 
+export const classGroupCreateSchema = z.object({
+  name: z.string().trim().min(2, "Nome da turma deve ter pelo menos 2 caracteres"),
+  segment: z.enum(["FUNDAMENTAL", "MEDIO", "NOTURNO", "INFANTIL", "EJA"]).default("FUNDAMENTAL"),
+  shift: z.enum(["MANHA", "TARDE", "NOITE", "INTEGRAL"]).default("MANHA"),
+});
+
 export const sereBatchImportSchema = z.object({
   turmas: z
     .array(

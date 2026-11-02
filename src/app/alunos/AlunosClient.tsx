@@ -15,6 +15,7 @@ import {
   UserCheck,
   Stethoscope,
   PhoneOff,
+  Loader2,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
 import SereImportModal from "./SereImportModal";
@@ -52,6 +53,54 @@ export default function AlunosClient({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; name: string } | null>(null);
+
+  // Submodal para criação rápida de turma
+  const [isCreateClassModalOpen, setIsCreateClassModalOpen] = useState(false);
+  const [quickClassName, setQuickClassName] = useState("");
+  const [quickClassSegment, setQuickClassSegment] = useState<
+    "FUNDAMENTAL" | "MEDIO" | "NOTURNO" | "INFANTIL" | "EJA"
+  >("FUNDAMENTAL");
+  const [quickClassShift, setQuickClassShift] = useState<
+    "MANHA" | "TARDE" | "NOITE" | "INTEGRAL"
+  >("MANHA");
+  const [isSubmittingQuickClass, setIsSubmittingQuickClass] = useState(false);
+  const [quickClassError, setQuickClassError] = useState("");
+
+  const handleQuickCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickClassName.trim()) {
+      setQuickClassError("Informe o nome da turma.");
+      return;
+    }
+    setIsSubmittingQuickClass(true);
+    setQuickClassError("");
+
+    try {
+      const res = await fetch("/api/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: quickClassName.trim(),
+          segment: quickClassSegment,
+          shift: quickClassShift,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao cadastrar turma");
+      }
+
+      setClassGroupList((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setFormClassId(data.id);
+      setIsCreateClassModalOpen(false);
+      setQuickClassName("");
+    } catch (err: any) {
+      setQuickClassError(err.message || "Erro inesperado.");
+    } finally {
+      setIsSubmittingQuickClass(false);
+    }
+  };
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -499,21 +548,59 @@ export default function AlunosClient({
           </div>
 
           <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Turma:
-            </label>
-            <select
-              required
-              value={formClassId}
-              onChange={(e) => setFormClassId(e.target.value)}
-              className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white"
-            >
-              {classGroupList.map((cg) => (
-                <option key={cg.id} value={cg.id}>
-                  {cg.name} ({cg.segment})
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700">
+                Turma *:
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickClassName("");
+                  setQuickClassSegment("FUNDAMENTAL");
+                  setQuickClassShift("MANHA");
+                  setQuickClassError("");
+                  setIsCreateClassModalOpen(true);
+                }}
+                className="text-xs text-sky-600 hover:text-sky-800 font-bold inline-flex items-center space-x-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nova Turma</span>
+              </button>
+            </div>
+
+            {classGroupList.length === 0 ? (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+                <p className="font-bold">Nenhuma turma cadastrada nesta escola.</p>
+                <p className="mt-0.5">Crie uma turma para poder enturmar este estudante.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickClassName("");
+                    setQuickClassSegment("FUNDAMENTAL");
+                    setQuickClassShift("MANHA");
+                    setQuickClassError("");
+                    setIsCreateClassModalOpen(true);
+                  }}
+                  className="mt-2 inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Criar Turma Agora</span>
+                </button>
+              </div>
+            ) : (
+              <select
+                required
+                value={formClassId}
+                onChange={(e) => setFormClassId(e.target.value)}
+                className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white"
+              >
+                {classGroupList.map((cg) => (
+                  <option key={cg.id} value={cg.id}>
+                    {cg.name} ({cg.segment})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div>
@@ -557,6 +644,96 @@ export default function AlunosClient({
               className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs"
             >
               {isSubmitting ? "Gravando..." : "Salvar Aluno"}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* Quick Add Class Modal */}
+      <ModalDialog
+        open={isCreateClassModalOpen}
+        onClose={() => setIsCreateClassModalOpen(false)}
+        title="Cadastrar Nova Turma"
+        subtitle="Crie a turma para vincular ao estudante imediatamente."
+      >
+        <form onSubmit={handleQuickCreateClass} className="space-y-4 text-xs">
+          {quickClassError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 font-medium">
+              {quickClassError}
+            </div>
+          )}
+
+          <div>
+            <label className="font-semibold text-slate-700 block mb-1">
+              Nome da Turma *:
+            </label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="Ex: 6º Ano A, 1º Ano Médio B, EJA..."
+              value={quickClassName}
+              onChange={(e) => setQuickClassName(e.target.value)}
+              className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white text-slate-900"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">
+                Segmento / Nível *:
+              </label>
+              <select
+                value={quickClassSegment}
+                onChange={(e) => setQuickClassSegment(e.target.value as any)}
+                className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white text-slate-900"
+              >
+                <option value="FUNDAMENTAL">Ensino Fundamental</option>
+                <option value="MEDIO">Ensino Médio</option>
+                <option value="NOTURNO">Noturno / EJA</option>
+                <option value="INFANTIL">Educação Infantil</option>
+                <option value="EJA">EJA Geral</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">
+                Turno *:
+              </label>
+              <select
+                value={quickClassShift}
+                onChange={(e) => setQuickClassShift(e.target.value as any)}
+                className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white text-slate-900"
+              >
+                <option value="MANHA">Manhã</option>
+                <option value="TARDE">Tarde</option>
+                <option value="NOITE">Noite</option>
+                <option value="INTEGRAL">Integral</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-2 flex justify-end space-x-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsCreateClassModalOpen(false)}
+              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmittingQuickClass}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold flex items-center space-x-1.5 disabled:opacity-50"
+            >
+              {isSubmittingQuickClass ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Cadastrando...</span>
+                </>
+              ) : (
+                <span>Criar Turma</span>
+              )}
             </button>
           </div>
         </form>
