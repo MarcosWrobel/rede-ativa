@@ -22,23 +22,39 @@ import {
   Eraser,
   Lock,
   ShieldCheck,
+  Edit3,
+  Calendar,
+  Sparkles,
+  Info,
+  Clock,
 } from "lucide-react";
 
-interface SchoolItem {
+export interface StaffMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface SchoolItem {
   id: string;
   name: string;
   shortName: string | null;
   inep: string | null;
+  nre?: string | null;
   network: "ESTADUAL" | "MUNICIPAL" | "PRIVADA";
   municipality: string;
   state: string;
   phone: string | null;
   email: string | null;
   logoUrl: string | null;
+  settings?: Record<string, any>;
   hasSyncToken: boolean;
+  lastSyncAt?: string | null;
   studentsCount: number;
   classesCount: number;
   staffCount: number;
+  staff?: StaffMember[];
   createdAt: string;
 }
 
@@ -63,6 +79,154 @@ export default function AdminEscolasClient({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [sanitizingId, setSanitizingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Edit Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingSchool, setEditingSchool] = useState<SchoolItem | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    name: "",
+    shortName: "",
+    inep: "",
+    network: "MUNICIPAL" as "ESTADUAL" | "MUNICIPAL" | "PRIVADA",
+    nre: "",
+    municipality: "Tibagi",
+    state: "PR",
+    phone: "",
+    email: "",
+    logoUrl: "",
+    criticalAbsenceThreshold: 5,
+    emergencyContactPhone: "",
+  });
+  const [updating, setUpdating] = useState(false);
+
+  // Staff Modal State
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [selectedSchoolForStaff, setSelectedSchoolForStaff] = useState<SchoolItem | null>(null);
+
+  const handleOpenEditModal = (school: SchoolItem) => {
+    setEditingSchool(school);
+    setEditFormData({
+      name: school.name,
+      shortName: school.shortName || "",
+      inep: school.inep || "",
+      network: school.network,
+      nre: school.nre || (school.network === "MUNICIPAL" ? `SEMEC ${school.municipality}` : "Ponta Grossa"),
+      municipality: school.municipality,
+      state: school.state || "PR",
+      phone: school.phone || "",
+      email: school.email || "",
+      logoUrl: school.logoUrl || "",
+      criticalAbsenceThreshold: school.settings?.criticalAbsenceThreshold || 5,
+      emergencyContactPhone: school.settings?.emergencyContactPhone || "",
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setEditFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleEditLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setFeedback({ type: "error", message: "Selecione uma imagem válida (PNG, JPG, SVG)." });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setEditFormData((prev) => ({ ...prev, logoUrl: reader.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpdateSchool = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSchool) return;
+
+    setUpdating(true);
+    setFeedback(null);
+
+    try {
+      const isLeopoldina = editingSchool.inep === "41042730" || editingSchool.name.toLowerCase().includes("leopoldina");
+
+      const payload: any = {
+        name: editFormData.name.trim(),
+        network: editFormData.network,
+        city: editFormData.municipality.trim(),
+        municipality: editFormData.municipality.trim(),
+        state: editFormData.state.trim().toUpperCase(),
+        nre: editFormData.nre.trim() || null,
+        phone: editFormData.phone.trim() || null,
+        email: editFormData.email.trim() || null,
+        logoUrl: editFormData.logoUrl.trim() || null,
+        settings: {
+          criticalAbsenceThreshold: Number(editFormData.criticalAbsenceThreshold) || 5,
+          emergencyContactPhone: editFormData.emergencyContactPhone.trim() || null,
+        },
+      };
+
+      if (!isLeopoldina && editFormData.inep.trim()) {
+        payload.inepCode = editFormData.inep.trim();
+      }
+
+      const res = await fetch(`/api/schools/${editingSchool.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao atualizar dados da instituição.");
+      }
+
+      const sc = data.school;
+      const shortName = sc.name.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "");
+
+      setSchools((prev) =>
+        prev.map((s) =>
+          s.id === sc.id
+            ? {
+                ...s,
+                name: sc.name,
+                shortName,
+                inep: sc.inepCode || s.inep,
+                network: sc.network,
+                municipality: sc.city,
+                state: sc.state,
+                nre: sc.nre,
+                phone: sc.phone,
+                email: sc.email,
+                logoUrl: sc.logoUrl,
+                settings: payload.settings,
+              }
+            : s
+        )
+      );
+
+      setFeedback({
+        type: "success",
+        message: `Instituição "${sc.name}" atualizada com sucesso!`,
+      });
+      setIsEditModalOpen(false);
+      setEditingSchool(null);
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "Falha ao atualizar instituição." });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleOpenStaffModal = (school: SchoolItem) => {
+    setSelectedSchoolForStaff(school);
+    setIsStaffModalOpen(true);
+  };
 
   const handleDeleteSchool = async (school: SchoolItem) => {
     if (school.inep === "41042730" || school.name.toLowerCase().includes("leopoldina")) {
@@ -422,21 +586,49 @@ export default function AdminEscolasClient({
                     <span className="text-[10px] text-slate-400 font-medium">Turmas</span>
                   </div>
                   <div>
-                    <span className="block text-base font-bold text-slate-800 dark:text-slate-200">
-                      {s.staffCount}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-medium">Equipe</span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenStaffModal(s)}
+                      className="group cursor-pointer focus:outline-none"
+                      title="Ver membros da equipe"
+                    >
+                      <span className="block text-base font-bold text-slate-800 dark:text-slate-200 group-hover:text-sky-600 transition">
+                        {s.staffCount}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium group-hover:text-sky-500 transition underline decoration-dotted">
+                        Equipe
+                      </span>
+                    </button>
                   </div>
+                </div>
+
+                {/* Status da Sincronização SERE & Saúde do Tenant */}
+                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-2.5 mb-2 text-xs border border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                    <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                      {s.lastSyncAt
+                        ? `Sincronizado: ${new Date(s.lastSyncAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                        : s.studentsCount === 0
+                        ? "Aguardando 1º lote de alunos"
+                        : "Sincronização ativa"}
+                    </span>
+                  </div>
+                  {s.studentsCount === 0 && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
+                      Base Zerada
+                    </span>
+                  )}
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
                 <div className="flex items-center space-x-1.5 text-xs">
                   {s.hasSyncToken ? (
                     <span className="inline-flex items-center space-x-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
                       <Key className="w-3.5 h-3.5" />
-                      <span>Extensão Vinculada</span>
+                      <span>Extensão Ativa</span>
                     </span>
                   ) : (
                     <span className="text-slate-400 text-[11px]">Sem chave da extensão</span>
@@ -444,6 +636,25 @@ export default function AdminEscolasClient({
                 </div>
 
                 <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditModal(s)}
+                    title="Editar dados institucionais e configurações da escola"
+                    className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-sky-600 hover:border-sky-300 dark:hover:text-sky-400 dark:hover:border-sky-700 bg-white dark:bg-slate-800 text-[11px] font-semibold transition"
+                  >
+                    <Edit3 className="w-3 h-3 text-sky-500" />
+                    <span>Editar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenStaffModal(s)}
+                    title="Ver equipe e cargos vinculados a esta instituição"
+                    className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-indigo-600 hover:border-indigo-300 dark:hover:text-indigo-400 dark:hover:border-indigo-700 bg-white dark:bg-slate-800 text-[11px] font-semibold transition"
+                  >
+                    <Users className="w-3 h-3 text-indigo-500" />
+                    <span>Equipe</span>
+                  </button>
                   {s.inep === "41042730" ? (
                     <span
                       title="Instituição sede de produção permanente"
@@ -727,6 +938,344 @@ export default function AdminEscolasClient({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Instituição Escolar */}
+      {isEditModalOpen && editingSchool && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditModalOpen(false);
+                setEditingSchool(null);
+              }}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2.5 mb-5">
+              <div className="p-2 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-xl">
+                <Edit3 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Editar Instituição Escolar
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Atualize dados cadastrais, contato institucional e parâmetros operacionais
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdateSchool} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Nome Completo da Instituição *
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  value={editFormData.name}
+                  onChange={handleEditInputChange}
+                  className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Código INEP (MEC)
+                  </label>
+                  <input
+                    type="text"
+                    name="inep"
+                    disabled={editingSchool.inep === "41042730" || editingSchool.name.toLowerCase().includes("leopoldina")}
+                    value={editFormData.inep}
+                    onChange={handleEditInputChange}
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                  />
+                  {editingSchool.inep === "41042730" && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 block">
+                      INEP protegido da Escola Sede Fundadora.
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Rede de Ensino *
+                  </label>
+                  <select
+                    name="network"
+                    value={editFormData.network}
+                    onChange={handleEditInputChange}
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-semibold"
+                  >
+                    <option value="MUNICIPAL">Municipal (SEMEC)</option>
+                    <option value="ESTADUAL">Estadual (SEED-PR)</option>
+                    <option value="PRIVADA">Privada / Particular</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Município / UF *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      name="municipality"
+                      required
+                      value={editFormData.municipality}
+                      onChange={handleEditInputChange}
+                      className="col-span-2 text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <input
+                      type="text"
+                      name="state"
+                      required
+                      maxLength={2}
+                      value={editFormData.state}
+                      onChange={handleEditInputChange}
+                      className="text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 uppercase text-center font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    NRE / Secretaria Mantenedora
+                  </label>
+                  <input
+                    type="text"
+                    name="nre"
+                    value={editFormData.nre}
+                    onChange={handleEditInputChange}
+                    placeholder="Ex: SEMEC Tibagi ou Ponta Grossa"
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Telefone Institucional
+                  </label>
+                  <input
+                    type="text"
+                    name="phone"
+                    value={editFormData.phone}
+                    onChange={handleEditInputChange}
+                    placeholder="(42) 3275-0000"
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    E-mail Institucional
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={editFormData.email}
+                    onChange={handleEditInputChange}
+                    placeholder="escola@municipio.pr.gov.br"
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+
+              {/* Configurações Avançadas */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 space-y-3">
+                <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <Sparkles className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Configurações & Parâmetros da Unidade</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Alerta Vermelho: Faltas Consecutivas
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      name="criticalAbsenceThreshold"
+                      value={editFormData.criticalAbsenceThreshold}
+                      onChange={handleEditInputChange}
+                      className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      WhatsApp Oficial de Apoio Pedagógico
+                    </label>
+                    <input
+                      type="text"
+                      name="emergencyContactPhone"
+                      value={editFormData.emergencyContactPhone}
+                      onChange={handleEditInputChange}
+                      placeholder="(42) 99999-9999"
+                      className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  URL do Brasão / Logotipo
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    name="logoUrl"
+                    value={editFormData.logoUrl}
+                    onChange={handleEditInputChange}
+                    placeholder="https://... ou /logo.svg"
+                    className="flex-1 text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                  />
+                  <label className="cursor-pointer inline-flex items-center space-x-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 transition">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleEditLogoUpload}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingSchool(null);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs transition disabled:opacity-50"
+                >
+                  {updating ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Salvar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Equipe da Instituição */}
+      {isStaffModalOpen && selectedSchoolForStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsStaffModalOpen(false);
+                setSelectedSchoolForStaff(null);
+              }}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2.5 mb-4">
+              <div className="p-2 bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 rounded-xl">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Equipe Vinculada: {selectedSchoolForStaff.name}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {selectedSchoolForStaff.staffCount} servidores vinculados a esta instituição
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1 my-4">
+              {selectedSchoolForStaff.staff && selectedSchoolForStaff.staff.length > 0 ? (
+                selectedSchoolForStaff.staff.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-xs"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white block">{m.name}</span>
+                      <span className="text-[11px] text-slate-400">{m.email}</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                      {m.role === "GESTOR_ESCOLAR"
+                        ? "Direção"
+                        : m.role === "GESTAO_SECRETARIA"
+                        ? "Gestor SEMEC"
+                        : m.role === "SUPERADMIN" || m.role === "ADMIN"
+                        ? "Admin"
+                        : "Pedagoga"}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  Nenhum membro da equipe associado diretamente ainda.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsStaffModalOpen(false);
+                  setSelectedSchoolForStaff(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (selectedSchoolForStaff.id !== activeSchoolId) {
+                    await handleSwitchSchool(selectedSchoolForStaff.id);
+                  }
+                  window.location.href = "/equipe";
+                }}
+                className="inline-flex items-center space-x-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs transition"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Gerenciar Equipe no Painel</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

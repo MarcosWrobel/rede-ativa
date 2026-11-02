@@ -21,6 +21,8 @@ const updateSchoolSchema = z.object({
   phone: z.string().optional().nullable(),
   email: z.string().email("E-mail institucional inválido").optional().nullable(),
   logoUrl: z.string().optional().nullable(),
+  settingsJson: z.string().optional().nullable(),
+  settings: z.record(z.string(), z.any()).optional().nullable(),
 });
 
 export async function GET(
@@ -89,8 +91,30 @@ export async function PUT(
 
     const data = parsed.data;
 
+    // Busca o registro atual da escola para validações de integridade
+    const currentSchoolRecord = await prisma.school.findUnique({
+      where: { id },
+      select: { inepCode: true, name: true },
+    });
+
+    if (!currentSchoolRecord) {
+      return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
+    }
+
+    // Proteção absoluta da escola sede Colégio Leopoldina contra alteração de INEP
+    if (
+      (currentSchoolRecord.inepCode === "41042730" || currentSchoolRecord.name.toLowerCase().includes("leopoldina")) &&
+      data.inepCode &&
+      data.inepCode !== "41042730"
+    ) {
+      return NextResponse.json(
+        { error: "O código INEP do Colégio Estadual Leopoldina B. Pedroso (41042730) é a escola sede fundadora e não pode ser alterado." },
+        { status: 403 }
+      );
+    }
+
     // Se estiver alterando o INEP, verifica se não colide com outra escola
-    if (data.inepCode) {
+    if (data.inepCode && data.inepCode !== currentSchoolRecord.inepCode) {
       const collision = await prisma.school.findFirst({
         where: {
           inepCode: data.inepCode,
@@ -105,6 +129,13 @@ export async function PUT(
       }
     }
 
+    let finalSettingsJson: string | undefined = undefined;
+    if (data.settings !== undefined) {
+      finalSettingsJson = data.settings ? JSON.stringify(data.settings) : null as any;
+    } else if (data.settingsJson !== undefined) {
+      finalSettingsJson = data.settingsJson || null as any;
+    }
+
     const updated = await prisma.school.update({
       where: { id },
       data: {
@@ -117,11 +148,12 @@ export async function PUT(
         ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
         ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
         ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl?.trim() || null } : {}),
+        ...(finalSettingsJson !== undefined ? { settingsJson: finalSettingsJson } : {}),
       },
     });
 
     await logAudit({
-      action: "UPDATE_USER",
+      action: "UPDATE_SCHOOL",
       entityType: "School",
       entityId: id,
       details: {
@@ -138,7 +170,13 @@ export async function PUT(
       req,
     });
 
-    return NextResponse.json({ success: true, school: updated });
+    return NextResponse.json({
+      success: true,
+      school: {
+        ...updated,
+        hasSyncToken: Boolean(updated.syncTokenHash),
+      },
+    });
   } catch (error: any) {
     console.error("[PUT /api/schools/[id]] Erro:", error);
     return NextResponse.json({ error: error.message || "Erro ao atualizar instituição" }, { status: 500 });

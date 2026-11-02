@@ -226,7 +226,7 @@ export async function POST(req: Request) {
     }
 
     await logAudit({
-      action: "CREATE_USER",
+      action: "CREATE_SCHOOL",
       entityType: "School",
       entityId: createdSchool.id,
       details: {

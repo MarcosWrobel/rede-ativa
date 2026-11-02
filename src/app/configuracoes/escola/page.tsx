@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { checkIsAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import EscolaSettingsClient from "./EscolaSettingsClient";
 
@@ -18,12 +19,8 @@ export default async function EscolaSettingsPage() {
     redirect("/login");
   }
 
-  // Ensure ADMIN permission
-  const userRole = sessionUser?.role;
-  const userEmail = (session.user.email || "").toLowerCase().trim();
-  const isAdmin = userRole === "ADMIN" || userEmail === "marcos.wrobel@escola.pr.gov.br";
-
-  if (!isAdmin) {
+  // Ensure Admin or School Manager permission (4-tier RBAC)
+  if (!checkIsAdmin(session)) {
     redirect("/");
   }
 

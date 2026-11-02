@@ -252,5 +252,37 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(validateTenantAccess(schoolB, schoolA, "SUPERADMIN")).toEqual({ allowed: true });
       expect(validateTenantAccess(schoolB, schoolA, "ADMIN")).toEqual({ allowed: true });
     });
+
+    it("Robustecimento da Gestão de Escolas: Proteção do INEP da escola sede na edição", () => {
+      // Validador de alteração cadastral de escolas (PUT /api/schools/[id])
+      const validateSchoolUpdate = (
+        targetSchool: { inepCode: string; name: string },
+        newInep?: string
+      ) => {
+        const isLeopoldina =
+          targetSchool.inepCode === "41042730" ||
+          targetSchool.name.toLowerCase().includes("leopoldina");
+        if (isLeopoldina && newInep && newInep !== "41042730") {
+          return {
+            allowed: false,
+            error: "O código INEP do Colégio Estadual Leopoldina B. Pedroso (41042730) é a escola sede fundadora e não pode ser alterado.",
+          };
+        }
+        return { allowed: true };
+      };
+
+      // 1. Tentar alterar o INEP da Leopoldina para outro valor deve ser barrado
+      const leopoldina = { inepCode: "41042730", name: "Colégio Estadual Leopoldina B. Pedroso" };
+      expect(validateSchoolUpdate(leopoldina, "99999999").allowed).toBe(false);
+      expect(validateSchoolUpdate(leopoldina, "99999999").error).toContain("escola sede fundadora");
+
+      // 2. Manter o mesmo INEP da Leopoldina ou atualizar outros campos é permitido
+      expect(validateSchoolUpdate(leopoldina, "41042730").allowed).toBe(true);
+      expect(validateSchoolUpdate(leopoldina, undefined).allowed).toBe(true);
+
+      // 3. Outras escolas podem ter seu INEP atualizado livremente
+      const escolaMunicipal = { inepCode: "12345678", name: "Escola Municipal Teste" };
+      expect(validateSchoolUpdate(escolaMunicipal, "87654321").allowed).toBe(true);
+    });
   });
 });
