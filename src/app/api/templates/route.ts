@@ -87,6 +87,22 @@ export async function PUT(req: Request) {
     }
 
     const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = parsed.data;
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "Modelo de mensagem não encontrado" }, { status: 404 });
+    }
+
+    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a modelo de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
 
     const template = await prisma.messageTemplate.update({
       where: { id },

@@ -137,14 +137,15 @@ export async function POST(req: Request) {
     }
 
     const { studentId, type, startDate, endDate, cidCode, notes } = parsed.data;
+    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: { classGroup: true },
     });
 
-    if (!student) {
-      return NextResponse.json({ error: "Estudante não encontrado." }, { status: 404 });
+    if (!student || (student.schoolId && student.schoolId !== school.id && authCheck.role !== "ADMIN")) {
+      return NextResponse.json({ error: "Estudante não encontrado nesta instituição." }, { status: 404 });
     }
 
     // Grava início e fim no horário civil de Brasília (-03:00)

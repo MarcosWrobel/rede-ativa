@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageReplySchema } from "@/lib/schemas";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function POST(req: Request) {
   try {
@@ -23,6 +24,14 @@ export async function POST(req: Request) {
 
     if (!previous) {
       return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     const shouldUpgradeDelivery =

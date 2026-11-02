@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeAddendumHash } from "@/lib/ataCrypto";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,11 @@ export async function POST(
 
       if (!minute) {
         throw new Error("Ata pedagógica não encontrada");
+      }
+
+      const currentSchool = await getCurrentSchool(authCheck.schoolId);
+      if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+        throw new Error("Acesso negado a registro de outra instituição de ensino.");
       }
 
       if (minute.status !== "FINALIZED") {
@@ -104,7 +110,7 @@ export async function POST(
     return NextResponse.json({ success: true, addendum }, { status: 201 });
   } catch (error: any) {
     console.error("[POST /api/atas/[id]/addendums] Erro:", error);
-    const status = error.message?.includes("não encontrada") ? 404 : error.message?.includes("já finalizadas") ? 400 : 500;
+    const status = error.message?.includes("Acesso negado") ? 403 : error.message?.includes("não encontrada") ? 404 : error.message?.includes("já finalizadas") ? 400 : 500;
     return NextResponse.json({ error: error.message || "Erro ao adicionar termo de aditamento" }, { status });
   }
 }

@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export async function POST(req: Request) {
   try {
@@ -30,8 +31,9 @@ export async function POST(req: Request) {
       include: { classGroup: true },
     });
 
-    if (!student) {
-      return NextResponse.json({ error: "Aluno não encontrado" }, { status: 404 });
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (!student || (student.schoolId && student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN")) {
+      return NextResponse.json({ error: "Aluno não encontrado nesta instituição" }, { status: 404 });
     }
 
     const digits = normalizeWhatsAppPhone(customPhone || student.phone);

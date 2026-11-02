@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeMinuteHash, generateVerificationCode } from "@/lib/ataCrypto";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,11 @@ export async function POST(
 
             if (!minute) {
               throw new Error("NOT_FOUND:Ata pedagógica não encontrada");
+            }
+
+            const currentSchool = await getCurrentSchool(authCheck.schoolId);
+            if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+              throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
             }
 
             // Idempotência: se já foi lavrada, sai com sucesso
@@ -346,6 +352,9 @@ export async function POST(
     const msg = error.message || "";
     if (msg.startsWith("NOT_FOUND:")) {
       return NextResponse.json({ error: msg.replace("NOT_FOUND:", "") }, { status: 404 });
+    }
+    if (msg.startsWith("FORBIDDEN:")) {
+      return NextResponse.json({ error: msg.replace("FORBIDDEN:", "") }, { status: 403 });
     }
     if (msg.startsWith("STATUS_INVALID:") || msg.startsWith("VALIDATION:")) {
       return NextResponse.json({ error: msg.split(":")[1] }, { status: 400 });

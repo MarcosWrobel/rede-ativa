@@ -202,16 +202,6 @@ export async function POST(req: Request) {
       actionItems,
     } = parsed.data;
 
-    // Busca dados cadastrais atuais dos estudantes para snapshot fiel
-    const studentsDb = await prisma.student.findMany({
-      where: { id: { in: studentIds } },
-      include: { classGroup: true },
-    });
-
-    if (studentsDb.length === 0) {
-      return NextResponse.json({ error: "Nenhum estudante válido encontrado para vincular" }, { status: 400 });
-    }
-
     // Garante que a escola exista no banco de dados para satisfazer a chave estrangeira (FK)
     let effectiveSchoolId = school.id;
     if (effectiveSchoolId === "default-leopoldina") {
@@ -219,6 +209,19 @@ export async function POST(req: Request) {
       if (ensured) {
         effectiveSchoolId = ensured.id;
       }
+    }
+
+    // Busca dados cadastrais atuais dos estudantes para snapshot fiel, garantindo escopo da escola ativa
+    const studentsDb = await prisma.student.findMany({
+      where: {
+        id: { in: studentIds },
+        ...(authCheck.role === "ADMIN" ? {} : { schoolId: effectiveSchoolId }),
+      },
+      include: { classGroup: true },
+    });
+
+    if (studentsDb.length === 0) {
+      return NextResponse.json({ error: "Nenhum estudante válido encontrado nesta instituição para vincular" }, { status: 400 });
     }
 
     const minute = await prisma.pedagogicalMinute.create({

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -22,11 +23,16 @@ export async function POST(
 
     const minute = await prisma.pedagogicalMinute.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, schoolId: true },
     });
 
     if (!minute) {
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
 
     if (minute.status !== "DRAFT") {

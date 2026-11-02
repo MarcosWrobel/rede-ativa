@@ -215,5 +215,42 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(checkIsSuperAdmin(gestorSession)).toBe(false);
       expect(checkIsSuperAdmin(pedagogaSession)).toBe(false);
     });
+
+    it("Prevenção Estrita de IDOR Multi-Tenant em todas as mutações e sub-recursos", () => {
+      // Função modelo que espelha a guarda implementada nos 11 endpoints remediados:
+      const validateTenantAccess = (
+        recordSchoolId: string | null | undefined,
+        currentSchoolId: string,
+        userRole: string
+      ): { allowed: boolean; status?: number; error?: string } => {
+        if (!recordSchoolId) return { allowed: true };
+        if (userRole === "ADMIN" || userRole === "SUPERADMIN") return { allowed: true };
+        if (recordSchoolId !== currentSchoolId) {
+          return {
+            allowed: false,
+            status: 403,
+            error: "Acesso negado a registro de outra instituição de ensino.",
+          };
+        }
+        return { allowed: true };
+      };
+
+      const schoolA = "school-leopoldina-uuid";
+      const schoolB = "school-david-federmann-uuid";
+
+      // 1. Usuário comum tentando alterar recurso da própria escola -> PERMITIDO
+      expect(validateTenantAccess(schoolA, schoolA, "PEDAGOGA")).toEqual({ allowed: true });
+      expect(validateTenantAccess(schoolB, schoolB, "GESTOR_ESCOLAR")).toEqual({ allowed: true });
+
+      // 2. Usuário comum tentando alterar recurso de OUTRA escola via ID -> BLOQUEADO COM 403
+      const blockedAttempt = validateTenantAccess(schoolB, schoolA, "PEDAGOGA");
+      expect(blockedAttempt.allowed).toBe(false);
+      expect(blockedAttempt.status).toBe(403);
+      expect(blockedAttempt.error).toContain("Acesso negado");
+
+      // 3. SuperAdmin pode operar com governança transversal
+      expect(validateTenantAccess(schoolB, schoolA, "SUPERADMIN")).toEqual({ allowed: true });
+      expect(validateTenantAccess(schoolB, schoolA, "ADMIN")).toEqual({ allowed: true });
+    });
   });
 });

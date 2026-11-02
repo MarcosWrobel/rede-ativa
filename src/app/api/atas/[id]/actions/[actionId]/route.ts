@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,11 @@ export async function PATCH(
 
     if (!actionItem) {
       return NextResponse.json({ error: "Encaminhamento não encontrado" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (actionItem.minute.schoolId && actionItem.minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
 
     const rawBody = await req.json();

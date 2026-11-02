@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageDeliveryStatusUpdateSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
+import { getCurrentSchool } from "@/lib/currentSchool";
 
 async function handleStatusUpdate(req: Request) {
   try {
@@ -32,6 +33,14 @@ async function handleStatusUpdate(req: Request) {
 
     if (!existing) {
       return NextResponse.json({ error: "Registro de envio não encontrado" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (existing.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     const updated = await prisma.messageLog.update({
