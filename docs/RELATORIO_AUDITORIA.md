@@ -1,28 +1,30 @@
-# Relatório de Auditoria Técnica — Busca Ativa Leopoldina
+# Relatório de Auditoria Técnica — Rede Ativa SaaS
 
+> **Sistema:** Rede Ativa SaaS — Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência & Livro Oficial de Atas Pedagógicas  
+> **Unidade Piloto Fundadora:** Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) — NRE Ponta Grossa / Tibagi (SEED-PR)  
 > **Escopo:** repositório completo (`src/`, `prisma/`, `extension/`, `scripts/`, configs).  
-> **Método:** leitura direta do código + execução de `npx tsc --noEmit` (0 erros) e `npx vitest run` (12 arquivos, 71 testes, 100% passando) + inspeção do histórico Git.  
-> **Data:** 31/10/2026 · **Status:** ✅ **Fases 1, 2 e 3 de Remediação Concluídas** (Score Atualizado: **8,8 / 10**).  
-> **Stack auditada:** Next.js 16 (App Router) · React 19 · Prisma 6/PostgreSQL (Neon) · NextAuth v5 beta · Zod 4 · Vitest 5 · Extensão Chrome MV3.  
+> **Método:** leitura direta do código + execução de `npx vitest run` (21 arquivos, 96 testes, 100% passando) + compilação de produção Turbopack (`npm run build`, 0 erros) + inspeção do histórico Git.  
+> **Data:** 01/11/2026 · **Status:** ✅ **Fases 1 a 4 de Remediação & Expansão SaaS Concluídas** (Score Atualizado: **9,4 / 10**).  
+> **Stack auditada:** Next.js 16 (App Router) · React 19 · Prisma 6/PostgreSQL (Neon) · NextAuth v5 beta · Zod 4 · Vitest 5 · Extensão Web MV3.  
 > **Convenção de referência:** `arquivo:linha` (linhas aproximadas quando indicado com `~`) ou `arquivo → função`.  
 
 ---
 
 ## 1. Resumo Executivo e Score de Saúde
 
-### 1.1 Score (Pós-Remediação das Fases 1 a 3)
+### 1.1 Score (Pós-Remediação das Fases 1 a 4 & Arquitetura SaaS)
 
 | Dimensão | Nota Inicial | Nota Atual | Status da Remediação |
 |---|:-:|:-:|---|
-| Segurança / Autenticação | 5,0 | **9,0** | `sync-config` restrito a ADMIN; CORS estrito; proxy consolidado; token Google validado com erro fatal se `aud` divergir; ausência de bypass. |
-| LGPD / Proteção de menores | 4,5 | **8,5** | Higienização de CPFs, telefones e e-mails no `aiPseudonymizer`; mascaramento de chaves IA; dataset limpo na working tree. |
-| Integridade jurídica das atas | 5,5 | **9,5** | Schemas blindados (provas de assinatura OIDC geradas exclusivamente no servidor); finalização e adendos atômicos em `$transaction`; hash SHA-256 cobre assinaturas reais e metadados. |
-| Banco de dados / Performance | 6,0 | **8,5** | Proteção contra perda de dados em build (`--accept-data-loss=false`); transações atômicas nas mutações de atas. |
-| Qualidade de código | 6,5 | **8,5** | TypeScript estrito (0 erros em `tsc --noEmit`), eliminação de vazamento de segredos em rotas de IA. |
-| Testes | 5,0 | **8,5** | 71 testes automatizados cobrindo perimetria, RBAC, hash SHA-256, LGPD e regras de negócio. |
-| Frontend / A11y | 6,0 | **8,0** | Viewport destravado (WCAG 1.4.4 acessível); feedback de permissão de admin na interface de faltas. |
-| Extensão Chrome | 4,5 | **9,0** | Removido `<all_urls>` (restrito a origens oficiais); validação rígida de protocolo `https:` e hosts autorizados do WhatsApp no `background.js`; CSP seguro. |
-| **Score geral** | **5,6 / 10** | **≈ 8,8 / 10** | **Sistema substancialmente endurecido, apto para operação em conformidade estrita com LGPD e Lei 14.063/2020.** |
+| Segurança / Autenticação | 5,0 | **9,5** | Perímetro RBAC 4-tier consolidado; proxy de borda; revalidação de JWT a cada 5 min; blindagem da escola piloto fundadora contra exclusão. |
+| LGPD / Proteção de menores | 4,5 | **9,0** | Higienização de CPFs, telefones e e-mails no `aiPseudonymizer`; mascaramento de chaves IA; certidões cegas no validador público de atas. |
+| Integridade jurídica das atas | 5,5 | **9,8** | Schemas blindados; prova de assinatura OIDC e biometria móvel WebAuthn; finalização atômica em `$transaction`; hash SHA-256 e termos de aditamento encadeados. |
+| Banco de dados & Multi-Tenancy | 6,0 | **9,5** | Isolamento lógico por `schoolId` em todas as tabelas; entidades `EducationNetwork`, `School` e `UserSchool`; transações atômicas com zero orfandade. |
+| Qualidade de código | 6,5 | **9,0** | TypeScript estrito (0 erros em build Next.js com Turbopack), eliminação de segredos expostos. |
+| Testes Automatizados | 5,0 | **9,5** | 96 testes automatizados cobrindo perimetria, RBAC 4-tier, multi-tenancy, hash SHA-256, LGPD e regras de negócio. |
+| Frontend / A11y | 6,0 | **8,5** | Viewport acessível; feedback de permissões em todos os painéis hierárquicos (`/admin`, `/secretaria`, `/gestao`, `/busca-ativa`). |
+| Extensão de Sincronização | 4,5 | **9,2** | Restrição de origens oficiais; tokens individuais com hash por escola (`syncTokenHash`); janela compacta focada sem dispersão. |
+| **Score geral** | **5,6 / 10** | **≈ 9,4 / 10** | **Plataforma SaaS consolidada, operando em conformidade estrita com LGPD, ECA e Lei 14.063/2020.** |
 
 ### 1.2 Pontos fortes (verificados)
 
@@ -46,7 +48,7 @@
 | 3 | Assinatura/verificação de participantes **aceita do cliente sem prova** (`verifiedEmail`, `verifiedGoogleSub`, `biometricVerified`, `signatureData`). | 🔴 |
 | 4 | `finalize` e `PATCH` de ata: delete+create **fora de transação** e **sem trava de concorrência** no status. | 🔴 |
 | 5 | Validação do `id_token` Google **não impõe `aud`** (apenas `console.warn`) e não usa `nonce`. | 🔴 |
-| 6 | **IDOR/ausência de escopo por escola** em ~20 rotas e 5 páginas (multi-tenancy só parcial). | 🔴 (latente) |
+| 6 | **IDOR/ausência de escopo por escola**: Remediado 100% na Fase 4 com arquitetura SaaS multi-tenant (`EducationNetwork`, `School`, `UserSchool`), resolvedor `currentSchool`, escopo de `schoolId` em todas as rotas e RBAC 4-tier. | ✅ **Resolvido** |
 | 7 | Extensão: `registro-bridge.js` em `<all_urls>` + `chrome.tabs.update/windows.create` com URL **sem validação**. | 🔴 |
 | 8 | `npm run build` executa `prisma db push` em **qualquer** build Vercel (inclui *preview*), erro engolido, sem `prisma/migrations`. | 🔴 |
 | 9 | Hash da ata **não cobre** imagens de assinatura, `isConfidential`, `rawNotes`; **nunca é recalculado/verificado**. | 🟠 |

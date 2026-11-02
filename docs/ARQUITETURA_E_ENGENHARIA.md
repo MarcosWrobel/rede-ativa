@@ -1,15 +1,17 @@
-# Arquitetura e Engenharia de Software — Busca Ativa Leopoldina
+# Arquitetura e Engenharia de Software — Rede Ativa SaaS
 
-> **Sistema:** Busca Ativa Escolar, Comunicação Institucional & Livro Oficial de Atas Digital  
-> **Unidade Sede:** Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) — NRE Ponta Grossa (SEED-PR)  
-> **Edição:** 3.0 (Documentação Canônica Auditada) · **Data:** 31/10/2026  
-> **Escopo:** `src/`, `prisma/`, `extension/`, `scripts/`, `public/` e infraestrutura serverless (Vercel + Neon PostgreSQL).
+> **Sistema:** Rede Ativa SaaS — Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência & Livro Oficial de Atas Pedagógicas  
+> **Unidade Piloto Fundadora:** Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) — NRE Ponta Grossa / Tibagi (SEED-PR)  
+> **Edição:** 4.0 (Documentação Canônica SaaS Multi-Escola) · **Data:** 01/11/2026  
+> **Escopo:** `src/`, `prisma/`, `extension/`, `scripts/`, `public/` e infraestrutura serverless multi-tenant (Vercel + Neon PostgreSQL).
 
 ---
 
 ## 1. Visão Geral da Arquitetura do Sistema
 
-O **Busca Ativa Leopoldina** é uma plataforma web full-stack serverless projetada para centralizar o combate preventivo à infrequência e ao abandono escolar na rede pública estadual do Paraná (SEED-PR), combinando quatro pilares operacionais e jurídicos:
+O **Rede Ativa SaaS** é uma plataforma web full-stack serverless de alta performance projetada para centralizar o combate preventivo à infrequência e ao abandono escolar, unificar a mensageria institucional com famílias via WhatsApp e conferir fé pública jurídica ao registro pedagógico através de um Livro Oficial de Atas Digital com validade legal em múltiplas redes públicas (estaduais e municipais) e privadas de ensino.
+
+Originalmente concebida e validada no **Colégio Estadual Leopoldina B. Pedroso** (**Unidade Piloto Fundadora**, com 689 alunos reais), a solução foi estruturada para operar em modelo SaaS multi-inquilino (*multi-tenant*), combinando cinco pilares operacionais e jurídicos fundamentais:
 
 1. **Ingestão Cadastral Poliglota (SERE):** Importação assistida de relatórios oficiais exportados do Sistema Estadual de Registro Escolar em `.xls` (BIFF8), `.xlsx`, `.pdf` e `.csv`, com desduplicação automática de dupla matrícula técnica (Ensino Médio Regular + Itinerário Profissional NEM/EPT) e higienização de telefones familiares.
 2. **Telemetria de Frequência e Rede de Proteção (Bridge Power BI & SERP):** Extensão Chrome Manifest V3 que extrai indicadores semanais do painel oficial *Presente na Escola* (`app.powerbi.com`) — incluindo enriquecimento de alunos *Ganhando Mundo*, AEE/Deficiência, idade e vigência de Amparo Legal — e fichas ativas do portal *SERP / Rede de Proteção* (`redeprotecao.seed.pr.gov.br`), sincronizando em lote via API autenticada.
@@ -112,7 +114,7 @@ flowchart TD
 | **Emissão PDF** | **jsPDF** | `^4.2.1` | Geração vetorial client-side de Dossiês para Conselho Tutelar/MP e impressão paginada do Livro Anual de Atas. |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto web (`/manifest.json`), registro em [`PwaRegister.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/PwaRegister.tsx) e cache seletivo *network-first* para navegação estática em [`public/sw.js`](file:///home/marcoswrobel/Documents/Registro/public/sw.js), ignorando `/api/*` para preservar consistência em tempo real. |
 | **Extensão** | **Chrome Extension MV3** | `1.4.1` | Coleta assistida nos portais governamentais Power BI e SERP e orquestração da Janela Dedicada Compacta do WhatsApp Web, empacotada automaticamente no build por [`scripts/package_extension.cjs`](file:///home/marcoswrobel/Documents/Registro/scripts/package_extension.cjs) em `/public/extensao-leopoldina.zip`. |
-| **Testes** | **Vitest** | `^5.0.5` | 12 suítes / 71 testes unitários rápidos (~600 ms) cobrindo criptografia de atas, OIDC `@escola`, parser SERE, pareamento nominal, classificador pedagógico, mensageria e RBAC ([`vitest.config.ts`](file:///home/marcoswrobel/Documents/Registro/vitest.config.ts)). |
+| **Testes** | **Vitest** | `^5.0.5` | 21 suítes / 96 testes unitários e de integração (~1.5s) cobrindo governança multi-escola 4-tier, isolamento multi-tenant, proteção da sede piloto, criptografia de atas SHA-256, OIDC `@escola`, parser SERE, pareamento nominal, classificador pedagógico, mensageria e RBAC ([`vitest.config.ts`](file:///home/marcoswrobel/Documents/Registro/vitest.config.ts)). |
 
 ---
 
@@ -130,15 +132,22 @@ O sistema adota a convenção de **par `page.tsx` (Server) + `*Client.tsx` (Clie
   - Marcada com `"use client"`, responsável por filtros instantâneos em memória, fila assistida de disparos, edição rica de atas, captura de assinatura touch/mouse ([`SignatureCanvas.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/SignatureCanvas.tsx)), parsing local de arquivos SERE antes do envio ([`SereImportModal.tsx`](file:///home/marcoswrobel/Documents/Registro/src/app/alunos/SereImportModal.tsx)) e mutações assíncronas via `fetch("/api/...")`.
   - O shell global [`AppLayoutClient.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/AppLayoutClient.tsx) oculta automaticamente [`Sidebar.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/Sidebar.tsx) e [`TopHeader.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/TopHeader.tsx) nas rotas públicas/limpas (`/login`, `/assinar/ata/*`, `/validar/ata/*`) e em visualizações de impressão (`/imprimir`, `/dossie`, `/livro/*`).
 
-### 3.2 Multi-tenancy e Isolamento Escolar
+### 3.2 Multi-tenancy, Isolamento de Inquilinos & Governança 4-Tier
 
-A fundação multi-escola baseia-se na entidade `School` e no resolvedor [`src/lib/currentSchool.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts):
+A arquitetura SaaS multi-escola baseia-se nas entidades `EducationNetwork`, `School`, `UserSchool` e no resolvedor [`src/lib/currentSchool.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts):
 
-- **Resolução de Escopo (`getCurrentSchool`):** Recebe `schoolId` da sessão JWT do operador ([`currentSchool.ts#L31-L96`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts#L31-L96)). Quando `schoolId` não está vinculado ao usuário, busca a primeira escola ativa no PostgreSQL; caso a tabela esteja vazia (primeiro deploy), invoca [`ensureDefaultSchool()`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts#L101-L122) para fazer `upsert` pelo `inepCode` (`41042730`), garantindo integridade de chave estrangeira. Em falha transitória de banco, retorna o objeto estático `DEFAULT_SCHOOL`.
+- **Hierarquia de 4 Níveis (RBAC):**
+  1. `SUPERADMIN`: Acesso global a todas as redes e escolas via painel `/admin`, com capacidade de gerenciar instituições, auditar acessos e higienizar dados de homologação.
+  2. `GESTAO_SECRETARIA`: Acesso executivo municipal via `/secretaria` para consolidação dos indicadores das escolas pertencentes à rede mantenedora (`networkId`).
+  3. `GESTOR_ESCOLAR`: Direção da unidade ativa (`/gestao`), controle da equipe autorizada (`/equipe`), turmas e token de sincronização.
+  4. `PEDAGOGA`: Equipe pedagógica de campo focada na operação da busca ativa (`/busca-ativa`), faltas, atas e prontuários da escola local.
+- **Resolução de Escopo (`getCurrentSchool`):** Recebe `schoolId` da sessão JWT do operador ([`currentSchool.ts#L31-L96`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts#L31-L96)) ou do cookie verificado `active_school_id`. Quando `schoolId` não está vinculado ao usuário, busca a primeira escola ativa no PostgreSQL; caso a tabela esteja vazia (primeiro deploy), invoca [`ensureDefaultSchool()`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts#L101-L122) para fazer `upsert` da **Unidade Piloto Leopoldina** pelo `inepCode` (`41042730`), garantindo integridade referencial.
 - **Chaves Compostas por Escola no Schema:**
   - `ClassGroup`: `@@unique([schoolId, name])` permite que duas escolas distintas possuam turmas homônimas (ex.: `"6º A"`).
   - `PedagogicalMinute`: `@@unique([schoolId, year, ataNumber])` isola a numeração anual sequencial do Livro de Atas por estabelecimento de ensino.
-- **Estado do Isolamento Multi-Escola:** As rotas de listagem (`/api/students`, `/api/messages`, `/api/atas`, `/api/atas/actions`, `/api/justifications`, `/api/low-attendance`, `/api/reports`) e todas as mutações diretas por `id` (`/api/students` PUT/DELETE, `/api/students/[id]/contacts`, `/api/students/[id]/justifications`, `/api/students/[id]/attendances`, `/api/atas/[id]` PATCH/DELETE/VOID e `/api/messages/manage` PUT/DELETE) impõem validação prévia de pertencimento à unidade escolar do operador (`schoolId` resolvido via `getCurrentSchool(authCheck.schoolId)`), com bypass controlado exclusivamente para administradores globais (`role === "ADMIN"`). As chaves primárias e relacionamentos garantem isolamento estrito de dados entre diferentes colégios da rede estadual.
+- **Proteção Inviolável da Unidade Piloto Leopoldina:**
+  - O Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) possui proteção atômica em nível de código contra exclusão acidental (`DELETE /api/schools/[id]`) e reinicialização de base (`POST /api/schools/[id]/sanitize`), assegurando a integridade contínua do laboratório piloto.
+- **Estado do Isolamento Multi-Escola:** Todas as rotas de listagem (`/api/students`, `/api/messages`, `/api/atas`, `/api/atas/actions`, `/api/justifications`, `/api/low-attendance`, `/api/reports`) e mutações impõem validação prévia de pertencimento à unidade escolar do operador (`schoolId` resolvido via `getCurrentSchool(authCheck.schoolId)`), com bypass controlado exclusivamente para administradores globais (`role === "SUPERADMIN"` ou `"ADMIN"`). As chaves primárias e relacionamentos garantem isolamento estrito de dados entre diferentes colégios e prefeituras.
 
 ### 3.3 Segurança e Controle de Acesso (RBAC)
 

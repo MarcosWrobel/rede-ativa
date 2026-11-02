@@ -1,81 +1,99 @@
-# Guia de Implantação: Vercel + PostgreSQL na Nuvem (Colégio Leopoldina)
+# Guia de Implantação e Operação: Rede Ativa SaaS
+## Plataforma Multi-Escola com Unidade Piloto Fundadora (C.E. Leopoldina B. Pedroso)
 
-Este guia orienta o processo de deploy do **Sistema de Busca Ativa & Comunicação Escolar** na Vercel com banco de dados PostgreSQL persistente na nuvem.
-
----
-
-## 1. Criar o Banco PostgreSQL Gratuito (Supabase ou Neon)
-
-Como a Vercel opera em ambiente serverless, o banco de dados deve estar hospedado em nuvem:
-
-### Opção A: Supabase (Recomendado)
-1. Acesse **[supabase.com](https://supabase.com)** e crie uma conta gratuita.
-2. Clique em **"New project"** e defina um nome (ex: `busca-ativa-leopoldina`) e uma senha forte para o banco.
-3. Escolha a região `São Paulo (South America)` para menor latência.
-4. Após criar, vá em **Project Settings** > **Database** > **Connection string** > **URI** (selecione o modo **Transaction** ou **Session**).
-5. Copie a URL gerada (substituindo `[YOUR-PASSWORD]` pela senha definida). Exemplo:
-   ```
-   postgresql://postgres.xxxx:sua_senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require
-   ```
-
-### Opção B: Neon
-1. Acesse **[neon.tech](https://neon.tech)**, crie uma conta e crie um novo projeto.
-2. Copie a string de conexão direta exibida no dashboard.
+Este guia orienta o processo de deploy, configuração em nuvem e provisionamento de redes e escolas na plataforma **Rede Ativa SaaS** utilizando Next.js 16 na **Vercel** e **PostgreSQL Serverless** na AWS São Paulo (`sa-east-1`).
 
 ---
 
-## 2. Subir o Código para o GitHub
+## 1. Banco de Dados Multi-Tenant na Nuvem (Neon PostgreSQL Serverless)
 
-O repositório Git local já foi inicializado e commitado na branch `main`.
+A plataforma utiliza o Neon PostgreSQL Serverless em São Paulo (`sa-east-1`) para garantir baixa latência (<60ms) e alta escalabilidade:
 
-1. Acesse **[github.com/new](https://github.com/new)** e crie um novo repositório **Privado** (ex: `busca-ativa-leopoldina`).
-2. No seu terminal, vincule o repositório remoto e faça o push:
-   ```bash
-   git remote add origin https://github.com/SEU_USUARIO/busca-ativa-leopoldina.git
-   git push -u origin main
+1. Acesse **[neon.tech](https://neon.tech)** e crie uma conta institucional.
+2. Crie um novo projeto (ex: `rede-ativa-saas`) selecionando a região **AWS São Paulo (sa-east-1)**.
+3. Copie a string de conexão com pooler (`DATABASE_URL`) e a string direta sem pooler (`DIRECT_URL`). Exemplo:
+   ```
+   DATABASE_URL="postgresql://neondb_owner:senha@ep-xyz-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+   DIRECT_URL="postgresql://neondb_owner:senha@ep-xyz.sa-east-1.aws.neon.tech/neondb?sslmode=require"
    ```
 
 ---
 
-## 3. Conectar e Publicar na Vercel
+## 2. Repositório e Deploy Contínuo na Vercel
 
-1. Acesse **[vercel.com/new](https://vercel.com/new)**.
-2. Selecione o repositório `busca-ativa-leopoldina` importado do GitHub.
-3. Na seção **Environment Variables**, adicione as seguintes variáveis:
-   - `DATABASE_URL`: Cole a string de conexão do PostgreSQL (obtida no Passo 1).
-   - `DIRECT_URL`: *(Opcional no Neon)* String de conexão direta sem pooler para migrações de schema.
-   - `NEXTAUTH_SECRET`: Uma string aleatória longa ou gerada com `openssl rand -base64 32`.
-   - `NEXTAUTH_URL`: `https://busca-ativa-leopoldina.vercel.app` (ou o domínio que a Vercel atribuir).
-   - `GOOGLE_CLIENT_ID`: Seu Client ID do Google Cloud Console.
-   - `GOOGLE_CLIENT_SECRET`: Seu Client Secret do Google Cloud Console.
-   - `ADMIN_EMAIL`: E-mail institucional do administrador principal (ex: `marcos.wrobel@escola.pr.gov.br`).
-   - `SYNC_API_TOKEN`: Token secreto exigido pela Extensão Chrome para sincronizar Power BI e SERP (gere com `openssl rand -hex 24`).
-   - `CRON_SECRET`: Token secreto utilizado pela Vercel Cron para disparar o Boletim Semanal (`/api/cron/weekly-digest`).
-   - `GEMINI_API_KEY`: Chave da API Google Gemini para formalização de atas, triagem de retornos e geração de modelos.
-4. Clique em **Deploy**. O script de build empacotará a extensão Chrome, sincronizará o schema Prisma (`vercel_db_push.cjs`) e executará `next build`.
+1. No painel da **[Vercel](https://vercel.com/new)**, importe o repositório GitHub do projeto (`MarcosWrobel/busca-ativa-lepoldina`).
+2. Defina o Framework Preset como **Next.js**.
+3. Na seção **Environment Variables**, configure as variáveis mandatórias:
+
+| Variável | Descrição / Exemplo |
+| :--- | :--- |
+| `DATABASE_URL` | String de conexão do PostgreSQL Neon com pooler. |
+| `DIRECT_URL` | String de conexão direta sem pooler para migrações de schema DDL. |
+| `NEXTAUTH_SECRET` | Chave criptográfica HMAC SHA-256 (gerada com `openssl rand -base64 32`). |
+| `NEXTAUTH_URL` | URL de produção (ex.: `https://busca-ativa-leopoldina.vercel.app`). |
+| `GOOGLE_CLIENT_ID` | Client ID OAuth 2.0 do Google Cloud Console. |
+| `GOOGLE_CLIENT_SECRET` | Client Secret do Google Cloud Console. |
+| `ADMIN_EMAIL` | E-mail do Super Admin da plataforma (`marcos.wrobel@escola.pr.gov.br`). |
+| `CRON_SECRET` | Segredo para execução do cron semanal Vercel (`/api/cron/weekly-digest`). |
+| `GEMINI_API_KEY` | Chave oficial Google Gemini API para redação e formalização de atas e retornos. |
+
+4. Clique em **Deploy**. O pipeline automatizado executará:
+   - Compactação da extensão universal (`scripts/package_extension.cjs`);
+   - Sincronização segura do schema Prisma (`scripts/vercel_db_push.cjs`);
+   - Compilação otimizada Next.js com Turbopack.
 
 ---
 
-## 4. Popular o Banco na Nuvem com os Dados Migrados das Planilhas
+## 3. Configurar Credenciais OAuth no Google Cloud Console
 
-Com a URL do banco PostgreSQL em mãos, execute os dois comandos abaixo no seu computador para sincronizar o schema e transferir os **688 alunos**, **3.323 históricos de envios**, turmas e modelos para o banco da nuvem:
+1. No [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+2. Edite o **ID do cliente OAuth 2.0 Web Client**.
+3. Em **Origens JavaScript autorizadas**, adicione:
+   - `https://busca-ativa-leopoldina.vercel.app` (e seus domínios customizados).
+4. Em **URIs de redirecionamento autorizados**, adicione:
+   - `https://busca-ativa-leopoldina.vercel.app/api/auth/callback/google`
+5. Salve as alterações.
 
+---
+
+## 4. Estrutura Inicial e Unidade Piloto Fundadora
+
+Ao inicializar o banco pela primeira vez, a plataforma cria automaticamente a **Unidade Piloto Fundadora**:
+- **Escola**: Colégio Estadual Leopoldina B. Pedroso
+- **INEP**: `41042730`
+- **Município / UF**: Tibagi - PR
+- **Rede**: Estadual (SEED-PR / NRE Ponta Grossa)
+
+Para popular a base histórica da escola piloto com os estudantes e mensagens consolidadas:
 ```bash
-# 1. Cria as tabelas no PostgreSQL da nuvem
-DATABASE_URL="sua-string-do-supabase-ou-neon" npx prisma db push
-
-# 2. Popula todos os dados históricos das 3 planilhas
-DATABASE_URL="sua-string-do-supabase-ou-neon" npm run seed
+DATABASE_URL="sua-string-do-neon" npm run seed
 ```
 
+A base do Leopoldina permanecerá protegida por travas no código contra exclusão ou higienização involuntária, servindo como o ambiente padrão de calibração para novas escolas.
+
 ---
 
-## 5. Configurar o Google Cloud Console para o Domínio da Vercel
+## 5. Provisionamento de Novas Redes e Escolas (SaaS)
 
-No [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
-1. Edite seu **ID do cliente OAuth 2.0**.
-2. Em **Origens JavaScript autorizadas**, adicione:
-   - `https://seu-projeto.vercel.app`
-3. Em **URIs de redirecionamento autorizados**, adicione:
-   - `https://seu-projeto.vercel.app/api/auth/callback/google`
-4. Salve as alterações.
+Com o Super Admin autenticado, a expansão para novas escolas e redes municipais é realizada diretamente pela interface web:
+
+1. **Cadastrar Rede Municipal (SEMEC)**:
+   - Acesse `/admin/escolas` e cadastre uma nova rede mantenedora municipal (ex.: `Secretaria Municipal de Educação de Tibagi - SEMEC`).
+2. **Adicionar Escolas à Rede**:
+   - Cadastre a instituição informando Nome, Código INEP oficial, Cidade, UF e Rede (`MUNICIPAL`, `ESTADUAL` ou `PRIVADA`).
+   - O sistema gerará automaticamente o pacote inicial de modelos pedagógicos e atribuirá uma chave exclusiva de sincronização (`syncTokenHash`).
+3. **Vincular Gestores e Equipe**:
+   - No painel `/admin` ou `/equipe`, cadastre os e-mails institucionais dos diretores (`GESTOR_ESCOLAR`), pedagogos (`PEDAGOGA`) ou secretários municipais (`GESTAO_SECRETARIA`).
+4. **Instalar o Agente Universal de Sincronização**:
+   - Os operadores da nova escola baixam o arquivo ZIP em `/extensao-leopoldina.zip`, inserem a chave da sua escola em `/configuracoes/escola` e conectam seus navegadores com o B.I. e portais de frequência.
+
+---
+
+## 6. Higienização de Homologação e Ciclos Letivos
+
+- **Limpar Dados de Homologação**: No `/admin/escolas` ou `/admin`, clique em **Higienizar** para zerar estudantes e turmas criados para testes em uma nova escola, preservando seus modelos e cadastro.
+- **Exclusão Definitiva**: Escolas criadas por engano podem ser removidas em cascata via botão **Excluir** (com proteção inviolável da escola sede piloto).
+
+---
+
+*Rede Ativa SaaS — Documentação de Implantação e Operação Multi-Tenant.*

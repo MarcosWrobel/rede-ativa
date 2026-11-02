@@ -109,16 +109,40 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 
 ---
 
-## Épico 8 — Próximas Evoluções Estratégicas (Fase 8+ • Backlog Futuro) — 📋 Planejado
+## Épico 9 — Transformação SaaS Multi-Escola & Governança Hierárquica 4-Tier (Fase 9 • Sprints 9 e 10) — ✅ Concluído
 
-- [ ] **`FUT-01`** `[P2 | Esforço: M]` **Alertas Automáticos de Prazos de Encaminhamentos das Atas (`PedagogicalActionItem`)**  
-  Exibir no topo do `/atas`, no `/boletim` semanal e na tela inicial os combinados/encaminhamentos com prazo vencido ou prestes a vencer (ex.: entrega de atestado, retorno da família, devolutiva da Rede de Proteção).
-- [ ] **`FUT-02`** `[P2 | Esforço: M]` **Captura Fotográfica da Via Física Assinada & Integração Gov.br**  
-  Interface para anexar/fotografar pelo celular a via A4 física assinada (`physicalSignedScanData`) em atas híbridas ou anexar o PDF assinado digitalmente pelo responsável via `assinador.iti.br` (Gov.br).
-- [ ] **`FUT-03`** `[P3 | Esforço: M]` **Pacote Arquivístico Anual para e-Protocolo SEED-PR**  
-  Exportação consolidada de fim de ano letivo contendo o Livro de Atas Digital + manifesto JSON/CSV de todos os hashes `SHA-256` e logs de auditoria para arquivamento oficial permanente na Secretaria Escolar / NRE.
-- [ ] **`FUT-04`** `[P3 | Esforço: G]` **Painel Gestor Multi-Escola (Seletor de Unidade / Visão NRE)**  
-  Interface administrativa para alternância e cadastro de novas escolas (`School`), permitindo replicação imediata da plataforma para outras unidades estaduais da rede.
+- [x] **`SAAS-01`** `[P0 | Esforço: G]` **Modelo de Dados Relacional Multi-Tenant (`EducationNetwork`, `School`, `UserSchool`)**  
+  Implementada segregação lógica estrita de inquilinos em `prisma/schema.prisma` com `schoolId` obrigatório em estudantes, turmas, atestados, atas e logs, associando usuários a escolas com permissões granulares.
+- [x] **`SAAS-02`** `[P0 | Esforço: M]` **Governança e RBAC de 4 Níveis (`SUPERADMIN`, `GESTAO_SECRETARIA`, `GESTOR_ESCOLAR`, `PEDAGOGA`)**  
+  Controle centralizado em [`src/lib/roles.ts`](../src/lib/roles.ts) e [`src/lib/permissions.ts`](../src/lib/permissions.ts), com proteções perimetrais e roteamento inteligente por papel na rota raiz (`/`).
+- [x] **`SAAS-03`** `[P0 | Esforço: G]` **Painéis Isolados de Aterrissagem**  
+  - `/admin`: Dashboard Global do SaaS com métricas consolidadas, diretório de escolas, emulação de contexto e trilha de auditoria global.  
+  - `/secretaria`: Dashboard Executivo Municipal para secretários(as) de educação (SEMEC), com indicadores de frequência da rede.  
+  - `/gestao`: Painel de controle da Direção Escolar com atalhos de gestão da unidade, equipe e turmas.  
+  - `/busca-ativa`: Operação da equipe pedagógica com interface focada e limpa.
+- [x] **`SAAS-04`** `[P1 | Esforço: M]` **Diretório Global de Escolas & Provisionamento Automático (`/admin/escolas`)**  
+  Interface para cadastro de novas escolas, vínculo com redes municipais ou estaduais, e auto-provisionamento dos modelos pedagógicos institucionais padrão.
+- [x] **`SAAS-05`** `[P0 | Esforço: M]` **Higienização Operacional e Exclusão Segura com Proteção da Unidade Piloto**  
+  - `POST /api/schools/[id]/sanitize`: Limpeza atômica em transação de registros de teste (estudantes, turmas, atas), retornando a escola a zero.  
+  - `DELETE /api/schools/[id]`: Exclusão em cascata atômica de escolas e registros dependentes.  
+  - **Blindagem do Piloto Leopoldina**: Travas no backend e frontend impedem a exclusão ou higienização da unidade piloto (INEP `41042730`).
+
+---
+
+## Épico 10 — Fortalecimento do Arcabouço Jurídico & Escala do SaaS (Fase 10+ • Backlog Futuro) — 📋 Planejado
+
+- [ ] **`JUR-01`** `[P1 | Esforço: G]` **Dossiê Unificado Anual de Evidências Jurídicas (Conselho Tutelar & Ministério Público)**  
+  Geração em 1 clique de um dossiê pericial probatório consolidado do aluno ao final do ano letivo ou momento de intervenção, reunindo cronologia completa: todas as mensagens WhatsApp disparadas com carimbo de tempo/IP, confirmações de entrega, respostas dos pais com categorização de causas, atestados médicos digitalizados e atas do Livro Digital assinadas eletronicamente com selo `SHA-256`.
+- [ ] **`JUR-02`** `[P1 | Esforço: M]` **Certificação Criptográfica de Mensagens e Linha do Tempo Imutável**  
+  Implementação de hash de integridade individual para cada registro de comunicação no histórico (`MessageLog.contentHash`), garantindo blindagem contra alegações de adulteração perante a Justiça da Infância e Juventude.
+- [ ] **`JUR-03`** `[P2 | Esforço: M]` **Alertas Automáticos de Prazos de Encaminhamentos das Atas (`PedagogicalActionItem`)**  
+  Painel de controle com notificações para prazos de combinados prestes a vencer ou vencidos (entrega de laudos, retorno familiar, encaminhamento ao CRAS/CREAS).
+- [ ] **`JUR-04`** `[P2 | Esforço: M]` **Captura Fotográfica de Vias Físicas & Assinatura Gov.br**  
+  Interface para fotografar ou anexar vias físicas de atas assinadas manualmente ou autenticadas via `assinador.iti.br` (Gov.br) diretamente no prontuário.
+- [ ] **`SAAS-06`** `[P2 | Esforço: G]` **Wizard de Auto-Onboarding e Adesão de Novas Escolas e Redes**  
+  Fluxo guiado passo a passo para que novos diretores e secretários municipais cadastrem suas escolas, subam brasões e importem a primeira remessa SERE/RCO de forma autônoma.
+- [ ] **`SAAS-07`** `[P2 | Esforço: M]` **Relatórios Analíticos Preditivos de Evasão para Secretarias (SEMEC)**  
+  Métricas avançadas e cruzamento de causas de infrequência (saúde, transporte, trabalho infantil) para subsidiar políticas públicas municipais de permanência escolar.
 
 ---
 
@@ -134,5 +158,6 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 | **Sprint 6** | Expansão Regional & Mobile PWA | `ESC-01` a `ESC-03` | ✅ Concluído |
 | **Sprint 7** | Importação SERE (`.xls`/`.pdf`) & Equipe | `SERE-01` a `SERE-03` | ✅ Concluído |
 | **Sprint 8** | Livro Oficial de Atas Digital & Biometria | `ATA-01` a `ATA-05` | ✅ Concluído |
-| **Sprint 9** | Auditoria Técnica, Multi-Escola & LGPD | `SEC-01` a `SEC-04`, `DB-01`, `DB-02`, `LGPD-01`, `PERF-01`, `UX-01`, `TEST-01`, `SCRIPT-01` | ✅ Concluído |
-| **Sprint 10+** | Alertas de Prazos, Scan Híbrido & e-Protocolo | `FUT-01` a `FUT-04` | 📋 Planejado |
+| **Sprint 9** | Auditoria Técnica, Multi-Escola & LGPD | `SEC-01` a `SEC-04`, `DB-01`, `DB-02`, `TEST-01` | ✅ Concluído |
+| **Sprint 10** | SaaS Multi-Escola & Hierarquia 4-Tier | `SAAS-01` a `SAAS-05` | ✅ Concluído |
+| **Sprint 11+** | Arcabouço Jurídico Probatório & Escala SaaS | `JUR-01` a `JUR-04`, `SAAS-06`, `SAAS-07` | 📋 Planejado |
