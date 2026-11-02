@@ -1,7 +1,8 @@
 /**
- * Content Script Bridge — Sincronizador Leopoldina
+ * Content Script Bridge — Sincronizador Leopoldina (Manifest V3)
  * Injetado na aplicação web Registro (local ou em nuvem).
- * Conecta eventos de postMessage da página web ao Background Service Worker da extensão.
+ * Conecta eventos de postMessage da página web ao Background Service Worker da extensão
+ * e repassa confirmações de envio de WhatsApp em tempo real.
  */
 
 (function () {
@@ -9,13 +10,15 @@
     // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação
     if (document.documentElement) {
       document.documentElement.dataset.leopoldinaExtension = "true";
+      document.documentElement.dataset.leopoldinaExtensionVersion = "1.5.0";
     }
 
     // 2. Anúncio via postMessage para listeners ativos
     window.postMessage(
       {
         type: "LEOPOLDINA_EXTENSION_READY",
-        version: "1.4.1",
+        version: "1.5.0",
+        capabilities: ["WHATSAPP_DISPATCH", "WHATSAPP_AUTO_CONFIRMATION", "SERE_SYNC", "SERP_SCRAPER"],
       },
       "*"
     );
@@ -47,6 +50,11 @@
             {
               type: "LEOPOLDINA_DISPATCH_WHATSAPP",
               url: event.data.url,
+              logId: event.data.logId || null,
+              studentId: event.data.studentId || null,
+              studentName: event.data.studentName || null,
+              phone: event.data.phone || null,
+              autoSend: event.data.autoSend,
             },
             (response) => {
               if (chrome.runtime.lastError) {
@@ -67,6 +75,23 @@
             }
           );
         });
+      }
+    });
+
+    // 4. Escuta mensagens vindas do Background Service Worker e repassa à página web
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY") {
+        window.postMessage(
+          {
+            type: "LEOPOLDINA_WHATSAPP_CONFIRMED",
+            outcome: message.outcome, // "SENT" | "FAILED_NO_WHATSAPP"
+            logId: message.logId,
+            phone: message.phone,
+            studentName: message.studentName,
+            timestamp: message.timestamp,
+          },
+          "*"
+        );
       }
     });
   } catch (err) {

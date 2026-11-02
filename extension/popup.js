@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const subtitleEl = document.getElementById('popup-mode-subtitle');
   const btnScan = document.getElementById('btn-popup-autoscroll');
   const toggleWhatsAppTab = document.getElementById('toggle-whatsapp-tab');
+  const toggleWhatsAppAutoSend = document.getElementById('toggle-whatsapp-auto-send');
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const isPowerBi = Boolean(tab && tab.url && tab.url.includes('powerbi.com'));
@@ -34,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const res = await chrome.storage.local.get([
       'leopoldina_alunos_frequencia',
       'opt_whatsapp_tab_reuse',
+      'opt_whatsapp_auto_send',
       'leopoldina_server_url',
       'leopoldina_sync_token'
     ]);
@@ -51,6 +53,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       toggleWhatsAppTab.checked = res.opt_whatsapp_tab_reuse !== false; // default true
       toggleWhatsAppTab.addEventListener('change', () => {
         chrome.storage.local.set({ opt_whatsapp_tab_reuse: toggleWhatsAppTab.checked });
+      });
+    }
+
+    if (toggleWhatsAppAutoSend) {
+      toggleWhatsAppAutoSend.checked = Boolean(res.opt_whatsapp_auto_send);
+      toggleWhatsAppAutoSend.addEventListener('change', () => {
+        chrome.storage.local.set({ opt_whatsapp_auto_send: toggleWhatsAppAutoSend.checked });
       });
     }
 

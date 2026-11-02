@@ -1,8 +1,9 @@
 /**
  * Background Service Worker — Sincronizador Leopoldina (Manifest V3)
- * Abre o WhatsApp Web em Janela Dedicada Compacta (tipo 'popup' minimalista)
- * posicionada no canto direito da tela, sem abas e sem barra de endereços,
- * reutilizando a mesma janela durante todo o fluxo da Busca Ativa.
+ * 1. Abre o WhatsApp Web em Janela Dedicada Compacta (tipo 'popup' minimalista)
+ *    posicionada no canto direito da tela, reutilizando a mesma janela durante todo o fluxo.
+ * 2. Gerencia o contexto de despacho da Busca Ativa (aluno, telefone, logId).
+ * 3. Faz o relay bidirecional de eventos de confirmação do WhatsApp Web para a plataforma Registro.
  */
 
 const POPUP_WIDTH = 480;
@@ -20,16 +21,94 @@ function isAllowedWhatsAppUrl(urlStr) {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // 1. Despacho de WhatsApp da aplicação Registro para a janela dedicada
   if (request?.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && request.url) {
     if (!isAllowedWhatsAppUrl(request.url)) {
       sendResponse({ success: false, error: "URL de destino não permitida. Apenas domínios WhatsApp são aceitos." });
       return false;
     }
 
-    handleWhatsAppDispatch(request.url)
-      .then((result) => sendResponse({ success: true, ...result }))
-      .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));
-    return true; // Mantém a porta de resposta assíncrona aberta
+    (async () => {
+      try {
+        // Armazena contexto no storage com expiração
+        const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
+        const autoSendPref = Boolean(storageRes?.opt_whatsapp_auto_send);
+
+        await chrome.storage.local.set({
+          leopoldina_active_dispatch: {
+            logId: request.logId || null,
+            studentId: request.studentId || null,
+            studentName: request.studentName || null,
+            phone: request.phone || null,
+            autoSend: request.autoSend !== undefined ? Boolean(request.autoSend) : autoSendPref,
+            dispatchedAt: Date.now(),
+          },
+        });
+
+        const result = await handleWhatsAppDispatch(request.url);
+        sendResponse({ success: true, ...result });
+      } catch (err) {
+        sendResponse({ success: false, error: err?.message || String(err) });
+      }
+    })();
+    return true; // Mantém o canal aberto para resposta assíncrona
+  }
+
+  // 2. Consulta de contexto ativo feita pelo content script do WhatsApp Web
+  if (request?.type === "LEOPOLDINA_GET_ACTIVE_DISPATCH") {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get(["leopoldina_active_dispatch"]);
+        const dispatch = data?.leopoldina_active_dispatch;
+
+        // Se o despacho tiver menos de 5 minutos, considera ativo
+        if (dispatch && Date.now() - dispatch.dispatchedAt < 300000) {
+          sendResponse({ activeDispatch: dispatch });
+        } else {
+          sendResponse({ activeDispatch: null });
+        }
+      } catch (err) {
+        sendResponse({ activeDispatch: null });
+      }
+    })();
+    return true;
+  }
+
+  // 3. Resultado de envio emitido pelo content script do WhatsApp Web
+  if (request?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME") {
+    (async () => {
+      try {
+        console.log("[Sincronizador Leopoldina] Resultado de envio recebido:", request.outcome, request.logId);
+
+        // Notifica todas as abas abertas da aplicação Registro
+        const targetUrls = [
+          "https://*.vercel.app/*",
+          "http://localhost/*",
+          "http://127.0.0.1/*",
+        ];
+
+        const tabs = await chrome.tabs.query({ url: targetUrls });
+        for (const tab of tabs) {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY",
+              outcome: request.outcome,
+              logId: request.logId,
+              phone: request.phone,
+              studentName: request.studentName,
+              timestamp: request.timestamp || Date.now(),
+            }).catch(() => {});
+          }
+        }
+
+        // Limpa o despacho pendente
+        await chrome.storage.local.remove(["leopoldina_active_dispatch"]);
+        sendResponse({ success: true });
+      } catch (err) {
+        sendResponse({ success: false, error: err?.message });
+      }
+    })();
+    return true;
   }
 });
 
@@ -72,7 +151,6 @@ async function handleWhatsAppDispatch(targetUrl) {
     try {
       const currentWin = await chrome.windows.getCurrent();
       if (currentWin && currentWin.width) {
-        // Alinha ao lado direito da janela atual do operador
         left = Math.max(0, (currentWin.left || 0) + currentWin.width - POPUP_WIDTH - 20);
         top = Math.max(0, (currentWin.top || 0) + 30);
       }

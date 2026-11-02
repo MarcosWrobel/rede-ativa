@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
@@ -324,7 +324,12 @@ export default function FaltasClient({
       });
 
       // Abre ou foca na aba/janela única reutilizável do WhatsApp Web
-      dispatchWhatsAppToBrowser(data.whatsappUrl);
+      dispatchWhatsAppToBrowser(data.whatsappUrl, {
+        logId: data.logId,
+        studentId: activeStudentData.student.id,
+        studentName: activeStudentData.student.name,
+        phone: customPhone || activeStudentData.student.phone || "",
+      });
     } catch (err: any) {
       setMessageError(err.message || "Erro ao processar envio.");
     } finally {
@@ -355,6 +360,24 @@ export default function FaltasClient({
       setIsUpdatingDrawerStatus(false);
     }
   };
+
+  // Escuta confirmações automáticas vindas da Extensão Leopoldina (whatsapp-content.js)
+  useEffect(() => {
+    const handleExtensionConfirmation = (event: MessageEvent) => {
+      if (event.source !== window || !event.data) return;
+      if (event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED") {
+        const { outcome, logId } = event.data;
+        if (messageSuccessInfo && (!logId || messageSuccessInfo.logId === logId)) {
+          const targetStatus: DeliveryStatus =
+            outcome === "FAILED_NO_WHATSAPP" ? "FAILED_NO_WHATSAPP" : "SENT";
+          handleUpdateDrawerDeliveryStatus(targetStatus);
+        }
+      }
+    };
+
+    window.addEventListener("message", handleExtensionConfirmation);
+    return () => window.removeEventListener("message", handleExtensionConfirmation);
+  }, [messageSuccessInfo]);
 
   // 1. KPIs Consolidados da Escola (Calculados sobre todos os registros de presença)
   const kpis = useMemo(() => {

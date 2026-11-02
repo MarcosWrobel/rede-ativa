@@ -56,15 +56,26 @@ export function isExtensionActive(): boolean {
   );
 }
 
+export interface DispatchWhatsAppMetadata {
+  logId?: string;
+  studentId?: string;
+  studentName?: string;
+  phone?: string;
+  autoSend?: boolean;
+}
+
 /**
  * Despacha uma mensagem do WhatsApp otimizada para o navegador da secretária:
  * 1. Se a preferência for "native": ignora a extensão intencionalmente e abre via window.open convencional.
  * 2. Se a preferência for "extension" e a Extensão Leopoldina estiver ativa: reutiliza a aba já aberta do WhatsApp Web
- *    e traz para o foco (sem abrir abas novas e sem conflito de sessão "Usar aqui").
+ *    e traz para o foco (sem abrir abas novas e sem conflito de sessão "Usar aqui"), repassando metadados de rastreio.
  * 3. Fallback: abre na janela nomeada fixa (WA_ME_REUSABLE_WINDOW_NAME) de forma síncrona,
  *    evitando bloqueios de popup do navegador.
  */
-export function dispatchWhatsAppToBrowser(targetUrl: string): {
+export function dispatchWhatsAppToBrowser(
+  targetUrl: string,
+  metadata?: DispatchWhatsAppMetadata
+): {
   dispatchedVia: "EXTENSION" | "WINDOW_OPEN";
 } {
   if (typeof window === "undefined") {
@@ -81,13 +92,17 @@ export function dispatchWhatsAppToBrowser(targetUrl: string): {
 
   // Modo Extensão:
   if (isExtensionActive()) {
-    window.postMessage(
-      {
-        type: "LEOPOLDINA_DISPATCH_WHATSAPP",
-        url: targetUrl,
-      },
-      "*"
-    );
+    const payload: any = {
+      type: "LEOPOLDINA_DISPATCH_WHATSAPP",
+      url: targetUrl,
+    };
+    if (metadata?.logId) payload.logId = metadata.logId;
+    if (metadata?.studentId) payload.studentId = metadata.studentId;
+    if (metadata?.studentName) payload.studentName = metadata.studentName;
+    if (metadata?.phone) payload.phone = metadata.phone;
+    if (metadata?.autoSend !== undefined) payload.autoSend = metadata.autoSend;
+
+    window.postMessage(payload, "*");
     return { dispatchedVia: "EXTENSION" };
   }
 

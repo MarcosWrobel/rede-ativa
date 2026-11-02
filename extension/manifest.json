@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sincronizador Leopoldina (Power BI & SERP)",
-  "version": "1.4.1",
-  "description": "Extrai dados de frequência do Power BI, fichas SERP e gerencia a Janela Dedicada Compacta do WhatsApp Web para o Sistema de Busca Ativa.",
+  "version": "1.5.0",
+  "description": "Extrai dados de frequência do Power BI, fichas SERP e gerencia a confirmação automática de envio do WhatsApp Web para a Busca Ativa.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -78,6 +78,7 @@
     },
     {
       "matches": ["*://web.whatsapp.com/*"],
+      "js": ["whatsapp-content.js"],
       "css": ["whatsapp-focus.css"],
       "run_at": "document_idle"
     }

@@ -102,6 +102,10 @@ export default function BuscaAtivaClient({
   } | null>(null);
   const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [autoConfirmationToast, setAutoConfirmationToast] = useState<{
+    message: string;
+    type: "success" | "warning";
+  } | null>(null);
 
   // --- Queue Mode (AUT-02) States ---
   const [checkedStudentIds, setCheckedStudentIds] = useState<string[]>([]);
@@ -361,7 +365,12 @@ export default function BuscaAtivaClient({
         deliveryStatus: data.deliveryStatus || "LINK_OPENED",
       });
 
-      dispatchWhatsAppToBrowser(data.whatsappUrl);
+      dispatchWhatsAppToBrowser(data.whatsappUrl, {
+        logId: data.logId,
+        studentId: selectedStudent.id,
+        studentName: selectedStudent.name,
+        phone: targetPhone,
+      });
     } catch (err: any) {
       setErrorMessage(err.message || "Erro ao processar envio.");
     } finally {
@@ -483,7 +492,12 @@ export default function BuscaAtivaClient({
     try {
       // Se já abriu para este aluno, apenas reabre a aba sem duplicar log no banco
       if (currentQueueItem.logId && currentQueueItem.whatsappUrl) {
-        dispatchWhatsAppToBrowser(currentQueueItem.whatsappUrl);
+        dispatchWhatsAppToBrowser(currentQueueItem.whatsappUrl, {
+          logId: currentQueueItem.logId,
+          studentId: currentQueueItem.student.id,
+          studentName: currentQueueItem.student.name,
+          phone: currentQueueItem.phone,
+        });
         return;
       }
 
@@ -508,7 +522,12 @@ export default function BuscaAtivaClient({
         outcome: "OPENED",
       });
 
-      dispatchWhatsAppToBrowser(data.whatsappUrl);
+      dispatchWhatsAppToBrowser(data.whatsappUrl, {
+        logId: data.logId,
+        studentId: currentQueueItem.student.id,
+        studentName: currentQueueItem.student.name,
+        phone: currentQueueItem.phone,
+      });
     } catch (err: any) {
       setQueueError(err.message || "Erro ao abrir WhatsApp para este aluno.");
     } finally {
@@ -586,8 +605,66 @@ export default function BuscaAtivaClient({
     setQueueError("");
   };
 
+  // Escuta confirmações automáticas vindas da Extensão Leopoldina (whatsapp-content.js)
+  useEffect(() => {
+    const handleExtensionConfirmation = (event: MessageEvent) => {
+      if (event.source !== window || !event.data) return;
+      if (event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED") {
+        const { outcome, logId, studentName } = event.data;
+        const targetStatus: DeliveryStatus =
+          outcome === "FAILED_NO_WHATSAPP" ? "FAILED_NO_WHATSAPP" : "SENT";
+
+        setAutoConfirmationToast({
+          message:
+            targetStatus === "SENT"
+              ? `⚡ Confirmação Automática: Envio concluído para ${studentName || "o estudante"}!`
+              : `⚠️ Alerta Automático: Telefone sem WhatsApp ativo detectado para ${studentName || "o estudante"}.`,
+          type: targetStatus === "SENT" ? "success" : "warning",
+        });
+        setTimeout(() => setAutoConfirmationToast(null), 4500);
+
+        // Modo Individual
+        if (lastSentSuccess && (!logId || lastSentSuccess.logId === logId)) {
+          handleUpdateIndividualStatus(targetStatus);
+        }
+
+        // Modo Fila
+        if (dispatchMode === "fila" && currentQueueItem) {
+          if (!logId || currentQueueItem.logId === logId) {
+            handleQueueResolveAndNext(targetStatus);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("message", handleExtensionConfirmation);
+    return () => window.removeEventListener("message", handleExtensionConfirmation);
+  }, [lastSentSuccess, dispatchMode, currentQueueItem]);
+
   return (
     <div className="space-y-6">
+      {/* Toast Flutuante de Confirmação Automática da Extensão */}
+      {autoConfirmationToast && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center justify-between shadow-lg animate-in slide-in-from-top-2 duration-200 ${
+            autoConfirmationToast.type === "success"
+              ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+              : "bg-amber-50 border-amber-300 text-amber-900"
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            <span className="text-base">{autoConfirmationToast.type === "success" ? "⚡" : "⚠️"}</span>
+            <span>{autoConfirmationToast.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAutoConfirmationToast(null)}
+            className="text-slate-400 hover:text-slate-600 font-bold ml-2 cursor-pointer"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Title, Mode Switcher & User info */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
