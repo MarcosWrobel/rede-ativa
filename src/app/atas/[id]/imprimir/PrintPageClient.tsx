@@ -8,11 +8,36 @@ interface Props {
   minute: any;
 }
 
+function getSchoolNetworkHeader(school: any) {
+  const network = school?.network || "ESTADUAL";
+  if (network === "MUNICIPAL") {
+    return {
+      line1: `Prefeitura Municipal de ${school?.city || "Município"} • Secretaria Municipal de Educação`,
+      line2: school?.nre ? `Supervisão / Regional: ${school.nre}` : "Secretaria Municipal de Educação",
+      unitType: "Escola Municipal",
+    };
+  }
+  if (network === "PRIVADA") {
+    return {
+      line1: "Rede de Ensino Particular / Privada",
+      line2: school?.nre ? `Supervisão Regional: ${school.nre}` : "Diretoria de Ensino",
+      unitType: "Instituição de Ensino",
+    };
+  }
+  return {
+    line1: `Governo do Estado ${school?.state === "PR" ? "do Paraná" : `de ${school?.state || "PR"}`} • Secretaria de Estado da Educação — SEED-PR`,
+    line2: `Núcleo Regional de Educação de ${school?.nre || school?.city || "Ponta Grossa"}`,
+    unitType: "Colégio Estadual",
+  };
+}
+
 export default function PrintPageClient({ minute }: Props) {
   const isFinal = minute.status === "FINALIZED";
   const isVoid = minute.status === "VOIDED";
   const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N";
   const attendedDate = new Date(minute.attendedAt);
+  const networkHeader = getSchoolNetworkHeader(minute.school);
+  const schoolLogo = minute.school?.logoUrl || "/logo.svg";
 
   // Se o resumo oficial já contém a fórmula canônica de abertura com data, evita duplicar o parágrafo de preâmbulo
   const summaryAlreadyHasOpening = /^(?:Aos?|No dia|Em|Nesta data)\s+/i.test(
@@ -52,22 +77,22 @@ export default function PrintPageClient({ minute }: Props) {
 
       {/* Folha Oficial A4 */}
       <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200 shadow-sm text-slate-900 font-serif space-y-6 print:border-none print:shadow-none print:p-0 print:m-0 print:space-y-3">
-        {/* Cabeçalho Oficial SEED-PR com Brasão / Logo Oficial */}
+        {/* Cabeçalho Oficial com Brasão / Logo Dinâmico */}
         <div className="border-b-2 border-slate-900 pb-4 space-y-2 print:pb-2 print:space-y-1">
           <div className="flex items-center justify-between gap-4 print:gap-2">
             <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 flex items-center justify-center print:w-14 print:h-14">
               <img
-                src="/logo.svg"
-                alt="Brasão do Colégio Estadual Leopoldina B. Pedroso"
+                src={schoolLogo}
+                alt={`Brasão / Logo de ${minute.school.name}`}
                 className="w-full h-full object-contain"
               />
             </div>
             <div className="flex-1 text-center space-y-0.5 print:space-y-0">
               <p className="font-sans text-[11px] font-bold tracking-wider uppercase text-slate-600 print:text-[10px]">
-                Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
+                {networkHeader.line1}
               </p>
               <p className="font-sans text-[11px] font-bold text-slate-600 print:text-[10px]">
-                Núcleo Regional de Educação de {minute.school.nre}
+                {networkHeader.line2}
               </p>
               <h1 className="font-sans text-base sm:text-lg font-black uppercase tracking-tight text-slate-900 print:text-base">
                 {minute.school.name}
@@ -78,7 +103,7 @@ export default function PrintPageClient({ minute }: Props) {
             </div>
             {/* Espaçador simétrico para centralizar o texto em relação ao logo */}
             <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 hidden sm:flex items-center justify-center opacity-0 pointer-events-none print:w-14 print:h-14">
-              <img src="/logo.svg" alt="" className="w-full h-full object-contain" />
+              <img src={schoolLogo} alt="" className="w-full h-full object-contain" />
             </div>
           </div>
         </div>
@@ -218,7 +243,9 @@ export default function PrintPageClient({ minute }: Props) {
             <div className="text-center space-y-1 print:space-y-0.5">
               <div className="border-b border-slate-800 pb-1 min-h-[45px] flex items-end justify-center print:min-h-[35px] print:pb-0.5">
                 <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 print:text-[10px]">
-                  ASSINADO DIGITALMENTE VIA @ESCOLA.PR.GOV.BR
+                  {minute.authorEmail?.endsWith("@escola.pr.gov.br")
+                    ? "ASSINADO DIGITALMENTE VIA @ESCOLA.PR.GOV.BR"
+                    : "ASSINADO DIGITALMENTE COM CONTA INSTITUCIONAL"}
                 </span>
               </div>
               <p className="text-xs font-bold text-slate-900 print:text-[11px]">{minute.authorName}</p>
@@ -232,7 +259,9 @@ export default function PrintPageClient({ minute }: Props) {
                   {p.verifiedEmail ? (
                     <div className="space-y-0.5">
                       <span className="font-mono text-[11px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-300 block print:text-[10px]">
-                        ASSINADO VIA @ESCOLA.PR.GOV.BR
+                        {p.verifiedEmail.endsWith("@escola.pr.gov.br")
+                          ? "ASSINADO VIA @ESCOLA.PR.GOV.BR"
+                          : "ASSINADO VIA E-MAIL INSTITUCIONAL"}
                       </span>
                       <span className="text-[9px] text-slate-500 font-mono block">
                         {p.verifiedEmail}
@@ -258,7 +287,7 @@ export default function PrintPageClient({ minute }: Props) {
                   {p.verifiedEmail
                     ? p.role === "ESTUDANTE"
                       ? " • Ciência Discente (ECA Art. 12 / Lei 14.063/2020)"
-                      : " • Certificação Institucional SEED-PR"
+                      : " • Certificação Institucional Digital"
                     : p.biometricVerified
                     ? " • Autenticação Biométrica FIDO2"
                     : ""}

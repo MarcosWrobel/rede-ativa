@@ -9,8 +9,39 @@ interface Props {
   minutes: any[];
 }
 
+function getSchoolNetworkHeader(school: any) {
+  const network = school?.network || "ESTADUAL";
+  if (network === "MUNICIPAL") {
+    return {
+      line1: `Prefeitura Municipal de ${school?.city || "Município"} • Secretaria Municipal de Educação`,
+      line2: school?.nre ? `Supervisão / Regional: ${school.nre}` : "Secretaria Municipal de Educação",
+      unitType: "Escola Municipal",
+      authority: "da Secretaria Municipal de Educação",
+      protocolSystem: "aos sistemas de protocolo e arquivo permanente do Município",
+    };
+  }
+  if (network === "PRIVADA") {
+    return {
+      line1: "Rede de Ensino Particular / Privada",
+      line2: school?.nre ? `Supervisão Regional: ${school.nre}` : "Diretoria de Ensino",
+      unitType: "Instituição de Ensino Particular",
+      authority: "dos órgãos competentes do Sistema de Ensino",
+      protocolSystem: "ao arquivo permanente e órgãos reguladores de Ensino",
+    };
+  }
+  return {
+    line1: `Governo do Estado ${school?.state === "PR" ? "do Paraná" : `de ${school?.state || "PR"}`} • Secretaria de Estado da Educação — SEED-PR`,
+    line2: `Núcleo Regional de Educação de ${school?.nre || school?.city || "Ponta Grossa"}`,
+    unitType: "Colégio Estadual",
+    authority: "da SEED-PR",
+    protocolSystem: "ao Sistema e-Protocolo da SEED-PR",
+  };
+}
+
 export default function LivroAnualClient({ school, year, minutes }: Props) {
   const totalAtas = minutes.length;
+  const networkHeader = getSchoolNetworkHeader(school);
+  const schoolLogo = school?.logoUrl || "/logo.svg";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -41,17 +72,17 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
           <div className="flex items-center justify-between gap-4 border-b border-slate-300 pb-4">
             <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 flex items-center justify-center">
               <img
-                src="/logo.svg"
-                alt="Brasão do Colégio Estadual Leopoldina B. Pedroso"
+                src={schoolLogo}
+                alt={`Brasão / Logo de ${school.name}`}
                 className="w-full h-full object-contain"
               />
             </div>
             <div className="flex-1 text-center space-y-1">
               <p className="font-sans text-xs font-bold tracking-wider uppercase text-slate-600">
-                Governo do Estado do Paraná • Secretaria de Estado da Educação — SEED-PR
+                {networkHeader.line1}
               </p>
               <p className="font-sans text-xs font-bold text-slate-600">
-                Núcleo Regional de Educação de {school.nre}
+                {networkHeader.line2}
               </p>
               <h1 className="font-sans text-xl font-black uppercase text-slate-900">
                 {school.name}
@@ -61,7 +92,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               </p>
             </div>
             <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 hidden sm:flex items-center justify-center opacity-0 pointer-events-none">
-              <img src="/logo.svg" alt="" className="w-full h-full object-contain" />
+              <img src={schoolLogo} alt="" className="w-full h-full object-contain" />
             </div>
           </div>
 
@@ -85,7 +116,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               destinado a lavrar eletronicamente todos os registros, atendimentos a familiares,
               deliberações da Equipe Pedagógica e encaminhamentos à Rede de Proteção da Criança
               e do Adolescente, em estrito cumprimento à Lei Federal nº 14.063/2020, ao Estatuto
-              da Criança e do Adolescente (Lei nº 8.069/1990) e às normativas vigentes da SEED-PR.
+              da Criança e do Adolescente (Lei nº 8.069/1990) e às normativas vigentes {networkHeader.authority}.
             </p>
           </div>
 
@@ -96,7 +127,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
             </div>
             <div className="border-t border-slate-800 pt-1">
               <p className="font-bold">Direção Escolar</p>
-              <p className="text-[10px] text-slate-500 uppercase">Colégio Estadual</p>
+              <p className="text-[10px] text-slate-500 uppercase">{networkHeader.unitType}</p>
             </div>
           </div>
         </div>
@@ -196,7 +227,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               contendo o total de <strong>{totalAtas} ({numberToWords(totalAtas)})</strong> ata(s)
               oficialmente lavrada(s) e arquivada(s) eletronicamente sob responsabilidade da
               Equipe Pedagógica e Direção Escolar para fins de arquivo permanente na Secretaria
-              Escolar e instrução processual junto ao Sistema e-Protocolo da SEED-PR.
+              Escolar e instrução processual junto {networkHeader.protocolSystem}.
             </p>
           </div>
 
@@ -207,7 +238,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
             </div>
             <div className="border-t border-slate-800 pt-1">
               <p className="font-bold">Direção Escolar</p>
-              <p className="text-[10px] text-slate-500 uppercase">Colégio Estadual</p>
+              <p className="text-[10px] text-slate-500 uppercase">{networkHeader.unitType}</p>
             </div>
           </div>
         </div>
