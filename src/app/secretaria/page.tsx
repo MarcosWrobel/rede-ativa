@@ -10,7 +10,12 @@ export const metadata = {
   title: "Painel da Secretaria Municipal de Educação | Gestão da Rede SEMEC",
 };
 
-export default async function SecretariaPage() {
+interface Props {
+  searchParams?: Promise<{ city?: string }>;
+}
+
+export default async function SecretariaPage({ searchParams }: Props) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
@@ -24,7 +29,18 @@ export default async function SecretariaPage() {
   }
 
   const userNetworks = ((session.user as any)?.networks as any[]) || [];
-  const defaultCity = userNetworks[0]?.city || "Tibagi";
+  const defaultCity = resolvedSearchParams.city?.trim() || userNetworks[0]?.city || "Tibagi";
+
+  // Buscar cidades disponíveis na rede municipal
+  const availableMunicipalCities = await prisma.school.findMany({
+    where: { active: true, network: "MUNICIPAL" },
+    select: { city: true },
+    distinct: ["city"],
+  });
+  const availableCities = Array.from(new Set(availableMunicipalCities.map((c) => c.city).filter(Boolean)));
+  if (!availableCities.includes(defaultCity)) {
+    availableCities.unshift(defaultCity);
+  }
 
   const municipalSchools = await prisma.school.findMany({
     where: {
@@ -45,6 +61,7 @@ export default async function SecretariaPage() {
         where: { active: true },
         select: {
           id: true,
+          updatedAt: true,
           lowAttendanceRecord: {
             select: { attendancePercent: true },
           },
@@ -64,8 +81,19 @@ export default async function SecretariaPage() {
     let schoolCritical = 0;
     let schoolSum = 0;
     let schoolRecorded = 0;
+    let latestUpdate: Date | null = null;
+
+    let settings: any = {};
+    try {
+      if (s.settingsJson) settings = JSON.parse(s.settingsJson);
+    } catch {}
 
     s.students.forEach((st) => {
+      if (st.updatedAt) {
+        if (!latestUpdate || st.updatedAt > latestUpdate) {
+          latestUpdate = st.updatedAt;
+        }
+      }
       if (st.lowAttendanceRecord) {
         const pct = st.lowAttendanceRecord.attendancePercent;
         schoolSum += pct;
@@ -85,6 +113,14 @@ export default async function SecretariaPage() {
     const avgAttendance =
       schoolRecorded > 0 ? Number((schoolSum / schoolRecorded).toFixed(1)) : 100;
 
+    const lastSyncAtIso = latestUpdate ? (latestUpdate as Date).toISOString() : null;
+    const daysSinceSync = latestUpdate
+      ? Math.max(0, Math.floor((Date.now() - (latestUpdate as Date).getTime()) / (1000 * 60 * 60 * 24)))
+      : null;
+    const isSyncOutdated = s._count.students === 0 || (daysSinceSync !== null && daysSinceSync > 7);
+
+    const district = settings.district || settings.polo || s.nre || "Sede Urbana";
+
     return {
       id: s.id,
       name: s.name,
@@ -95,12 +131,18 @@ export default async function SecretariaPage() {
       phone: s.phone,
       email: s.email,
       logoUrl: s.logoUrl,
+      nre: s.nre,
+      district,
       studentsCount: s._count.students,
       classesCount: s._count.classGroups,
       staffCount: s._count.userSchools,
       minutesCount: s._count.pedagogicalMinutes,
       criticalCount: schoolCritical,
       averageAttendance: avgAttendance,
+      hasSyncToken: Boolean(s.syncTokenHash),
+      lastSyncAt: lastSyncAtIso,
+      daysSinceSync,
+      isSyncOutdated,
     };
   });
 
@@ -122,6 +164,7 @@ export default async function SecretariaPage() {
   return (
     <SecretariaClient
       city={defaultCity}
+      availableCities={availableCities}
       metrics={{
         totalSchools: municipalSchools.length,
         totalStudents,

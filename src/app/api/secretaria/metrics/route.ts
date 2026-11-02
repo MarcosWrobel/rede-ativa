@@ -42,6 +42,7 @@ export async function GET(req: Request) {
           where: { active: true },
           select: {
             id: true,
+            updatedAt: true,
             lowAttendanceRecord: {
               select: { attendancePercent: true, serpStatus: true },
             },
@@ -61,8 +62,19 @@ export async function GET(req: Request) {
       let schoolCritical = 0;
       let schoolPercentSum = 0;
       let schoolStudentsWithRecord = 0;
+      let latestUpdate: Date | null = null;
+
+      let settings: any = {};
+      try {
+        if (s.settingsJson) settings = JSON.parse(s.settingsJson);
+      } catch {}
 
       s.students.forEach((st) => {
+        if (st.updatedAt) {
+          if (!latestUpdate || st.updatedAt > latestUpdate) {
+            latestUpdate = st.updatedAt;
+          }
+        }
         if (st.lowAttendanceRecord) {
           const pct = st.lowAttendanceRecord.attendancePercent;
           schoolPercentSum += pct;
@@ -84,6 +96,14 @@ export async function GET(req: Request) {
           ? Number((schoolPercentSum / schoolStudentsWithRecord).toFixed(1))
           : 100;
 
+      const lastSyncAtIso = latestUpdate ? (latestUpdate as Date).toISOString() : null;
+      const daysSinceSync = latestUpdate
+        ? Math.max(0, Math.floor((Date.now() - (latestUpdate as Date).getTime()) / (1000 * 60 * 60 * 24)))
+        : null;
+      const isSyncOutdated = s._count.students === 0 || (daysSinceSync !== null && daysSinceSync > 7);
+
+      const district = settings.district || settings.polo || s.nre || "Sede Urbana";
+
       return {
         id: s.id,
         name: s.name,
@@ -93,12 +113,17 @@ export async function GET(req: Request) {
         phone: s.phone,
         email: s.email,
         logoUrl: s.logoUrl,
+        district,
         studentsCount: s._count.students,
         classesCount: s._count.classGroups,
         staffCount: s._count.userSchools,
         minutesCount: s._count.pedagogicalMinutes,
         criticalCount: schoolCritical,
         averageAttendance: avgAttendance,
+        hasSyncToken: Boolean(s.syncTokenHash),
+        lastSyncAt: lastSyncAtIso,
+        daysSinceSync,
+        isSyncOutdated,
       };
     });
 
