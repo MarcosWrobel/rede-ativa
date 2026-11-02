@@ -76,6 +76,11 @@ export default async function BuscaAtivaPage({
           lowAttendanceRecord: {
             select: { attendancePercent: true, actionsTaken: true, enrollmentDetail: true },
           },
+          messageLogs: {
+            orderBy: { sentAt: "desc" },
+            take: 1,
+            select: { sentAt: true, reasonTitle: true, sentByName: true },
+          },
         },
         orderBy: { name: "asc" },
       }),

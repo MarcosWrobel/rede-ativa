@@ -41,7 +41,8 @@ import {
   FileText,
   UserCheck,
   PhoneOff,
-  ListChecks
+  ListChecks,
+  BookOpenCheck,
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
 import {
@@ -86,7 +87,7 @@ export default function FaltasClient({
   const [selectedShift, setSelectedShift] = useState("TODOS");
   const [selectedTurma, setSelectedTurma] = useState("");
   const [selectedRiskRange, setSelectedRiskRange] = useState<
-    "TODOS" | "CRITICO" | "ATENCAO" | "REGULAR" | "QUEDA_ABRUPTA" | "GANHANDO_MUNDO" | "ATESTADO" | "PCD"
+    "TODOS" | "CRITICO" | "ATENCAO" | "REGULAR" | "QUEDA_ABRUPTA" | "FALTAS_CONSECUTIVAS" | "SEM_CONTATO_7D" | "GANHANDO_MUNDO" | "ATESTADO" | "PCD"
   >("TODOS");
   const [selectedActionStatus, setSelectedActionStatus] = useState<
     "TODOS" | "COM_ACAO" | "SEM_ACAO" | "CONSELHO_TUTELAR" | "MINISTERIO_PUBLICO" | "EM_ACOMPANHAMENTO"
@@ -452,6 +453,17 @@ export default function FaltasClient({
       if (selectedRiskRange === "CRITICO") matchRisk = p < 75;
       else if (selectedRiskRange === "ATENCAO") matchRisk = p >= 75 && p < 85;
       else if (selectedRiskRange === "REGULAR") matchRisk = p >= 85;
+      else if (selectedRiskRange === "FALTAS_CONSECUTIVAS") {
+        matchRisk = p < 75 || (!!rec.actionsTaken && rec.actionsTaken.toLowerCase().includes("consecutiv"));
+      } else if (selectedRiskRange === "SEM_CONTATO_7D") {
+        const lastContact = st.messageLogs?.[0]?.sentAt ? new Date(st.messageLogs[0].sentAt) : null;
+        if (!lastContact) {
+          matchRisk = true;
+        } else {
+          const diffDays = Math.floor((Date.now() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
+          matchRisk = diffDays >= 7;
+        }
+      }
       else if (selectedRiskRange === "GANHANDO_MUNDO") matchRisk = !!st.isExchangeStudent;
       else if (selectedRiskRange === "ATESTADO") matchRisk = getActiveJustification(st.justifications) !== null;
       else if (selectedRiskRange === "PCD") matchRisk = !!st.isSpecialNeeds;
@@ -1025,6 +1037,8 @@ export default function FaltasClient({
               { id: "CRITICO", label: `🚨 Risco Crítico (<75%) (${kpis.critico})` },
               { id: "ATENCAO", label: `⚠️ Em Atenção (75-85%) (${kpis.atencao})` },
               { id: "QUEDA_ABRUPTA", label: `📉 Queda Abrupta (${kpis.quedasAbruptas})` },
+              { id: "FALTAS_CONSECUTIVAS", label: "🛑 Faltas Consecutivas" },
+              { id: "SEM_CONTATO_7D", label: "📅 Sem Contato > 7d" },
               { id: "REGULAR", label: `✅ Regular (≥85%) (${kpis.regular})` },
               { id: "GANHANDO_MUNDO", label: "✈️ Ganhando Mundo" },
               { id: "ATESTADO", label: "🩺 Com Atestado" },
@@ -1416,6 +1430,15 @@ export default function FaltasClient({
                             <Send className="w-3 h-3 text-sky-600" />
                             <span>Mensagem</span>
                           </button>
+
+                          <Link
+                            href={`/atas?studentId=${rec.student.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-200 transition shadow-2xs align-middle"
+                            title="Lavrar Ata Pedagógica Formal de Infrequência Escolar (1 Clique)"
+                          >
+                            <BookOpenCheck className="w-3 h-3 text-indigo-600" />
+                            <span>Lavrar Ata</span>
+                          </Link>
                         </td>
                       </tr>
                     );
@@ -1531,6 +1554,14 @@ export default function FaltasClient({
                         >
                           <FileText className="w-3.5 h-3.5" />
                           <span>PDF</span>
+                        </Link>
+                        <Link
+                          href={`/atas?studentId=${item.student.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-200 transition shadow-2xs"
+                          title="Lavrar Ata Pedagógica Formal de Infrequência (1 Clique)"
+                        >
+                          <BookOpenCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Lavrar Ata</span>
                         </Link>
                         <button
                           type="button"
@@ -1848,15 +1879,25 @@ export default function FaltasClient({
                   </div>
                 )}
 
-                {/* Ações Rápidas de Navegação / Prontuário / Dossiê */}
+                {/* Ações Rápidas de Navegação / Prontuário / Dossiê / Lavratura de Ata */}
                 <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    href={`/atas?studentId=${activeStudentData.student.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
+                    target="_blank"
+                    className="inline-flex items-center space-x-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50/80 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg border border-indigo-200 transition"
+                    title="Lavrar ata formal de infrequência no livro digital"
+                  >
+                    <BookOpenCheck className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Lavrar Ata (1 Clique)</span>
+                  </Link>
+
                   <Link
                     href={`/alunos/${activeStudentData.student.id}`}
                     target="_blank"
                     className="inline-flex items-center space-x-1.5 text-xs font-bold text-sky-700 hover:text-sky-900 bg-white hover:bg-sky-50 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
                   >
                     <UserCheck className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Abrir Prontuário 360º</span>
+                    <span>Prontuário 360º</span>
                   </Link>
 
                   <Link
@@ -1865,7 +1906,7 @@ export default function FaltasClient({
                     className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
                   >
                     <FileText className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Dossiê A4 (CT/MP)</span>
+                    <span>Dossiê A4</span>
                   </Link>
                 </div>
               </div>

@@ -75,6 +75,11 @@ export default async function FaltasPage() {
               classGroup: {
                 select: { id: true, name: true, segment: true, shift: true },
               },
+              messageLogs: {
+                orderBy: { sentAt: "desc" },
+                take: 1,
+                select: { sentAt: true, reasonTitle: true, sentByName: true },
+              },
             },
           },
         },
@@ -103,6 +108,11 @@ export default async function FaltasPage() {
               classGroupId: true,
               classGroup: {
                 select: { id: true, name: true, segment: true, shift: true },
+              },
+              messageLogs: {
+                orderBy: { sentAt: "desc" },
+                take: 1,
+                select: { sentAt: true, reasonTitle: true, sentByName: true },
               },
             },
           },

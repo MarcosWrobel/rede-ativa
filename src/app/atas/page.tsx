@@ -8,13 +8,26 @@ export const metadata = {
   title: "Livro de Atas Pedagógicas | Registro Escolar",
 };
 
-export default async function AtasPage() {
+export default async function AtasPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ studentId?: string; create?: string; category?: string }>;
+}) {
   const authCheck = await requireAuth();
   if (!authCheck.ok) {
     redirect("/login");
   }
   const isAdmin = authCheck.role === "ADMIN";
   const school = await getCurrentSchool(authCheck.schoolId);
+
+  let sp: { studentId?: string; create?: string; category?: string } = {};
+  try {
+    if (searchParams) {
+      sp = (await searchParams) || {};
+    }
+  } catch (e) {
+    console.warn("[AtasPage] Erro ao ler searchParams:", e);
+  }
 
   const currentYear = new Date().getFullYear();
 
@@ -53,6 +66,9 @@ export default async function AtasPage() {
         currentYear={currentYear}
         availableStudents={formattedStudents}
         isAdmin={isAdmin}
+        initialStudentId={sp.studentId}
+        initialCreateOpen={sp.create === "true" || Boolean(sp.studentId)}
+        initialCategory={sp.category}
       />
     </div>
   );

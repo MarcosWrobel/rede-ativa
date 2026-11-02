@@ -27,6 +27,9 @@ interface Props {
   currentYear: number;
   availableStudents: any[];
   isAdmin?: boolean;
+  initialStudentId?: string;
+  initialCreateOpen?: boolean;
+  initialCategory?: string;
 }
 
 export default function AtasClient({
@@ -34,15 +37,19 @@ export default function AtasClient({
   currentYear,
   availableStudents,
   isAdmin = false,
+  initialStudentId,
+  initialCreateOpen = false,
+  initialCategory,
 }: Props) {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory || "ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [minutes, setMinutes] = useState<any[]>([]);
 
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(Boolean(initialCreateOpen));
+  const [selectedStudentForDraft, setSelectedStudentForDraft] = useState<string | undefined>(initialStudentId);
   const [editingMinute, setEditingMinute] = useState<any | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -485,12 +492,14 @@ export default function AtasClient({
         onClose={() => {
           setIsCreateModalOpen(false);
           setEditingMinute(null);
+          setSelectedStudentForDraft(undefined);
           fetchMinutes();
         }}
         onSaved={() => {
           fetchMinutes();
         }}
         availableStudents={availableStudents}
+        preSelectedStudentId={selectedStudentForDraft}
         existingMinute={editingMinute}
       />
     </div>

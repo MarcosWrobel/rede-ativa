@@ -24,6 +24,7 @@ import {
   Check,
   RotateCcw,
   Clock,
+  BookOpenCheck,
 } from "lucide-react";
 import { determineShift, formatMessage, SchoolShift } from "@/lib/messageFormatter";
 import {
@@ -81,6 +82,9 @@ export default function BuscaAtivaClient({
   const [selectedSegment, setSelectedSegment] = useState<string>("TODOS");
   const [selectedTurmaId, setSelectedTurmaId] = useState<string>(initialTurmaId);
   const [selectedStudentId, setSelectedStudentId] = useState<string>(initialSelectedStudentId);
+  const [studentQuickFilter, setStudentQuickFilter] = useState<
+    "TODOS" | "CRITICO" | "SEM_CONTATO_7D" | "ATESTADO"
+  >("TODOS");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [activeShift, setActiveShift] = useState<SchoolShift>("MANHA");
   const [customMessage, setCustomMessage] = useState<string>("");
@@ -127,14 +131,31 @@ export default function BuscaAtivaClient({
     return classGroups.filter((cg) => cg.segment === selectedSegment);
   }, [classGroups, selectedSegment]);
 
-  // Filtered students by segment and turma
+  // Filtered students by segment, turma and quick filter
   const filteredStudents = useMemo(() => {
     return studentsState.filter((s) => {
       const matchSegment = selectedSegment === "TODOS" || s.classGroup?.segment === selectedSegment;
       const matchTurma = !selectedTurmaId || s.classGroupId === selectedTurmaId;
-      return matchSegment && matchTurma;
+
+      let matchQuick = true;
+      if (studentQuickFilter === "CRITICO") {
+        const pct = s.lowAttendanceRecord?.attendancePercent;
+        matchQuick = pct !== undefined && pct !== null && pct < 75;
+      } else if (studentQuickFilter === "SEM_CONTATO_7D") {
+        const lastContact = s.messageLogs?.[0]?.sentAt ? new Date(s.messageLogs[0].sentAt) : null;
+        if (!lastContact) {
+          matchQuick = true;
+        } else {
+          const diffDays = Math.floor((Date.now() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
+          matchQuick = diffDays >= 7;
+        }
+      } else if (studentQuickFilter === "ATESTADO") {
+        matchQuick = getActiveJustification(s.justifications) !== null;
+      }
+
+      return matchSegment && matchTurma && matchQuick;
     });
-  }, [studentsState, selectedSegment, selectedTurmaId]);
+  }, [studentsState, selectedSegment, selectedTurmaId, studentQuickFilter]);
 
   // Selected student object (Individual Mode)
   const selectedStudent = useMemo(() => {
@@ -683,9 +704,32 @@ export default function BuscaAtivaClient({
               </div>
 
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-1.5">
-                  3. Selecione o Aluno ({filteredStudents.length} disponíveis)
-                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    3. Selecione o Aluno ({filteredStudents.length} disponíveis)
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: "TODOS", label: "Todos" },
+                      { id: "CRITICO", label: "🚨 Risco (<75%)" },
+                      { id: "SEM_CONTATO_7D", label: "📅 Sem contato >7d" },
+                      { id: "ATESTADO", label: "🩺 Com Atestado" },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setStudentQuickFilter(f.id as any)}
+                        className={`text-[10px] px-2 py-0.5 rounded-md font-semibold transition ${
+                          studentQuickFilter === f.id
+                            ? "bg-sky-600 text-white shadow-2xs"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <select
                   value={selectedStudentId}
                   onChange={(e) => handleSelectStudent(e.target.value)}
@@ -728,6 +772,14 @@ export default function BuscaAtivaClient({
                     </div>
 
                     <div className="flex items-center space-x-1 shrink-0">
+                      <Link
+                        href={`/atas?studentId=${selectedStudent.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
+                        className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[10px] transition"
+                        title="Lavrar Ata Pedagógica Formal de Busca Ativa (1 Clique)"
+                      >
+                        <BookOpenCheck className="w-3 h-3 text-indigo-600" />
+                        <span>Lavrar Ata</span>
+                      </Link>
                       <Link
                         href={`/alunos/${selectedStudent.id}`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold text-[10px]"
