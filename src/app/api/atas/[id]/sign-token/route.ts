@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function POST(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
 

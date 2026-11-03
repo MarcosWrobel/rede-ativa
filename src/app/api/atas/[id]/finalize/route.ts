@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeMinuteHash, generateVerificationCode } from "@/lib/ataCrypto";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export async function POST(
             }
 
             const currentSchool = await getCurrentSchool(authCheck.schoolId);
-            if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+            if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
               throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
             }
 
@@ -338,6 +339,7 @@ export async function POST(
       entityType: "PedagogicalMinute",
       entityId: id,
       details: `Lavratura oficial da Ata nº ${String(finalized.ataNumber).padStart(3, "0")}/${finalized.year} (${finalized.subject}) — Hash SHA-256: ${finalized.contentHash?.slice(0, 16)}...`,
+      schoolId: finalized.schoolId,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

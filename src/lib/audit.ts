@@ -68,6 +68,7 @@ export async function logAudit({
   entityId,
   details,
   user,
+  schoolId,
   ipAddress,
   req,
 }: {
@@ -76,6 +77,7 @@ export async function logAudit({
   entityId?: string;
   details?: Record<string, any> | string;
   user: AuditUser;
+  schoolId?: string | null;
   ipAddress?: string | null;
   req?: Request | Headers | null;
 }) {
@@ -92,6 +94,7 @@ export async function logAudit({
         entityType,
         entityId: entityId || null,
         details: detailsStr || null,
+        schoolId: schoolId || null,
         ipAddress: resolvedIp,
       },
     });

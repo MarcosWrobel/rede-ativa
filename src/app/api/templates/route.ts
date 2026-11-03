@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export async function GET(req: Request) {
   try {
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
       entityType: "MessageTemplate",
       entityId: template.id,
       details: { title: template.title, segment: template.segment },
+      schoolId: currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -97,7 +99,15 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Modelo de mensagem não encontrado" }, { status: 404 });
     }
 
-    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    const isSuper = checkIsSuperAdmin(authCheck.session);
+    if (!existing.schoolId && !isSuper) {
+      return NextResponse.json(
+        { error: "Modelos padrão globais só podem ser editados pelo SuperAdmin." },
+        { status: 403 }
+      );
+    }
+
+    if (existing.schoolId && !assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a modelo de outra instituição de ensino." },
         { status: 403 }
@@ -121,6 +131,7 @@ export async function PUT(req: Request) {
       entityType: "MessageTemplate",
       entityId: template.id,
       details: { title: template.title, segment: template.segment },
+      schoolId: template.schoolId || currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

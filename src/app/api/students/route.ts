@@ -59,6 +59,19 @@ export async function POST(req: Request) {
     }
 
     const { cgm, name, guardianName, phone, classGroupId } = parsed.data;
+
+    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa
+    const classGroup = await prisma.classGroup.findFirst({
+      where: { id: classGroupId, schoolId: currentSchool.id },
+    });
+
+    if (!classGroup) {
+      return NextResponse.json(
+        { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
+        { status: 400 }
+      );
+    }
+
     const cleanDigits = phone.replace(/\D/g, "");
     const cleanCgm = cgm ? cgm.replace(/\D/g, "") || null : null;
     const formattedName = name.toUpperCase();
@@ -85,6 +98,7 @@ export async function POST(req: Request) {
         phone: student.phone,
         turma: student.classGroup.name,
       },
+      schoolId: currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -124,6 +138,18 @@ export async function PUT(req: Request) {
       );
     }
 
+    if (classGroupId && classGroupId !== previous.classGroupId) {
+      const classGroup = await prisma.classGroup.findFirst({
+        where: { id: classGroupId, schoolId: currentSchool.id },
+      });
+      if (!classGroup) {
+        return NextResponse.json(
+          { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
+          { status: 400 }
+        );
+      }
+    }
+
     const cleanDigits = phone !== undefined ? phone.replace(/\D/g, "") : previous?.phone;
     const cleanCgm =
       cgm !== undefined ? (cgm ? cgm.replace(/\D/g, "") || null : null) : previous?.cgm;
@@ -150,6 +176,7 @@ export async function PUT(req: Request) {
         previous: { name: previous?.name, phone: previous?.phone, turma: previous?.classGroup.name },
         new: { name: student.name, phone: student.phone, turma: student.classGroup.name },
       },
+      schoolId: currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -197,6 +224,7 @@ export async function DELETE(req: Request) {
       entityType: "Student",
       entityId: student.id,
       details: { name: student.name, turma: student.classGroup.name, deactivated: true },
+      schoolId: currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

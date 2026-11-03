@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export async function PATCH(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (actionItem.minute.schoolId && actionItem.minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(actionItem.minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
 
@@ -65,6 +66,7 @@ export async function PATCH(
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       ipAddress: ip,
     });
 

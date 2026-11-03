@@ -6,6 +6,7 @@ import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export async function POST(req: Request) {
   try {
@@ -32,8 +33,18 @@ export async function POST(req: Request) {
     });
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (!student || (student.schoolId && student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN")) {
+    if (!student || !assertTenantOwnership(student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Aluno não encontrado nesta instituição" }, { status: 404 });
+    }
+
+    if (templateId) {
+      const template = await prisma.messageTemplate.findUnique({
+        where: { id: templateId },
+        select: { id: true, schoolId: true },
+      });
+      if (template && template.schoolId && !assertTenantOwnership(template.schoolId, currentSchool.id, authCheck.session)) {
+        return NextResponse.json({ error: "Modelo de mensagem não pertence a esta instituição." }, { status: 403 });
+      }
     }
 
     const digits = normalizeWhatsAppPhone(customPhone || student.phone);
@@ -89,6 +100,7 @@ export async function POST(req: Request) {
         name: sentByName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       req,
     });
 

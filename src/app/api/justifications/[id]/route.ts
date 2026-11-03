@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +29,8 @@ export async function DELETE(
       return NextResponse.json({ error: "Justificativa não encontrada." }, { status: 404 });
     }
 
-    if (justification.student.schoolId !== school.id && authCheck.role !== "ADMIN") {
-      return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+    if (!assertTenantOwnership(justification.student.schoolId, school.id, authCheck.session)) {
+      return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
 
     await prisma.absenceJustification.delete({
@@ -48,6 +49,7 @@ export async function DELETE(
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: school.id,
     });
 
     return NextResponse.json({ success: true });

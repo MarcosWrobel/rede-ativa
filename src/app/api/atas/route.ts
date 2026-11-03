@@ -215,13 +215,16 @@ export async function POST(req: Request) {
     const studentsDb = await prisma.student.findMany({
       where: {
         id: { in: studentIds },
-        ...(authCheck.role === "ADMIN" ? {} : { schoolId: effectiveSchoolId }),
+        schoolId: effectiveSchoolId,
       },
       include: { classGroup: true },
     });
 
-    if (studentsDb.length === 0) {
-      return NextResponse.json({ error: "Nenhum estudante válido encontrado nesta instituição para vincular" }, { status: 400 });
+    if (studentsDb.length !== studentIds.length) {
+      return NextResponse.json(
+        { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
+        { status: 400 }
+      );
     }
 
     const minute = await prisma.pedagogicalMinute.create({
@@ -294,6 +297,7 @@ export async function POST(req: Request) {
       entityType: "PedagogicalMinute",
       entityId: minute.id,
       details: `Rascunho de ata pedagógica aberto para ${studentsDb.map((s) => s.name).join(", ")} (${subject})`,
+      schoolId: effectiveSchoolId,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

@@ -45,6 +45,7 @@ import {
   BookOpenCheck,
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
+import { sanitizeCsvField } from "@/lib/csvSanitizer";
 import {
   detectAbruptDrop,
   getActiveJustification,
@@ -566,15 +567,15 @@ export default function FaltasClient({
       const d = parseDetail(rec.enrollmentDetail);
       const cgm = rec.student.cgm || d.cgm || "";
       rows.push([
-        `"${cgm}"`,
-        `"${rec.student.name.replace(/"/g, '""')}"`,
-        `"${rec.student.classGroup.name}"`,
-        `"${rec.student.classGroup.shift || ""}"`,
+        `"${sanitizeCsvField(cgm)}"`,
+        `"${sanitizeCsvField(rec.student.name).replace(/"/g, '""')}"`,
+        `"${sanitizeCsvField(rec.student.classGroup.name)}"`,
+        `"${sanitizeCsvField(rec.student.classGroup.shift || "")}"`,
         `"${rec.attendancePercent.toFixed(1)}%"`,
-        `"${d.semanaAtual || ""}"`,
-        `"${d.semanaAnterior || ""}"`,
+        `"${sanitizeCsvField(d.semanaAtual || "")}"`,
+        `"${sanitizeCsvField(d.semanaAnterior || "")}"`,
         `"${d.variacao !== null ? (d.variacao > 0 ? "+" : "") + d.variacao + "%" : ""}"`,
-        `"${(rec.actionsTaken || "").replace(/"/g, '""')}"`
+        `"${sanitizeCsvField(rec.actionsTaken || "").replace(/"/g, '""')}"`
       ].join(";"));
     });
 

@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageReplySchema } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export async function POST(req: Request) {
   try {
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -72,6 +73,7 @@ export async function POST(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       req,
     });
 

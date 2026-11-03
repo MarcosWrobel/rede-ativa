@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 // PUT: Editar campos de um registro do histórico (Restrito a ADMIN)
 export async function PUT(req: Request) {
@@ -42,7 +43,7 @@ export async function PUT(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -110,6 +111,7 @@ export async function PUT(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       req,
     });
 
@@ -147,7 +149,7 @@ export async function DELETE(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (previous.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -178,6 +180,7 @@ export async function DELETE(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       req,
     });
 

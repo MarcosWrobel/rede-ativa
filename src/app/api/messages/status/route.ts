@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageDeliveryStatusUpdateSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 async function handleStatusUpdate(req: Request) {
   try {
@@ -36,7 +37,7 @@ async function handleStatusUpdate(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (existing.student.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(existing.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -110,6 +111,7 @@ async function handleStatusUpdate(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       req,
     });
 

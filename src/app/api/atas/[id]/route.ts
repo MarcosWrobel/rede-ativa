@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -127,7 +128,7 @@ export async function GET(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -160,7 +161,7 @@ export async function PATCH(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -377,18 +378,18 @@ export async function DELETE(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (existing.schoolId && existing.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    const isAdmin = authCheck.role === "ADMIN";
+    const isSuper = checkIsSuperAdmin(authCheck.session);
 
     // REGRA DE OURO JURÍDICA: Usuários comuns só podem descartar rascunhos (DRAFT).
     // Administradores Gerais possuem permissão de expurgo técnico (ex: descarte de atas de teste/homologação).
-    if (!isAdmin && existing.status !== "DRAFT") {
+    if (!isSuper && existing.status !== "DRAFT") {
       return NextResponse.json(
         {
           error:
@@ -414,6 +415,7 @@ export async function DELETE(
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: currentSchool.id,
       ipAddress: ip,
     });
 

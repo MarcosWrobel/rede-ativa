@@ -72,6 +72,14 @@ export async function POST(req: Request) {
     const isSuperAdminEmail = isBootstrapAdminEmail(rawEmail);
     const effectiveRole = isSuperAdminEmail ? "SUPERADMIN" : rawRole || "PEDAGOGA";
 
+    const isCallerSuper = checkIsSuperAdmin(authCheck.session);
+    if (!isCallerSuper && (effectiveRole === "SUPERADMIN" || effectiveRole === "GESTAO_SECRETARIA" || effectiveRole === "ADMIN")) {
+      return NextResponse.json(
+        { error: "Você não possui permissão para conceder este perfil de acesso elevado." },
+        { status: 403 }
+      );
+    }
+
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const targetSchoolId = currentSchool.id;
 
@@ -198,6 +206,7 @@ export async function POST(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: targetSchoolId,
       req,
     });
 
@@ -229,6 +238,27 @@ export async function PUT(req: Request) {
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     const targetSchoolId = currentSchool.id;
+    const isCallerSuper = checkIsSuperAdmin(authCheck.session);
+
+    // Validação de posse de inquilino: o usuário alvo precisa ter vínculo com esta instituição
+    const isLinkedToCurrentSchool =
+      target.schoolId === targetSchoolId ||
+      target.schools.some((s) => s.schoolId === targetSchoolId);
+
+    if (!isCallerSuper && !isLinkedToCurrentSchool) {
+      return NextResponse.json(
+        { error: "Acesso negado: o usuário não pertence à equipe desta instituição escolar." },
+        { status: 403 }
+      );
+    }
+
+    // Teto de privilégios: não-SuperAdmins não podem elevar para SUPERADMIN, GESTAO_SECRETARIA ou ADMIN
+    if (!isCallerSuper && role && (role === "SUPERADMIN" || role === "GESTAO_SECRETARIA" || role === "ADMIN")) {
+      return NextResponse.json(
+        { error: "Você não possui permissão para conceder este perfil de acesso elevado." },
+        { status: 403 }
+      );
+    }
 
     const isSelf = target.email.toLowerCase().trim() === authCheck.email;
     const isRoot = isBootstrapAdminEmail(target.email);
@@ -307,6 +337,7 @@ export async function PUT(req: Request) {
         name: authCheck.userName,
         email: authCheck.email,
       },
+      schoolId: targetSchoolId,
       req,
     });
 

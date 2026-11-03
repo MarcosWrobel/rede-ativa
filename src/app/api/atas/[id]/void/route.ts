@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function POST(
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (minute.schoolId && minute.schoolId !== currentSchool.id && authCheck.role !== "ADMIN") {
+    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -68,6 +69,7 @@ export async function POST(
       entityType: "PedagogicalMinute",
       entityId: id,
       details: `Ata nº ${String(minute.ataNumber).padStart(3, "0")}/${minute.year} TORNADA SEM EFEITO. Motivo: ${parsed.data.reason}`,
+      schoolId: currentSchool.id,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
 import { normalizeStudentName } from "@/lib/studentMatcher";
@@ -23,14 +23,14 @@ export async function POST(req: Request) {
 
     const { turmas, students, transferredStudents, options } = parsed.data;
 
-    // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por ADMIN)
+    // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por SuperAdmin)
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     let schoolRecord: any = currentSchool;
     if (
       schoolRecord &&
       options.updateSchoolInfo &&
       options.schoolInfo?.name &&
-      authCheck.role === "ADMIN"
+      checkIsSuperAdmin(authCheck.session)
     ) {
       try {
         schoolRecord = await prisma.school.update({
@@ -98,30 +98,42 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Carrega todos os alunos existentes (ativos e inativos) para evitar colisão de @unique cgm
-    const allExistingStudents = await prisma.student.findMany({
-      select: {
-        id: true,
-        cgm: true,
-        name: true,
-        guardianName: true,
-        phone: true,
-        classGroupId: true,
-        schoolId: true,
-        active: true,
-      },
-    });
+    // 3. Carrega alunos existentes ISOLADOS por esta instituição de ensino
+    // e o catálogo global de CGMs em uso para prevenir colisão de chave única (@unique cgm)
+    const [existingSchoolStudents, globalCgmRows] = await Promise.all([
+      prisma.student.findMany({
+        where: schoolId ? { schoolId } : undefined,
+        select: {
+          id: true,
+          cgm: true,
+          name: true,
+          guardianName: true,
+          phone: true,
+          classGroupId: true,
+          schoolId: true,
+          active: true,
+        },
+      }),
+      prisma.student.findMany({
+        where: { cgm: { not: null } },
+        select: { cgm: true },
+      }),
+    ]);
 
-    type ExistingRow = (typeof allExistingStudents)[number];
+    type ExistingRow = (typeof existingSchoolStudents)[number];
     const byCgm = new Map<string, ExistingRow>();
     const byNormName = new Map<string, ExistingRow[]>();
     const usedCgms = new Set<string>();
 
-    for (const s of allExistingStudents) {
+    for (const row of globalCgmRows) {
+      const c = row.cgm?.trim();
+      if (c) usedCgms.add(c);
+    }
+
+    for (const s of existingSchoolStudents) {
       const cgmTrim = s.cgm?.trim();
       if (cgmTrim) {
         byCgm.set(cgmTrim, s);
-        usedCgms.add(cgmTrim);
       }
       const norm = normalizeStudentName(s.name);
       if (norm) {
@@ -307,7 +319,10 @@ export async function POST(req: Request) {
 
       if (idsToDeactivate.size > 0) {
         const res = await prisma.student.updateMany({
-          where: { id: { in: Array.from(idsToDeactivate) } },
+          where: {
+            id: { in: Array.from(idsToDeactivate) },
+            ...(schoolId ? { schoolId } : {}),
+          },
           data: { active: false },
         });
         deactivatedTransferredCount = res.count;
@@ -334,6 +349,7 @@ export async function POST(req: Request) {
         deactivatedTransferredCount,
         missingPhoneImportedCount,
       },
+      schoolId: schoolId,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -342,12 +358,12 @@ export async function POST(req: Request) {
       req,
     });
 
-    // 9. Retorna listas atualizadas prontas para hidratar a tela /alunos sem reload
+    // 9. Retorna listas atualizadas prontas para hidratar a tela /alunos sem reload (ISOLADAS POR ESCOLA)
     const recentCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const [freshStudents, freshClassGroups, recentJustifications, allContacts] =
       await Promise.all([
         prisma.student.findMany({
-          where: { active: true },
+          where: { active: true, ...(schoolId ? { schoolId } : {}) },
           include: {
             classGroup: true,
             _count: { select: { messageLogs: true } },
@@ -355,16 +371,21 @@ export async function POST(req: Request) {
           orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
         }),
         prisma.classGroup.findMany({
+          where: schoolId ? { schoolId } : undefined,
           orderBy: { name: "asc" },
         }),
         safeQueryList(() =>
           prisma.absenceJustification.findMany({
-            where: { endDate: { gte: recentCutoff } },
+            where: {
+              endDate: { gte: recentCutoff },
+              ...(schoolId ? { student: { schoolId } } : {}),
+            },
             orderBy: { endDate: "desc" },
           })
         ),
         safeQueryList(() =>
           prisma.studentContact.findMany({
+            where: schoolId ? { student: { schoolId } } : undefined,
             select: { id: true, studentId: true, whatsappValid: true },
           })
         ),
