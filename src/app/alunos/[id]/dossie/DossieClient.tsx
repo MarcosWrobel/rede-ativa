@@ -195,8 +195,8 @@ export default function DossieClient({
         </div>
       </div>
 
-      {/* FOLHA OFICIAL DO DOSSIÊ (A4) */}
-      <article className="bg-white max-w-4xl mx-auto p-8 sm:p-10 print:p-0 border border-slate-300 print:border-0 rounded-xl print:rounded-none shadow-sm print:shadow-none text-slate-900 space-y-5 text-[12px] leading-snug">
+      {/* FOLHA OFICIAL DO DOSSIÊ (A4) COM MOLDURA PERIMÉTRICA */}
+      <article className="bg-white max-w-4xl mx-auto p-6 sm:p-10 rounded-2xl border-2 border-slate-800 shadow-sm text-slate-900 space-y-5 text-[12px] leading-snug print-page-frame print:space-y-3.5 print:shadow-none">
         {/* 1. Cabeçalho Institucional Oficial */}
         <header className="border-b-2 border-slate-900 pb-4 flex items-start justify-between gap-4">
           <div className="space-y-0.5">

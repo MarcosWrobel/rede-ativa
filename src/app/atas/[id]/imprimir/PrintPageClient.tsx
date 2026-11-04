@@ -94,8 +94,8 @@ export default function PrintPageClient({
         </button>
       </div>
 
-      {/* Folha Oficial A4 */}
-      <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200 shadow-sm text-slate-900 font-serif space-y-6 print:border-none print:shadow-none print:p-0 print:m-0 print:space-y-3">
+      {/* Folha Oficial A4 com Moldura Perimétrica e Margem Padronizada */}
+      <div className="bg-white p-6 sm:p-10 rounded-2xl border-2 border-slate-800 shadow-sm text-slate-900 font-serif space-y-5 print-page-frame print:space-y-3 print:shadow-none">
         {/* Cabeçalho Oficial com Brasão / Logo Dinâmico */}
         <div className="border-b-2 border-slate-900 pb-4 space-y-2 print:pb-2 print:space-y-1">
           <div className="flex items-center justify-between gap-4 print:gap-2">

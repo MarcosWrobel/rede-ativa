@@ -415,4 +415,13 @@ progress.queue-progress::-moz-progress-bar {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* Garante renderização contínua e nítida da moldura perimétrica oficial na folha A4 */
+  .print-page-frame {
+    border: 2px solid #1e293b !important;
+    border-radius: 1rem !important;
+    padding: 1.5rem !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
 }
