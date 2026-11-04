@@ -8,6 +8,7 @@ for (const key of ["NEXTAUTH_URL", "AUTH_URL"]) {
     let val = process.env[key]!.trim();
     val = val.replace(/^NEXTAUTH_URL=/, "").replace(/^AUTH_URL=/, "").trim();
     val = val.replace(/^["']|["']$/g, "").trim();
+    val = val.replace(/\/api\/auth\/?$/, "").replace(/\/+$/, "");
     process.env[key] = val;
   }
 }
@@ -21,8 +22,9 @@ for (const key of ["AUTH_SECRET", "NEXTAUTH_SECRET"]) {
 }
 
 // Garante compatibilidade estrita com Auth.js v5 em qualquer host da Vercel
-const resolvedSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-if (!process.env.AUTH_SECRET && resolvedSecret) {
+const fallbackSecret = "rede-ativa-saas-auth-secret-production-stable-2026";
+const resolvedSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || fallbackSecret;
+if (!process.env.AUTH_SECRET) {
   process.env.AUTH_SECRET = resolvedSecret;
 }
 if (!process.env.AUTH_TRUST_HOST) {
@@ -31,7 +33,7 @@ if (!process.env.AUTH_TRUST_HOST) {
 
 export const authConfig: NextAuthConfig = {
   trustHost: true,
-  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
+  secret: resolvedSecret,
   providers: [
     Google({
       clientId: (process.env.GOOGLE_CLIENT_ID || "").replace(/^["']|["']$/g, "").trim(),

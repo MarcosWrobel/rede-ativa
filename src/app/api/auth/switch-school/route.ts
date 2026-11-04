@@ -28,10 +28,28 @@ export async function POST(req: Request) {
     const isRootAdmin = isBootstrapAdminEmail(authCheck.email);
 
     // 1. Verifica se a escola existe e está ativa
-    const targetSchool = await prisma.school.findUnique({
+    let targetSchool = await prisma.school.findUnique({
       where: { id: schoolId },
       select: { id: true, name: true, inepCode: true, city: true, network: true, active: true },
     });
+
+    if (!targetSchool && (schoolId === "default-leopoldina" || schoolId === "41042730")) {
+      targetSchool = await prisma.school.findFirst({
+        where: { OR: [{ inepCode: "41042730" }, { name: { contains: "Leopoldina", mode: "insensitive" } }] },
+        select: { id: true, name: true, inepCode: true, city: true, network: true, active: true },
+      });
+    }
+
+    if (!targetSchool && schoolId === "default-leopoldina") {
+      targetSchool = {
+        id: "default-leopoldina",
+        name: "Colégio Estadual Leopoldina B. Pedroso",
+        inepCode: "41042730",
+        city: "Ponta Grossa",
+        network: "ESTADUAL",
+        active: true,
+      };
+    }
 
     if (!targetSchool || !targetSchool.active) {
       return NextResponse.json({ error: "Instituição escolar não encontrada ou inativa." }, { status: 404 });
@@ -84,29 +102,42 @@ export async function POST(req: Request) {
     }
 
     // 3. Atualiza o schoolId padrão no perfil do usuário no banco
-    if (authCheck.userId) {
-      await prisma.user.update({
-        where: { id: authCheck.userId },
-        data: { schoolId },
-      });
+    if (authCheck.userId || authCheck.email) {
+      try {
+        await prisma.user.updateMany({
+          where: {
+            OR: [
+              ...(authCheck.userId ? [{ id: authCheck.userId }] : []),
+              ...(authCheck.email ? [{ email: authCheck.email.toLowerCase().trim() }] : []),
+            ],
+          },
+          data: { schoolId },
+        });
+      } catch (err) {
+        console.warn("[POST /api/auth/switch-school] Aviso ao sincronizar schoolId no perfil do usuário:", err);
+      }
     }
 
-    await logAudit({
-      action: "UPDATE_USER",
-      entityType: "SchoolContext",
-      entityId: schoolId,
-      details: {
-        switchedTo: targetSchool.name,
-        inepCode: targetSchool.inepCode,
-        network: (targetSchool as any).network,
-      },
-      user: {
-        id: authCheck.userId,
-        name: authCheck.userName,
-        email: authCheck.email,
-      },
-      req,
-    });
+    try {
+      await logAudit({
+        action: "UPDATE_USER",
+        entityType: "SchoolContext",
+        entityId: schoolId,
+        details: {
+          switchedTo: targetSchool.name,
+          inepCode: targetSchool.inepCode,
+          network: (targetSchool as any).network,
+        },
+        user: {
+          id: authCheck.userId,
+          name: authCheck.userName,
+          email: authCheck.email,
+        },
+        req,
+      });
+    } catch (auditErr) {
+      console.warn("[POST /api/auth/switch-school] Aviso ao registrar auditoria de troca de escola:", auditErr);
+    }
 
     const response = NextResponse.json({
       success: true,

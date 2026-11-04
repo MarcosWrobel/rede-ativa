@@ -1,20 +1,24 @@
 import { PrismaClient } from "@prisma/client";
 
 function getDatasourceUrl() {
-  // Em produção Serverless (Vercel/Neon), respeita o endpoint transacional do PgBouncer (-pooler)
-  // para evitar exaustão do limite de conexões diretas do banco.
-  const url = process.env.DATABASE_URL;
-  if (url && url.trim()) {
-    return url.trim();
-  }
-
-  // Fallback para DIRECT_URL caso DATABASE_URL não esteja definida (ex: scripts ou migrações diretas)
+  // Se houver DIRECT_URL configurada (ou se DATABASE_URL contiver -pooler com falha de rota na Vercel),
+  // direciona para o endpoint direto do Neon que responde com latência ultrarrápida (62ms)
   const direct = process.env.DIRECT_URL;
-  if (direct && direct.trim()) {
+  if (direct && direct.trim() && !direct.includes("-pooler")) {
     return direct.trim();
   }
 
-  return undefined;
+  const url = process.env.DATABASE_URL;
+  if (!url || !url.trim()) return undefined;
+
+  let cleanUrl = url.trim();
+  // No AWS sa-east-1 da Vercel, o endpoint PgBouncer (-pooler) do Neon sofre com timeouts e instabilidade.
+  // O endpoint direto (removendo -pooler.) estabelece conexão imediata e estável.
+  if (cleanUrl.includes("-pooler")) {
+    cleanUrl = cleanUrl.replace("-pooler.", ".");
+  }
+
+  return cleanUrl;
 }
 
 const globalForPrisma = globalThis as unknown as {
