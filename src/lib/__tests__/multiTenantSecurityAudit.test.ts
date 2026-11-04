@@ -37,10 +37,18 @@ describe("Auditoria Restrita de Segurança Multi-Tenant", () => {
       expect(allowed2).toBe(false);
     });
 
-    it("bloqueia estritamente recursos com schoolId nulo ou indefinido para não-SuperAdmins", () => {
+    it("bloqueia estritamente recursos com schoolId nulo ou indefinido para escolas não-sede", () => {
       expect(assertTenantOwnership(null, "escola-a", gestorEscolaASession)).toBe(false);
       expect(assertTenantOwnership(undefined, "escola-a", gestorEscolaASession)).toBe(false);
       expect(assertTenantOwnership("", "escola-a", gestorEscolaASession)).toBe(false);
+    });
+
+    it("permite acesso retrocompatível a recursos legados (schoolId nulo ou default-leopoldina) na unidade fundadora piloto", () => {
+      const leopoldinaPedagogaSession = {
+        user: { email: "pedagoga@leopoldina.pr.gov.br", role: "PEDAGOGA", inepCode: "41042730" },
+      };
+      expect(assertTenantOwnership(null, "default-leopoldina", leopoldinaPedagogaSession)).toBe(true);
+      expect(assertTenantOwnership("default-leopoldina", "default-leopoldina", leopoldinaPedagogaSession)).toBe(true);
     });
 
     it("bloqueia se currentSchoolId for nulo ou vazio", () => {

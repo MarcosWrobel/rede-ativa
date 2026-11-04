@@ -21,8 +21,22 @@ export default async function AuditoriaPage() {
   const sessionUser = session.user as any;
   const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
 
-  // SuperAdmin visualiza todo o ecossistema SaaS; Gestores veem estritamente a sua escola
-  const where = isSuper ? {} : { schoolId: currentSchool.id };
+  // SuperAdmin visualiza todo o ecossistema SaaS; Gestores veem a sua escola (incluindo logs históricos legados da unidade fundadora)
+  const isDefaultSchoolContext =
+    currentSchool.id === "default-leopoldina" ||
+    currentSchool.inepCode === "41042730";
+
+  const where = isSuper
+    ? {}
+    : isDefaultSchoolContext
+    ? {
+        OR: [
+          { schoolId: currentSchool.id },
+          { schoolId: null },
+          { schoolId: "default-leopoldina" },
+        ],
+      }
+    : { schoolId: currentSchool.id };
 
   const logs = await prisma.auditLog.findMany({
     where,

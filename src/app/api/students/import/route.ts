@@ -47,10 +47,19 @@ export async function POST(req: Request) {
       }
     }
     const schoolId = schoolRecord?.id || null;
+    const schoolFilter = schoolId
+      ? {
+          OR: [
+            { schoolId },
+            { schoolId: null },
+            { schoolId: "default-leopoldina" },
+          ],
+        }
+      : undefined;
 
-    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola
+    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola (com tolerância a turmas legadas)
     const existingClassGroups = await prisma.classGroup.findMany({
-      where: schoolId ? { schoolId } : undefined,
+      where: schoolFilter,
     });
     const existingByName = new Map(
       existingClassGroups.map((cg) => [cg.name.trim().toUpperCase(), cg])
@@ -110,7 +119,7 @@ export async function POST(req: Request) {
 
     const [existingSchoolStudents, globalCgmRows] = await Promise.all([
       prisma.student.findMany({
-        where: schoolId ? { schoolId } : undefined,
+        where: schoolFilter,
         select: {
           id: true,
           cgm: true,
@@ -125,7 +134,7 @@ export async function POST(req: Request) {
       incomingCgms.length > 0
         ? prisma.student.findMany({
             where: { cgm: { in: incomingCgms } },
-            select: { cgm: true },
+            select: { id: true, cgm: true, schoolId: true },
           })
         : Promise.resolve([]),
     ]);
@@ -135,15 +144,22 @@ export async function POST(req: Request) {
     const byNormName = new Map<string, ExistingRow[]>();
     const usedCgms = new Set<string>();
 
+    // Mapeia IDs dos alunos desta escola para isolar colisões externas
+    const thisSchoolStudentIds = new Set(existingSchoolStudents.map((s) => s.id));
+
+    // Apenas marca como usedCgms os CGMs pertencentes a OUTROS estudantes de OUTRAS escolas
     for (const row of globalCgmRows) {
       const c = row.cgm?.trim();
-      if (c) usedCgms.add(c);
+      if (c && !thisSchoolStudentIds.has(row.id)) {
+        usedCgms.add(c);
+      }
     }
 
     for (const s of existingSchoolStudents) {
       const cgmTrim = s.cgm?.trim();
       if (cgmTrim) {
         byCgm.set(cgmTrim, s);
+        usedCgms.add(cgmTrim);
       }
       const norm = normalizeStudentName(s.name);
       if (norm) {
@@ -373,7 +389,7 @@ export async function POST(req: Request) {
     const [freshStudents, freshClassGroups, recentJustifications, allContacts] =
       await Promise.all([
         prisma.student.findMany({
-          where: { active: true, ...(schoolId ? { schoolId } : {}) },
+          where: { active: true, ...(schoolFilter ? schoolFilter : {}) },
           include: {
             classGroup: true,
             _count: { select: { messageLogs: true } },
@@ -381,7 +397,7 @@ export async function POST(req: Request) {
           orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
         }),
         prisma.classGroup.findMany({
-          where: schoolId ? { schoolId } : undefined,
+          where: schoolFilter,
           orderBy: { name: "asc" },
         }),
         safeQueryList(() =>

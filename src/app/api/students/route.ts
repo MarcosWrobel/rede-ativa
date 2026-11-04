@@ -60,9 +60,16 @@ export async function POST(req: Request) {
 
     const { cgm, name, guardianName, phone, classGroupId } = parsed.data;
 
-    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa
+    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa (tolerante a turmas legadas)
     const classGroup = await prisma.classGroup.findFirst({
-      where: { id: classGroupId, schoolId: currentSchool.id },
+      where: {
+        id: classGroupId,
+        OR: [
+          { schoolId: currentSchool.id },
+          { schoolId: null },
+          { schoolId: "default-leopoldina" },
+        ],
+      },
     });
 
     if (!classGroup) {
@@ -70,6 +77,14 @@ export async function POST(req: Request) {
         { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
         { status: 400 }
       );
+    }
+
+    // Auto-cura de turma legada: associa ao schoolId atual se estiver nula
+    if (!classGroup.schoolId && currentSchool.id) {
+      prisma.classGroup.update({
+        where: { id: classGroup.id },
+        data: { schoolId: currentSchool.id },
+      }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
     }
 
     const cleanDigits = phone.replace(/\D/g, "");
@@ -140,13 +155,26 @@ export async function PUT(req: Request) {
 
     if (classGroupId && classGroupId !== previous.classGroupId) {
       const classGroup = await prisma.classGroup.findFirst({
-        where: { id: classGroupId, schoolId: currentSchool.id },
+        where: {
+          id: classGroupId,
+          OR: [
+            { schoolId: currentSchool.id },
+            { schoolId: null },
+            { schoolId: "default-leopoldina" },
+          ],
+        },
       });
       if (!classGroup) {
         return NextResponse.json(
           { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
           { status: 400 }
         );
+      }
+      if (!classGroup.schoolId && currentSchool.id) {
+        prisma.classGroup.update({
+          where: { id: classGroup.id },
+          data: { schoolId: currentSchool.id },
+        }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
       }
     }
 

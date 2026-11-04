@@ -241,9 +241,14 @@ export async function PUT(req: Request) {
     const isCallerSuper = checkIsSuperAdmin(authCheck.session);
 
     // Validação de posse de inquilino: o usuário alvo precisa ter vínculo com esta instituição
+    const isDefaultSchoolContext =
+      targetSchoolId === "default-leopoldina" ||
+      currentSchool.inepCode === "41042730";
+
     const isLinkedToCurrentSchool =
       target.schoolId === targetSchoolId ||
-      target.schools.some((s) => s.schoolId === targetSchoolId);
+      target.schools.some((s) => s.schoolId === targetSchoolId) ||
+      ((!target.schoolId || target.schoolId === "default-leopoldina") && isDefaultSchoolContext);
 
     if (!isCallerSuper && !isLinkedToCurrentSchool) {
       return NextResponse.json(
