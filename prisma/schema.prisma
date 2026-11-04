@@ -159,6 +159,7 @@ model Student {
   @@index([classGroupId, active])
   @@index([name])
   @@index([schoolId])
+  @@index([schoolId, active])
   @@index([email])
 }
 
@@ -205,6 +206,7 @@ model MessageLog {
 
   @@index([sentAt(sort: Desc)])
   @@index([studentId, sentAt(sort: Desc)])
+  @@index([studentId, sentAt(sort: Desc), deliveryStatus])
   @@index([guardianReplied])
   @@index([sentByName])
   @@index([reasonTitle])
@@ -226,6 +228,7 @@ model LowAttendanceRecord {
   updatedAt         DateTime  @updatedAt
 
   @@index([attendancePercent])
+  @@index([studentId, attendancePercent])
   @@index([serpStatus])
 }
 
@@ -247,6 +250,7 @@ model AuditLog {
   @@index([createdAt(sort: Desc)])
   @@index([action])
   @@index([schoolId])
+  @@index([schoolId, createdAt(sort: Desc)])
 }
 
 model AttendanceSnapshot {

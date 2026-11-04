@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
+import AtaQrCode from "./AtaQrCode";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 import {
@@ -2354,13 +2355,12 @@ export default function AtaEditorModal({
 
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
                       <div className="md:col-span-4 flex justify-center">
-                        <div className="p-2 bg-white rounded-xl border border-sky-200 shadow-2xs">
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                              qrModalInfo.url
-                            )}`}
-                            alt="QR Code Assinatura"
+                        <div className="p-2 bg-white rounded-xl border border-sky-200 shadow-2xs flex items-center justify-center">
+                          <AtaQrCode
+                            value={qrModalInfo.url}
+                            size={128}
                             className="w-32 h-32"
+                            alt="QR Code Assinatura"
                           />
                         </div>
                       </div>

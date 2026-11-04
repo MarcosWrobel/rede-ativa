@@ -31,6 +31,8 @@ import {
   X,
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
+import AtaQrCode from "@/components/ata/AtaQrCode";
+import { getAtaValidationUrl } from "@/lib/qrCode";
 
 function getCategoryConfig(category?: string) {
   switch (category) {
@@ -115,16 +117,21 @@ export default function AtasClient({
   const [selectedMinuteForQr, setSelectedMinuteForQr] = useState<any | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [copiedValidationUrl, setCopiedValidationUrl] = useState(false);
-  const [origin, setOrigin] = useState("https://registro-leopoldina.vercel.app");
+  const [origin, setOrigin] = useState<string>(() => {
+    if (typeof window !== "undefined" && window.location.origin) {
+      return window.location.origin;
+    }
+    return "https://registro-leopoldina.vercel.app";
+  });
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && window.location.origin) {
       setOrigin(window.location.origin);
     }
   }, []);
 
   const handleCopyValidationUrl = async (verificationCode: string) => {
-    const url = `${origin}/validar/ata/${verificationCode}`;
+    const url = getAtaValidationUrl(verificationCode, origin);
     try {
       await navigator.clipboard.writeText(url);
       setCopiedValidationUrl(true);
@@ -641,21 +648,26 @@ export default function AtasClient({
               </div>
             </div>
 
-            {/* QR Code de Alta Resolução */}
+            {/* QR Code de Alta Resolução Autônomo */}
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col items-center justify-center space-y-3">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                  `${origin}/validar/ata/${selectedMinuteForQr.verificationCode}`
-                )}`}
-                alt="QR Code de Validação"
-                className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200"
-              />
+              <div className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200 flex items-center justify-center">
+                <AtaQrCode
+                  value={
+                    selectedMinuteForQr.verificationCode
+                      ? getAtaValidationUrl(selectedMinuteForQr.verificationCode, origin)
+                      : ""
+                  }
+                  size={160}
+                  className="w-full h-full"
+                  alt="QR Code de Validação"
+                />
+              </div>
               <div className="text-center">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                   Código de Autenticação
                 </span>
                 <span className="text-lg font-black font-mono tracking-widest text-slate-900">
-                  {selectedMinuteForQr.verificationCode}
+                  {selectedMinuteForQr.verificationCode || "Pendente"}
                 </span>
               </div>
             </div>

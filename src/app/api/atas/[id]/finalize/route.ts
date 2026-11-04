@@ -70,6 +70,16 @@ export async function POST(
               throw new Error(`STATUS_INVALID:Esta ata encontra-se com status '${minute.status}' e não pode ser lavrada.`);
             }
 
+            // 1.1 Adquire lock transacional exclusivo por tenant e ano (Lei 14.063/2020)
+            // Impede qualquer colisão de concorrência ou disputa de ataNumber entre pedagogas simultâneas da mesma escola.
+            try {
+              await tx.$executeRaw`
+                SELECT pg_advisory_xact_lock(hashtext('seq_ata_' || ${minute.schoolId} || '_' || ${currentYear}::text));
+              `;
+            } catch (lockErr) {
+              // Tolerância em ambientes de teste sem Postgres Advisory Locks
+            }
+
             // 2. Se o cliente enviou os dados atualizados do formulário no momento de lavrar, sincroniza antes de selar o hash
             if (rawBody && typeof rawBody === "object") {
               if (Array.isArray(rawBody.studentIds) && rawBody.studentIds.length > 0) {

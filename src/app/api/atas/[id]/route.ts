@@ -4,6 +4,7 @@ import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { generateVerificationCode } from "@/lib/ataCrypto";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +134,20 @@ export async function GET(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
+    }
+
+    // Auto-recuperação de fé pública: assegura verificationCode para ata finalizada legada
+    if (minute.status === "FINALIZED" && !minute.verificationCode) {
+      const code = generateVerificationCode();
+      minute.verificationCode = code;
+      try {
+        await prisma.pedagogicalMinute.update({
+          where: { id: minute.id },
+          data: { verificationCode: code },
+        });
+      } catch (e) {
+        console.warn(`[GET /api/atas/${id}] Falha ao persistir verificationCode legado:`, e);
+      }
     }
 
     return NextResponse.json({ success: true, minute });

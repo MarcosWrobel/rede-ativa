@@ -99,7 +99,15 @@ export async function POST(req: Request) {
     }
 
     // 3. Carrega alunos existentes ISOLADOS por esta instituição de ensino
-    // e o catálogo global de CGMs em uso para prevenir colisão de chave única (@unique cgm)
+    // e apenas os CGMs do lote recebido que já estejam cadastrados para prevenir colisão de chave única (@unique cgm)
+    const incomingCgms = Array.from(
+      new Set(
+        students
+          .map((s) => (s.cgm || "").replace(/\D/g, "").trim())
+          .filter((cgm) => cgm.length > 0)
+      )
+    );
+
     const [existingSchoolStudents, globalCgmRows] = await Promise.all([
       prisma.student.findMany({
         where: schoolId ? { schoolId } : undefined,
@@ -114,10 +122,12 @@ export async function POST(req: Request) {
           active: true,
         },
       }),
-      prisma.student.findMany({
-        where: { cgm: { not: null } },
-        select: { cgm: true },
-      }),
+      incomingCgms.length > 0
+        ? prisma.student.findMany({
+            where: { cgm: { in: incomingCgms } },
+            select: { cgm: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     type ExistingRow = (typeof existingSchoolStudents)[number];

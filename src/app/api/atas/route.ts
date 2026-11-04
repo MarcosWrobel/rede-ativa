@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
+import { generateVerificationCode } from "@/lib/ataCrypto";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -150,6 +151,25 @@ export async function GET(req: Request) {
         },
       },
     });
+
+    // Auto-recuperação de fé pública: assegura verificationCode para atas finalizadas legadas
+    const missingCodes = minutes.filter((m) => m.status === "FINALIZED" && !m.verificationCode);
+    if (missingCodes.length > 0) {
+      await Promise.all(
+        missingCodes.map(async (m) => {
+          const code = generateVerificationCode();
+          m.verificationCode = code;
+          try {
+            await prisma.pedagogicalMinute.update({
+              where: { id: m.id },
+              data: { verificationCode: code },
+            });
+          } catch (e) {
+            console.warn(`[GET /api/atas] Falha ao persistir verificationCode para ata ${m.id}:`, e);
+          }
+        })
+      );
+    }
 
     const includeSignatures = searchParams.get("includeSignatures") === "true";
 

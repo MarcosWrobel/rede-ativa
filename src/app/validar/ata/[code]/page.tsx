@@ -9,7 +9,12 @@ interface Props {
 
 export default async function ValidarAtaPage({ params }: Props) {
   const { code } = await params;
-  const cleanCode = code.toUpperCase().trim();
+  let cleanCode = "";
+  try {
+    cleanCode = decodeURIComponent(code).toUpperCase().trim();
+  } catch {
+    cleanCode = code.toUpperCase().trim();
+  }
 
   const minute = await prisma.pedagogicalMinute.findUnique({
     where: { verificationCode: cleanCode },

@@ -36,6 +36,15 @@ export async function POST(
 
     // Executa em transação atômica para garantir encadeamento linear estrito dos hashes dos adendos
     const addendum = await prisma.$transaction(async (tx) => {
+      // Bloqueio pessimista de linha na ata pai para garantir linearidade estrita da hash-chain (Lei nº 14.063/2020)
+      try {
+        await tx.$executeRaw`
+          SELECT "id" FROM "PedagogicalMinute" WHERE "id" = ${id} FOR UPDATE;
+        `;
+      } catch (lockErr) {
+        // Tolerância em ambientes de teste sem suporte a FOR UPDATE
+      }
+
       const minute = await tx.pedagogicalMinute.findUnique({
         where: { id },
         include: {

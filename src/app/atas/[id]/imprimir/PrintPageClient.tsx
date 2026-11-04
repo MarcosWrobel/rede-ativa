@@ -3,9 +3,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Printer, ArrowLeft, ShieldCheck } from "lucide-react";
+import AtaQrCode from "@/components/ata/AtaQrCode";
+import { getAtaValidationUrl } from "@/lib/qrCode";
 
 interface Props {
   minute: any;
+  initialOrigin?: string;
+  initialQrSvg?: string;
+  initialVerificationUrl?: string;
 }
 
 function getSchoolNetworkHeader(school: any) {
@@ -31,7 +36,12 @@ function getSchoolNetworkHeader(school: any) {
   };
 }
 
-export default function PrintPageClient({ minute }: Props) {
+export default function PrintPageClient({
+  minute,
+  initialOrigin,
+  initialQrSvg,
+  initialVerificationUrl,
+}: Props) {
   const isFinal = minute.status === "FINALIZED";
   const isVoid = minute.status === "VOIDED";
   const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N";
@@ -44,14 +54,23 @@ export default function PrintPageClient({ minute }: Props) {
     (minute.summary || "").trim()
   );
 
-  const [origin, setOrigin] = useState("https://registro-leopoldina.vercel.app");
+  const [origin, setOrigin] = useState<string>(() => {
+    if (typeof window !== "undefined" && window.location.origin) {
+      return window.location.origin;
+    }
+    return initialOrigin || "https://registro-leopoldina.vercel.app";
+  });
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && window.location.origin) {
       setOrigin(window.location.origin);
     }
   }, []);
 
-  const verificationUrl = `${origin}/validar/ata/${minute.verificationCode}`;
+  const verificationUrl =
+    minute.verificationCode
+      ? getAtaValidationUrl(minute.verificationCode, origin)
+      : initialVerificationUrl || "";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -329,13 +348,15 @@ export default function PrintPageClient({ minute }: Props) {
             </div>
 
             <div className="text-center flex-shrink-0">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(
-                  verificationUrl
-                )}`}
-                alt="QR Code Validação"
-                className="w-20 h-20 mx-auto border border-slate-200 p-1 rounded-lg print:w-16 print:h-16 print:p-0.5"
-              />
+              <div className="w-20 h-20 mx-auto border border-slate-200 p-1 rounded-lg print:w-16 print:h-16 print:p-0.5 bg-white flex items-center justify-center">
+                <AtaQrCode
+                  value={verificationUrl}
+                  size={76}
+                  className="w-full h-full"
+                  alt="QR Code Validação"
+                  initialSvg={initialQrSvg}
+                />
+              </div>
               <span className="text-[9px] text-slate-500 font-bold block mt-0.5 print:text-[8px]">Conferir Autenticidade</span>
             </div>
           </div>
