@@ -20,6 +20,15 @@ for (const key of ["AUTH_SECRET", "NEXTAUTH_SECRET"]) {
   }
 }
 
+// Garante compatibilidade estrita com Auth.js v5 em qualquer host da Vercel
+const resolvedSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+if (!process.env.AUTH_SECRET && resolvedSecret) {
+  process.env.AUTH_SECRET = resolvedSecret;
+}
+if (!process.env.AUTH_TRUST_HOST) {
+  process.env.AUTH_TRUST_HOST = "true";
+}
+
 export const authConfig: NextAuthConfig = {
   trustHost: true,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
