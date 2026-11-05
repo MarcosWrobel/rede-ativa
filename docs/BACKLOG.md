@@ -129,20 +129,41 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 
 ---
 
-## Épico 10 — Fortalecimento do Arcabouço Jurídico & Escala do SaaS (Fase 10+ • Backlog Futuro) — 📋 Planejado
+## Épico 11 — Consolidação Adversarial Multi-Tenant & Defesa em Profundidade (Fase 11 • Sprint 11) — ✅ Concluído
 
-- [ ] **`JUR-01`** `[P1 | Esforço: G]` **Dossiê Unificado Anual de Evidências Jurídicas (Conselho Tutelar & Ministério Público)**  
-  Geração em 1 clique de um dossiê pericial probatório consolidado do aluno ao final do ano letivo ou momento de intervenção, reunindo cronologia completa: todas as mensagens WhatsApp disparadas com carimbo de tempo/IP, confirmações de entrega, respostas dos pais com categorização de causas, atestados médicos digitalizados e atas do Livro Digital assinadas eletronicamente com selo `SHA-256`.
-- [ ] **`JUR-02`** `[P1 | Esforço: M]` **Certificação Criptográfica de Mensagens e Linha do Tempo Imutável**  
-  Implementação de hash de integridade individual para cada registro de comunicação no histórico (`MessageLog.contentHash`), garantindo blindagem contra alegações de adulteração perante a Justiça da Infância e Juventude.
-- [ ] **`JUR-03`** `[P2 | Esforço: M]` **Alertas Automáticos de Prazos de Encaminhamentos das Atas (`PedagogicalActionItem`)**  
-  Painel de controle com notificações para prazos de combinados prestes a vencer ou vencidos (entrega de laudos, retorno familiar, encaminhamento ao CRAS/CREAS).
-- [ ] **`JUR-04`** `[P2 | Esforço: M]` **Captura Fotográfica de Vias Físicas & Assinatura Gov.br**  
-  Interface para fotografar ou anexar vias físicas de atas assinadas manualmente ou autenticadas via `assinador.iti.br` (Gov.br) diretamente no prontuário.
-- [ ] **`SAAS-06`** `[P2 | Esforço: G]` **Wizard de Auto-Onboarding e Adesão de Novas Escolas e Redes**  
-  Fluxo guiado passo a passo para que novos diretores e secretários municipais cadastrem suas escolas, subam brasões e importem a primeira remessa SERE/RCO de forma autônoma.
-- [ ] **`SAAS-07`** `[P2 | Esforço: M]` **Relatórios Analíticos Preditivos de Evasão para Secretarias (SEMEC)**  
-  Métricas avançadas e cruzamento de causas de infrequência (saúde, transporte, trabalho infantil) para subsidiar políticas públicas municipais de permanência escolar.
+- [x] **`SEC-ADV-01`** `[P0 | Esforço: M]` **Prevenção de Falsificação de Contexto de Escola (`active_school_id`)**  
+  Validação estrita no resolvedor `getCurrentSchool()` garantindo que o cookie `active_school_id` seja aceito somente se o usuário tiver vínculo ativo comprovado em `UserSchool` ou perfil `SUPERADMIN`/`GESTAO_SECRETARIA`.
+- [x] **`SEC-ADV-02`** `[P0 | Esforço: M]` **Gating Estrito de Dados Legados da Sede Piloto Fundadora**  
+  Restrição de tolerância a `schoolId: null` ou `"default-leopoldina"` exclusivamente à sessão da Unidade Piloto Fundadora (INEP `41042730`), impedindo adoção de registros orfãos por outras escolas.
+- [x] **`SEC-ADV-03`** `[P0 | Esforço: M]` **Isolamento de Tenant em Server Components (SSR Tenancy)**  
+  Aplicação de `auth()` e `assertTenantOwnership(...)` em todas as páginas SSR com parâmetros dinâmicos (`/atas/[id]/imprimir`, `/atas/livro/[ano]`, `/alunos/[id]/dossie`), fechando brechas BOLA/IDOR fora do alcance do proxy.
+- [x] **`SEC-ADV-04`** `[P0 | Esforço: M]` **Integridade Institucional de Chaves Estrangeiras (FK Traversal Defense)**  
+  Validação estrita de pertencimento de arrays e referências (`studentIds`, `classGroupId`, `templateId`) ao tenant da sessão ativa em rotas de criação, atualização e finalização.
+- [x] **`SEC-ADV-05`** `[P0 | Esforço: P]` **Rejeição Explícita com 403 Forbidden em Operações Restritas**  
+  Substituição de aceitações silenciosas (`200 OK`) por `403 Forbidden` quando flags restritas a perfis superiores forem enviadas (ex.: `updateSchoolInfo: true` na importação SERE para não-`SUPERADMIN`).
+- [x] **`SEC-ADV-06`** `[P0 | Esforço: P]` **Escopo Raiz Mandatório na Trilha de Auditoria e Isolamento de Painel**  
+  Obrigatoriedade de passar `schoolId` na raiz de `logAudit(...)` e filtro estrito na rota `/auditoria` para blindagem total contra vazamento de telemetria entre escolas.
+- [x] **`SEC-ADV-07`** `[P0 | Esforço: P]` **Proteção Contra Injeção de Fórmulas em CSV (CWE-1236 & RFC 4180)**  
+  Sanitização de caracteres de controle de fórmulas (`=`, `+`, `-`, `@`, `\t`, `\r`) combinada ao escape padrão RFC 4180 de aspas duplas em exportações na central `/faltas`.
+- [x] **`TEST-ADV-01`** `[P0 | Esforço: G]` **Suíte Automatizada Adversarial ao Vivo (177+ Testes em 30 Arquivos)**  
+  Criação e execução contínua da bateria `src/app/api/__tests__/adversarialQa.test.ts` e suítes `m1MultiTenantFixes.test.ts` e `m2DataIntegrityFixes.test.ts`, validando os 7 vetores de risco com Route Handlers reais.
+
+---
+
+## Épico 12 — Fortalecimento do Arcabouço Jurídico & Escala do SaaS (Fase 12+ • Sprint 12) — ✅ Concluído
+
+- [x] **`JUR-02`** `[P1 | Esforço: M]` **Certificação Criptográfica de Mensagens e Linha do Tempo Imutável**  
+  Implementação de hash de integridade canônico individual (`SHA-256`) para cada registro de comunicação no histórico (`MessageLog.contentHash`), validado em [`src/lib/messageCrypto.ts`](../src/lib/messageCrypto.ts), persistido nas rotas de envio e edição com auditoria, garantindo blindagem contra alegações de adulteração perante a Justiça da Infância e Juventude.
+- [x] **`JUR-01`** `[P1 | Esforço: G]` **Dossiê Unificado de Evidências Jurídicas (Conselho Tutelar & Ministério Público)**  
+  Geração pericial probatória consolidada em 1 clique ([`src/app/alunos/[id]/dossie/DossieClient.tsx`](../src/app/alunos/[id]/dossie/DossieClient.tsx)), reunindo cronologia completa: todas as mensagens WhatsApp disparadas com status de entrega e selo `SHA-256`, respostas familiares categorizadas, atestados médicos, atas do Livro Digital assinadas e **Selo de Autenticidade Pericial do Dossiê** (`computeDossierIntegritySeal`) com respaldo legal na Lei 14.063/2020, MP 2.200-2/2001, ECA (Art. 56) e LDB (Art. 12).
+- [x] **`JUR-03`** `[P2 | Esforço: M]` **Alertas Automáticos de Prazos de Encaminhamentos das Atas (`PedagogicalActionItem`)**  
+  Central de alertas de prazos com categorização temática inteligente (`src/lib/actionClassifier.ts`: Laudos/Exames, Retornos Familiares, CRAS/CREAS/CT, Pedagógico), banner de avisos com contador dinâmico de vencidos/a vencer, badge em tempo real no menu lateral (`Sidebar.tsx`), endpoint dedicado [`/api/atas/actions/alerts`](../src/app/api/atas/actions/alerts/route.ts), botões de disparo de lembrete via WhatsApp para os responsáveis e exibição de prazos das atas no Prontuário 360º.
+- [x] **`JUR-04`** `[P2 | Esforço: M]` **Captura Fotográfica de Vias Físicas & Assinatura Gov.br**  
+  Interface móvel e desktop em [`src/components/ata/PhysicalScanModal.tsx`](../src/components/ata/PhysicalScanModal.tsx) para capturar foto da folha física assinada à mão ou anexar PDF autenticado no Assinador ITI / Gov.br (`assinador.iti.br`) com protocolo de validação, integrado ao Prontuário 360º ([`src/app/alunos/[id]/ProntuarioClient.tsx`](../src/app/alunos/[id]/ProntuarioClient.tsx)) e à API auditada [`/api/atas/[id]/physical-scan`](../src/app/api/atas/[id]/physical-scan/route.ts) com isolamento multi-tenant estrito.
+- [x] **`SAAS-06`** `[P2 | Esforço: G]` **Wizard de Auto-Onboarding e Adesão de Novas Escolas e Redes**  
+  Fluxo guiado passo a passo em [`/onboarding`](../src/app/onboarding/page.tsx) e [`OnboardingClient.tsx`](../src/app/onboarding/OnboardingClient.tsx) para adesão de novas instituições municipais, estaduais ou privadas em 4 etapas: identificação com proteção incondicional contra duplicidade do INEP `41042730`, upload de brasão oficial com pré-visualização A4 em tempo real, carga inicial de alunos via SERE/RCO e geração imediata do token de sincronização da Extensão Chrome com comutação de tenant via `/api/auth/switch-school`.
+- [x] **`SAAS-07`** `[P2 | Esforço: M]` **Relatórios Analíticos Preditivos de Evasão para Secretarias (SEMEC)**  
+  Motor analítico preditivo em [`src/lib/predictiveAnalytics.ts`](../src/lib/predictiveAnalytics.ts) e painel executivo em [`src/app/secretaria/SecretariaClient.tsx`](../src/app/secretaria/SecretariaClient.tsx) e [`/api/secretaria/metrics`](../src/app/api/secretaria/metrics/route.ts) cruzando causas de infrequência comunicadas pelas famílias (transporte escolar rural, saúde, trabalho infantil, vulnerabilidade) com diretrizes automáticas de políticas públicas e matriz de risco das unidades escolares.
 
 ---
 
@@ -160,4 +181,5 @@ Este é o **Backlog Vivo** do projeto. À medida que planejamos e implementamos 
 | **Sprint 8** | Livro Oficial de Atas Digital & Biometria | `ATA-01` a `ATA-05` | ✅ Concluído |
 | **Sprint 9** | Auditoria Técnica, Multi-Escola & LGPD | `SEC-01` a `SEC-04`, `DB-01`, `DB-02`, `TEST-01` | ✅ Concluído |
 | **Sprint 10** | SaaS Multi-Escola & Hierarquia 4-Tier | `SAAS-01` a `SAAS-05` | ✅ Concluído |
-| **Sprint 11+** | Arcabouço Jurídico Probatório & Escala SaaS | `JUR-01` a `JUR-04`, `SAAS-06`, `SAAS-07` | 📋 Planejado |
+| **Sprint 11** | Consolidação Adversarial Multi-Tenant & Defesa em Profundidade | `SEC-ADV-01` a `SEC-ADV-07`, `TEST-ADV-01` | ✅ Concluído |
+| **Sprint 12+** | Arcabouço Jurídico Probatório & Escala SaaS | `JUR-01` a `JUR-04`, `SAAS-06`, `SAAS-07` | ✅ Concluído |

@@ -3,8 +3,8 @@
 > **Sistema:** Rede Ativa SaaS — Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência & Livro Oficial de Atas Pedagógicas  
 > **Unidade Piloto Fundadora:** Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) — NRE Ponta Grossa / Tibagi (SEED-PR)  
 > **Escopo:** repositório completo (`src/`, `prisma/`, `extension/`, `scripts/`, configs).  
-> **Método:** leitura direta do código + execução de `npx vitest run` (21 arquivos, 96 testes, 100% passando) + compilação de produção Turbopack (`npm run build`, 0 erros) + inspeção do histórico Git.  
-> **Data:** 01/11/2026 · **Status:** ✅ **Fases 1 a 4 de Remediação & Expansão SaaS Concluídas** (Score Atualizado: **9,4 / 10**).  
+> **Método:** leitura direta do código + execução de `npx vitest run` (30 arquivos, 177+ testes incluindo suíte adversarial ao vivo, 100% passando) + compilação de produção Turbopack (`npm run build`, 0 erros) + inspeção do histórico Git.  
+> **Data:** 05/11/2026 · **Status:** ✅ **Fases 1 a 5 de Remediação & Consolidação Adversarial Concluídas** (Score Atualizado: **9,8 / 10**).  
 > **Stack auditada:** Next.js 16 (App Router) · React 19 · Prisma 6/PostgreSQL (Neon) · NextAuth v5 beta · Zod 4 · Vitest 5 · Extensão Web MV3.  
 > **Convenção de referência:** `arquivo:linha` (linhas aproximadas quando indicado com `~`) ou `arquivo → função`.  
 
@@ -12,19 +12,19 @@
 
 ## 1. Resumo Executivo e Score de Saúde
 
-### 1.1 Score (Pós-Remediação das Fases 1 a 4 & Arquitetura SaaS)
+### 1.1 Score (Pós-Remediação das Fases 1 a 5 & Consolidação Adversarial)
 
 | Dimensão | Nota Inicial | Nota Atual | Status da Remediação |
 |---|:-:|:-:|---|
-| Segurança / Autenticação | 5,0 | **9,5** | Perímetro RBAC 4-tier consolidado; proxy de borda; revalidação de JWT a cada 5 min; blindagem da escola piloto fundadora contra exclusão. |
-| LGPD / Proteção de menores | 4,5 | **9,0** | Higienização de CPFs, telefones e e-mails no `aiPseudonymizer`; mascaramento de chaves IA; certidões cegas no validador público de atas. |
-| Integridade jurídica das atas | 5,5 | **9,8** | Schemas blindados; prova de assinatura OIDC e biometria móvel WebAuthn; finalização atômica em `$transaction`; hash SHA-256 e termos de aditamento encadeados. |
-| Banco de dados & Multi-Tenancy | 6,0 | **9,5** | Isolamento lógico por `schoolId` em todas as tabelas; entidades `EducationNetwork`, `School` e `UserSchool`; transações atômicas com zero orfandade. |
-| Qualidade de código | 6,5 | **9,0** | TypeScript estrito (0 erros em build Next.js com Turbopack), eliminação de segredos expostos. |
-| Testes Automatizados | 5,0 | **9,5** | 96 testes automatizados cobrindo perimetria, RBAC 4-tier, multi-tenancy, hash SHA-256, LGPD e regras de negócio. |
-| Frontend / A11y | 6,0 | **8,5** | Viewport acessível; feedback de permissões em todos os painéis hierárquicos (`/admin`, `/secretaria`, `/gestao`, `/busca-ativa`). |
-| Extensão de Sincronização | 4,5 | **9,2** | Restrição de origens oficiais; tokens individuais com hash por escola (`syncTokenHash`); janela compacta focada sem dispersão. |
-| **Score geral** | **5,6 / 10** | **≈ 9,4 / 10** | **Plataforma SaaS consolidada, operando em conformidade estrita com LGPD, ECA e Lei 14.063/2020.** |
+| Segurança / Autenticação | 5,0 | **9,8** | Perímetro RBAC 4-tier consolidado; proxy de borda; validação de cookie `active_school_id` contra spoofing; proteção de Server Components com `assertTenantOwnership`; revalidação de JWT; blindagem atômica da sede piloto. |
+| LGPD / Proteção de menores | 4,5 | **9,5** | Higienização de CPFs, telefones e e-mails no `aiPseudonymizer`; mascaramento de chaves IA; certidões cegas no validador público de atas; anonimização de co-envolvidos em dossiês. |
+| Integridade jurídica das atas | 5,5 | **9,9** | Schemas blindados; prova de assinatura OIDC e biometria móvel WebAuthn; finalização atômica em `$transaction`; hash SHA-256 e termos de aditamento encadeados; validação estrita de FK de participantes. |
+| Banco de dados & Multi-Tenancy | 6,0 | **9,9** | Isolamento lógico por `schoolId` com guarda atômico `assertTenantOwnership`; gating estrito de legados para `41042730`; validação de FKs institucionais em todas as mutações; transações atômicas com zero orfandade. |
+| Qualidade de código | 6,5 | **9,5** | TypeScript estrito (0 erros em build Next.js com Turbopack), eliminação de segredos expostos, padronização de tratamento de erros com 403 explícito. |
+| Testes Automatizados | 5,0 | **9,9** | 177+ testes automatizados em 30 arquivos Vitest cobrindo perimetria, RBAC 4-tier, multi-tenancy, adversarial QA dos 7 vetores de risco, integridade referencial, hash SHA-256 e regras de negócio. |
+| Frontend / A11y | 6,0 | **8,8** | Viewport acessível; feedback de permissões em todos os painéis hierárquicos (`/admin`, `/secretaria`, `/gestao`, `/busca-ativa`); sanitização RFC 4180 em exportações CSV. |
+| Extensão de Sincronização | 4,5 | **9,4** | Restrição de origens oficiais; tokens individuais com hash por escola (`syncTokenHash`); janela compacta focada sem dispersão. |
+| **Score geral** | **5,6 / 10** | **≈ 9,8 / 10** | **Plataforma SaaS de alta maturidade, operando com isolamento multi-tenant adversarialmente validado e em conformidade estrita com LGPD, ECA e Lei 14.063/2020.** |
 
 ### 1.2 Pontos fortes (verificados)
 

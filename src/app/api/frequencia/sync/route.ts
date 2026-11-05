@@ -434,6 +434,7 @@ export async function POST(req: Request) {
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "LowAttendanceRecord",
       entityId: "BATCH_SYNC",
+      schoolId: currentSchool.id,
       details: {
         totalRecebido: alunos.length,
         atualizados,

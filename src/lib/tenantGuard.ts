@@ -30,12 +30,11 @@ export function assertTenantOwnership(
 
   // Retrocompatibilidade segura com dados legados da escola piloto fundadora:
   // Se o recurso não tem schoolId ou carrega o ID fixo legado "default-leopoldina",
-  // e o contexto do usuário for a escola sede fundadora (ou sem schoolId específico na sessão),
+  // e o contexto do usuário for comprovadamente a escola sede fundadora (INEP 41042730 ou ID fixo),
   // permite o acesso para não travar a operação histórica da unidade piloto.
   const isDefaultSchoolContext =
     currentSchoolId === "default-leopoldina" ||
-    (session?.user as any)?.inepCode === "41042730" ||
-    !(session?.user as any)?.schoolId;
+    (session?.user as any)?.inepCode === "41042730";
 
   if ((!resourceSchoolId || resourceSchoolId === "default-leopoldina") && isDefaultSchoolContext) {
     return true;

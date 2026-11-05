@@ -94,6 +94,7 @@ export async function POST(req: Request) {
       action: "WEBHOOK_REPLY",
       entityType: "MessageLog",
       entityId: targetLog.id,
+      schoolId: targetLog.student.schoolId || null,
       details: {
         studentName: targetLog.student.name,
         phone: digits,

@@ -203,6 +203,7 @@ model MessageLog {
   deliveryStatus    String           @default("SENT") // LINK_OPENED | SENT | DELIVERED | READ | FAILED_NO_WHATSAPP
   deliveryUpdatedAt DateTime?
   sentAt            DateTime         @default(now())
+  contentHash       String?          // Hash SHA-256 canônico de integridade probatória e não-repúdio (JUR-02)
 
   @@index([sentAt(sort: Desc)])
   @@index([studentId, sentAt(sort: Desc)])
@@ -212,6 +213,7 @@ model MessageLog {
   @@index([reasonTitle])
   @@index([deliveryStatus])
   @@index([replyCategory])
+  @@index([contentHash])
 }
 
 model LowAttendanceRecord {
@@ -347,6 +349,10 @@ model PedagogicalMinute {
   contentHash           String?                        // SHA-256 canônico gerado no momento da lavratura
   verificationCode      String?                        @unique // Código curto aleatório não sequencial para o QR Code público
   physicalSignedScanData String?                       // Base64 compactado de imagem/PDF da via física assinada
+  physicalScanUploadedAt DateTime?                     // Data do upload da via física escaneada/fotografada (JUR-04)
+  physicalScanUploadedBy String?                       // Nome do profissional que digitalizou (JUR-04)
+  govBrVerified         Boolean                        @default(false) // Autenticado via Assinador ITI / Gov.br (JUR-04)
+  govBrProtocol         String?                        // Código de validação / protocolo do assinador.iti.br (JUR-04)
   
   // Averbação de Cancelamento ("Tornada Sem Efeito")
   voidedAt              DateTime?

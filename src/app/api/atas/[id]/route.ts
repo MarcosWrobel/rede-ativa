@@ -213,12 +213,19 @@ export async function PATCH(
     const data = parsed.data;
     const ip = extractClientIp(req);
 
-    // Se informou studentIds, atualiza vínculos
+    // Se informou studentIds, atualiza vínculos garantindo isolamento multi-tenant
     if (data.studentIds) {
       const studentsDb = await prisma.student.findMany({
-        where: { id: { in: data.studentIds } },
+        where: { id: { in: data.studentIds }, schoolId: existing.schoolId },
         include: { classGroup: true },
       });
+
+      if (studentsDb.length !== data.studentIds.length) {
+        return NextResponse.json(
+          { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
+          { status: 400 }
+        );
+      }
 
       await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
       await prisma.pedagogicalMinuteStudent.createMany({
@@ -359,6 +366,7 @@ export async function PATCH(
       action: "UPDATE_ATA_DRAFT",
       entityType: "PedagogicalMinute",
       entityId: id,
+      schoolId: existing.schoolId,
       details: `Rascunho de ata atualizado: ${updated.subject}`,
       user: {
         id: authCheck.userId,

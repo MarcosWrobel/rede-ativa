@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Landmark,
   Plus,
@@ -467,14 +468,23 @@ export default function AdminEscolasClient({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsModalOpen(true)}
-          className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Cadastrar Nova Instituição</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-emerald-100" />
+            <span>Wizard de Auto-Onboarding</span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Cadastrar Nova Instituição</span>
+          </button>
+        </div>
       </div>
 
       {/* Feedback Banner */}

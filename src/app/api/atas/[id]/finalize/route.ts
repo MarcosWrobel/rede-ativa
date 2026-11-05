@@ -84,21 +84,24 @@ export async function POST(
             if (rawBody && typeof rawBody === "object") {
               if (Array.isArray(rawBody.studentIds) && rawBody.studentIds.length > 0) {
                 const studentsDb = await tx.student.findMany({
-                  where: { id: { in: rawBody.studentIds } },
+                  where: { id: { in: rawBody.studentIds }, schoolId: minute.schoolId },
                   include: { classGroup: true },
                 });
-                if (studentsDb.length > 0) {
-                  await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-                  await tx.pedagogicalMinuteStudent.createMany({
-                    data: studentsDb.map((s) => ({
-                      minuteId: id,
-                      studentId: s.id,
-                      studentNameSnapshot: s.name,
-                      classNameSnapshot: s.classGroup?.name || null,
-                      cgmSnapshot: s.cgm || null,
-                    })),
-                  });
+                if (studentsDb.length !== rawBody.studentIds.length) {
+                  throw new Error(
+                    "VALIDATION:Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular."
+                  );
                 }
+                await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+                await tx.pedagogicalMinuteStudent.createMany({
+                  data: studentsDb.map((s) => ({
+                    minuteId: id,
+                    studentId: s.id,
+                    studentNameSnapshot: s.name,
+                    classNameSnapshot: s.classGroup?.name || null,
+                    cgmSnapshot: s.cgm || null,
+                  })),
+                });
               }
 
               if (Array.isArray(rawBody.participants)) {
@@ -369,7 +372,7 @@ export async function POST(
       return NextResponse.json({ error: msg.replace("FORBIDDEN:", "") }, { status: 403 });
     }
     if (msg.startsWith("STATUS_INVALID:") || msg.startsWith("VALIDATION:")) {
-      return NextResponse.json({ error: msg.split(":")[1] }, { status: 400 });
+      return NextResponse.json({ error: msg.replace(/^(STATUS_INVALID|VALIDATION):/, "") }, { status: 400 });
     }
     return NextResponse.json({ error: msg || "Erro ao lavrar ata" }, { status: 500 });
   }

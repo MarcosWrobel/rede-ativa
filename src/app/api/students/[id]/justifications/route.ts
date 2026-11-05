@@ -49,6 +49,7 @@ export async function POST(
       action: "CREATE_JUSTIFICATION",
       entityType: "AbsenceJustification",
       entityId: created.id,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: student.name,
@@ -105,6 +106,7 @@ export async function DELETE(
       action: "DELETE_JUSTIFICATION",
       entityType: "AbsenceJustification",
       entityId: justificationId,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: existing.student.name,

@@ -285,6 +285,7 @@ export async function POST(req: Request) {
       action: "UPDATE_LOW_ATTENDANCE",
       entityType: "SerpSync",
       entityId: "BATCH_SERP",
+      schoolId: currentSchool.id,
       details: {
         totalRecebido: fichas.length,
         atualizados,

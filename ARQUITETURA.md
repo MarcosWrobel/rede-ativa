@@ -188,28 +188,39 @@ flowchart TD
 * **Token JWT Seguro**: Carga útil (*payload*) assinada com `AUTH_SECRET` (HMAC SHA-256 de 256 bits), transportada exclusivamente via cookies com atributos `HttpOnly`, `SameSite=Lax` e `Secure` (em produção).
 * **Revalidação Periódica de Acessos**: O callback `jwt()` implementa checagem temporal (`SESSION_REVALIDATE_MS = 5 min`) que consulta o banco de dados Neon para verificar se a conta foi desativada ou teve o papel alterado, revogando privilégios instantaneamente sem aguardar a expiração do cookie.
 
-### 4.2. Isolamento de Dados Multi-Tenant & Prevenção de IDOR
-* **Isolamento Lógico Rígido**: Todas as consultas Prisma das entidades filhas (`Student`, `ClassGroup`, `MessageLog`, `PedagogicalMinute`, `AbsenceJustification`) contêm cláusulas estritas vinculadas ao `schoolId`:
+### 4.2. Isolamento de Dados Multi-Tenant & Prevenção de IDOR / BOLA
+* **Isolamento Lógico Rígido**: Todas as consultas Prisma das entidades filhas (`Student`, `ClassGroup`, `MessageLog`, `PedagogicalMinute`, `AbsenceJustification`, `StudentContact`, etc.) contêm cláusulas estritas vinculadas ao `schoolId`:
   ```typescript
   // Exemplo de consulta blindada
   const students = await prisma.student.findMany({
     where: { schoolId, active: true },
-    // ...
   });
   ```
-* **Prevenção de IDOR (*Insecure Direct Object Reference*)**: Em operações de atualização, leitura detalhada ou exclusão por ID (`/api/students/[id]`, `/api/atas/[id]`), o backend valida se o registro pertence de fato à escola sob controle do usuário autenticado antes de executar a mutação.
-* **Chaveamento de Contexto Seguro (`/api/auth/switch-school`)**:
-  * SuperAdmin pode alternar para qualquer escola.
-  * Gestor da Secretaria pode alternar apenas para escolas do seu município/rede.
-  * Gestor Escolar e Pedagoga são restritos às escolas em que possuem vínculo em `UserSchool`.
-  * Tentativas de manipular o cookie `active_school_id` são neutralizadas pelo fallback automático para a escola autorizada do usuário.
+* **Prevenção de IDOR / BOLA (*Insecure Direct Object Reference*)**: Em operações de atualização, leitura detalhada ou exclusão por ID (`/api/students/[id]`, `/api/atas/[id]`), o backend valida se o registro pertence de fato à escola sob controle do usuário autenticado antes de executar a mutação via `assertTenantOwnership(...)`.
+* **Validação de Cookie de Contexto & Neutralização de Spoofing (`getCurrentSchool`)**:
+  * Em chamadas a `getCurrentSchool()`, o valor lido do cookie `active_school_id` nunca é aceito cegamente. O sistema valida se o usuário autenticado na sessão possui vínculo ativo com aquela instituição escolar (`session.user.schools` / `schoolId`) ou privilégio global (`SUPERADMIN` / `GESTAO_SECRETARIA` autorizado).
+  * Tentativas de manipular o cookie ou injetar `schoolId` no corpo de requisições JSON (*parameter spoofing*) são completamente neutralizadas, derivando o tenant operacional estritamente da sessão verificada.
+* **Tolerância a Dados Legados Restrita à Sede Piloto**:
+  * Qualquer filtro de retrocompatibilidade com registros legados (`schoolId: null` ou `"default-leopoldina"`) é condicionado estritamente à comprovação de que a sessão ativa pertence à Escola Piloto Fundadora (`inepCode === "41042730"`).
+  * Escolas externas são impedidas de adotar ou acessar registros orfãos por cláusulas `OR` e bloqueadas de executar *auto-healing* indevido de `schoolId`.
 * **Proteção Especial da Escola Piloto Leopoldina**:
   * O Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) possui travas de segurança atômicas nos endpoints de exclusão (`DELETE /api/schools/[id]`) e higienização (`POST /api/schools/[id]/sanitize`), impedindo sua desativação inadvertida por qualquer operador.
+* **Isolamento em Server Components (SSR Tenancy Enforcement)**:
+  * O proxy de borda (`src/proxy.ts`) atua como guardião perimetral de autenticação e papel geral, mas não valida propriedade sobre parâmetros dinâmicos de rota (`[id]`, `[ano]`).
+  * Páginas de renderização no servidor (SSR como `/atas/[id]/imprimir`, `/atas/livro/[ano]` e `/alunos/[id]/dossie`) executam obrigatoriamente checagem de sessão com `auth()` e verificação de posse institucional com `assertTenantOwnership(...)` antes de qualquer entrega de dados.
+* **Integridade Institucional de Chaves Estrangeiras (FK Traversal Defense)**:
+  * Em mutações de criação, atualização de rascunhos e finalizações (`POST /api/students`, `POST /api/atas`, `PATCH /api/atas/[id]`, `POST /api/atas/[id]/finalize`, `POST /api/messages/send`), todos os identificadores de entidades relacionadas referenciadas em arrays ou campos (`studentIds`, `classGroupId`, `templateId`) são verificados contra o `schoolId` ativo (`matched.length === requestedIds.length`), impedindo o vínculo cruzado entre diferentes instituições.
+* **Rejeição Explícita de Parâmetros Restritos (RBAC)**:
+  * Quando um payload submeter parâmetros ou flags restritos a perfis administrativos superiores (ex.: `updateSchoolInfo: true` na importação SERE para não-`SUPERADMIN` ou tentativa de autopromoção em `/api/users`), a aplicação rejeita imediatamente com código `403 Forbidden`, repudiando a prática insegura de aceitar a requisição com `200 OK` ignorando silenciosamente a flag.
+* **Isolamento Estrito da Trilha de Auditoria**:
+  * Toda mutação em contexto escolar registra logs de auditoria fornecendo `schoolId` na raiz de `logAudit(...)`.
+  * Consultas ao painel `/auditoria` são escopadas pelo inquilino da sessão, impedindo o vazamento de eventos de outras instituições ou de registros com `schoolId: null`.
 
 ### 4.3. Validação de Entrada & Proteção contra Injeção
-* **Schemas Zod Estritos**: Todas as requisições que alteram estado passam por validação estrutural via Zod (`userCreateSchema`, `ataCreateSchema`, `switchSchoolSchema`, etc.), rejeitando propriedades desconhecidas e prevenindo ataques de *Mass Assignment*.
+* **Schemas Zod Estritos**: Todas as requisições que alteram estado passam por validação estrutural via Zod (`userCreateSchema`, `ataCreateSchema`, `sereBatchImportSchema`, etc.), rejeitando propriedades desconhecidas e prevenindo ataques de *Mass Assignment*.
 * **Sanitização de Consultas SQL**: Utilização exclusiva de queries parametrizadas via Prisma ORM, tornando a aplicação imune a *SQL Injection*.
 * **Mitigação de Ataques de Timing**: Verificação de tokens estáticos e chaves de extensão utilizando `crypto.timingSafeEqual` para impedir ataques de análise de tempo de resposta.
+* **Proteção contra Injeção de Fórmulas em CSV (CWE-1236)**: Em exportações de planilhas (como na central de infrequência `/faltas`), todas as colunas de texto passam por `sanitizeCsvField(...)`, que prefixa caracteres de disparo de fórmulas (`=`, `+`, `-`, `@`, `\t`, `\r`) com apóstrofo (`'`) e aplica o escape de aspas duplas (`""`) preconizado pela norma RFC 4180.
 
 ---
 
@@ -312,16 +323,17 @@ O Artigo 15 do Marco Civil da Internet impõe o dever de guarda e conservação 
 
 ## 7. Verificação de Integridade e Testes Automatizados
 
-A estabilidade da arquitetura é verificada continuamente por meio de uma suíte de testes com o framework **Vitest**:
-* **Total de Testes Automatizados**: **96 testes aprovados** em 21 arquivos de teste.
-* **Coberturas Testadas**:
-  - Segurança perimetral, bootstrap admin, hierarquia de 4 níveis de papéis e proteção da escola piloto (`securityAndRbac.test.ts`);
-  - Algoritmo de pseudonimização LGPD para inteligência artificial (`aiPseudonymizer.test.ts`);
-  - Criptografia SHA-256 e selagem de atas pedagógicas (`ataCrypto.test.ts` e `escolaSign.test.ts`);
-  - Resolução contextual de instituições multi-escola (`multiTenancy.test.ts`);
-  - Parsers multi-formato de importação SERE (`sereParser.test.ts`);
-  - Despacho de mensagens e janela compacta (`clientDispatcher.test.ts`);
-  - Renderização SSR resiliente em componentes de servidor (`buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx`).
+A estabilidade e inviolabilidade da arquitetura são verificadas continuamente por meio de uma suíte abrangente de testes com o framework **Vitest**:
+* **Total de Testes Automatizados**: **177+ testes aprovados (100% de sucesso)** distribuídos em 30 arquivos de teste.
+* **Coberturas e Baterias de Teste**:
+  - **QA Adversarial de Segurança Multi-Tenant (`adversarialQa.test.ts` e `multiTenantSecurityAudit.test.ts`)**: Bateria contra os 7 vetores de risco (BOLA/IDOR em rotas REST e SSR, context leakage e falsificação de cookies, importação SERE cross-tenant, violação de FK institucional, escalada de privilégios RBAC, injeção de fórmulas CSV e isolamento de auditoria).
+  - **Isolamento de Núcleo e Integridade Referencial (`m1MultiTenantFixes.test.ts` e `m2DataIntegrityFixes.test.ts`)**: Validação ponta a ponta dos resolvedores de escola, sanitização de auditoria, integridade de participantes de atas e bloqueio de cross-linking.
+  - **Segurança Perimetral e RBAC Hierárquico (`securityAndRbac.test.ts`)**: Bootstrap admin, 4 camadas hierárquicas, proteção atômica da Escola Piloto Leopoldina e permissões restritas.
+  - **Fé Pública Criptográfica e Assinaturas (`ataCrypto.test.ts` e `escolaSign.test.ts`)**: Selagem `SHA-256` canônica, encadeamento de hashes (*hash-chaining*) em aditivos e validação biométrica WebAuthn/Passkeys.
+  - **Conformidade LGPD/ECA (`aiPseudonymizer.test.ts` e `ssrComponents.test.tsx`)**: Pseudonimização pré-envio à API Google Gemini e anonimização de co-envolvidos em dossiês.
+  - **Ingestão Cadastral e Pareamento (`sereParser.test.ts` e `studentMatcher.test.ts`)**: Parsers multiformato (`.xls` BIFF8, `.xlsx`, `.pdf`, `.csv`) e deduplicação de matrículas técnicas.
+  - **Mensageria e Interface (`clientDispatcher.test.ts`, `messageFormatter.test.ts`)**: Roteamento de mensagens, validação de números de WhatsApp e janela dedicada compacta.
+  - **Resiliência Server-Side (`buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx`, `alunosSsr.test.tsx`)**: Renderização de Server Components e tratamento gracioso de falhas de banco.
 
 ---
 

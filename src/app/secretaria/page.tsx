@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkIsAdmin, checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
+import { generatePredictiveRecommendations } from "@/lib/predictiveAnalytics";
 import SecretariaClient from "./SecretariaClient";
 
 export const dynamic = "force-dynamic";
@@ -161,6 +162,35 @@ export default async function SecretariaPage({ searchParams }: Props) {
     },
   });
 
+  // Agrupamento de Causas para Relatórios Preditivos (SAAS-07)
+  const repliedLogs = await prisma.messageLog.groupBy({
+    by: ["replyCategory"],
+    where: {
+      student: { schoolId: { in: schoolIds } },
+      guardianReplied: true,
+      replyCategory: { not: null },
+    },
+    _count: { replyCategory: true },
+  });
+
+  const totalCategorized = repliedLogs.reduce((acc, curr) => acc + curr._count.replyCategory, 0);
+
+  const causesBreakdown = repliedLogs
+    .map((item) => ({
+      category: item.replyCategory as string,
+      count: item._count.replyCategory,
+      percentage:
+        totalCategorized > 0
+          ? Number(((item._count.replyCategory / totalCategorized) * 100).toFixed(1))
+          : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const criticalRate =
+    totalStudents > 0 ? Number(((criticalCount / totalStudents) * 100).toFixed(1)) : 0;
+
+  const recommendations = generatePredictiveRecommendations(causesBreakdown, criticalRate);
+
   return (
     <SecretariaClient
       city={defaultCity}
@@ -174,6 +204,12 @@ export default async function SecretariaPage({ searchParams }: Props) {
         messagesSentThisMonth: monthlyMessages,
       }}
       initialSchools={formattedSchools}
+      predictiveData={{
+        totalCategorizedReplies: totalCategorized,
+        criticalRate,
+        causesBreakdown,
+        recommendations,
+      }}
       isSuperAdmin={isSuper}
       currentUser={{
         name: session.user.name || "Gestor SEMEC",

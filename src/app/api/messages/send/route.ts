@@ -7,6 +7,7 @@ import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { computeMessageContentHash } from "@/lib/messageCrypto";
 
 export async function POST(req: Request) {
   try {
@@ -64,8 +65,20 @@ export async function POST(req: Request) {
     });
 
     const resolvedStatus = initialDeliveryStatus || dispatch.initialStatus;
+    const sentAt = new Date();
 
-    // 1. Create message log with deliveryStatus (AUT-01)
+    // 1. Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
+    const contentHash = computeMessageContentHash({
+      studentId: student.id,
+      schoolId: student.schoolId || currentSchool.id,
+      phoneUsed: digits,
+      reasonTitle,
+      messageContent,
+      sentByName,
+      sentAt,
+    });
+
+    // 2. Create message log with deliveryStatus (AUT-01) and contentHash (JUR-02)
     const log = await prisma.messageLog.create({
       data: {
         studentId: student.id,
@@ -77,11 +90,12 @@ export async function POST(req: Request) {
         sentByName,
         deliveryStatus: resolvedStatus,
         deliveryUpdatedAt: new Date(),
-        sentAt: new Date(),
+        sentAt,
+        contentHash,
       },
     });
 
-    // 2. Create Audit Log
+    // 3. Create Audit Log
     await logAudit({
       action: "SEND_MESSAGE",
       entityType: "MessageLog",
@@ -93,6 +107,7 @@ export async function POST(req: Request) {
         phone: digits,
         deliveryStatus: resolvedStatus,
         providerMode: dispatch.mode,
+        contentHash,
         messageSnippet: messageContent.slice(0, 100),
       },
       user: {
@@ -110,6 +125,7 @@ export async function POST(req: Request) {
       whatsappUrl: dispatch.whatsappUrl,
       deliveryStatus: resolvedStatus,
       providerMode: dispatch.mode,
+      contentHash,
     });
   } catch (error: any) {
     console.error("Erro ao enviar mensagem:", error);

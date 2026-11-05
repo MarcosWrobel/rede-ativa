@@ -76,11 +76,11 @@ export async function POST(req: Request) {
       action: "CREATE_CLASS_GROUP",
       entityType: "ClassGroup",
       entityId: newClass.id,
+      schoolId: currentSchool.id,
       details: {
         name: newClass.name,
         segment: newClass.segment,
         shift: newClass.shift,
-        schoolId: currentSchool.id,
       },
       user: {
         id: authCheck.userId,

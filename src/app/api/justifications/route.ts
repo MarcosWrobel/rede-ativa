@@ -180,6 +180,7 @@ export async function POST(req: Request) {
       action: "CREATE_JUSTIFICATION",
       entityType: "AbsenceJustification",
       entityId: created.id,
+      schoolId: student.schoolId || school.id,
       details: `Atestado/Justificativa (${type}) lançado para ${student.name} (${student.classGroup?.name || "Sem turma"}) de ${startDate} a ${endDate}`,
       ipAddress: ip,
       user: {

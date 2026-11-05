@@ -65,6 +65,7 @@ export async function POST(
       action: "CREATE_STUDENT_CONTACT",
       entityType: "StudentContact",
       entityId: created.id,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: student.name,
@@ -152,6 +153,7 @@ export async function PUT(
       action: "UPDATE_STUDENT_CONTACT",
       entityType: "StudentContact",
       entityId: updated.id,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: existing.student.name,
@@ -208,6 +210,7 @@ export async function DELETE(
       action: "DELETE_STUDENT_CONTACT",
       entityType: "StudentContact",
       entityId: contactId,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: existing.student.name,

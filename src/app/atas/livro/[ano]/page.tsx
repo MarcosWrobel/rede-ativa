@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import LivroAnualClient from "./LivroAnualClient";
 
@@ -12,7 +13,12 @@ export default async function LivroAnualPage({ params }: Props) {
   const year = parseInt(ano, 10);
   if (isNaN(year)) notFound();
 
-  const school = await getCurrentSchool();
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const school = await getCurrentSchool((session.user as any)?.schoolId);
 
   const isDefaultSchoolContext =
     school.id === "default-leopoldina" || school.inepCode === "41042730";

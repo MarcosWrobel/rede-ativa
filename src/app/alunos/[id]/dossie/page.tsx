@@ -30,6 +30,7 @@ export default async function DossiePage({
     action: "GENERATE_DOSSIER",
     entityType: "Student",
     entityId: bundle.student.id,
+    schoolId: school.id,
     details: {
       studentName: bundle.student.name,
       cgm: bundle.student.cgm,

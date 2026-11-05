@@ -55,6 +55,7 @@ interface NavSection {
 export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMobileOpen }: SidebarProps) {
   const pathname = usePathname() || "";
   const [collapsed, setCollapsed] = useState(false);
+  const [overdueActionsCount, setOverdueActionsCount] = useState<number>(0);
 
   // Load user preference for sidebar state
   useEffect(() => {
@@ -63,6 +64,22 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
       setCollapsed(saved === "true");
     }
   }, []);
+
+  // Busca alertas de prazos de encaminhamentos (JUR-03)
+  useEffect(() => {
+    let isMounted = true;
+    fetch("/api/atas/actions/alerts")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (isMounted && data?.metrics?.overdueCount !== undefined) {
+          setOverdueActionsCount(data.metrics.overdueCount);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [pathname]);
 
   const toggleCollapsed = () => {
     const nextState = !collapsed;
@@ -132,6 +149,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           href: "/encaminhamentos",
           label: "Combinados & Prazos",
           icon: ListTodo,
+          badge: overdueActionsCount > 0 ? `${overdueActionsCount}` : undefined,
           description: "Acompanhamento e baixa em compromissos e prazos de atas",
         },
       ],

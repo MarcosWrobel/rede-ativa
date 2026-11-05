@@ -1,10 +1,11 @@
 # Relatório de Auditoria de Segurança e Testes Adversariais Multi-Tenant (2026)
 
-**Data da Homologação:** 03 de Novembro de 2026  
+**Data da Homologação Original:** 03 de Novembro de 2026  
+**Data da Revalidação Adversarial ao Vivo:** 05 de Novembro de 2026  
 **Responsável Técnico:** Engenharia de QA de Segurança Cibernética & Auditoria Adversarial  
 **Plataforma Auditada:** Rede Ativa SaaS (Next.js 16.4.3 App Router, React 19, Prisma ORM 6, PostgreSQL Neon)  
-**Cobertura Automatizada:** 129 testes automatizados aprovados (`npm test`) | Compilação de Produção Turbopack com 0 erros (`npm run build`).  
-**Resultado Global da Auditoria:** **100% APROVADO (PASS em todos os 18 cenários de teste)**
+**Cobertura Automatizada:** **177 testes automatizados aprovados (30 suítes Vitest)** | Compilação de Produção Turbopack com 0 erros (`npm run build`).  
+**Resultado Global da Auditoria:** **100% APROVADO (PASS em todos os cenários de teste unitário, integrado e adversarial ao vivo)**
 
 ---
 
@@ -284,3 +285,18 @@ Auditoria de vazamento de logs e telemetria operacional entre inquilinos.
 ## 4. Conclusão da Auditoria
 
 Todas as 7 frentes de segurança multi-tenant encontram-se **integralmente consolidadas, cobertas por testes automatizados contínuos e atestadas em conformidade** com os padrões OWASP Top 10 API Security, LGPD e regulamentações educacionais aplicáveis.
+
+---
+
+## 5. Adendo de Revalidação Adversarial ao Vivo (Novembro/2026)
+
+Em novembro de 2026, foi executada uma nova bateria de testes adversariais automatizados operando diretamente sobre os **Route Handlers e Server Components reais** da aplicação (`src/app/api/__tests__/adversarialQa.test.ts`), acompanhada de suítes de regressão em marcos arquiteturais (`m1MultiTenantFixes.test.ts` e `m2DataIntegrityFixes.test.ts`), elevando a suíte para **177 testes em 30 arquivos**.
+
+### Refinamentos Arquiteturais e de Segurança Consolidados:
+1. **Neutralização de Cookie Spoofing em `getCurrentSchool()`:** O cookie `active_school_id` agora é validado estritamente contra as escolas às quais o usuário tem permissão (`session.user.schools`), repelindo a adoção indevida de escolas por atacantes.
+2. **Gating Estrito da Sede Piloto Fundadora (INEP `41042730`):** Qualquer cláusula de retrocompatibilidade para dados legados (`schoolId: null` ou `"default-leopoldina"`) é agora estritamente restrita a sessões com `inepCode === "41042730"`, impedindo que inquilinos externos adotem ou alterem dados do Leopoldina.
+3. **Isolamento de Tenant em Server Components (SSR):** Rotas de renderização de servidor dinâmicas (`/atas/[id]/imprimir`, `/atas/livro/[ano]` e `/alunos/[id]/dossie`) agora validam `auth()` e executam `assertTenantOwnership(...)` antes da renderização.
+4. **Defesa contra Traversal de Chaves Estrangeiras:** Todos os endpoints de criação e mutação (`POST /api/students`, `POST /api/atas`, `PATCH /api/atas/[id]`, `/finalize`) validam a integridade institucional de referências (`studentIds`, `classGroupId`, `templateId`), garantindo `matched.length === requestedIds.length`.
+5. **Rejeição Explícita com 403 Forbidden em Operações Restritas:** Parâmetros de importação restritos a administradores globais (`options.updateSchoolInfo: true`) e tentativas de manipulação de papéis em `/api/users` retornam explicitamente `403 Forbidden` em vez de ignorar silenciosamente.
+6. **Escopo Raiz Mandatório na Trilha de Auditoria:** Toda emissão de logs em contexto escolar inclui obrigatoriamente `schoolId` na raiz de `logAudit(...)`, e a página `/auditoria` veda o cruzamento de logs entre inquilinos.
+7. **Mitigação de CSV Injection (CWE-1236):** Combinação de sanitização de prefixos executáveis (`=`, `+`, `-`, `@`, `\t`, `\r`) com apóstrofo e escape de aspas duplas RFC 4180 em exportações CSV.

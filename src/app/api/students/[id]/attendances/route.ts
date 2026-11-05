@@ -49,6 +49,7 @@ export async function POST(
       action: "CREATE_IN_PERSON_ATTENDANCE",
       entityType: "InPersonAttendance",
       entityId: created.id,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: student.name,
@@ -103,6 +104,7 @@ export async function DELETE(
       action: "DELETE_IN_PERSON_ATTENDANCE",
       entityType: "InPersonAttendance",
       entityId: attendanceId,
+      schoolId: currentSchool.id,
       details: {
         studentId,
         studentName: existing.student.name,

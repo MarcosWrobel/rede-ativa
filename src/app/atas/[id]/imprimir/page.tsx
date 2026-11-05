@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
+import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { generateVerificationCode } from "@/lib/ataCrypto";
 import { generateQrCodeSvg, getAtaValidationUrl, getRequestOrigin } from "@/lib/qrCode";
 import PrintPageClient from "./PrintPageClient";
@@ -11,6 +14,11 @@ interface Props {
 
 export default async function AtaPrintPage({ params }: Props) {
   const { id } = await params;
+
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
 
   let minute = await prisma.pedagogicalMinute.findUnique({
     where: { id },
@@ -27,8 +35,17 @@ export default async function AtaPrintPage({ params }: Props) {
     notFound();
   }
 
+  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+
+  // Validação estrita de isolamento multi-tenant (Ponto 2)
+  const isOwner = assertTenantOwnership(minute.schoolId, currentSchool.id, session);
+  if (!isOwner) {
+    notFound();
+  }
+
   // Auto-healing: Se a ata está FINALIZED mas não tem verificationCode (legado ou importado),
   // assegura a geração atômica e salva no banco para garantir a fé pública e o QR Code.
+  // Executado estritamente APÓS validação de tenant autorizada.
   if (minute.status === "FINALIZED" && !minute.verificationCode) {
     const newCode = generateVerificationCode();
     try {

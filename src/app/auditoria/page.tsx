@@ -32,7 +32,6 @@ export default async function AuditoriaPage() {
     ? {
         OR: [
           { schoolId: currentSchool.id },
-          { schoolId: null },
           { schoolId: "default-leopoldina" },
         ],
       }

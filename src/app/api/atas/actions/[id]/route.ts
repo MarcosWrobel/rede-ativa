@@ -69,6 +69,7 @@ export async function PATCH(
       action: "UPDATE_ATA_ACTION",
       entityType: "PedagogicalActionItem",
       entityId: actionId,
+      schoolId: actionItem.minute.schoolId || currentSchool.id,
       details: `Status do encaminhamento da Ata ${actionItem.minute.ataNumber ? String(actionItem.minute.ataNumber).padStart(3, "0") + "/" + actionItem.minute.year : "Rascunho"} alterado para ${parsed.data.status}: "${actionItem.description}" por ${authCheck.userName}`,
       ipAddress: ip,
       user: {

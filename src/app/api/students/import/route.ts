@@ -26,6 +26,15 @@ export async function POST(req: Request) {
     // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por SuperAdmin)
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     let schoolRecord: any = currentSchool;
+
+    // RBAC Guard: apenas SuperAdmin pode atualizar dados cadastrais da instituição (Ponto 5)
+    if (options.updateSchoolInfo && !checkIsSuperAdmin(authCheck.session)) {
+      return NextResponse.json(
+        { error: "Apenas administradores globais podem atualizar dados cadastrais da instituição escolar." },
+        { status: 403 }
+      );
+    }
+
     if (
       schoolRecord &&
       options.updateSchoolInfo &&
@@ -47,14 +56,22 @@ export async function POST(req: Request) {
       }
     }
     const schoolId = schoolRecord?.id || null;
+    const isDefaultSchoolContext =
+      schoolRecord?.id === "default-leopoldina" ||
+      schoolRecord?.inepCode === "41042730" ||
+      (schoolRecord as any)?.inep === "41042730" ||
+      (authCheck.session?.user as any)?.inepCode === "41042730";
+
     const schoolFilter = schoolId
-      ? {
-          OR: [
-            { schoolId },
-            { schoolId: null },
-            { schoolId: "default-leopoldina" },
-          ],
-        }
+      ? isDefaultSchoolContext
+        ? {
+            OR: [
+              { schoolId },
+              { schoolId: null },
+              { schoolId: "default-leopoldina" },
+            ],
+          }
+        : { schoolId }
       : undefined;
 
     // 2. Sincroniza Turmas (ClassGroups) isoladas por escola (com tolerância a turmas legadas)

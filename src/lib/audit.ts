@@ -41,7 +41,9 @@ export type AuditAction =
   | "UPDATE_SCHOOL"
   | "DELETE_SCHOOL"
   | "SANITIZE_SCHOOL"
-  | "CREATE_CLASS_GROUP";
+  | "CREATE_CLASS_GROUP"
+  | "ATTACH_PHYSICAL_SCAN"
+  | "REMOVE_PHYSICAL_SCAN";
 
 export interface AuditUser {
   id?: string;

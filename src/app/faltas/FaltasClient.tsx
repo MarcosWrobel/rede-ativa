@@ -562,20 +562,21 @@ export default function FaltasClient({
     if (filteredLowAttendance.length === 0) return;
     const headers = ["CGM", "Nome", "Turma", "Turno", "Frequencia_Geral", "Semana_Atual", "Semana_Anterior", "Variacao", "Medidas_Adotadas"];
     const rows = [headers.join(";")];
+    const escapeCsv = (val: any) => `"${sanitizeCsvField(val ?? "").replace(/"/g, '""')}"`;
 
     filteredLowAttendance.forEach((rec) => {
       const d = parseDetail(rec.enrollmentDetail);
       const cgm = rec.student.cgm || d.cgm || "";
       rows.push([
-        `"${sanitizeCsvField(cgm)}"`,
-        `"${sanitizeCsvField(rec.student.name).replace(/"/g, '""')}"`,
-        `"${sanitizeCsvField(rec.student.classGroup.name)}"`,
-        `"${sanitizeCsvField(rec.student.classGroup.shift || "")}"`,
+        escapeCsv(cgm),
+        escapeCsv(rec.student.name),
+        escapeCsv(rec.student.classGroup.name),
+        escapeCsv(rec.student.classGroup.shift || ""),
         `"${rec.attendancePercent.toFixed(1)}%"`,
-        `"${sanitizeCsvField(d.semanaAtual || "")}"`,
-        `"${sanitizeCsvField(d.semanaAnterior || "")}"`,
+        escapeCsv(d.semanaAtual || ""),
+        escapeCsv(d.semanaAnterior || ""),
         `"${d.variacao !== null ? (d.variacao > 0 ? "+" : "") + d.variacao + "%" : ""}"`,
-        `"${sanitizeCsvField(rec.actionsTaken || "").replace(/"/g, '""')}"`
+        escapeCsv(rec.actionsTaken || "")
       ].join(";"));
     });
 

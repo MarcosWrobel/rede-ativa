@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin, checkIsSecretariat } from "@/lib/permissions";
+import { generatePredictiveRecommendations } from "@/lib/predictiveAnalytics";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +146,37 @@ export async function GET(req: Request) {
       },
     });
 
+    // 4. Agrupamento e Cruzamento de Causas de Infrequência (SAAS-07)
+    const repliedLogs = await prisma.messageLog.groupBy({
+      by: ["replyCategory"],
+      where: {
+        student: { schoolId: { in: schoolIds } },
+        guardianReplied: true,
+        replyCategory: { not: null },
+      },
+      _count: { replyCategory: true },
+    });
+
+    const totalCategorized = repliedLogs.reduce((acc, curr) => acc + curr._count.replyCategory, 0);
+
+    const causesBreakdown = repliedLogs
+      .map((item) => ({
+        category: item.replyCategory as string,
+        count: item._count.replyCategory,
+        percentage:
+          totalCategorized > 0
+            ? Number(((item._count.replyCategory / totalCategorized) * 100).toFixed(1))
+            : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Indicadores Preditivos de Risco de Evasão
+    const criticalRate =
+      totalStudents > 0 ? Number(((criticalStudentsCount / totalStudents) * 100).toFixed(1)) : 0;
+
+    // Gerador de Recomendações Preditivas para Políticas Públicas (SEMEC)
+    const recommendations = generatePredictiveRecommendations(causesBreakdown, criticalRate);
+
     return NextResponse.json({
       success: true,
       city: requestedCity,
@@ -156,6 +188,12 @@ export async function GET(req: Request) {
         criticalStudentsCount,
         networkAverageAttendance,
         messagesSentThisMonth: totalLogsMonth,
+      },
+      predictiveAnalysis: {
+        totalCategorizedReplies: totalCategorized,
+        criticalRate,
+        causesBreakdown,
+        recommendations,
       },
       schools: schoolsSummary,
     });

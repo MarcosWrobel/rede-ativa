@@ -499,11 +499,24 @@ export default function AtaEditorModal({
         }
 
         if (data.usedFallback) {
+          const reason = data.fallbackReason || "";
+          const isDemandSpike =
+            reason.includes("503") ||
+            reason.includes("alta demanda") ||
+            reason.includes("high demand") ||
+            reason.includes("UNAVAILABLE");
+
+          const guidance = isDemandSpike
+            ? "Os servidores da Google estão com pico de demanda temporário. A minuta foi estruturada pelo modelo padrão institucional. Você pode clicar em 'Formalizar & Revisar' novamente em instantes."
+            : hasServerKey || geminiApiKey || savedKey
+              ? "Minuta estruturada pelo modelo padrão institucional."
+              : "Minuta estruturada pelo modelo padrão local. Para correção ortográfica, sintaxe e redação pedagógica por IA, configure sua chave do Google Gemini no botão 'Configurar Chave IA' acima.";
+
           setAiSuccessMsg({
             type: "warning",
-            text: `${data.fallbackReason || "Aviso:"} Minuta estruturada pelo modelo padrão local. Para correção ortográfica, sintaxe e redação pedagógica por IA, configure sua chave do Google Gemini no botão 'Configurar Chave IA' acima.`,
+            text: `${reason} ${guidance}`.trim(),
           });
-          if (!savedKey) {
+          if (!savedKey && !hasServerKey && !isDemandSpike) {
             setShowKeyModal(true);
           }
         } else {

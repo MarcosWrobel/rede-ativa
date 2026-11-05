@@ -83,7 +83,12 @@ O banco de dados está hospedado no **Neon PostgreSQL Serverless (AWS São Paulo
 - **`PedagogicalMinuteParticipant`**: Signatários presentes (`role`, `name`, `signatureMode`, `signatureData`, `mobileSignToken`, `biometricVerified`, `witnessName`).
 - **`PedagogicalMinuteAddendum`**: Termos de aditamento encadeados (*"Em tempo"*), selados por hash criptográfico encadeado.
 - **`PedagogicalActionItem`**: Combinados pedagógicos e prazos firmados com a família (`dueDate`, `status`, `completedAt`).
-- **`AuditLog`**: Trilha imutável de conformidade contendo `action`, `entityType`, `entityId`, `userEmail`, `ipAddress` e detalhes em JSON.
+- **`AuditLog`**: Trilha imutável de conformidade contendo obrigatoriamente `schoolId` na raiz (para isolamento estrito multi-tenant no painel `/auditoria`), `action`, `entityType`, `entityId`, `userEmail`, `ipAddress` e detalhes em JSON.
+- **Proteções de Integridade & Isolamento Multi-Tenant**:
+  - Resolução contextual via `getCurrentSchool()` validando associação ativa da sessão contra spoofing de cookie `active_school_id`.
+  - Validação estrita de chaves estrangeiras (`studentIds`, `classGroupId`, `templateId`) garantindo que pertençam à escola ativa do usuário em criações, edições e finalizações.
+  - Guarda institucional `assertTenantOwnership(...)` aplicado tanto em Route Handlers quanto em Server Components dinâmicos (`/atas/[id]/imprimir`, `/atas/livro/[ano]`, `/alunos/[id]/dossie`).
+  - Proteção contra injeção de fórmulas CSV (`sanitizeCsvField` com escape RFC 4180) e rejeição imediata com `403 Forbidden` em requisições contendo flags restritas a perfis superiores.
 
 ---
 
@@ -144,8 +149,10 @@ O banco de dados está hospedado no **Neon PostgreSQL Serverless (AWS São Paulo
 
 ## 6. Qualidade, Testes & Conformidade Jurídica
 
-- **Suíte de Testes Automatizados (Vitest — 96 testes em 21 arquivos, 100% de aprovação)**:
-  - `securityAndRbac.test.ts`: Controle perimetral, permissões dos 4 papéis, rotas protegidas e blindagem da sede piloto Leopoldina.
+- **Suíte de Testes Automatizados (Vitest — 177+ testes em 30 arquivos, 100% de aprovação)**:
+  - `adversarialQa.test.ts` & `multiTenantSecurityAudit.test.ts`: Baterias de testes adversariais para validação dos 7 vetores de risco (BOLA/IDOR em rotas e SSR, tenant spoofing via cookie/body, importações SERE com validação de `updateSchoolInfo: true`, integridade de FKs institucionais, proteção RBAC contra escalação, neutralização de CSV Injection e isolamento de auditoria).
+  - `m1MultiTenantFixes.test.ts` & `m2DataIntegrityFixes.test.ts`: Testes de regressão cobrindo o núcleo de isolamento multi-tenant, validação de participantes de atas e resolução contextual.
+  - `securityAndRbac.test.ts`: Controle perimetral, permissões dos 4 papéis, rotas protegidas e blindagem atômica da sede piloto Leopoldina.
   - `multiTenancy.test.ts`: Resolução de inquilinos, isolamento por `schoolId` e persistência de dados.
   - `ataCrypto.test.ts` e `escolaSign.test.ts`: Integridade do hash `SHA-256`, assinaturas institucionais e biometria móvel WebAuthn.
   - `aiPseudonymizer.test.ts`: Mascaramento de dados de menores antes do envio à inteligência artificial.

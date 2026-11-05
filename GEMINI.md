@@ -11,6 +11,7 @@ Siga rigorosamente as diretrizes e regras inegociáveis abaixo em qualquer taref
 - O **Colégio Estadual Leopoldina B. Pedroso** (INEP `41042730`) é a Unidade Piloto Fundadora da plataforma e contém 689 estudantes reais.
 - **NUNCA** gere código, scripts ou rotinas que excluam, resetem ou alterem inadvertidamente a escola sede ou seus registros históricos.
 - Os endpoints `DELETE /api/schools/[id]` e `POST /api/schools/[id]/sanitize` possuem proteções atômicas contra a exclusão do INEP `41042730`. Nunca contorne ou desative essas proteções.
+- **Tolerância a Dados Legados Restrita à Sede:** Qualquer filtro de retrocompatibilidade com registros legados (`schoolId: null` ou `"default-leopoldina"`) **DEVE** ser estritamente condicionado à comprovação de que a sessão ativa pertence à Escola Piloto Fundadora (`inepCode === "41042730"`). Nunca inclua `schoolId: null` ou `"default-leopoldina"` em cláusulas `OR` para outras escolas nem execute *auto-healing* de `schoolId` a partir de sessões externas.
 
 ---
 
@@ -18,6 +19,10 @@ Siga rigorosamente as diretrizes e regras inegociáveis abaixo em qualquer taref
 - Todas as consultas e mutações de dados operacionais (`Student`, `ClassGroup`, `MessageLog`, `PedagogicalMinute`, `AbsenceJustification`, `StudentContact`, etc.) **DEVEM conter o filtro obrigatório por `schoolId`**.
 - Nunca realize buscas ou mutações globais que possam cruzar dados entre diferentes instituições escolares ou redes.
 - Em rotas de mutação direta por ID (`/api/students/[id]`, `/api/atas/[id]`), valide se o registro pertence à instituição sob controle da sessão do usuário autenticado.
+- **Validação de Cookie de Contexto (`active_school_id`):** Em `getCurrentSchool()`, nunca confie no cookie `active_school_id` sem validar se o usuário autenticado na sessão possui vínculo ativo com aquela escola (`session.user.schools` / `schoolId`) ou privilégio global (`SUPERADMIN` / `GESTAO_SECRETARIA` autorizado). Nunca ignore `schoolId` do corpo apenas parcialmente: o tenant efetivo sempre deriva da sessão validada.
+- **Integridade de FKs em Criação E Atualização (`POST`, `PUT`, `PATCH`, `/finalize`):** Sempre valide que chaves estrangeiras referenciadas em arrays ou campos (`studentIds`, `classGroupId`, `templateId`) pertençam estritamente ao mesmo `schoolId` do recurso/sessão (conferindo `matched.length === requestedIds.length`), inclusive em edições de rascunho e finalizações.
+- **Rejeição Explícita de Parâmetros Restritos (RBAC):** Quando um payload contiver flags ou operações restritas a papéis superiores (ex.: `updateSchoolInfo: true` para não-`SUPERADMIN`), retorne explicitamente **`403 Forbidden`** — nunca ignore silenciosamente retornando `200 OK`.
+- **Auditoria com `schoolId` Raiz Obrigatório & Exportação CSV Segura:** Toda chamada `logAudit(...)` em contexto escolar **DEVE** receber `schoolId` na raiz do objeto (nunca apenas dentro de `details`), e consultas em `/auditoria` nunca devem expor `{ schoolId: null }` entre tenants. Em exportações CSV, todas as colunas textuais devem aplicar `sanitizeCsvField(...)` combinado ao escape RFC 4180 (`.replace(/"/g, '""')`).
 
 ---
 
@@ -49,12 +54,13 @@ Respeite o modelo de papéis e o isolamento de painéis:
 - Mantenha o padrão de pares:
   - `page.tsx`: Server Component para resolver sessão, escola ativa e buscar dados iniciais no banco sem waterfall.
   - `*Client.tsx`: Client Component (`"use client"`) para gerenciar estados, modais, formulários interativos e chamadas `fetch`.
+- **Atenção ao Escopo do Middleware (`src/proxy.ts`):** O middleware valida apenas autenticação ativa, **não** posse de tenant sobre parâmetros dinâmicos `[id]` ou `[ano]`. Todo Server Component (`page.tsx`, rotas de impressão `/imprimir`, dossiês e livros anuais) **DEVE** validar `auth()` e `assertTenantOwnership(...)` antes de renderizar dados ou executar escritas de *auto-healing*.
 - Nunca importe o Prisma Client dentro de Client Components.
 
 ---
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **todos os testes passem (96+ testes)**.
+1. Execute `npm test` — garanta que **todos os testes passem (177+ testes, incluindo `adversarialQa.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.

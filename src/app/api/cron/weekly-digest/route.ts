@@ -35,6 +35,7 @@ async function handleDigest(req: NextRequest) {
       await logAudit({
         action: "GENERATE_WEEKLY_DIGEST",
         entityType: "LowAttendance",
+        schoolId: (session.user as any)?.schoolId || null,
         details: {
           totalStudents: payload.kpis.totalStudents,
           criticalCount: payload.kpis.criticalCount,

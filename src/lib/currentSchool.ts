@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { checkIsSuperAdmin } from "./roles";
 
 export interface SchoolContext {
   id: string;
@@ -30,28 +31,69 @@ export const DEFAULT_SCHOOL: SchoolContext = {
 /**
  * Obtém os dados da escola atual para emissão de documentos, cabeçalhos e disparos.
  * Prioridade:
- * 1. Cookie ativo de instituição selecionada no painel (`active_school_id`)
+ * 1. Cookie ativo de instituição selecionada no painel (`active_school_id`) validado contra a sessão
  * 2. schoolId explicitamente fornecido (da sessão ou parâmetro)
- * 3. Primeira escola ativa no banco de dados
- * 4. Fallback padrão para o Colégio Estadual Leopoldina
+ * 3. schoolId da sessão autenticada (fallback seguro contra cookie spoofing)
+ * 4. Primeira escola ativa no banco de dados
+ * 5. Fallback padrão para o Colégio Estadual Leopoldina
  */
 export async function getCurrentSchool(schoolId?: string | null): Promise<SchoolContext> {
   let targetId: string | null = null;
+  let sessionSchoolId: string | null = null;
 
-  // 1. Prioridade máxima: cookie da instituição ativa selecionada pelo usuário no painel
+  // 1. Validação estrita do cookie da instituição ativa contra a sessão autenticada
   try {
+    let session: any = null;
+    try {
+      const { auth } = await import("@/lib/auth");
+      session = await auth();
+    } catch {
+      // Fora de contexto de autenticação / CLI / testes
+    }
+
+    if (session?.user) {
+      if ((session.user as any).schoolId) {
+        sessionSchoolId = String((session.user as any).schoolId).trim();
+      }
+    }
+
     const cookieStore = await cookies();
-    const cookieVal = cookieStore.get("active_school_id")?.value;
-    if (cookieVal && cookieVal.trim()) {
-      targetId = cookieVal.trim();
+    const cookieVal = cookieStore.get("active_school_id")?.value?.trim();
+
+    if (cookieVal) {
+      if (session?.user) {
+        const role = (session.user as any).role;
+        const isGlobal = checkIsSuperAdmin(session) || role === "GESTAO_SECRETARIA";
+        const userSchools = ((session.user as any).schools as any[]) || [];
+        const hasAccess =
+          sessionSchoolId === cookieVal ||
+          userSchools.some(
+            (s: any) =>
+              (s.id && s.id === cookieVal) ||
+              (s.schoolId && s.schoolId === cookieVal)
+          );
+
+        if (isGlobal || hasAccess) {
+          targetId = cookieVal;
+        } else {
+          console.warn(
+            `[currentSchool] Tentativa de cookie spoofing ignorada para escola ${cookieVal} por usuário ${session.user.email}`
+          );
+        }
+      }
     }
   } catch {
     // Fora do ciclo de requisição HTTP (ex: testes unitários, scripts locais, CLI)
   }
 
-  // 2. Se não houver cookie, utiliza o schoolId explicitamente fornecido
+  // 2. Se não houver cookie autorizado, utiliza o schoolId explicitamente fornecido
   if (!targetId && schoolId && schoolId.trim()) {
     targetId = schoolId.trim();
+  }
+
+  // 3. Se ainda não houver targetId mas houver schoolId na sessão, utiliza como fallback
+  if (!targetId && sessionSchoolId) {
+    targetId = sessionSchoolId;
   }
 
   if (targetId) {

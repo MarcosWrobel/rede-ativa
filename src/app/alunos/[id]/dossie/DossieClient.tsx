@@ -13,6 +13,11 @@ import {
   REPLY_CATEGORY_LABELS,
   type ReplyCategory,
 } from "@/lib/whatsappProvider";
+import {
+  computeDossierIntegritySeal,
+  formatMessageSeal,
+  computeMessageContentHash,
+} from "@/lib/messageCrypto";
 
 interface Props {
   student: any;
@@ -71,7 +76,21 @@ export default function DossieClient({
       failedLogs > 0
         ? ` (além de ${failedLogs} tentativa(s) frustrada(s) em número cadastral sem conta ativa no WhatsApp)`
         : "";
-    return `Certificamos, para os devidos fins legais junto aos órgãos da Rede de Proteção (Art. 56, inciso II do Estatuto da Criança e do Adolescente — Lei nº 8.069/1990 e LDB — Lei nº 9.394/1996), que a Equipe Pedagógica do Colégio Estadual Leopoldina B. Pedroso realizou ${effectiveLogs} acionamento(s) efetivo(s) de Busca Ativa Escolar${failedClause}, obtendo ${repliedLogs} retorno(s) familiar(es), e ${attendances.length} atendimento(s) presencial(is) referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}.`;
+    const schoolUnit = school?.name || "Unidade Escolar";
+    return `Certificamos, para instrução processual perante a Rede de Proteção à Criança e ao Adolescente (Art. 56, inciso II da Lei nº 8.069/1990 — ECA e Art. 12, incisos VII e VIII da Lei nº 9.394/1996 — LDB), que a Equipe Pedagógica do(a) ${schoolUnit} realizou ${effectiveLogs} acionamento(s) de Busca Ativa Escolar com certificação digital${failedClause}, obtendo ${repliedLogs} retorno(s) familiar(es), e ${attendances.length} atendimento(s) presencial(is) com ata lavrada referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}. O presente dossiê reúne a cadeia de custódia e evidências probatórias sob fé pública documental (Lei Federal nº 14.063/2020 e MP nº 2.200-2/2001).`;
+  });
+
+  const dossierIntegritySeal = computeDossierIntegritySeal({
+    studentId: student.id,
+    studentName: student.name,
+    cgm,
+    schoolId: student.schoolId || school?.inepCode || "school-default",
+    schoolInep: school?.inepCode || null,
+    totalMessages: totalLogs,
+    totalMinutes: (minutes || []).length,
+    totalJustifications: justifications.length,
+    emittedAtIso,
+    emittedByEmail: emittedBy.email,
   });
 
   useEffect(() => {
@@ -138,6 +157,9 @@ export default function DossieClient({
               </option>
               <option value="Ministério Público do Estado do Paraná — Promotoria da Infância e Juventude">
                 Ministério Público do Paraná (Promotoria da Infância e Juventude)
+              </option>
+              <option value="Vara da Infância e da Juventude (Poder Judiciário)">
+                Vara da Infância e da Juventude (Poder Judiciário)
               </option>
               <option value="Direção Escolar & Arquivo Pedagógico Interno">
                 Direção Escolar & Arquivo Pedagógico Interno
@@ -231,6 +253,9 @@ export default function DossieClient({
                 Ficha SERP: #{lowAtt.serpProtocol}
               </div>
             )}
+            <div className="pt-1 text-[9px] font-mono font-bold text-emerald-800 border-t border-slate-200 mt-1">
+              Selo Pericial: {dossierIntegritySeal}
+            </div>
           </div>
         </header>
 
@@ -503,9 +528,10 @@ export default function DossieClient({
               <thead className="bg-slate-100">
                 <tr>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Data / Hora</th>
-                  <th className="border border-slate-300 px-2 py-1.5 text-left">Motivo do Acionamento</th>
+                  <th className="border border-slate-300 px-2 py-1.5 text-left">Motivo / Mensagem</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Telefone</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Profissional</th>
+                  <th className="border border-slate-300 px-2 py-1.5 text-left">Selo Probatório SHA-256</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-center">Retorno?</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">
                     Manifestação da Família / Observações
@@ -513,62 +539,84 @@ export default function DossieClient({
                 </tr>
               </thead>
               <tbody>
-                {student.messageLogs.map((log: any) => (
-                  <tr key={log.id} className="break-inside-avoid align-top">
-                    <td className="border border-slate-300 px-2 py-1 font-mono whitespace-nowrap">
-                      {new Date(log.sentAt).toLocaleDateString("pt-BR")}{" "}
-                      {new Date(log.sentAt).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="border border-slate-300 px-2 py-1">
-                      <strong className="block">{log.reasonTitle}</strong>
-                      {showFullMessages && log.messageContent && (
-                        <div className="mt-1 p-1.5 bg-slate-50 border border-slate-200 rounded text-[10px] whitespace-pre-wrap text-slate-600">
-                          {log.messageContent}
-                        </div>
-                      )}
-                    </td>
-                    <td className="border border-slate-300 px-2 py-1 font-mono whitespace-nowrap">
-                      {log.phoneUsed}
-                      {log.deliveryStatus === "FAILED_NO_WHATSAPP" && (
-                        <span className="block font-sans text-[9.5px] font-bold text-rose-800">
-                          [Sem WhatsApp]
+                {student.messageLogs.map((log: any) => {
+                  const messageHash =
+                    log.contentHash ||
+                    computeMessageContentHash({
+                      studentId: student.id,
+                      schoolId: student.schoolId || school?.inepCode || "",
+                      phoneUsed: log.phoneUsed,
+                      reasonTitle: log.reasonTitle,
+                      messageContent: log.messageContent || "",
+                      sentByName: log.sentByName,
+                      sentAt: log.sentAt,
+                    });
+
+                  return (
+                    <tr key={log.id} className="break-inside-avoid align-top">
+                      <td className="border border-slate-300 px-2 py-1 font-mono whitespace-nowrap">
+                        {new Date(log.sentAt).toLocaleDateString("pt-BR")}{" "}
+                        {new Date(log.sentAt).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1">
+                        <strong className="block">{log.reasonTitle}</strong>
+                        {showFullMessages && log.messageContent && (
+                          <div className="mt-1 p-1.5 bg-slate-50 border border-slate-200 rounded text-[10px] whitespace-pre-wrap text-slate-600">
+                            {log.messageContent}
+                          </div>
+                        )}
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1 font-mono whitespace-nowrap">
+                        {log.phoneUsed}
+                        {log.deliveryStatus === "FAILED_NO_WHATSAPP" && (
+                          <span className="block font-sans text-[9.5px] font-bold text-rose-800">
+                            [Sem WhatsApp]
+                          </span>
+                        )}
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1 whitespace-nowrap">
+                        {log.sentByName}
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1 font-mono text-[9px]">
+                        <span className="block text-emerald-800 font-bold">
+                          {formatMessageSeal(messageHash)}
                         </span>
-                      )}
-                    </td>
-                    <td className="border border-slate-300 px-2 py-1 whitespace-nowrap">
-                      {log.sentByName}
-                    </td>
-                    <td className="border border-slate-300 px-2 py-1 text-center font-bold">
-                      {log.deliveryStatus === "FAILED_NO_WHATSAPP"
-                        ? "FRUSTRADO"
-                        : log.guardianReplied
-                        ? "SIM"
-                        : "NÃO"}
-                    </td>
-                    <td className="border border-slate-300 px-2 py-1">
-                      {log.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
-                        <strong>
-                          Tentativa frustrada — Número informado no cadastro não possui WhatsApp ativo.
-                        </strong>
-                      ) : (
-                        <>
-                          {log.replyCategory && (
-                            <strong className="block text-slate-800">
-                              [{REPLY_CATEGORY_LABELS[log.replyCategory as ReplyCategory] || log.replyCategory}]
-                            </strong>
-                          )}
-                          {log.replyNotes ||
-                            (log.guardianReplied
-                              ? "Retorno confirmado sem observação textual."
-                              : "Sem retorno registrado.")}
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        <span className="block text-slate-500 text-[8.5px]">
+                          Status: {log.deliveryStatus || "SENT"}
+                        </span>
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1 text-center font-bold">
+                        {log.deliveryStatus === "FAILED_NO_WHATSAPP"
+                          ? "FRUSTRADO"
+                          : log.guardianReplied
+                          ? "SIM"
+                          : "NÃO"}
+                      </td>
+                      <td className="border border-slate-300 px-2 py-1">
+                        {log.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
+                          <strong>
+                            Tentativa frustrada — Número informado no cadastro não possui WhatsApp ativo.
+                          </strong>
+                        ) : (
+                          <>
+                            {log.replyCategory && (
+                              <strong className="block text-slate-800">
+                                [{REPLY_CATEGORY_LABELS[log.replyCategory as ReplyCategory] || log.replyCategory}]
+                              </strong>
+                            )}
+                            {log.replyNotes ||
+                              (log.guardianReplied
+                                ? "Retorno confirmado sem observação textual."
+                                : "Sem retorno registrado.")}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -588,16 +636,32 @@ export default function DossieClient({
             <div className="border-t border-slate-800 pt-1.5">
               <strong>{emittedBy.name}</strong>
               <span className="block text-slate-600">Equipe Pedagógica</span>
+              <span className="block text-[9px] text-slate-400 font-mono">{emittedBy.email}</span>
             </div>
 
             <div className="border-t border-slate-800 pt-1.5">
               <strong>Direção Escolar</strong>
-              <span className="block text-slate-600">Colégio Est. Leopoldina B. Pedroso</span>
+              <span className="block text-slate-600">{school?.name || "Unidade Escolar"}</span>
+              <span className="block text-[9px] text-slate-400 font-mono">Assinatura Institucional</span>
             </div>
 
             <div className="border-t border-slate-800 pt-1.5">
-              <strong>Ciência do Responsável / Órgão</strong>
-              <span className="block text-slate-600">Data: ____/____/________</span>
+              <strong>Ciência do Órgão Destinatário</strong>
+              <span className="block text-slate-600 truncate">{destinatario}</span>
+              <span className="block text-slate-500 text-[9.5px]">Data / Carimbo / Rubrica</span>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-300 text-[9px] text-slate-500 font-mono flex flex-wrap justify-between items-center gap-2">
+            <div>
+              <span className="font-bold text-slate-700 block">
+                CERTIDÃO PROBATÓRIA ELETRÔNICA — LEI Nº 14.063/2020 E MP Nº 2.200-2/2001
+              </span>
+              <span>Selo de Autenticidade do Dossiê: <strong className="text-emerald-800 font-mono">{dossierIntegritySeal}</strong></span>
+            </div>
+            <div className="text-right">
+              <span>Evidências cronológicas com cadeia de custódia certificada via SHA-256</span>
+              <span className="block">Emissão: {emittedDate.toISOString()}</span>
             </div>
           </div>
         </section>

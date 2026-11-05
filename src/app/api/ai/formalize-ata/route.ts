@@ -8,6 +8,33 @@ import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 export const maxDuration = 45;
 export const dynamic = "force-dynamic";
 
+function humanizeGeminiError(rawMsg: string): string {
+  if (!rawMsg) return "tempo limite esgotado";
+  try {
+    const trimmed = rawMsg.trim();
+    const parsed = trimmed.startsWith("{") ? JSON.parse(trimmed) : null;
+    if (parsed?.error?.code === 503 || parsed?.error?.status === "UNAVAILABLE" || parsed?.error?.message?.includes("high demand")) {
+      return "Os servidores da Google Gemini estão com alta demanda temporária (Erro 503). Tente novamente em instantes.";
+    }
+    if (parsed?.error?.code === 429 || parsed?.error?.status === "RESOURCE_EXHAUSTED") {
+      return "Limite de requisições excedido no Google Gemini (Erro 429). Aguarde um instante e tente novamente.";
+    }
+    if (parsed?.error?.message) {
+      return parsed.error.message;
+    }
+  } catch {
+    // rawMsg is not JSON
+  }
+
+  if (rawMsg.includes("503") || rawMsg.includes("high demand") || rawMsg.includes("UNAVAILABLE")) {
+    return "Os servidores da Google Gemini estão com alta demanda temporária (Erro 503). Tente novamente em instantes.";
+  }
+  if (rawMsg.includes("429") || rawMsg.includes("RESOURCE_EXHAUSTED")) {
+    return "Limite de requisições excedido no Google Gemini (Erro 429). Aguarde um instante e tente novamente.";
+  }
+  return rawMsg;
+}
+
 const formalizeAtaSchema = z
   .object({
     rawNotes: z.string().default(""),
@@ -206,10 +233,14 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
         }
       } catch (err: any) {
         lastErrorMsg = err?.message || String(err);
-        if (lastErrorMsg.toLowerCase().includes("api key not valid")) {
+        if (lastErrorMsg.toLowerCase().includes("api key not valid") || lastErrorMsg.includes("403 Forbidden")) {
           break;
         }
         console.warn(`[GEMINI generateContent] Modelo ${model} falhou: ${lastErrorMsg}. Tentando próximo...`);
+        if (lastErrorMsg.includes("503") || lastErrorMsg.includes("high demand") || lastErrorMsg.includes("UNAVAILABLE")) {
+          // Pequena pausa (backoff) para aguardar alívio de pico momentâneo no cluster do Google
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
     }
 
@@ -367,7 +398,7 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
       usedFallback: true,
       fallbackReason: !apiKey
         ? "Chave da API Gemini não configurada no navegador nem no servidor."
-        : `A chamada à API Gemini falhou (${lastErrorMsg || "tempo limite esgotado"}).`,
+        : `A chamada à API Gemini falhou: ${humanizeGeminiError(lastErrorMsg)}.`,
       result: fallbackResult,
     });
   } catch (error: any) {

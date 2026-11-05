@@ -22,7 +22,14 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
+  Sparkles,
+  Brain,
+  Printer,
+  ShieldAlert,
+  HelpCircle,
+  FileText,
 } from "lucide-react";
+import { getCategoryMeta } from "@/lib/predictiveAnalytics";
 
 export interface SchoolSummary {
   id: string;
@@ -57,11 +64,31 @@ export interface Metrics {
   messagesSentThisMonth: number;
 }
 
+export interface CauseBreakdownItem {
+  category: string;
+  count: number;
+  percentage: number;
+}
+
+export interface PredictiveRecommendation {
+  priority: "HIGH" | "MEDIUM" | "INFO";
+  title: string;
+  action: string;
+}
+
+export interface PredictiveData {
+  totalCategorizedReplies: number;
+  criticalRate: number;
+  causesBreakdown: CauseBreakdownItem[];
+  recommendations: PredictiveRecommendation[];
+}
+
 interface Props {
   city: string;
   availableCities?: string[];
   metrics: Metrics;
   initialSchools: SchoolSummary[];
+  predictiveData?: PredictiveData;
   isSuperAdmin: boolean;
   currentUser: {
     name: string;
@@ -74,12 +101,13 @@ export default function SecretariaClient({
   availableCities = [],
   metrics,
   initialSchools,
+  predictiveData,
   isSuperAdmin,
   currentUser,
 }: Props) {
   const [schools, setSchools] = useState<SchoolSummary[]>(initialSchools);
   const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"RANKING" | "CARDS">("RANKING");
+  const [viewMode, setViewMode] = useState<"RANKING" | "CARDS" | "PREDICTIVE">("RANKING");
   const [sortBy, setSortBy] = useState<
     "FREQUENCIA_ASC" | "FREQUENCIA_DESC" | "CRITICOS_DESC" | "ALUNOS_DESC" | "ATAS_DESC" | "NOME_ASC"
   >("FREQUENCIA_ASC");
@@ -277,13 +305,20 @@ export default function SecretariaClient({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/onboarding"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-bold rounded-xl shadow-lg transition transform active:scale-95 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-100" />
+              <span>Wizard de Auto-Onboarding</span>
+            </Link>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-sky-900 hover:bg-sky-50 text-xs font-bold rounded-xl shadow-md transition transform active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4 text-sky-600" />
-              <span>Nova Escola Municipal</span>
+              <span>Nova Escola</span>
             </button>
             {isSuperAdmin && (
               <Link
@@ -461,6 +496,18 @@ export default function SecretariaClient({
             >
               <LayoutGrid className="w-4 h-4 text-sky-600" />
               <span>Grade de Unidades</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("PREDICTIVE")}
+              className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                viewMode === "PREDICTIVE"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Brain className="w-4 h-4 text-indigo-600" />
+              <span>Diagnóstico Preditivo SEMEC</span>
             </button>
           </div>
 
@@ -876,6 +923,278 @@ export default function SecretariaClient({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Visualização 3: Diagnóstico Preditivo de Evasão & Causas Municipais (SAAS-07) */}
+        {viewMode === "PREDICTIVE" && (
+          <div className="space-y-6 pt-2">
+            {/* Header com Ações e Contexto do Diagnóstico */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-sky-900 text-white shadow-md">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/10 text-indigo-200 text-[11px] font-bold">
+                  <Brain className="w-3.5 h-3.5" />
+                  <span>Inteligência Preditiva de Permanência Escolar (SEMEC)</span>
+                </div>
+                <h3 className="text-lg font-black tracking-tight">
+                  Mapeamento de Causas e Diretrizes de Políticas Públicas — {city}
+                </h3>
+                <p className="text-xs text-indigo-200/90 max-w-2xl">
+                  Cruzamento automatizado entre faltas registradas no SERE e justificativas prestadas pelas famílias via WhatsApp e Busca Ativa.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl border border-white/20 transition cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir Diagnóstico</span>
+                </button>
+              </div>
+            </div>
+
+            {/* KPIs Preditivos Rápidos */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200/80">
+                <span className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider block">
+                  Respostas Familiares Auditadas
+                </span>
+                <p className="text-2xl font-black text-indigo-950 mt-1">
+                  {predictiveData?.totalCategorizedReplies || 0}
+                </p>
+                <span className="text-[11px] text-indigo-600/90 mt-0.5 block">
+                  Justificativas com categorização temática
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-200/80">
+                <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wider block">
+                  Taxa Crítica da Rede (&lt;75%)
+                </span>
+                <p className="text-2xl font-black text-rose-950 mt-1">
+                  {predictiveData?.criticalRate || 0}%
+                </p>
+                <span className="text-[11px] text-rose-600/90 mt-0.5 block">
+                  {metrics.criticalStudentsCount} discentes em risco grave de retenção
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80">
+                <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">
+                  Causa Prevalente na Rede
+                </span>
+                <p className="text-base sm:text-lg font-black text-emerald-950 mt-1 truncate">
+                  {predictiveData?.causesBreakdown && predictiveData.causesBreakdown.length > 0
+                    ? getCategoryMeta(predictiveData.causesBreakdown[0].category).label
+                    : "Em consolidação"}
+                </p>
+                <span className="text-[11px] text-emerald-600/90 mt-0.5 block">
+                  {predictiveData?.causesBreakdown && predictiveData.causesBreakdown.length > 0
+                    ? `${predictiveData.causesBreakdown[0].percentage}% do volume total registrado`
+                    : "Aguardando mais retornos"}
+                </span>
+              </div>
+            </div>
+
+            {/* Painel de Recomendações de Políticas Públicas */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-sky-600" />
+                  <span>Diretrizes Executivas e Recomendações de Intervenção Municipal</span>
+                </h4>
+                <span className="text-[11px] font-medium text-slate-500">
+                  Respaldo: Art. 56 do ECA & Art. 12 da LDB
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {predictiveData?.recommendations && predictiveData.recommendations.length > 0 ? (
+                  predictiveData.recommendations.map((rec, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-4 rounded-2xl border transition-all ${
+                        rec.priority === "HIGH"
+                          ? "bg-rose-50/70 border-rose-300 text-rose-950"
+                          : rec.priority === "MEDIUM"
+                          ? "bg-amber-50/70 border-amber-300 text-amber-950"
+                          : "bg-sky-50/70 border-sky-300 text-sky-950"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                            rec.priority === "HIGH"
+                              ? "bg-rose-600 text-white"
+                              : rec.priority === "MEDIUM"
+                              ? "bg-amber-600 text-white"
+                              : "bg-sky-600 text-white"
+                          }`}
+                        >
+                          {rec.priority === "HIGH"
+                            ? "Prioridade Alta (Ação Imediata)"
+                            : rec.priority === "MEDIUM"
+                            ? "Prioridade Média (Intersetorial)"
+                            : "Monitoramento Regular"}
+                        </span>
+                      </div>
+                      <h5 className="font-bold text-xs sm:text-sm mb-1.5">{rec.title}</h5>
+                      <p className="text-xs leading-relaxed opacity-90">{rec.action}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-2 p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
+                    Nenhuma recomendação atípica no momento. Rede em monitoramento contínuo.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Distribuição Gráfica das Causas de Faltas */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-sm font-extrabold text-slate-900">
+                    Distribuição Percentual de Motivos de Infrequência
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Base fundamentada nos relatos das famílias durante as abordagens de Busca Ativa
+                  </p>
+                </div>
+                <span className="text-xs font-bold text-slate-700">
+                  {predictiveData?.totalCategorizedReplies || 0} justificativas
+                </span>
+              </div>
+
+              {predictiveData?.causesBreakdown && predictiveData.causesBreakdown.length > 0 ? (
+                <div className="space-y-3.5">
+                  {predictiveData.causesBreakdown.map((item, idx) => {
+                    const meta = getCategoryMeta(item.category);
+                    return (
+                      <div key={idx} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-800 flex items-center gap-2">
+                            <span className={`w-2.5 h-2.5 rounded-full ${meta.bg.split(" ")[0]}`} />
+                            {meta.label}
+                          </span>
+                          <span className="font-extrabold text-slate-900">
+                            {item.percentage}% ({item.count} {item.count === 1 ? "ocorrência" : "ocorrências"})
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                          <div
+                            style={{ width: `${Math.min(100, Math.max(0, item.percentage))}%` }}
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              item.category === "TRABALHO"
+                                ? "bg-red-600"
+                                : item.category === "TRANSPORTE"
+                                ? "bg-amber-500"
+                                : item.category === "SAUDE"
+                                ? "bg-rose-500"
+                                : item.category === "VULNERABILIDADE"
+                                ? "bg-purple-600"
+                                : "bg-sky-600"
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-8 text-center rounded-xl bg-slate-50 text-xs text-slate-500 space-y-2">
+                  <HelpCircle className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="font-semibold text-slate-700">
+                    Nenhuma justificativa familiar categorizada ainda nesta rede municipal.
+                  </p>
+                  <p className="text-slate-400 max-w-md mx-auto">
+                    Conforme as equipes pedagógicas das escolas realizarem as abordagens pelo WhatsApp e registrarem os motivos das ausências, os índices preditivos serão consolidados automaticamente.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Matriz de Priorização das Escolas com Menor Desempenho */}
+            <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+              <h4 className="text-sm font-extrabold text-slate-900">
+                Matriz de Foco Prioritário da Rede (Intervenção Imediata)
+              </h4>
+              <p className="text-xs text-slate-500">
+                Unidades ordenadas por criticidade para subsidiar a atuação da equipe multidisciplinar da SEMEC
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 text-[11px] font-bold">
+                      <th className="py-2.5 px-3">Escola Municipal</th>
+                      <th className="py-2.5 px-3">Polo / Distrito</th>
+                      <th className="py-2.5 px-3 text-center">Frequência Média</th>
+                      <th className="py-2.5 px-3 text-center">Alunos em Risco Crítico</th>
+                      <th className="py-2.5 px-3 text-center">Nível de Atenção</th>
+                      <th className="py-2.5 px-3 text-right">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[...schools]
+                      .sort((a, b) => a.averageAttendance - b.averageAttendance)
+                      .slice(0, 5)
+                      .map((sc) => (
+                        <tr key={sc.id} className="hover:bg-slate-50/80">
+                          <td className="py-2.5 px-3 font-bold text-slate-800">{sc.name}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{sc.district || "Sede Urbana"}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`font-black px-2 py-0.5 rounded-md ${
+                                sc.averageAttendance < 75
+                                  ? "bg-rose-100 text-rose-800"
+                                  : sc.averageAttendance < 85
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-emerald-100 text-emerald-800"
+                              }`}
+                            >
+                              {sc.averageAttendance}%
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                            {sc.criticalCount} alunos
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black ${
+                                sc.averageAttendance < 75
+                                  ? "bg-rose-600 text-white"
+                                  : sc.averageAttendance < 85
+                                  ? "bg-amber-500 text-white"
+                                  : "bg-emerald-600 text-white"
+                              }`}
+                            >
+                              {sc.averageAttendance < 75
+                                ? "Urgência Alta"
+                                : sc.averageAttendance < 85
+                                ? "Atenção Moderada"
+                                : "Estável"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleSwitchSchool(sc.id)}
+                              disabled={switching === sc.id}
+                              className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] transition cursor-pointer"
+                            >
+                              Inspecionar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>

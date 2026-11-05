@@ -23,8 +23,13 @@ import {
   FileText,
   RotateCcw,
   Check,
-  X
+  X,
+  Stethoscope,
+  Send,
+  BellRing,
 } from "lucide-react";
+import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
+import { classifyActionItemCategory } from "@/lib/actionClassifier";
 
 interface ActionItemMinuteStudent {
   id: string;
@@ -121,6 +126,7 @@ export default function EncaminhamentosClient({
   // Filtros
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "OVERDUE" | "COMPLETED">("PENDING");
   const [responsibleFilter, setResponsibleFilter] = useState<string>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [turmaFilter, setTurmaFilter] = useState<string>("ALL");
   const [search, setSearch] = useState("");
 
@@ -226,9 +232,15 @@ export default function EncaminhamentosClient({
         }
       }
 
+      // 5. Filtro de Categoria Temática (JUR-03)
+      if (categoryFilter !== "ALL") {
+        const itemCat = classifyActionItemCategory(item.description).category;
+        if (itemCat !== categoryFilter) return false;
+      }
+
       return true;
     });
-  }, [actionItems, statusFilter, responsibleFilter, turmaFilter, search, startOfToday, classes]);
+  }, [actionItems, statusFilter, responsibleFilter, categoryFilter, turmaFilter, search, startOfToday, classes]);
 
   // Abertura do modal de conclusão
   const handleOpenCompleteModal = (item: ActionItem) => {
@@ -420,6 +432,57 @@ export default function EncaminhamentosClient({
           </Link>
         </div>
       </div>
+
+      {/* Banner de Notificações de Alerta de Prazos (JUR-03) */}
+      {(metrics.overdue > 0 || metrics.dueSoon > 0) && (
+        <div className="p-4 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
+              <BellRing className="w-5 h-5 animate-bounce" />
+            </div>
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-extrabold text-amber-900 dark:text-amber-200 flex items-center space-x-2">
+                <span>Central de Alertas de Prazos Pedagógicos</span>
+                {metrics.overdue > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-black text-[10px]">
+                    {metrics.overdue} Vencido{metrics.overdue > 1 ? "s" : ""}
+                  </span>
+                )}
+                {metrics.dueSoon > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[10px]">
+                    {metrics.dueSoon} Vencendo em breve
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                Acompanhe entregas de laudos, retornos da família e encaminhamentos ao CRAS/CREAS para evitar descontinuidade protetiva.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            {metrics.overdue > 0 && (
+              <button
+                type="button"
+                onClick={() => setStatusFilter("OVERDUE")}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+              >
+                Filtrar Vencidos ({metrics.overdue})
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter("PENDING");
+                setCategoryFilter("LAUDO_MEDICO");
+              }}
+              className="px-3 py-1.5 rounded-xl border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-900 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100/50 transition cursor-pointer"
+            >
+              🩺 Laudos Pendentes
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Cards de Métricas Analíticas */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
@@ -644,6 +707,33 @@ export default function EncaminhamentosClient({
             </select>
           </div>
         </div>
+
+        {/* Chips de Categoria Temática (JUR-03) */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">
+            Categorias:
+          </span>
+          {[
+            { id: "ALL", label: "Todas" },
+            { id: "LAUDO_MEDICO", label: "🩺 Laudos & Saúde" },
+            { id: "RETORNO_FAMILIAR", label: "👨‍👩‍👧 Retorno Familiar" },
+            { id: "REDE_PROTECAO", label: "🏛️ Rede / CRAS / CT" },
+            { id: "PEDAGOGICO", label: "📚 Pedagógico" },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setCategoryFilter(cat.id)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                categoryFilter === cat.id
+                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Lista de Combinados */}
@@ -694,7 +784,7 @@ export default function EncaminhamentosClient({
                     </button>
 
                     <div className="space-y-2 flex-1 min-w-0">
-                      {/* Linha de Badges: Responsável + Prazo */}
+                      {/* Linha de Badges: Responsável + Categoria + Prazo */}
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Badge de Responsável */}
                         <span
@@ -702,6 +792,11 @@ export default function EncaminhamentosClient({
                         >
                           <RespIcon className="w-3.5 h-3.5" />
                           {respCfg.label}
+                        </span>
+
+                        {/* Badge de Categoria Temática (JUR-03) */}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          {classifyActionItemCategory(item.description).label}
                         </span>
 
                         {/* Badge de Prazo / Status */}
@@ -790,6 +885,25 @@ export default function EncaminhamentosClient({
 
                   {/* Lado Direito: Ações */}
                   <div className="flex sm:flex-col items-center sm:items-end justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                    {!isCompleted && item.minute.students?.[0]?.studentNameSnapshot && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const student = item.minute.students[0];
+                          const desc = item.description;
+                          const due = item.dueDate ? new Date(item.dueDate).toLocaleDateString("pt-BR") : "breve";
+                          const text = `Olá! Entramos em contato da Equipe Pedagógica a respeito do combinado firmado em ata pedagógica referente ao estudante ${student.studentNameSnapshot}: "${desc}". Lembrando que o prazo pactuado é até ${due}. Estamos à disposição na secretaria escolar!`;
+                          const url = `https://web.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+                          window.open(url, "_blank");
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40 text-xs font-semibold transition cursor-pointer"
+                        title="Enviar lembrete do combinado via WhatsApp para a família"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Lembrete</span>
+                      </button>
+                    )}
+
                     {!isCompleted ? (
                       <button
                         onClick={() => handleOpenCompleteModal(item)}

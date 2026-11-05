@@ -19,6 +19,7 @@ const createSchoolSchema = z
     phone: z.string().optional().nullable(),
     email: z.string().optional().nullable(),
     logoUrl: z.string().optional().nullable(),
+    settings: z.record(z.string(), z.any()).optional().nullable(),
   })
   .transform((d) => {
     const rawInep = (d.inepCode || d.inep || "").trim();
@@ -32,6 +33,7 @@ const createSchoolSchema = z
       email: rawEmail,
       phone: rawPhone,
       state: (d.state || "PR").trim().toUpperCase(),
+      settings: d.settings || null,
     };
   })
   .refine((d) => d.inepCode.length >= 4, {
@@ -113,6 +115,14 @@ export async function POST(req: Request) {
 
     const data = parsed.data;
 
+    // 0. Proteção Inviolável da Escola Piloto Fundadora Leopoldina (INEP 41042730)
+    if (data.inepCode === "41042730") {
+      return NextResponse.json(
+        { error: "O código INEP 41042730 pertence à Unidade Piloto Fundadora e não pode ser recriado." },
+        { status: 403 }
+      );
+    }
+
     // 1. Verifica se já existe escola com este INEP
     const existing = await prisma.school.findUnique({
       where: { inepCode: data.inepCode },
@@ -163,6 +173,7 @@ export async function POST(req: Request) {
         phone: data.phone?.trim() || null,
         email: data.email?.trim() || null,
         logoUrl: data.logoUrl?.trim() || null,
+        settingsJson: data.settings ? JSON.stringify(data.settings) : null,
         active: true,
       },
     });

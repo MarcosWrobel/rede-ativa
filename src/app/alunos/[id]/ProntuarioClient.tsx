@@ -25,8 +25,11 @@ import {
   Printer,
   QrCode,
   Lock,
+  ShieldCheck,
+  Camera,
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
+import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import ModalDialog from "@/components/ModalDialog";
 import {
   KINSHIP_LABELS,
@@ -41,6 +44,7 @@ import {
   type DeliveryStatus,
   type ReplyCategory,
 } from "@/lib/whatsappProvider";
+import { formatMessageSeal } from "@/lib/messageCrypto";
 
 interface Props {
   initialStudent: any;
@@ -75,6 +79,7 @@ export default function ProntuarioClient({
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [isAtaEditorOpen, setIsAtaEditorOpen] = useState(false);
   const [editingMinute, setEditingMinute] = useState<any | null>(null);
+  const [scanningMinute, setScanningMinute] = useState<any | null>(null);
 
   // Modal: Novo Contato
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -1052,7 +1057,27 @@ export default function ProntuarioClient({
                           </p>
                         </div>
 
-                        <div className="flex items-center space-x-2">
+                        <div className="flex flex-wrap items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setScanningMinute(m)}
+                            className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                              m.physicalSignedScanData
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                            }`}
+                            title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>
+                              {m.physicalSignedScanData
+                                ? m.govBrVerified
+                                  ? "🏛️ Gov.br Anexo"
+                                  : "📄 Via Física Anexa"
+                                : "Anexar Via Física"}
+                            </span>
+                          </button>
+
                           {isFinal && (
                             <Link
                               href={`/atas/${m.id}/imprimir`}
@@ -1088,6 +1113,66 @@ export default function ProntuarioClient({
                         <p className="text-sky-900 bg-sky-50 p-2 rounded-lg border border-sky-100 text-[11px]">
                           <strong>Combinados:</strong> {m.agreementsSummary}
                         </p>
+                      )}
+
+                      {/* Combinados e Prazos Individuais da Ata (JUR-03) */}
+                      {m.actionItems && m.actionItems.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            Prazos e Encaminhamentos Pactuados ({m.actionItems.length}):
+                          </span>
+                          <div className="grid grid-cols-1 gap-1.5">
+                            {m.actionItems.map((act: any) => {
+                              const isDone = act.status === "COMPLETED";
+                              const isOverdue = !isDone && act.dueDate && new Date(act.dueDate) < new Date();
+                              return (
+                                <div
+                                  key={act.id}
+                                  className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl text-[11px] border ${
+                                    isDone
+                                      ? "bg-emerald-50/60 border-emerald-200 text-emerald-900"
+                                      : isOverdue
+                                      ? "bg-rose-50 border-rose-200 text-rose-900 font-medium"
+                                      : "bg-white border-slate-200 text-slate-800"
+                                  }`}
+                                >
+                                  <div className="flex items-center space-x-2">
+                                    <span
+                                      className={`w-2 h-2 rounded-full ${
+                                        isDone ? "bg-emerald-500" : isOverdue ? "bg-rose-500 animate-pulse" : "bg-amber-500"
+                                      }`}
+                                    />
+                                    <span className="font-semibold">{act.description}</span>
+                                    <span className="text-[10px] text-slate-500">({act.responsible})</span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 shrink-0">
+                                    {act.dueDate && (
+                                      <span
+                                        className={`font-mono text-[10px] ${
+                                          isOverdue ? "font-bold text-rose-700" : "text-slate-600"
+                                        }`}
+                                      >
+                                        {isOverdue ? "⚠️ Vencido em: " : "Prazo: "}
+                                        {new Date(act.dueDate).toLocaleDateString("pt-BR")}
+                                      </span>
+                                    )}
+                                    <span
+                                      className={`px-2 py-0.5 rounded-md font-bold text-[9.5px] ${
+                                        isDone
+                                          ? "bg-emerald-100 text-emerald-800"
+                                          : isOverdue
+                                          ? "bg-rose-100 text-rose-800"
+                                          : "bg-slate-100 text-slate-700"
+                                      }`}
+                                    >
+                                      {isDone ? "Concluído" : isOverdue ? "Atrasado" : "Pendente"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
@@ -1203,6 +1288,15 @@ export default function ProntuarioClient({
                           <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold text-[10px]">
                             {DELIVERY_STATUS_LABELS[log.deliveryStatus as DeliveryStatus] ||
                               log.deliveryStatus}
+                          </span>
+                        ) : null}
+                        {log.contentHash ? (
+                          <span
+                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-[10px] border border-slate-200"
+                            title={`Selo Probatório SHA-256: ${log.contentHash}`}
+                          >
+                            <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                            <span>{formatMessageSeal(log.contentHash)}</span>
                           </span>
                         ) : null}
                       </div>
@@ -1589,6 +1683,19 @@ export default function ProntuarioClient({
         ]}
         preSelectedStudentId={student.id}
         existingMinute={editingMinute}
+      />
+
+      {/* Modal de Captura de Via Física e Assinatura Gov.br (JUR-04) */}
+      <PhysicalScanModal
+        isOpen={Boolean(scanningMinute)}
+        minute={scanningMinute}
+        onClose={() => setScanningMinute(null)}
+        onSuccess={(updated) => {
+          setMinutes((prev) =>
+            prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+          );
+          setScanningMinute(null);
+        }}
       />
     </div>
   );

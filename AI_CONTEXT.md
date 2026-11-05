@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa).
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com selo SHA-256 canônico, adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 177+ testes incluindo adversarialQa.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx).
 ```
 
@@ -53,7 +53,7 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - Modelagem de dados multi-tenant com `EducationNetwork`, `School` e `UserSchool`.
 - Implementação da hierarquia de governança em 4 camadas com dashboards isolados.
 - Criação de mecanismos de higienização de dados de teste (`/api/schools/[id]/sanitize`) e exclusão segura com blindagem atômica da **Escola Piloto Leopoldina**.
-- Suíte automatizada expandida para **96 testes unitários e de integração (Vitest)**.
+- Suíte automatizada expandida para **177+ testes unitários, integrados e adversariais (Vitest em 30 arquivos)** com 0 erros de build Turbopack.
 
 ---
 
@@ -61,20 +61,25 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 
 Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas regras:
 
-### Regra 1: A Escola Piloto Leopoldina é Inviolável
+### Regra 1: A Escola Piloto Leopoldina é Inviolável & Tolerância a Legados Restrita à Sede
 - O **Colégio Estadual Leopoldina B. Pedroso** (INEP `41042730`) é a semente fundadora do sistema e contém 689 alunos reais.
 - **NUNCA** execute comandos ou crie rotinas que apaguem, redefinam ou sobreponham dados do Leopoldina.
 - O backend rejeita requisições destrutivas com `403 Forbidden` (`target.inepCode === "41042730"`). Não contorne essa proteção.
+- **Tolerância a Dados Legados Restrita à Sede:** Qualquer filtro de retrocompatibilidade com registros legados (`schoolId: null` ou `"default-leopoldina"`) **DEVE** ser estritamente condicionado à comprovação de que a sessão ativa pertence à Escola Piloto Fundadora (`inepCode === "41042730"`). Nunca inclua `schoolId: null` ou `"default-leopoldina"` em cláusulas `OR` para outras escolas nem execute *auto-healing* de `schoolId` a partir de sessões externas.
 
-### Regra 2: Isolamento Multi-Tenant Estrito (Sem IDOR)
-- Toda consulta e mutação a entidades filhas (`Student`, `ClassGroup`, `PedagogicalMinute`, `MessageLog`, etc.) **deve filtrar por `schoolId`**:
+### Regra 2: Isolamento Multi-Tenant Estrito (Sem IDOR / BOLA)
+- Toda consulta e mutação a entidades filhas (`Student`, `ClassGroup`, `PedagogicalMinute`, `MessageLog`, `AbsenceJustification`, `StudentContact`, etc.) **deve filtrar obrigatoriamente por `schoolId`**:
   ```typescript
   // CORRETO
   const students = await prisma.student.findMany({
     where: { schoolId, active: true },
   });
   ```
-- Em mutações por ID (`/api/students/[id]`, `/api/atas/[id]`), valide se o registro pertence à escola do usuário antes de atualizar ou excluir.
+- **Validação de Cookie de Contexto (`active_school_id`):** Em `getCurrentSchool()`, nunca confie no cookie `active_school_id` sem validar se o usuário autenticado na sessão possui vínculo ativo com aquela escola (`session.user.schools` / `schoolId`) ou privilégio global (`SUPERADMIN` / `GESTAO_SECRETARIA` autorizado). Nunca confie em `schoolId` vindo do corpo da requisição (*parameter spoofing*): o tenant efetivo sempre deriva da sessão validada.
+- **Integridade de FKs em Criação E Atualização (`POST`, `PUT`, `PATCH`, `/finalize`):** Sempre valide que chaves estrangeiras referenciadas em arrays ou campos (`studentIds`, `classGroupId`, `templateId`) pertençam estritamente ao mesmo `schoolId` do recurso/sessão (conferindo `matched.length === requestedIds.length`), inclusive em edições de rascunho e finalizações de atas.
+- **Rejeição Explícita de Parâmetros Restritos (RBAC):** Quando um payload contiver flags ou operações restritas a papéis superiores (ex.: `updateSchoolInfo: true` para não-`SUPERADMIN`), retorne explicitamente **`403 Forbidden`** — nunca ignore silenciosamente retornando `200 OK`.
+- **Auditoria com `schoolId` Raiz Obrigatório & Exportação CSV Segura:** Toda chamada `logAudit(...)` em contexto escolar **DEVE** receber `schoolId` na raiz do objeto (nunca apenas dentro de `details`), e consultas em `/auditoria` nunca devem expor `{ schoolId: null }` entre tenants. Em exportações CSV, todas as colunas textuais devem aplicar `sanitizeCsvField(...)` combinado ao escape RFC 4180 (`.replace(/"/g, '""')`).
+- Em mutações por ID (`/api/students/[id]`, `/api/atas/[id]`), valide se o registro pertence à escola do usuário antes de atualizar ou excluir (`assertTenantOwnership`).
 
 ### Regra 3: Fé Pública e Imutabilidade das Atas
 - Atas no status `FINALIZED` **nunca sofrem edição de texto in loco**.
@@ -87,15 +92,16 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 - No validador público (`/validar/ata/[code]`), exponha apenas metadados e nomes mascarados (`maskName`, `maskDocument`).
 - No Dossiê em PDF (`/alunos/[id]/dossie`), aplique anonimização automática por iniciais a outros menores citados em atas coletivas.
 
-### Regra 5: Arquitetura Híbrida (Server vs. Client Components)
+### Regra 5: Arquitetura Híbrida (Server vs. Client Components) e Escopo do Proxy
 - Mantenha o padrão de pares:
   - `page.tsx`: Server Component para resolver sessão, escola ativa e buscar dados iniciais sem waterfall.
   - `*Client.tsx`: Client Component (`"use client"`) para gerenciar estados, modais, filtros e chamadas `fetch`.
+- **Atenção ao Escopo do Middleware (`src/proxy.ts`):** O middleware valida apenas autenticação ativa, **não** posse de tenant sobre parâmetros dinâmicos `[id]` ou `[ano]`. Todo Server Component (`page.tsx`, rotas de impressão `/imprimir`, dossiês e livros anuais) **DEVE** validar `auth()` e `assertTenantOwnership(...)` antes de renderizar dados ou executar escritas de *auto-healing*.
 - Não importe Prisma Client dentro de Client Components.
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **todos os 96 testes devem passar**.
+  1. Execute `npm test` — **todos os 177+ testes devem passar (incluindo `adversarialQa.test.ts`)**.
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 

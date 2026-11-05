@@ -60,16 +60,28 @@ export async function POST(req: Request) {
 
     const { cgm, name, guardianName, phone, classGroupId } = parsed.data;
 
-    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa (tolerante a turmas legadas)
+    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa (tolerante a turmas legadas apenas para a escola piloto)
+    const isDefaultSchoolContext =
+      currentSchool.id === "default-leopoldina" ||
+      currentSchool.inepCode === "41042730" ||
+      (authCheck.session?.user as any)?.inepCode === "41042730";
+
+    const classGroupFilter = isDefaultSchoolContext
+      ? {
+          id: classGroupId,
+          OR: [
+            { schoolId: currentSchool.id },
+            { schoolId: null },
+            { schoolId: "default-leopoldina" },
+          ],
+        }
+      : {
+          id: classGroupId,
+          schoolId: currentSchool.id,
+        };
+
     const classGroup = await prisma.classGroup.findFirst({
-      where: {
-        id: classGroupId,
-        OR: [
-          { schoolId: currentSchool.id },
-          { schoolId: null },
-          { schoolId: "default-leopoldina" },
-        ],
-      },
+      where: classGroupFilter,
     });
 
     if (!classGroup) {
@@ -79,12 +91,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // Auto-cura de turma legada: associa ao schoolId atual se estiver nula
+    // Auto-cura de turma legada: associa ao schoolId atual estritamente na escola piloto
     if (!classGroup.schoolId && currentSchool.id) {
-      prisma.classGroup.update({
-        where: { id: classGroup.id },
-        data: { schoolId: currentSchool.id },
-      }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
+      if (isDefaultSchoolContext) {
+        prisma.classGroup.update({
+          where: { id: classGroup.id },
+          data: { schoolId: currentSchool.id },
+        }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
+      } else {
+        return NextResponse.json(
+          { error: "A turma selecionada não pertence a esta instituição escolar." },
+          { status: 400 }
+        );
+      }
     }
 
     const cleanDigits = phone.replace(/\D/g, "");
@@ -154,15 +173,27 @@ export async function PUT(req: Request) {
     }
 
     if (classGroupId && classGroupId !== previous.classGroupId) {
+      const isDefaultSchoolContext =
+        currentSchool.id === "default-leopoldina" ||
+        currentSchool.inepCode === "41042730" ||
+        (authCheck.session?.user as any)?.inepCode === "41042730";
+
+      const classGroupFilter = isDefaultSchoolContext
+        ? {
+            id: classGroupId,
+            OR: [
+              { schoolId: currentSchool.id },
+              { schoolId: null },
+              { schoolId: "default-leopoldina" },
+            ],
+          }
+        : {
+            id: classGroupId,
+            schoolId: currentSchool.id,
+          };
+
       const classGroup = await prisma.classGroup.findFirst({
-        where: {
-          id: classGroupId,
-          OR: [
-            { schoolId: currentSchool.id },
-            { schoolId: null },
-            { schoolId: "default-leopoldina" },
-          ],
-        },
+        where: classGroupFilter,
       });
       if (!classGroup) {
         return NextResponse.json(
@@ -171,10 +202,17 @@ export async function PUT(req: Request) {
         );
       }
       if (!classGroup.schoolId && currentSchool.id) {
-        prisma.classGroup.update({
-          where: { id: classGroup.id },
-          data: { schoolId: currentSchool.id },
-        }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
+        if (isDefaultSchoolContext) {
+          prisma.classGroup.update({
+            where: { id: classGroup.id },
+            data: { schoolId: currentSchool.id },
+          }).catch((e) => console.warn("[api/students] Falha não-crítica ao vincular turma legada:", e));
+        } else {
+          return NextResponse.json(
+            { error: "A turma selecionada não pertence a esta instituição escolar." },
+            { status: 400 }
+          );
+        }
       }
     }
 

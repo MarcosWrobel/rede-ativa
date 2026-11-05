@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { computeMessageContentHash } from "@/lib/messageCrypto";
 
 // PUT: Editar campos de um registro do histórico (Restrito a ADMIN)
 export async function PUT(req: Request) {
@@ -69,6 +70,23 @@ export async function PUT(req: Request) {
       updateData.deliveryStatus = deliveryStatus;
       updateData.deliveryUpdatedAt = new Date();
     }
+
+    // Recalcula o Hash SHA-256 canônico de integridade probatória se campos-chave forem alterados
+    const effectiveSentAt = updateData.sentAt || previous.sentAt;
+    const effectiveReason = updateData.reasonTitle !== undefined ? updateData.reasonTitle : previous.reasonTitle;
+    const effectivePhone = updateData.phoneUsed !== undefined ? updateData.phoneUsed : previous.phoneUsed;
+    const effectiveContent = updateData.messageContent !== undefined ? updateData.messageContent : previous.messageContent;
+    const effectiveSentByName = updateData.sentByName !== undefined ? updateData.sentByName : previous.sentByName;
+
+    updateData.contentHash = computeMessageContentHash({
+      studentId: previous.studentId,
+      schoolId: previous.student.schoolId || currentSchool.id,
+      phoneUsed: effectivePhone,
+      reasonTitle: effectiveReason,
+      messageContent: effectiveContent,
+      sentByName: effectiveSentByName,
+      sentAt: effectiveSentAt,
+    });
 
     const updated = await prisma.messageLog.update({
       where: { id },
