@@ -43,6 +43,7 @@ export default function MobileSignClient({
   googleClientId,
 }: Props) {
   const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [biometricStrokeData, setBiometricStrokeData] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [successMode, setSuccessMode] = useState<string>("CANVAS");
@@ -257,16 +258,21 @@ export default function MobileSignClient({
       const payload: any = {};
       if (preferEscolaAuth && googleIdToken) {
         payload.googleIdToken = googleIdToken;
-        if (signatureData) payload.signatureData = signatureData;
+        if (signatureData) {
+          payload.signatureData = signatureData;
+          if (biometricStrokeData) payload.biometricStrokeData = biometricStrokeData;
+        }
         if (biometricVerified) {
           payload.biometricVerified = true;
           payload.biometricDeviceType = biometricDeviceType;
         }
       } else {
         payload.signatureData = signatureData;
+        if (biometricStrokeData) payload.biometricStrokeData = biometricStrokeData;
         payload.biometricVerified = biometricVerified;
         payload.biometricDeviceType = biometricDeviceType;
       }
+      payload.clientTimestampIso = new Date().toISOString();
 
       const res = await fetch(`/api/atas/sign-token/${token}`, {
         method: "POST",
@@ -509,8 +515,14 @@ export default function MobileSignClient({
               </label>
               <SignatureCanvas
                 signerName={participantName}
-                onSave={(dataUrl) => setSignatureData(dataUrl)}
-                onClear={() => setSignatureData(null)}
+                onSave={(dataUrl, strokeData) => {
+                  setSignatureData(dataUrl);
+                  setBiometricStrokeData(strokeData || null);
+                }}
+                onClear={() => {
+                  setSignatureData(null);
+                  setBiometricStrokeData(null);
+                }}
               />
 
               <button

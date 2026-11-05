@@ -158,6 +158,16 @@ export default function PrintPageClient({
               MOTIVO: {minute.voidReason}
             </p>
           )}
+          {minute.isExtemporaneous && minute.extemporaneousReason && (
+            <div className="font-sans text-xs border border-amber-300 bg-amber-50/80 p-2.5 rounded-lg text-amber-950 space-y-0.5 print:p-2 print:text-[10px]">
+              <p className="font-bold uppercase tracking-wider text-amber-900 text-[10px] print:text-[9px]">
+                Nota de Escrituração Administrativa (Lavratura Extemporânea):
+              </p>
+              <p className="italic leading-relaxed">
+                &ldquo;{minute.extemporaneousReason}&rdquo;
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Informações dos Estudantes Vinculados */}

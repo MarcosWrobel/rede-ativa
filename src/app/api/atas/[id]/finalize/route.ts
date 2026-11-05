@@ -5,6 +5,7 @@ import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeMinuteHash, generateVerificationCode } from "@/lib/ataCrypto";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { verifyPin, calculateBusinessDaysDiff } from "@/lib/signingPin";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,67 @@ export async function POST(
       }
     } catch {
       rawBody = null;
+    }
+
+    // Validação de Fé Pública: Se o servidor cadastrou um PIN de assinatura, exige a validação da credencial
+    if (authCheck.userId && prisma.user?.findUnique) {
+      const userDb = await prisma.user.findUnique({
+        where: { id: authCheck.userId },
+        select: { id: true, signingPinHash: true, pinAttempts: true, pinLockedUntil: true },
+      });
+
+      if (userDb?.signingPinHash) {
+        const now = new Date();
+        if (userDb.pinLockedUntil && userDb.pinLockedUntil > now) {
+          const minsLeft = Math.ceil((userDb.pinLockedUntil.getTime() - now.getTime()) / 60000);
+          return NextResponse.json(
+            { error: `PIN de fé pública temporariamente bloqueado. Aguarde ${minsLeft} minuto(s) para tentar novamente.` },
+            { status: 403 }
+          );
+        }
+
+        const providedPin = rawBody?.signingPin ? String(rawBody.signingPin).trim() : "";
+        if (!providedPin) {
+          return NextResponse.json(
+            { error: "PIN_REQUIRED:Informe seu PIN de fé pública para lavrar e assinar a ata oficial." },
+            { status: 401 }
+          );
+        }
+
+        const isValidPin = await verifyPin(providedPin, userDb.signingPinHash);
+        if (!isValidPin) {
+          const nextAttempts = userDb.pinAttempts + 1;
+          const shouldLock = nextAttempts >= 3;
+          const lockUntil = shouldLock ? new Date(now.getTime() + 5 * 60000) : null;
+
+          if (prisma.user?.update) {
+            await prisma.user.update({
+              where: { id: userDb.id },
+              data: {
+                pinAttempts: shouldLock ? 0 : nextAttempts,
+                pinLockedUntil: lockUntil,
+              },
+            });
+          }
+
+          return NextResponse.json(
+            {
+              error: shouldLock
+                ? "PIN de fé pública incorreto. Limite de 3 tentativas excedido. Bloqueado por 5 minutos."
+                : `PIN de fé pública incorreto. Tentativas restantes: ${3 - nextAttempts}.`,
+            },
+            { status: 401 }
+          );
+        }
+
+        // Reseta tentativas incorretas após sucesso
+        if (userDb.pinAttempts > 0 && prisma.user?.update) {
+          await prisma.user.update({
+            where: { id: userDb.id },
+            data: { pinAttempts: 0, pinLockedUntil: null },
+          });
+        }
+      }
     }
 
     const currentYear = new Date().getFullYear();
@@ -172,6 +234,9 @@ export async function POST(
                     signatureData: sigData,
                     signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
                     signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
+                    signerUserAgent: shouldClear || isRefused ? null : (p.signerUserAgent || match?.signerUserAgent || null),
+                    biometricStrokeData: shouldClear || isRefused ? null : (p.biometricStrokeData || match?.biometricStrokeData || null),
+                    clientTimestampIso: shouldClear || isRefused ? null : (p.clientTimestampIso || match?.clientTimestampIso || null),
                     mobileSignToken: null,
                     mobileSignExpiresAt: null,
                     biometricVerified: bioVerified,
@@ -267,6 +332,25 @@ export async function POST(
             const verificationCode = generateVerificationCode();
             const now = new Date();
 
+            // Verificação de Lavratura Extemporânea (> 5 dias úteis) para conformidade administrativa
+            const businessDays = calculateBusinessDaysDiff(refreshedMinute.attendedAt, now);
+            let isExtemporaneous = false;
+            let extemporaneousReason: string | null = null;
+
+            if (businessDays > 5) {
+              const reason = rawBody?.extemporaneousReason ? String(rawBody.extemporaneousReason).trim() : "";
+              if (!reason || reason.length < 5) {
+                throw new Error(
+                  "VALIDATION:Atendimentos realizados há mais de 5 dias úteis exigem justificativa de lavratura extemporânea para fins de escrituração escolar."
+                );
+              }
+              isExtemporaneous = true;
+              extemporaneousReason = reason;
+            } else if (rawBody?.extemporaneousReason && String(rawBody.extemporaneousReason).trim().length >= 5) {
+              isExtemporaneous = true;
+              extemporaneousReason = String(rawBody.extemporaneousReason).trim();
+            }
+
             const canonicalPayload = {
               schoolId: refreshedMinute.schoolId,
               year: currentYear,
@@ -274,6 +358,8 @@ export async function POST(
               attendedAt: refreshedMinute.attendedAt.toISOString(),
               category: refreshedMinute.category,
               isConfidential: refreshedMinute.isConfidential,
+              isExtemporaneous,
+              extemporaneousReason,
               subject: refreshedMinute.subject,
               summary: refreshedMinute.summary,
               agreementsSummary: refreshedMinute.agreementsSummary,
@@ -313,6 +399,8 @@ export async function POST(
                 finalizedAt: now,
                 contentHash,
                 verificationCode,
+                isExtemporaneous,
+                extemporaneousReason,
                 authorId: authCheck.userId,
                 authorName: authCheck.userName || refreshedMinute.authorName,
                 authorEmail: authCheck.email,

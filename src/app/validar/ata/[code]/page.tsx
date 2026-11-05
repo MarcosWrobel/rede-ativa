@@ -88,8 +88,13 @@ export default async function ValidarAtaPage({ params }: Props) {
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
               <span className="text-[10px] font-bold text-slate-400 block uppercase">Data de Lavratura</span>
               <strong className="text-sm font-black text-slate-900">
-                {new Date(minute.attendedAt).toLocaleDateString("pt-BR")}
+                {new Date(minute.finalizedAt || minute.attendedAt).toLocaleDateString("pt-BR")}
               </strong>
+              {minute.isExtemporaneous && (
+                <span className="text-[9px] font-bold text-amber-700 block mt-0.5">
+                  • Lavratura Extemporânea Averbada
+                </span>
+              )}
             </div>
           </div>
 

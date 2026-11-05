@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
 import AtaQrCode from "./AtaQrCode";
+import SigningPinModal from "./SigningPinModal";
+import { calculateBusinessDaysDiff } from "@/lib/signingPin";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 import {
@@ -82,6 +84,14 @@ export default function AtaEditorModal({
   const [step1Error, setStep1Error] = useState<string | null>(null);
 
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [attendedAt, setAttendedAt] = useState<string>(() => {
+    if (existingMinute?.attendedAt) {
+      return typeof existingMinute.attendedAt === "string"
+        ? existingMinute.attendedAt
+        : new Date(existingMinute.attendedAt).toISOString();
+    }
+    return new Date().toISOString();
+  });
   const [category, setCategory] = useState("ACOMPANHAMENTO_PEDAGOGICO");
   const [isConfidential, setIsConfidential] = useState(false);
   const [subject, setSubject] = useState("Atendimento Pedagógico e Alinhamento de Frequência");
@@ -119,6 +129,13 @@ export default function AtaEditorModal({
   const [finalizedAta, setFinalizedAta] = useState<any | null>(null);
   const [minuteId, setMinuteId] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+
+  // Estados de Conformidade Jurídica (PIN de Fé Pública e Lavratura Extemporânea)
+  const [extemporaneousReason, setExtemporaneousReason] = useState(
+    existingMinute?.extemporaneousReason || ""
+  );
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [hasSigningPin, setHasSigningPin] = useState<boolean | undefined>(undefined);
 
   // Estados exclusivos para visualização de Ata já Lavrada (Adendo / Cancelamento / Ações)
   const [viewMinuteData, setViewMinuteData] = useState<any | null>(null);
@@ -439,7 +456,7 @@ export default function AtaEditorModal({
           category,
           studentNames,
           guardianNames,
-          attendedAt: existingMinute?.attendedAt || new Date().toISOString(),
+          attendedAt: attendedAt || new Date().toISOString(),
           apiKey: savedKey || undefined,
         }),
       });
@@ -566,6 +583,7 @@ export default function AtaEditorModal({
       studentIds: selectedStudentIds,
       participants: cleanParticipants,
       actionItems: cleanActions,
+      extemporaneousReason: extemporaneousReason.trim() || null,
     };
   };
 
@@ -622,8 +640,16 @@ export default function AtaEditorModal({
     }
   };
 
-  // Botão "Lavrar Ata Oficial (Imutável)" — direto, sem window.confirm bloqueável
-  const handleFinalize = async () => {
+  const isExtemporaneousMeeting = useMemo(() => {
+    const dateStr = attendedAt || existingMinute?.attendedAt;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    return calculateBusinessDaysDiff(d, new Date()) > 5;
+  }, [attendedAt, existingMinute]);
+
+  // Botão "Lavrar Ata Oficial (Imutável)" — com validação de PIN de Fé Pública e Extemporaneidade
+  const handleFinalize = async (overridePin?: string) => {
     setFinalizeError(null);
     setDraftSavedMsg(null);
 
@@ -646,6 +672,20 @@ export default function AtaEditorModal({
       return;
     }
 
+    // Validação de lavratura extemporânea (> 5 dias úteis)
+    if (isExtemporaneousMeeting && (!extemporaneousReason || extemporaneousReason.trim().length < 5)) {
+      setFinalizeError(
+        "Esta reunião ocorreu há mais de 5 dias úteis. Preencha a Justificativa da Lavratura Extemporânea no formulário antes de lavrar."
+      );
+      return;
+    }
+
+    // Se o PIN ainda não foi informado nesta submissão, abre o modal de validação de fé pública
+    if (!overridePin) {
+      setShowPinModal(true);
+      return;
+    }
+
     setSavingFinal(true);
     try {
       let targetId = minuteId || existingMinute?.id;
@@ -659,8 +699,12 @@ export default function AtaEditorModal({
         targetId = created.id;
       }
 
-      // Envia o payload atualizado direto para o endpoint atômico de lavratura oficial
-      const payload = buildSanitizedPayload();
+      // Envia o payload atualizado direto para o endpoint atômico de lavratura oficial com o PIN
+      const payload = {
+        ...buildSanitizedPayload(),
+        signingPin: overridePin,
+        extemporaneousReason: extemporaneousReason.trim() || undefined,
+      };
       const res = await fetch(`/api/atas/${targetId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -669,6 +713,10 @@ export default function AtaEditorModal({
 
       const data = await res.json();
       if (!res.ok) {
+        if (data.error && data.error.includes("PIN_REQUIRED")) {
+          setShowPinModal(true);
+          return;
+        }
         throw new Error(data.error || "Erro ao lavrar ata oficial no servidor.");
       }
 
@@ -1720,6 +1768,26 @@ export default function AtaEditorModal({
               </button>
             </div>
 
+            {/* Aviso e Justificativa de Lavratura Extemporânea (> 5 dias úteis) */}
+            {isExtemporaneousMeeting && (
+              <div className="p-4 bg-amber-50/90 border border-amber-300 rounded-2xl space-y-2 text-xs shadow-2xs">
+                <div className="flex items-center space-x-2 text-amber-900 font-black">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>Lavratura Extemporânea (Atendimento realizado há mais de 5 dias úteis)</span>
+                </div>
+                <p className="text-amber-800 leading-relaxed font-medium">
+                  Conforme as diretrizes de escrituração do NRE/SEED-PR, atendimentos lavrados após 5 dias úteis exigem justificativa administrativa para constar no Livro de Atas e resguardar a equipe perante auditorias:
+                </p>
+                <textarea
+                  rows={2}
+                  value={extemporaneousReason}
+                  onChange={(e) => setExtemporaneousReason(e.target.value)}
+                  placeholder="Ex: Reunião presencial realizada na data informada, com colheita de assinaturas concluída nesta data pelo comparecimento do responsável à unidade escolar..."
+                  className="w-full p-2.5 bg-white border border-amber-300 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-amber-600 focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+            )}
+
             <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
               {/* COLUNA ESQUERDA: IA, TEXTO FORMAL E COMBINADOS (6 colunas) */}
               <div className="lg:col-span-6 space-y-4">
@@ -2284,11 +2352,13 @@ export default function AtaEditorModal({
                           <div className="pt-2">
                             <SignatureCanvas
                               signerName={p.name || "Participante"}
-                              onSave={(dataUrl) => {
+                              onSave={(dataUrl, strokeData) => {
                                 const copy = [...participants];
                                 copy[idx] = {
                                   ...copy[idx],
                                   signatureData: dataUrl,
+                                  biometricStrokeData: strokeData || null,
+                                  clientTimestampIso: new Date().toISOString(),
                                   signatureMode: "SCREEN_CANVAS",
                                   clearSignature: false,
                                 };
@@ -2300,6 +2370,7 @@ export default function AtaEditorModal({
                                 copy[idx] = {
                                   ...copy[idx],
                                   signatureData: null,
+                                  biometricStrokeData: null,
                                   signatureMode: "PENDING",
                                 };
                                 setParticipants(copy);
@@ -2510,7 +2581,7 @@ export default function AtaEditorModal({
 
                 <button
                   type="button"
-                  onClick={handleFinalize}
+                  onClick={() => handleFinalize()}
                   disabled={saving || savingFinal}
                   className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
                 >
@@ -2522,6 +2593,17 @@ export default function AtaEditorModal({
           </div>
         )}
       </div>
+
+      {/* Modal de PIN de Fé Pública do Servidor */}
+      <SigningPinModal
+        isOpen={showPinModal}
+        onClose={() => setShowPinModal(false)}
+        onSuccess={(pin) => {
+          setShowPinModal(false);
+          handleFinalize(pin);
+        }}
+        hasPinInitial={hasSigningPin}
+      />
     </AtaDialog>
   );
 }

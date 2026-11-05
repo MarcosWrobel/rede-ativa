@@ -12,6 +12,8 @@ export const dynamic = "force-dynamic";
 const submitSignSchema = z.object({
   // Modo 1: Assinatura manuscrita em tela (canvas)
   signatureData: z.string().optional().nullable(),
+  biometricStrokeData: z.string().optional().nullable(),
+  clientTimestampIso: z.string().optional().nullable(),
   biometricVerified: z.boolean().default(false),
   biometricDeviceType: z.string().optional().nullable(),
 
@@ -88,6 +90,7 @@ export async function POST(
   try {
     const { token } = await params;
     const ip = extractClientIp(req);
+    const userAgent = req.headers.get("user-agent") || null;
 
     const participant = await prisma.pedagogicalMinuteParticipant.findUnique({
       where: { mobileSignToken: token },
@@ -117,7 +120,7 @@ export async function POST(
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Payload de assinatura inválido" }, { status: 400 });
     }
 
-    const { signatureData, biometricVerified, biometricDeviceType, googleIdToken, dryRun } = parsed.data;
+    const { signatureData, biometricStrokeData, clientTimestampIso, biometricVerified, biometricDeviceType, googleIdToken, dryRun } = parsed.data;
 
     // FLUXO A: Assinatura Institucional via Google @escola.pr.gov.br
     if (googleIdToken) {
@@ -170,7 +173,10 @@ export async function POST(
           emailVerifiedAt: now,
           signedAt: now,
           signerIp: ip,
+          signerUserAgent: userAgent,
           signatureData: signatureData || null, // Se o usuário também desenhou opcionalmente
+          biometricStrokeData: signatureData ? (biometricStrokeData || null) : null,
+          clientTimestampIso: clientTimestampIso || now.toISOString(),
           biometricVerified: biometricVerified || false,
           biometricDeviceType: biometricDeviceType || null,
           biometricAuthTime: biometricVerified ? now : null,
@@ -215,6 +221,9 @@ export async function POST(
         signatureData,
         signedAt: now,
         signerIp: ip,
+        signerUserAgent: userAgent,
+        biometricStrokeData: biometricStrokeData || null,
+        clientTimestampIso: clientTimestampIso || now.toISOString(),
         biometricVerified,
         biometricDeviceType: biometricDeviceType || null,
         biometricAuthTime: biometricVerified ? now : null,

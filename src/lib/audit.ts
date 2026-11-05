@@ -43,7 +43,10 @@ export type AuditAction =
   | "SANITIZE_SCHOOL"
   | "CREATE_CLASS_GROUP"
   | "ATTACH_PHYSICAL_SCAN"
-  | "REMOVE_PHYSICAL_SCAN";
+  | "REMOVE_PHYSICAL_SCAN"
+  | "SETUP_SIGNING_PIN"
+  | "CHANGE_SIGNING_PIN"
+  | "RESET_SIGNING_PIN_GOOGLE";
 
 export interface AuditUser {
   id?: string;

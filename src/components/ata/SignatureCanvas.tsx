@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { Eraser, Check } from "lucide-react";
 
 interface Props {
-  onSave: (dataUrl: string) => void;
+  onSave: (dataUrl: string, strokeData?: string) => void;
   onClear?: () => void;
   initialDataUrl?: string | null;
   signerName: string;
@@ -17,6 +17,7 @@ export default function SignatureCanvas({
   signerName,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const strokesRef = useRef<Array<{ x: number; y: number; t: number; p: number }>>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(Boolean(initialDataUrl));
 
@@ -77,6 +78,13 @@ export default function SignatureCanvas({
     ctx.moveTo(x, y);
     setIsDrawing(true);
     setHasContent(true);
+
+    strokesRef.current.push({
+      x: Math.round(x),
+      y: Math.round(y),
+      t: Date.now(),
+      p: Number((e.pressure || 0.5).toFixed(2)),
+    });
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -90,6 +98,13 @@ export default function SignatureCanvas({
 
     ctx.lineTo(x, y);
     ctx.stroke();
+
+    strokesRef.current.push({
+      x: Math.round(x),
+      y: Math.round(y),
+      t: Date.now(),
+      p: Number((e.pressure || 0.5).toFixed(2)),
+    });
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -106,7 +121,8 @@ export default function SignatureCanvas({
     }
 
     const dataUrl = canvas.toDataURL("image/png");
-    onSave(dataUrl);
+    const strokeData = strokesRef.current.length > 0 ? JSON.stringify(strokesRef.current) : undefined;
+    onSave(dataUrl, strokeData);
   };
 
   const handleClear = () => {
@@ -117,6 +133,7 @@ export default function SignatureCanvas({
 
     const rect = canvas.getBoundingClientRect();
     ctx.clearRect(0, 0, rect.width, rect.height);
+    strokesRef.current = [];
     setHasContent(false);
     if (onClear) onClear();
   };

@@ -50,6 +50,7 @@ export async function GET(
       year: minute.year,
       status: minute.status,
       category: minute.category,
+      isExtemporaneous: Boolean(minute.isExtemporaneous),
       attendedAt: minute.attendedAt,
       finalizedAt: minute.finalizedAt,
       authorName: maskName(minute.authorName),

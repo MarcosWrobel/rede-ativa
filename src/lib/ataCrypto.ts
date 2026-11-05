@@ -32,6 +32,8 @@ export interface MinuteCanonicalPayload {
   attendedAt: string; // ISO
   category: string;
   isConfidential?: boolean;
+  isExtemporaneous?: boolean;
+  extemporaneousReason?: string | null;
   subject: string;
   summary: string;
   agreementsSummary?: string | null;
@@ -53,6 +55,8 @@ export function computeMinuteHash(payload: MinuteCanonicalPayload): string {
     attendedAt: payload.attendedAt,
     category: payload.category.trim(),
     isConfidential: Boolean(payload.isConfidential),
+    isExtemporaneous: Boolean(payload.isExtemporaneous),
+    extemporaneousReason: (payload.extemporaneousReason || "").trim(),
     subject: payload.subject.trim(),
     summary: payload.summary.trim(),
     agreementsSummary: (payload.agreementsSummary || "").trim(),

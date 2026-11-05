@@ -86,6 +86,13 @@ model User {
   active        Boolean       @default(true)
   schoolId      String?
   school        School?       @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+
+  // PIN de Fé Pública para Lavratura de Atas (Lei 14.063/2020)
+  signingPinHash String?
+  pinCreatedAt   DateTime?
+  pinAttempts    Int           @default(0)
+  pinLockedUntil DateTime?
+
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -359,6 +366,10 @@ model PedagogicalMinute {
   voidedByName          String?
   voidedByEmail         String?
   voidReason            String?
+
+  // Governança Cronológica e Lavratura Extemporânea (Auditoria MP/NRE)
+  isExtemporaneous      Boolean                        @default(false)
+  extemporaneousReason  String?
   
   createdAt             DateTime                       @default(now())
   updatedAt             DateTime                       @updatedAt
@@ -411,6 +422,9 @@ model PedagogicalMinuteParticipant {
   signatureData           String?           // Imagem de traço vetorial/SVG ou PNG compactado (data URL)
   signedAt                DateTime?
   signerIp                String?
+  signerUserAgent         String?           // User-Agent completo no momento da assinatura
+  biometricStrokeData     String?           // JSON compactado com array de coordenadas [{x, y, t, p}]
+  clientTimestampIso      String?           // Timestamp emitido pelo dispositivo no ato da assinatura
   refusalReason           String?           // Justificativa caso tenha se recusado a assinar
   witnessName             String?           // Servidor/testemunha presencial se houver recusa
   
