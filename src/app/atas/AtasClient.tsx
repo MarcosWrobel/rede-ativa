@@ -223,10 +223,10 @@ export default function AtasClient({
           </div>
           <div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight">
-              Livro Oficial de Atas Pedagógicas
+              Livro de Atas Pedagógicas
             </h1>
             <p className="text-xs text-slate-500 font-medium">
-              {school.name} — Registros de Fé Pública e Acompanhamento Escolar
+              {school.name}
             </p>
           </div>
         </div>
@@ -237,7 +237,7 @@ export default function AtasClient({
             className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition"
           >
             <ListTodo className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <span>Painel de Combinados</span>
+            <span>Encaminhamentos</span>
           </Link>
 
           <Link
@@ -245,7 +245,7 @@ export default function AtasClient({
             className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
           >
             <Printer className="w-4 h-4 text-amber-500" />
-            <span>Emitir Livro Anual ({selectedYear})</span>
+            <span>Livro Anual ({selectedYear})</span>
           </Link>
 
           <button
@@ -257,7 +257,7 @@ export default function AtasClient({
             className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4 text-sky-400" />
-            <span>Lavrar Nova Ata</span>
+            <span>Nova Ata</span>
           </button>
         </div>
       </div>
@@ -270,16 +270,14 @@ export default function AtasClient({
             <FileCheck2 className="w-4 h-4 text-emerald-600" />
           </div>
           <p className="text-2xl font-black text-slate-900 mt-2">{finalizedCount}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Registros oficiais imutáveis</p>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-            <span>Rascunhos em Aberto</span>
+            <span>Rascunhos</span>
             <Clock className="w-4 h-4 text-amber-500" />
           </div>
           <p className="text-2xl font-black text-slate-900 mt-2">{draftCount}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Aguardando lavratura/assinatura</p>
         </div>
 
         <Link
@@ -287,16 +285,15 @@ export default function AtasClient({
           className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-300 hover:shadow-sm transition group"
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-            <span className="group-hover:text-indigo-600 transition">Encaminhamentos & Combinados</span>
+            <span className="group-hover:text-indigo-600 transition">Encaminhamentos Pendentes</span>
             <ListTodo className="w-4 h-4 text-indigo-600" />
           </div>
           <div className="flex items-baseline justify-between mt-2">
             <p className="text-2xl font-black text-slate-900">{pendingActionsCount}</p>
             <span className="text-[11px] font-semibold text-indigo-600 group-hover:underline inline-flex items-center gap-0.5">
-              Acessar painel <ArrowRight className="w-3 h-3" />
+              Ver todos <ArrowRight className="w-3 h-3" />
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Prazos e compromissos das atas</p>
         </Link>
       </div>
 
@@ -375,7 +372,7 @@ export default function AtasClient({
             <FileText className="w-8 h-8 text-slate-300 mx-auto" />
             <p className="text-sm font-bold text-slate-700">Nenhuma ata encontrada</p>
             <p className="text-xs text-slate-400">
-              Inicie um novo registro clicando no botão &quot;Lavrar Nova Ata&quot; acima.
+              Nenhuma ata registrada para os filtros selecionados.
             </p>
           </div>
         ) : (
@@ -513,7 +510,7 @@ export default function AtasClient({
                           }}
                           className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition cursor-pointer"
                         >
-                          Editar / Lavrar
+                          Editar
                         </button>
 
                         {confirmDeleteId === m.id ? (

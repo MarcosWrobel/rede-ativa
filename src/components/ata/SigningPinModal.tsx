@@ -159,7 +159,7 @@ export default function SigningPinModal({
           <form onSubmit={handleSetupSubmit} className="space-y-4">
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 leading-relaxed">
               <ShieldCheck className="w-4 h-4 text-emerald-600 inline mr-1 -mt-0.5" />
-              Para sua segurança e conformidade jurídica, crie um <strong>PIN de 4 a 6 dígitos</strong>. Ele será exigido para lavrar e assinar oficialmente qualquer ata, prevenindo o uso indevido em caso de tela aberta.
+              Crie um <strong>PIN de 4 a 6 dígitos</strong> para assinar e lavrar atas com fé pública.
             </div>
 
             <div className="space-y-3">
@@ -212,15 +212,15 @@ export default function SigningPinModal({
                 disabled={loading || pin.length < 4 || pin !== confirmPin}
                 className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
               >
-                {loading ? "Gravando..." : "Salvar PIN e Lavrar"}
+                {loading ? "Gravando..." : "Salvar PIN"}
               </button>
             </div>
           </form>
         ) : (
           /* MODO PROMPT (DIGITAR PIN) */
           <form onSubmit={handlePromptSubmit} className="space-y-4">
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Confirme sua identidade funcional digitando o seu PIN cadastrado para assinar eletronicamente sob fé pública:
+            <p className="text-xs text-slate-600">
+              Digite seu PIN para lavratura:
             </p>
 
             <div>

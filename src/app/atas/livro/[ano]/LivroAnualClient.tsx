@@ -52,7 +52,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
           className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Voltar ao Livro de Atas</span>
+          <span>Voltar às Atas</span>
         </Link>
 
         <button
@@ -61,7 +61,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
           className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
         >
           <Printer className="w-4 h-4 text-amber-400" />
-          <span>Imprimir / Gerar PDF Consolidado</span>
+          <span>Imprimir Livro</span>
         </button>
       </div>
 

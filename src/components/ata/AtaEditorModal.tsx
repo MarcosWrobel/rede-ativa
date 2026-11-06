@@ -1607,7 +1607,7 @@ export default function AtaEditorModal({
                     disabled={selectedStudentIds.length === 0}
                     className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold text-xs transition shadow-2xs flex items-center justify-center space-x-2 cursor-pointer mt-2"
                   >
-                    <span>Avançar para Redação & Assinatura</span>
+                    <span>Avançar</span>
                     <ArrowRight className="w-4 h-4 text-sky-400" />
                   </button>
                 </div>
@@ -1618,11 +1618,8 @@ export default function AtaEditorModal({
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <div>
                     <h3 className="font-extrabold text-slate-900 text-sm">
-                      Catálogo Geral de Alunos da Escola
+                      Estudantes
                     </h3>
-                    <p className="text-xs text-slate-500">
-                      Encontre e marque os alunos. Suporta múltiplos alunos em atas conjuntas.
-                    </p>
                   </div>
                   <span className="text-xs text-slate-600 font-medium">
                     Exibindo <strong>{filteredStudents.length}</strong> de {availableStudents.length}
@@ -1634,7 +1631,7 @@ export default function AtaEditorModal({
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                     <input
                       type="text"
-                      placeholder="Pesquisar por nome do aluno, CGM ou responsável..."
+                      placeholder="Buscar por estudante, CGM ou responsável..."
                       value={studentSearch}
                       onChange={(e) => setStudentSearch(e.target.value)}
                       className="w-full pl-9 pr-8 py-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:outline-sky-500 text-sm shadow-2xs"
@@ -1771,7 +1768,7 @@ export default function AtaEditorModal({
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Pauta e Aluno(s) Vinculados:
+                    Estudante(s) e Pauta:
                   </span>
                   <p className="font-extrabold text-sm text-slate-900">
                     {subject || "Sem assunto"} •{" "}
@@ -1791,7 +1788,7 @@ export default function AtaEditorModal({
                 className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-sky-600 font-bold text-xs flex items-center space-x-1.5 cursor-pointer shadow-2xs"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Alterar alunos / pauta</span>
+                <span>Alterar</span>
               </button>
             </div>
 
@@ -1803,7 +1800,7 @@ export default function AtaEditorModal({
                   <span>Lavratura Extemporânea (Atendimento realizado há mais de 5 dias úteis)</span>
                 </div>
                 <p className="text-amber-800 leading-relaxed font-medium">
-                  Conforme as diretrizes de escrituração do NRE/SEED-PR, atendimentos lavrados após 5 dias úteis exigem justificativa administrativa para constar no Livro de Atas e resguardar a equipe perante auditorias:
+                  Atendimentos lavrados após 5 dias úteis exigem justificativa administrativa para constar no Livro de Atas:
                 </p>
                 <textarea
                   rows={2}
@@ -1821,7 +1818,7 @@ export default function AtaEditorModal({
                 <div className="border border-sky-100 bg-sky-50/50 p-4 rounded-2xl space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-extrabold text-sky-900 text-xs">
-                      Redação & Diretrizes NRE/SEED-PR
+                      Fatos Observados
                     </span>
 
                     <div className="flex items-center space-x-2">
@@ -1966,7 +1963,7 @@ export default function AtaEditorModal({
                     rows={3}
                     value={rawNotes}
                     onChange={(e) => setRawNotes(e.target.value)}
-                    placeholder="Digite anotações rápidas ou use o ditado por voz. Clique em 'Formalizar & Revisar' para redigir ou aprimorar o texto nas normas cultas do NRE."
+                    placeholder="Anotações dos fatos para redação da ata..."
                     className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs"
                   />
                 </div>
@@ -1975,9 +1972,8 @@ export default function AtaEditorModal({
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="font-extrabold text-slate-900 block text-xs">
-                      Texto Formal da Ata (Norma Culta / Diretrizes NRE): <span className="text-rose-600">*</span>
+                      Texto Oficial da Ata: <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[11px] text-slate-400">Texto corrido contínuo e sem entrelinhas</span>
                   </div>
                   <textarea
                     rows={9}
@@ -1986,7 +1982,7 @@ export default function AtaEditorModal({
                       setSummary(e.target.value);
                       if (finalizeError) setFinalizeError(null);
                     }}
-                    placeholder="O texto formal da ata será gerado pela IA ou redigido diretamente aqui..."
+                    placeholder="Redija o texto oficial da ata ou formalize a partir das anotações..."
                     className="w-full p-3.5 border border-slate-300 rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs"
                   />
                 </div>
@@ -1994,13 +1990,13 @@ export default function AtaEditorModal({
                 {/* Síntese dos Combinados */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 block text-xs">
-                    Síntese dos Combinados e Prazos Acordados:
+                    Síntese dos Encaminhamentos:
                   </label>
                   <input
                     type="text"
                     value={agreementsSummary}
                     onChange={(e) => setAgreementsSummary(e.target.value)}
-                    placeholder="Ex.: Responsável entregará atestado até sexta-feira e aluno realizará trabalhos de compensação."
+                    placeholder="Ex.: Responsável apresentará atestado e estudante realizará compensação pedagógica."
                     className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 text-xs shadow-2xs"
                   />
                 </div>
@@ -2012,9 +2008,8 @@ export default function AtaEditorModal({
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="font-extrabold text-slate-800 block text-xs">
-                        Encaminhamentos & Prazos da Ata:
+                        Encaminhamentos e Prazos:
                       </label>
-                      <p className="text-[11px] text-slate-500">Alimenta os lembretes do Prontuário 360º</p>
                     </div>
                     <button
                       type="button"
@@ -2027,13 +2022,13 @@ export default function AtaEditorModal({
                       className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
                     >
                       <UserPlus className="w-3.5 h-3.5" />
-                      <span>Adicionar Ação</span>
+                      <span>Novo Encaminhamento</span>
                     </button>
                   </div>
 
                   {actionItems.length === 0 ? (
                     <div className="text-center py-3 text-slate-400 text-xs italic">
-                      Nenhum encaminhamento registrado. Clique em &quot;+ Adicionar Ação&quot; se houver combinados com prazo.
+                      Nenhum encaminhamento registrado.
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -2095,21 +2090,18 @@ export default function AtaEditorModal({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <label className="font-extrabold text-slate-800 block text-xs">
-                        Presentes e Coleta de Assinatura:
+                        Presentes e Assinaturas:
                       </label>
-                      <p className="text-[11px] text-slate-500">
-                        A servidora logada assina eletronicamente com fé pública ao lavrar. Colha a assinatura dos demais abaixo.
-                      </p>
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
                         type="button"
                         onClick={handleAddSelectedStudentsAsParticipants}
                         className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs transition"
-                        title="Adiciona automaticamente os alunos selecionados na Etapa 1 para assinarem a ata"
+                        title="Adiciona automaticamente os estudantes selecionados para assinarem a ata"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>+ Aluno(s) da Pauta</span>
+                        <span>+ Estudantes da Pauta</span>
                       </button>
                       <button
                         type="button"
@@ -2134,7 +2126,7 @@ export default function AtaEditorModal({
                         className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>Adicionar Presente</span>
+                        <span>Novo Presente</span>
                       </button>
                     </div>
                   </div>
@@ -2585,7 +2577,7 @@ export default function AtaEditorModal({
                   className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition flex items-center space-x-1.5 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Voltar aos Alunos</span>
+                  <span>Voltar aos Estudantes</span>
                 </button>
                 <button
                   type="button"
@@ -2603,7 +2595,7 @@ export default function AtaEditorModal({
                   disabled={saving || savingFinal}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
                 >
-                  {saving ? "Salvando rascunho..." : "Salvar Rascunho"}
+                  {saving ? "Salvando..." : "Salvar Rascunho"}
                 </button>
 
                 <button
@@ -2613,7 +2605,7 @@ export default function AtaEditorModal({
                   className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
                 >
                   <FileCheck2 className="w-4 h-4 text-emerald-200" />
-                  <span>{savingFinal ? "Lavrando Ata Oficial..." : "Lavrar Ata Oficial (Imutável)"}</span>
+                  <span>{savingFinal ? "Lavrando..." : "Lavrar Ata"}</span>
                 </button>
               </div>
             </div>

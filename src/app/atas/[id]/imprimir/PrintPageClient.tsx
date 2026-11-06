@@ -81,7 +81,7 @@ export default function PrintPageClient({
           className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Voltar ao Livro de Atas</span>
+          <span>Voltar às Atas</span>
         </Link>
 
         <div className="flex items-center space-x-2">
@@ -92,7 +92,7 @@ export default function PrintPageClient({
               title="Baixar arquivo binário padronizado para preservação arquivística de longo prazo (ISO 19005-1 Level B)"
             >
               <Download className="w-4 h-4 text-sky-600" />
-              <span>Baixar PDF/A-1b (ISO 19005)</span>
+              <span>Baixar PDF/A</span>
             </a>
           )}
 
@@ -102,7 +102,7 @@ export default function PrintPageClient({
             className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
           >
             <Printer className="w-4 h-4 text-amber-400" />
-            <span>Imprimir / Salvar PDF A4</span>
+            <span>Imprimir</span>
           </button>
         </div>
       </div>

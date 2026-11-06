@@ -246,11 +246,8 @@ export default function AtestadosClient({
           </div>
           <div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight">
-              Atestados & Justificativas Escolares
+              Atestados e Justificativas
             </h1>
-            <p className="text-xs text-slate-500 font-medium">
-              Lançamento ágil de atestados médicos, declarações e monitoramento de vigência
-            </p>
           </div>
         </div>
 
@@ -273,12 +270,9 @@ export default function AtestadosClient({
           <div className="flex items-center space-x-2">
             <Sparkles className="w-4 h-4 text-emerald-600" />
             <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
-              Lançador Rápido de Atestados
+              Novo Registro
             </h2>
           </div>
-          <span className="text-xs text-slate-400">
-            Cadastre atestados de múltiplos estudantes sem navegar de tela em tela
-          </span>
         </div>
 
         {formSuccessMsg && (
@@ -391,18 +385,18 @@ export default function AtestadosClient({
           {/* Tipo de Justificativa */}
           <div className="md:col-span-3 space-y-1.5">
             <label className="text-xs font-bold text-slate-700 block">
-              2. Natureza / Tipo <span className="text-rose-500">*</span>
+              Tipo de Justificativa <span className="text-rose-500">*</span>
             </label>
             <select
               value={type}
               onChange={(e) => setType(e.target.value)}
               className="w-full py-2 px-3 text-xs border border-slate-200 rounded-xl bg-white font-semibold text-slate-800"
             >
-              <option value="ATESTADO_MEDICO">🩺 Atestado Médico</option>
-              <option value="DECLARACAO_COMPARECIMENTO">📄 Declaração de Consulta</option>
-              <option value="ATESTADO_ODONTOLOGICO">🦷 Atestado Odontológico</option>
-              <option value="JUSTIFICATIVA_FAMILIAR">🏠 Justificativa Familiar</option>
-              <option value="DISPENSA_LEGAL">⚖️ Dispensa Legal / Luto</option>
+              <option value="ATESTADO_MEDICO">Atestado Médico</option>
+              <option value="DECLARACAO_COMPARECIMENTO">Declaração de Consulta</option>
+              <option value="ATESTADO_ODONTOLOGICO">Atestado Odontológico</option>
+              <option value="JUSTIFICATIVA_FAMILIAR">Justificativa Familiar</option>
+              <option value="DISPENSA_LEGAL">Dispensa Legal / Luto</option>
             </select>
           </div>
 
@@ -410,9 +404,8 @@ export default function AtestadosClient({
           <div className="md:col-span-4 space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700 block">
-                3. Vigência (Início & Fim) <span className="text-rose-500">*</span>
+                Vigência (Início e Fim) <span className="text-rose-500">*</span>
               </label>
-              <span className="text-[10px] text-slate-400">Atalhos de duração:</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -524,7 +517,7 @@ export default function AtestadosClient({
                 tableStatusFilter === "ACTIVE" ? "bg-white text-emerald-800 shadow-2xs font-extrabold" : "hover:text-slate-900"
               }`}
             >
-              🟢 Vigentes ({metrics.active})
+              Vigentes ({metrics.active})
             </button>
             <button
               type="button"
@@ -533,7 +526,7 @@ export default function AtestadosClient({
                 tableStatusFilter === "EXPIRED" ? "bg-white text-slate-800 shadow-2xs font-extrabold" : "hover:text-slate-900"
               }`}
             >
-              ⚪ Encerrados ({metrics.expired})
+              Encerrados ({metrics.expired})
             </button>
             <button
               type="button"
@@ -609,7 +602,7 @@ export default function AtestadosClient({
               {filteredJustifications.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-8 text-slate-400 italic">
-                    Nenhum atestado encontrado com os critérios selecionados.
+                    Nenhum atestado encontrado.
                   </td>
                 </tr>
               ) : (

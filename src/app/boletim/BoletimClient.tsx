@@ -98,7 +98,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
               className="inline-flex items-center space-x-1.5 px-3 py-2 text-xs font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs transition disabled:opacity-50 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-sky-600" : ""}`} />
-              <span>{refreshing ? "Atualizando..." : "Recalcular Diagnóstico"}</span>
+              <span>{refreshing ? "Atualizando..." : "Atualizar"}</span>
             </button>
 
             <button
@@ -107,7 +107,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
               className="inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5 text-amber-400" />
-              <span>Imprimir / Salvar PDF</span>
+              <span>Imprimir</span>
             </button>
           </div>
         </div>
@@ -158,7 +158,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                   {data.kpis.criticalWithoutRecentContactCount}
                 </div>
                 <div className="text-xs font-medium text-rose-700">
-                  Alunos &lt;75% sem busca há &gt;7 dias
+                  Estudantes &lt;75% sem contato &gt;7d
                 </div>
               </div>
               <div className="text-[11px] text-rose-600 pt-1 border-t border-rose-200/60">
@@ -177,7 +177,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                   {data.kpis.serpActiveCount}
                 </div>
                 <div className="text-xs font-medium text-amber-700">
-                  Casos SERP / Conselho Tutelar
+                  SERP / Conselho Tutelar
                 </div>
               </div>
               <div className="text-[11px] text-amber-600 pt-1 border-t border-amber-200/60">
@@ -215,7 +215,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                   {data.kpis.abruptDropCount}
                 </div>
                 <div className="text-xs font-medium text-indigo-700">
-                  Quedas abruptas &ge; 15%
+                  Quedas de frequência &ge; 15%
                 </div>
               </div>
               <div className="text-[11px] text-indigo-600 pt-1 border-t border-indigo-200/60">
