@@ -671,14 +671,10 @@ export default function BuscaAtivaClient({
       {/* Title, Mode Switcher & User info */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
+          <h1 aria-label="Painel de Busca Ativa" className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <Send className="w-6 h-6 text-sky-600" />
-            <span>Painel de Busca Ativa & Envio de Mensagens</span>
+            <span>Busca Ativa</span>
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Operação assistida via <strong>WhatsApp Web (wa.me)</strong> com rastreio de entrega e saneamento cadastral em nome de{" "}
-            <strong>{currentUser.name}</strong>.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
@@ -697,7 +693,7 @@ export default function BuscaAtivaClient({
               }`}
             >
               <User className="w-3.5 h-3.5" />
-              <span>Envio Individual</span>
+              <span>Individual</span>
             </button>
             <button
               type="button"
@@ -712,7 +708,7 @@ export default function BuscaAtivaClient({
               }`}
             >
               <ListChecks className="w-3.5 h-3.5" />
-              <span>Fila por Turma</span>
+              <span>Fila da Turma</span>
             </button>
           </div>
 
@@ -736,7 +732,7 @@ export default function BuscaAtivaClient({
             {/* 1. Nível / Segmento Tabs */}
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
-                1. Nível de Ensino / Turno
+                1. Etapa de Ensino
               </label>
               <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
                 {["TODOS", "FUNDAMENTAL", "MEDIO", "NOTURNO"].map((seg) => (
@@ -764,7 +760,7 @@ export default function BuscaAtivaClient({
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-1.5">
-                  2. Selecione a Turma
+                  2. Turma
                 </label>
                 <select
                   value={selectedTurmaId}
@@ -786,14 +782,14 @@ export default function BuscaAtivaClient({
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-1.5">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    3. Selecione o Aluno ({filteredStudents.length} disponíveis)
+                    3. Estudante ({filteredStudents.length})
                   </label>
                   <div className="flex flex-wrap gap-1">
                     {[
                       { id: "TODOS", label: "Todos" },
-                      { id: "CRITICO", label: "🚨 Risco (<75%)" },
-                      { id: "SEM_CONTATO_7D", label: "📅 Sem contato >7d" },
-                      { id: "ATESTADO", label: "🩺 Com Atestado" },
+                      { id: "CRITICO", label: "Risco (<75%)" },
+                      { id: "SEM_CONTATO_7D", label: "Sem contato >7d" },
+                      { id: "ATESTADO", label: "Com atestado" },
                     ].map((f) => (
                       <button
                         key={f.id}
@@ -815,7 +811,7 @@ export default function BuscaAtivaClient({
                   onChange={(e) => handleSelectStudent(e.target.value)}
                   className="w-full text-sm border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 font-medium transition"
                 >
-                  <option value="">-- Escolha um aluno na lista --</option>
+                  <option value="">-- Selecione o estudante --</option>
                   {filteredStudents.map((st) => {
                     const hasActiveJust = getActiveJustification(st.justifications) !== null;
                     const prefix = st.isExchangeStudent
@@ -855,7 +851,7 @@ export default function BuscaAtivaClient({
                       <Link
                         href={`/atas?studentId=${selectedStudent.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[10px] transition"
-                        title="Lavrar Ata Pedagógica Formal de Busca Ativa (1 Clique)"
+                        title="Lavrar ata de busca ativa"
                       >
                         <BookOpenCheck className="w-3 h-3 text-indigo-600" />
                         <span>Lavrar Ata</span>
@@ -863,7 +859,7 @@ export default function BuscaAtivaClient({
                       <Link
                         href={`/alunos/${selectedStudent.id}`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold text-[10px]"
-                        title="Abrir Prontuário 360º"
+                        title="Ver prontuário"
                       >
                         <UserCheck className="w-3 h-3" />
                         <span>360º</span>
@@ -871,7 +867,7 @@ export default function BuscaAtivaClient({
                       <Link
                         href={`/alunos/${selectedStudent.id}/dossie`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[10px]"
-                        title="Emitir Dossiê PDF"
+                        title="Emitir dossiê"
                       >
                         <FileText className="w-3 h-3" />
                         <span>PDF</span>
@@ -885,10 +881,10 @@ export default function BuscaAtivaClient({
                       <span className="text-base shrink-0">✈️</span>
                       <div>
                         <strong className="block font-extrabold">
-                          Aluno em Intercâmbio Oficial (Ganhando Mundo)
+                          Estudante em Intercâmbio (Ganhando Mundo)
                         </strong>
                         <span className="text-[11px] block">
-                          Este(a) estudante está participando do programa internacional Ganhando Mundo no exterior. Cobranças de frequência e avisos de infrequência devem ser suspensos.
+                          Estudante em intercâmbio no exterior. Envios de infrequência suspensos.
                         </span>
                       </div>
                     </div>
@@ -900,7 +896,7 @@ export default function BuscaAtivaClient({
                       <Stethoscope className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                       <div>
                         <strong className="block font-extrabold">
-                          🩺 Atenção: Atestado / Justificativa Vigente!
+                          Atestado vigente
                         </strong>
                         <span className="text-[11px] block">
                           {JUSTIFICATION_TYPE_LABELS[activeJustification.type] ||
@@ -923,7 +919,7 @@ export default function BuscaAtivaClient({
                   {selectedStudent.contacts?.length > 0 && (
                     <div className="pt-1.5 border-t border-sky-100 space-y-1.5">
                       <span className="text-[11px] font-bold text-sky-900 block">
-                        Escolher destinatário familiar:
+                        Destinatário:
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         <button
@@ -974,7 +970,7 @@ export default function BuscaAtivaClient({
 
                   <div className="flex items-center space-x-2 pt-1.5 border-t border-sky-100">
                     <Phone className="w-3.5 h-3.5 text-sky-600" />
-                    <span className="text-slate-600">Número de envio:</span>
+                    <span className="text-slate-600">Telefone:</span>
                     <input
                       type="text"
                       value={customPhone}
@@ -990,7 +986,7 @@ export default function BuscaAtivaClient({
                     <div className="mt-2 p-2 bg-amber-100 border border-amber-300 rounded-lg text-amber-900 font-medium flex items-start space-x-2">
                       <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <div>
-                        <span>Atenção: Aluno em Acompanhamento de Frequência!</span>
+                        <span>Estudante com infrequência crítica</span>
                         <div className="text-[11px] font-normal mt-0.5 space-y-0.5">
                           <div>
                             Freq Geral:{" "}
@@ -1016,7 +1012,7 @@ export default function BuscaAtivaClient({
                   {selectedStudent.messageLogs?.length > 0 && (
                     <div className="mt-2 text-slate-600 text-[11px] border-t border-sky-100 pt-1.5">
                       <span className="font-semibold text-sky-900">
-                        Últimos contatos registrados:
+                        Últimos registros:
                       </span>
                       <ul className="mt-1 space-y-0.5">
                         {selectedStudent.messageLogs.map((log: any) => (
@@ -1035,7 +1031,7 @@ export default function BuscaAtivaClient({
             {/* 4. Reason / Template Selection */}
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
-                4. Selecione o Motivo da Mensagem
+                4. Motivo da Mensagem
               </label>
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                 {filteredTemplates.map((t) => {
@@ -1078,11 +1074,8 @@ export default function BuscaAtivaClient({
                   <Edit3 className="w-5 h-5 text-sky-600" />
                   <div>
                     <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                      Prévia da Mensagem (Editável)
+                      Prévia da Mensagem
                     </h2>
-                    <p className="text-[11px] text-slate-400">
-                      Texto adaptado automaticamente ao aluno e período
-                    </p>
                   </div>
                 </div>
 
@@ -1135,7 +1128,7 @@ export default function BuscaAtivaClient({
                   rows={11}
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
-                  placeholder="Selecione um aluno e um motivo à esquerda para gerar o texto da mensagem automaticamente..."
+                  placeholder="Selecione um estudante e um motivo para gerar a mensagem..."
                   className="w-full text-sm font-sans p-4 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 leading-relaxed transition shadow-inner"
                 />
               </div>
@@ -1161,14 +1154,13 @@ export default function BuscaAtivaClient({
                       {lastSentSuccess.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
                         <>
                           <PhoneOff className="w-4 h-4 mr-1.5 text-rose-600" />
-                          <span>Número sinalizado como Sem WhatsApp!</span>
+                          <span>Número sem WhatsApp</span>
                         </>
                       ) : (
                         <>
                           <CheckCircle className="w-4 h-4 mr-1.5 text-emerald-600" />
                           <span>
-                            Acionamento aberto para {lastSentSuccess.studentName} (
-                            {lastSentSuccess.time})
+                            Mensagem aberta para {lastSentSuccess.studentName}
                           </span>
                         </>
                       )}
@@ -1181,8 +1173,8 @@ export default function BuscaAtivaClient({
 
                   <p className="text-[11px] opacity-90">
                     {lastSentSuccess.deliveryStatus === "FAILED_NO_WHATSAPP"
-                      ? `O telefone ${lastSentSuccess.phoneUsed} foi marcado automaticamente como inválido no cadastro do estudante e constará como tentativa frustrada no Dossiê do Conselho Tutelar/SERP.`
-                      : "Após a abertura do WhatsApp Web (wa.me), confirme com 1 clique se o envio foi concluído ou se o número não possui conta no WhatsApp:"}
+                      ? `Telefone ${lastSentSuccess.phoneUsed} marcado como sem WhatsApp.`
+                      : "Confirme o envio da mensagem:"}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -1196,7 +1188,7 @@ export default function BuscaAtivaClient({
                       <span>
                         {lastSentSuccess.deliveryStatus === "SENT"
                           ? "Envio Confirmado"
-                          : "Confirmar Envio Efetivado"}
+                          : "Confirmar envio"}
                       </span>
                     </button>
 
@@ -1210,7 +1202,7 @@ export default function BuscaAtivaClient({
                       className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 disabled:opacity-50 font-bold transition"
                     >
                       <PhoneOff className="w-3.5 h-3.5" />
-                      <span>Número sem WhatsApp (Invalidar)</span>
+                      <span>Sem WhatsApp</span>
                     </button>
 
                     <a
@@ -1233,7 +1225,7 @@ export default function BuscaAtivaClient({
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="text-xs text-slate-500 flex items-center space-x-1">
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Reutiliza aba única do WhatsApp Web e grava trilha de auditoria</span>
+                  <span>Disparo seguro via WhatsApp</span>
                 </div>
 
                 <button
@@ -1244,29 +1236,10 @@ export default function BuscaAtivaClient({
                 >
                   <Send className="w-4 h-4" />
                   <span>
-                    {isSending ? "Registrando e abrindo..." : "Abrir WhatsApp & Gravar"}
+                    {isSending ? "Abrindo..." : "Enviar via WhatsApp"}
                   </span>
                 </button>
               </div>
-            </div>
-
-            {/* Quick Instructions Guide */}
-            <div className="bg-sky-50/50 dark:bg-slate-900 rounded-xl border border-sky-100 dark:border-slate-800 p-5 text-xs text-sky-950 dark:text-slate-300 space-y-2">
-              <h3 className="font-bold text-sky-900 dark:text-sky-400 flex items-center space-x-1.5 text-sm">
-                <HelpCircle className="w-4 h-4 text-sky-700 dark:text-sky-400" />
-                <span>Dica Rápida: Precisa avisar vários alunos faltosos de uma mesma turma?</span>
-              </h3>
-              <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                Alterne no topo para{" "}
-                <button
-                  type="button"
-                  onClick={() => setDispatchMode("fila")}
-                  className="font-bold text-sky-700 dark:text-sky-400 underline hover:text-sky-900 dark:hover:text-sky-300"
-                >
-                  Fila por Turma (wa.me)
-                </button>{" "}
-                para marcar os faltosos do dia de uma só vez e avançar aluno por aluno na mesma guia do WhatsApp Web, pulando automaticamente quem possui atestado médico vigente!
-              </p>
             </div>
           </div>
         </div>
@@ -1282,7 +1255,7 @@ export default function BuscaAtivaClient({
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-4">
               <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
                 <ListChecks className="w-4 h-4 text-sky-600" />
-                <span>1. Configurar Chamada / Fila da Turma</span>
+                <span>1. Parâmetros da Turma</span>
               </h2>
 
               <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-lg">
@@ -1307,14 +1280,14 @@ export default function BuscaAtivaClient({
 
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Turma Alvo da Busca Ativa:
+                  Turma:
                 </label>
                 <select
                   value={selectedTurmaId}
                   onChange={(e) => setSelectedTurmaId(e.target.value)}
                   className="w-full text-sm border border-slate-300 rounded-lg p-2.5 bg-slate-50 focus:bg-white font-semibold"
                 >
-                  <option value="">-- Escolha uma turma para listar os estudantes --</option>
+                  <option value="">-- Selecione a turma --</option>
                   {filteredClassGroups.map((cg) => (
                     <option key={cg.id} value={cg.id}>
                       {cg.name} ({cg.segment})
@@ -1325,7 +1298,7 @@ export default function BuscaAtivaClient({
 
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Saudação / Período da Mensagem:
+                  Turno da mensagem:
                 </label>
                 <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl">
                   {(["MANHA", "TARDE", "NOITE"] as SchoolShift[]).map((sh) => (
@@ -1347,7 +1320,7 @@ export default function BuscaAtivaClient({
 
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Modelo Institucional do Disparo:
+                  Modelo de mensagem:
                 </label>
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                   {filteredTemplates.map((t) => {
@@ -1394,8 +1367,7 @@ export default function BuscaAtivaClient({
               >
                 <Send className="w-4 h-4" />
                 <span>
-                  Iniciar Fila Guiada wa.me ({checkedStudentIds.length} selecionado
-                  {checkedStudentIds.length === 1 ? "" : "s"})
+                  Iniciar disparos ({checkedStudentIds.length})
                 </span>
               </button>
             </div>
@@ -1407,10 +1379,10 @@ export default function BuscaAtivaClient({
               <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-extrabold text-slate-900">
-                    2. Seleção de Estudantes para Acionamento
+                    2. Estudantes da Turma
                   </h2>
                   <p className="text-[11px] text-slate-500">
-                    Alunos com 🩺 Atestado Vigente, 📵 Sem WhatsApp ou já acionados hoje vêm desmarcados automaticamente.
+                    Estudantes com atestado ou sem WhatsApp vêm desmarcados.
                   </p>
                 </div>
 
@@ -1427,7 +1399,7 @@ export default function BuscaAtivaClient({
                       onChange={handleToggleSelectAllInTurma}
                     />
                     <span>
-                      Marcar Todos ({checkedStudentIds.length}/{selectableStudentsInTurma.length})
+                      Selecionar todos ({checkedStudentIds.length}/{selectableStudentsInTurma.length})
                     </span>
                   </label>
                 )}
@@ -1435,11 +1407,11 @@ export default function BuscaAtivaClient({
 
               {!selectedTurmaId ? (
                 <div className="p-12 text-center text-slate-400 text-sm">
-                  Selecione uma turma à esquerda para carregar a chamada de busca ativa.
+                  Selecione uma turma para listar os estudantes.
                 </div>
               ) : turmaEvaluations.length === 0 ? (
                 <div className="p-12 text-center text-slate-400 text-sm">
-                  Nenhum estudante ativo cadastrado nesta turma.
+                  Nenhum estudante ativo nesta turma.
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto">
@@ -1479,27 +1451,27 @@ export default function BuscaAtivaClient({
                               {evalResult.skipReason === "ATESTADO_VIGENTE" && (
                                 <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px]">
                                   <Stethoscope className="w-3 h-3" />
-                                  <span>Atestado Vigente</span>
+                                  <span>Atestado</span>
                                 </span>
                               )}
 
                               {evalResult.skipReason === "JA_ACIONADO_HOJE" && (
                                 <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-bold text-[10px]">
                                   <Clock className="w-3 h-3" />
-                                  <span>Já acionado hoje</span>
+                                  <span>Contatado hoje</span>
                                 </span>
                               )}
 
                               {evalResult.skipReason === "SEM_WHATSAPP" && (
                                 <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-bold text-[10px]">
                                   <PhoneOff className="w-3 h-3" />
-                                  <span>Sem WhatsApp válido</span>
+                                  <span>Sem WhatsApp</span>
                                 </span>
                               )}
 
                               {evalResult.usedFallbackContact && (
                                 <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-semibold text-[10px]">
-                                  Usando contato alternativo ({evalResult.resolvedGuardianName})
+                                  Contato alternativo ({evalResult.resolvedGuardianName})
                                 </span>
                               )}
                             </div>
@@ -1540,7 +1512,7 @@ export default function BuscaAtivaClient({
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span id={queueProgressLabelId} className="text-sm font-extrabold text-slate-900">
-                Progresso da Fila Assistida via WhatsApp Web
+                Progresso da Fila
               </span>
 
               <div className="flex items-center space-x-2">
@@ -1564,7 +1536,7 @@ export default function BuscaAtivaClient({
 
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>
-                Motivo: <strong>{selectedTemplate?.title}</strong> • Todas as mensagens abrem na mesma guia do navegador.
+                Motivo: <strong>{selectedTemplate?.title}</strong>
               </span>
               <button
                 type="button"
@@ -1572,7 +1544,7 @@ export default function BuscaAtivaClient({
                 className="inline-flex items-center space-x-1 font-bold text-slate-600 hover:text-slate-900"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Encerrar / Voltar à Turma</span>
+                <span>Voltar à turma</span>
               </button>
             </div>
           </div>
@@ -1627,7 +1599,7 @@ export default function BuscaAtivaClient({
                   className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
                 >
                   <SkipForward className="w-4 h-4" />
-                  <span>Pular Aluno</span>
+                  <span>Pular estudante</span>
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1641,7 +1613,7 @@ export default function BuscaAtivaClient({
                     <span>
                       {currentQueueItem.outcome === "OPENED"
                         ? "Reabrir no WhatsApp"
-                        : "1. Abrir no WhatsApp"}
+                        : "1. Abrir WhatsApp"}
                     </span>
                   </button>
 
@@ -1652,7 +1624,7 @@ export default function BuscaAtivaClient({
                     className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
-                    <span>2. Enviado → Próximo</span>
+                    <span>2. Enviado</span>
                   </button>
 
                   <button
@@ -1676,7 +1648,7 @@ export default function BuscaAtivaClient({
                 <CheckCircle className="w-6 h-6" />
               </div>
               <h2 className="text-lg font-black text-slate-900">
-                Fila de Busca Ativa da Turma Concluída!
+                Fila da turma concluída
               </h2>
 
               <div className="grid grid-cols-3 gap-3 max-w-lg mx-auto text-xs">
@@ -1684,7 +1656,7 @@ export default function BuscaAtivaClient({
                   <div className="text-xl font-black text-emerald-700">
                     {queueItems.filter((i) => i.outcome === "SENT").length}
                   </div>
-                  <div className="font-bold text-emerald-900">Envios Confirmados</div>
+                  <div className="font-bold text-emerald-900">Enviados</div>
                 </div>
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
                   <div className="text-xl font-black text-rose-700">
@@ -1696,7 +1668,7 @@ export default function BuscaAtivaClient({
                   <div className="text-xl font-black text-slate-700">
                     {queueItems.filter((i) => i.outcome === "SKIPPED").length}
                   </div>
-                  <div className="font-bold text-slate-700">Pulados</div>
+                  <div className="font-bold text-slate-700">Ignorados</div>
                 </div>
               </div>
 
@@ -1707,7 +1679,7 @@ export default function BuscaAtivaClient({
                   className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition cursor-pointer"
                 >
                   <ListChecks className="w-4 h-4" />
-                  <span>Selecionar Outra Turma</span>
+                  <span>Nova turma</span>
                 </button>
               </div>
             </div>

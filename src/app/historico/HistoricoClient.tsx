@@ -506,21 +506,18 @@ export default function HistoricoClient({
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center space-x-2">
             <History className="w-6 h-6 text-sky-600" />
-            <span>Histórico de Envios & Retorno dos Pais</span>
+            <span>Histórico de Contatos</span>
             {isAdmin && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800 uppercase tracking-wider">
                 Modo Administrador
               </span>
             )}
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Busca paginada com rastreio de entrega (wa.me) e triagem inteligente de justificativas dos responsáveis.
-          </p>
         </div>
         <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
           {isLoading && <Loader2 className="w-4 h-4 animate-spin text-sky-600" />}
           <span>
-            Total encontrado: <strong>{total.toLocaleString("pt-BR")}</strong> registros
+            Total: <strong>{total.toLocaleString("pt-BR")}</strong> registros
           </span>
         </div>
       </div>
@@ -533,7 +530,7 @@ export default function HistoricoClient({
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar aluno, CGM, motivo, fone ou observação..."
+              placeholder="Buscar estudante, CGM, telefone ou observação..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -695,7 +692,7 @@ export default function HistoricoClient({
             <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-3 py-3 whitespace-nowrap">Data / Hora</th>
-                <th className="px-3 py-3">Aluno</th>
+                <th className="px-3 py-3">Estudante</th>
                 <th className="px-2.5 py-3">Turma</th>
                 <th className="px-3 py-3">Motivo</th>
                 <th className="px-3 py-3">Telefone / Entrega</th>
@@ -828,7 +825,7 @@ export default function HistoricoClient({
                     colSpan={9}
                     className="px-4 py-8 text-center text-slate-400"
                   >
-                    Nenhum envio encontrado com os filtros selecionados.
+                    Nenhum contato encontrado.
                   </td>
                 </tr>
               )}
@@ -1003,7 +1000,7 @@ export default function HistoricoClient({
               <div className="flex items-center space-x-2">
                 <Pencil className="w-5 h-5 text-amber-600" />
                 <h3 className="text-base font-bold text-slate-900">
-                  Editar Registro do Histórico (Admin)
+                  Editar Registro
                 </h3>
               </div>
               <button
@@ -1194,21 +1191,21 @@ export default function HistoricoClient({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Excluir Registro do Histórico?
+                  Excluir Registro?
                 </h3>
                 <p className="text-xs text-rose-600 font-semibold">
-                  Ação restrita de administrador
+                  Esta ação não pode ser desfeita.
                 </p>
               </div>
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              Você está prestes a excluir permanentemente o registro de acionamento do aluno:
+              Excluir permanentemente o registro de contato:
             </p>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
               <div>
-                Aluno: <strong>{activeDeleteLog.student.name}</strong>
+                Estudante: <strong>{activeDeleteLog.student.name}</strong>
               </div>
               <div>
                 Turma: <strong>{activeDeleteLog.student.classGroup.name}</strong>

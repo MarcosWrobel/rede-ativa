@@ -736,11 +736,8 @@ export default function FaltasClient({
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                Painel de Frequência & Busca Ativa Escolar
+                Frequência e Alertas
               </h1>
-              <p className="text-xs text-slate-500">
-                Rede Ativa • Gestão Integrada de Busca Ativa & Frequência Escolar
-              </p>
             </div>
           </div>
         </div>
@@ -754,7 +751,7 @@ export default function FaltasClient({
             className="px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
           >
             <Download className="w-4 h-4 text-purple-600" />
-            <span>Baixar Extensão (.ZIP)</span>
+            <span>Baixar Extensão</span>
           </a>
 
           {/* Botão Autenticado para Copiar Chave da Extensão (Disponível apenas na Versão Piloto Integrada) */}
@@ -832,7 +829,7 @@ export default function FaltasClient({
             className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
           >
             <ListChecks className="w-4 h-4" />
-            <span>Fila por Turma (wa.me)</span>
+            <span>Fila da Turma</span>
           </Link>
 
           {/* Exportar CSV */}
@@ -870,7 +867,7 @@ export default function FaltasClient({
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Frequência & SERP ({recordsList.length})
+              Frequência e SERP ({recordsList.length})
             </button>
             <button
               type="button"
@@ -881,7 +878,7 @@ export default function FaltasClient({
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Contatos de Falta ({rankedAbsences.length})
+              Histórico de Faltas ({rankedAbsences.length})
             </button>
           </div>
         </div>
@@ -899,7 +896,7 @@ export default function FaltasClient({
                 Monitorados
               </span>
               <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none">
-                {kpis.total} alunos
+                {kpis.total}
               </strong>
             </div>
           </div>
@@ -930,7 +927,7 @@ export default function FaltasClient({
                 Atenção (75-85%)
               </span>
               <strong className="text-lg sm:text-xl font-black text-amber-800 leading-none">
-                {kpis.atencao} alunos
+                {kpis.atencao}
               </strong>
             </div>
           </div>
@@ -941,7 +938,7 @@ export default function FaltasClient({
             </div>
             <div>
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                Média Geral Escola
+                Média da Escola
               </span>
               <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none">
                 {kpis.mediaGeral}%
@@ -958,7 +955,7 @@ export default function FaltasClient({
                 Conselho Tutelar
               </span>
               <strong className="text-lg sm:text-xl font-black text-purple-800 leading-none">
-                {kpis.conselhoTutelar} casos
+                {kpis.conselhoTutelar}
               </strong>
             </div>
           </div>
@@ -974,7 +971,7 @@ export default function FaltasClient({
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar por Nome do Aluno ou CGM..."
+              placeholder="Buscar estudante ou CGM..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -1004,9 +1001,9 @@ export default function FaltasClient({
               }}
               className="w-full border border-slate-300 dark:border-slate-700 rounded-lg py-2 px-2.5 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 text-xs font-medium"
             >
-              <option value="TODOS">Todos os Segmentos</option>
+              <option value="TODOS">Todas as Etapas</option>
               <option value="FUNDAMENTAL">Fundamental</option>
-              <option value="MEDIO">Ensino Médio</option>
+              <option value="MEDIO">Médio</option>
               <option value="NOTURNO">Noturno</option>
             </select>
           </div>
@@ -1203,7 +1200,7 @@ export default function FaltasClient({
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Atual</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Ant.</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[100px]`}>Variação</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[220px]`}>Medidas Adotadas (SERP / CT)</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[220px]`}>Encaminhamentos (SERP / CT)</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right min-w-[130px]`}>Ações</th>
                 </tr>
               </thead>
@@ -1211,7 +1208,7 @@ export default function FaltasClient({
                 {paginatedRecords.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="p-10 text-center text-slate-400 dark:text-slate-500">
-                      Nenhum estudante encontrado com os filtros aplicados.
+                      Nenhum estudante encontrado.
                     </td>
                   </tr>
                 ) : (
@@ -1422,7 +1419,7 @@ export default function FaltasClient({
                               </div>
                             ) : (
                               <span className="text-[11px] text-slate-400 italic">
-                                Nenhuma ação registrada
+                                Sem encaminhamentos
                               </span>
                             )}
                           </div>
@@ -1525,7 +1522,7 @@ export default function FaltasClient({
               <span>Ranking por Contatos de Falta Disparados</span>
             </div>
             <span className="text-xs text-slate-500 font-medium">
-              Alunos com avisos de falta disparados à família via sistema
+              Estudantes notificados via WhatsApp
             </span>
           </div>
 
@@ -1536,7 +1533,7 @@ export default function FaltasClient({
                   <th className="p-3 w-16 text-center">Posição</th>
                   <th className="p-3">Estudante</th>
                   <th className="p-3">Turma</th>
-                  <th className="p-3 text-center">Contatos de Falta</th>
+                  <th className="p-3 text-center">Avisos de Falta</th>
                   <th className="p-3">Último Disparo</th>
                   <th className="p-3 text-right">Ação</th>
                 </tr>
@@ -1545,7 +1542,7 @@ export default function FaltasClient({
                 {rankedAbsences.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="p-8 text-center text-slate-400">
-                      Nenhum registro de falta enviado via WhatsApp ainda.
+                      Nenhum aviso de falta enviado.
                     </td>
                   </tr>
                 ) : (
@@ -1631,11 +1628,8 @@ export default function FaltasClient({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">
-                    {isIntegrated ? "Importar Frequência Escolar do Power BI" : "Importar Frequência Escolar (CSV / Planilha)"}
+                    {isIntegrated ? "Sincronizar Frequência (Power BI)" : "Importar Frequência (Planilha)"}
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    {isIntegrated ? "Atualize os percentuais oficiais para a equipe pedagógica" : "Atualize os percentuais de presença dos estudantes para a busca ativa"}
-                  </p>
                 </div>
               </div>
               <button
@@ -1768,10 +1762,10 @@ export default function FaltasClient({
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200">
             <h3 className="text-base font-bold text-slate-900">
-              Atualizar Acompanhamento (Busca Ativa)
+              Atualizar Encaminhamento
             </h3>
             <p className="text-xs text-slate-600">
-              Aluno: <strong>{editingRecord.student.name}</strong> ({editingRecord.student.classGroup.name})
+              Estudante: <strong>{editingRecord.student.name}</strong> ({editingRecord.student.classGroup.name})
             </p>
 
             <div>
@@ -1839,11 +1833,8 @@ export default function FaltasClient({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 leading-tight">
-                    Disparo de Mensagem & Busca Ativa
+                    Enviar Mensagem
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    Envio direto via WhatsApp com métricas de frequência escolar
-                  </p>
                 </div>
               </div>
               <button
@@ -1863,7 +1854,7 @@ export default function FaltasClient({
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Aluno(a)</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Estudante</span>
                     <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
                       {activeStudentData.student.name}
                     </h4>
