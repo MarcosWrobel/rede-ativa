@@ -86,3 +86,21 @@ Antes de dar qualquer tarefa como concluída ou commitar:
   - O `SUPERADMIN` define a versão atribuída no cadastro da SEMEC (`EducationNetwork`) ou de escolas individuais no painel `/admin/escolas`.
   - Quando os gestores da SEMEC (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
 - **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.
+
+---
+
+## 10. Padrão de UX Writing & Microcopy Operacional (Léxico Pedagógico Brasileiro)
+A interface deve seguir os princípios de design de alta densidade de informação e concisão operacional (padrão Linear, Stripe, Notion):
+
+- **Deleção de Redundâncias (Zero Vibecoding):** Se um `<h1/h2/h3>` ou título de Card/Modal já é autoexplicativo (ex.: *"Histórico de Contatos"*), **nunca adicione** um elemento `<p>` ou subtítulo abaixo dele que apenas repita a mesma ideia com palavras a mais. Remova a tag inteira para manter o layout limpo e direto.
+- **Corte Rígido de Enchimento de IA:** É estritamente proibido o uso de termos vazios corporativos como *otimizar, potencializar, gerenciar de forma eficiente, ecossistema, jornada, insights, holístico, integrado, facilmente, centralizado, em um só lugar*.
+- **Léxico Pedagógico Operacional:**
+  - **PROIBIDO USAR:** *Cliente, Usuário* (quando se referir ao aluno ou responsáveis), *Lead, Ticket, Chamado, Ocorrência genérica, Pipeline, Log* (na interface visível).
+  - **OBRIGATÓRIO USAR:** *Estudante / Aluno, Responsável legal, Família, Busca Ativa, Infrequência, Evasão, Abandono, Faltas consecutivas / alternadas, Tentativa de contato, Registro de atendimento, Encaminhamento (Rede de Proteção, Conselho Tutelar, CRAS/CREAS), Ata pedagógica, Conselho de classe, Justificativa / Atestado, Turma, Turno, Equipe pedagógica*.
+- **Concisão Operacional:**
+  - **Botões de Ação:** Máximo de 2 a 3 palavras no infinitivo/imperativo direto (*"Registrar contato"*, *"Nova ata"*, *"Encaminhar"*, *"Acessar"*, *"Imprimir"*).
+  - **Badges/Status:** 1 a 2 palavras (*"Pendente"*, *"Em acompanhamento"*, *"Sem retorno"*, *"Concluído"*, *"Conselho Tutelar"*).
+  - **Placeholders:** Objetivos e diretos (*"Buscar por estudante ou CGM..."* em vez de *"Digite aqui o nome do aluno que você deseja encontrar..."*).
+  - **Toasts e Alertas:** Factuais e curtos (*"Ata registrada."* em vez de *"A sua ata foi salva com sucesso no banco de dados!"*).
+- **Preservação de Acessibilidade & Testes SSR:** Quando testes legados de renderização exigirem strings descritivas para asserção de integridade, utilize atributos de acessibilidade (`aria-label="..."`) no elemento, mantendo a interface visual limpa, acessível para leitores de tela e 100% compatível com a suíte de testes.
+
