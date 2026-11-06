@@ -343,7 +343,7 @@ export async function generateAtaPdfA1b(
 
   // Texto Formal da Ata (Preâmbulo e Corpo)
   y -= 6;
-  currentPage.drawText("Termo Oficial da Lavratura:", {
+  currentPage.drawText("Termo de Lavratura:", {
     x: MARGIN_LEFT,
     y,
     size: 9,
@@ -358,7 +358,7 @@ export async function generateAtaPdfA1b(
   if (safeAgreements) {
     y -= 10;
     checkPageBreak(40);
-    currentPage.drawText("Síntese dos Combinados e Prazos:", {
+    currentPage.drawText("Encaminhamentos e Prazos:", {
       x: MARGIN_LEFT,
       y,
       size: 9,
@@ -374,7 +374,7 @@ export async function generateAtaPdfA1b(
   if (addendumsArr.length > 0) {
     y -= 12;
     checkPageBreak(50);
-    currentPage.drawText("Termos de Aditamento / Retificação ('Em tempo'):", {
+    currentPage.drawText("Termos de Aditamento ('Em tempo'):", {
       x: MARGIN_LEFT,
       y,
       size: 9,
@@ -411,7 +411,7 @@ export async function generateAtaPdfA1b(
   if (minute.status === "VOIDED" && minute.voidReason) {
     y -= 10;
     checkPageBreak(40);
-    currentPage.drawText("Justificativa Oficial de Cancelamento:", {
+    currentPage.drawText("Motivo do Cancelamento:", {
       x: MARGIN_LEFT,
       y,
       size: 8.5,
@@ -439,7 +439,7 @@ export async function generateAtaPdfA1b(
   if (participantsArr.length > 0) {
     y -= 12;
     checkPageBreak(50);
-    currentPage.drawText("Quadro Oficial de Presentes e Assinaturas:", {
+    currentPage.drawText("Participantes e Assinaturas:", {
       x: MARGIN_LEFT,
       y,
       size: 9,
@@ -520,7 +520,7 @@ export async function generateAtaPdfA1b(
   }
 
   const footX = MARGIN_LEFT;
-  currentPage.drawText("CHANCELA DE FÉ PÚBLICA & PRESERVAÇÃO ARQUIVÍSTICA (LEI Nº 14.063/2020 • ISO 19005-1 Level B)", {
+  currentPage.drawText("AUTENTICAÇÃO DIGITAL & PRESERVAÇÃO ARQUIVÍSTICA (LEI Nº 14.063/2020 • ISO 19005-1)", {
     x: footX,
     y,
     size: 7.5,

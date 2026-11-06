@@ -81,7 +81,7 @@ export default function PrintPageClient({
           className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Voltar às Atas</span>
+          <span>Atas</span>
         </Link>
 
         <div className="flex items-center space-x-2">
@@ -174,7 +174,7 @@ export default function PrintPageClient({
           {minute.isExtemporaneous && minute.extemporaneousReason && (
             <div className="font-sans text-xs border border-amber-300 bg-amber-50/80 p-2.5 rounded-lg text-amber-950 space-y-0.5 print:p-2 print:text-[10px]">
               <p className="font-bold uppercase tracking-wider text-amber-900 text-[10px] print:text-[9px]">
-                Nota de Escrituração Administrativa (Lavratura Extemporânea):
+                Lavratura extemporânea:
               </p>
               <p className="italic leading-relaxed">
                 &ldquo;{minute.extemporaneousReason}&rdquo;
@@ -186,7 +186,7 @@ export default function PrintPageClient({
         {/* Informações dos Estudantes Vinculados */}
         <div className="font-sans text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1 print:p-2 print:py-1.5 print:rounded-lg">
           <p className="font-bold text-slate-700">
-            Estudante(s) Objeto do Atendimento:
+            Estudantes vinculados:
           </p>
           <ul className="list-disc list-inside space-y-0.5 text-slate-800">
             {minute.students?.map((s: any) => (
@@ -219,7 +219,7 @@ export default function PrintPageClient({
           {minute.agreementsSummary && (
             <div className="pt-2 print:pt-1">
               <strong className="font-sans text-xs font-bold uppercase tracking-wider block text-slate-800 print:text-[11px]">
-                Deliberações e Combinados Pactuados:
+                Encaminhamentos e combinados:
               </strong>
               <p className="whitespace-pre-line mt-1 print:mt-0.5">{minute.agreementsSummary}</p>
             </div>
@@ -230,12 +230,12 @@ export default function PrintPageClient({
         {minute.actionItems && minute.actionItems.length > 0 && (
           <div className="font-sans text-xs space-y-1.5 pt-2 print:pt-1 print:space-y-1">
             <span className="font-bold text-slate-800 uppercase text-[11px] tracking-wider print:text-[10px]">
-              Quadro de Encaminhamentos e Prazos:
+              Encaminhamentos e prazos:
             </span>
             <table className="w-full border-collapse border border-slate-300 text-[11px] print:text-[10px]">
               <thead>
                 <tr className="bg-slate-100 text-left">
-                  <th className="border border-slate-300 p-1.5 print:p-1">Ação / Encaminhamento</th>
+                  <th className="border border-slate-300 p-1.5 print:p-1">Encaminhamento</th>
                   <th className="border border-slate-300 p-1.5 print:p-1">Responsável</th>
                   <th className="border border-slate-300 p-1.5 print:p-1">Prazo Limite</th>
                 </tr>
@@ -259,7 +259,7 @@ export default function PrintPageClient({
         {minute.addendums && minute.addendums.length > 0 && (
           <div className="space-y-2 border-t border-dashed border-slate-400 pt-4 font-sans text-xs print:pt-2 print:space-y-1">
             <h4 className="font-bold uppercase tracking-wider text-slate-800">
-              Termos de Aditamento / Retificação (&quot;Em tempo&quot;):
+              Termos de aditamento (&quot;Em tempo&quot;):
             </h4>
             {minute.addendums.map((ad: any, idx: number) => (
               <div key={ad.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1 print:p-1.5">
@@ -277,7 +277,7 @@ export default function PrintPageClient({
         {/* Bloco de Assinaturas */}
         <div className="pt-6 border-t-2 border-slate-900 space-y-6 font-sans print:pt-3 print:space-y-2 print:break-inside-avoid">
           <p className="text-center text-xs font-bold text-slate-700 uppercase tracking-wider print:text-[11px]">
-            Assinaturas e Ciência dos Presentes
+            Participantes e assinaturas
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 pt-4 print:gap-4 print:pt-2">
@@ -345,11 +345,10 @@ export default function PrintPageClient({
             <div className="space-y-1 flex-1 print:space-y-0.5">
               <p className="font-bold text-slate-800 flex items-center space-x-1 print:text-[11px]">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 print:w-3.5 print:h-3.5" />
-                <span>Autenticidade e Fé Pública — Lei Federal nº 14.063/2020</span>
+                <span>Autenticidade digital — Lei nº 14.063/2020</span>
               </p>
               <p className="text-[10px] text-slate-500 leading-tight print:text-[9px]">
-                Documento emitido eletronicamente pela Equipe Pedagógica. A integridade do conteúdo é garantida
-                pelo algoritmo criptográfico SHA-256 e pelo código validador.
+                Documento oficial com integridade atestada por hash SHA-256 e código validador.
               </p>
               <p className="font-mono text-[9px] text-slate-600 break-all print:text-[8px]">
                 Hash SHA-256: {minute.contentHash}
@@ -380,7 +379,7 @@ export default function PrintPageClient({
                   initialSvg={initialQrSvg}
                 />
               </div>
-              <span className="text-[9px] text-slate-500 font-bold block mt-0.5 print:text-[8px]">Conferir Autenticidade</span>
+              <span className="text-[9px] text-slate-500 font-bold block mt-0.5 print:text-[8px]">Validar documento</span>
             </div>
           </div>
         )}

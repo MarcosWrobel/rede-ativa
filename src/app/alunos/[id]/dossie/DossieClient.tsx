@@ -118,16 +118,13 @@ export default function DossieClient({
               className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Voltar ao Prontuário 360º</span>
+              <span>Prontuário</span>
             </Link>
             <div>
               <h1 className="text-base font-extrabold text-slate-900 flex items-center space-x-1.5">
                 <FileCheck2 className="w-5 h-5 text-emerald-600" />
-                <span>Emissão de Dossiê Individual de Busca Ativa</span>
+                <span>Emissão de Dossiê de Busca Ativa</span>
               </h1>
-              <p className="text-xs text-slate-500">
-                Revise o órgão destinatário e o parecer técnico abaixo antes de imprimir ou salvar como PDF.
-              </p>
             </div>
           </div>
 
@@ -137,14 +134,14 @@ export default function DossieClient({
             className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
           >
             <Printer className="w-4 h-4 text-amber-400" />
-            <span>Imprimir / Salvar PDF Oficial</span>
+            <span>Imprimir dossiê</span>
           </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-3 border-t border-slate-100 text-xs">
           <div className="lg:col-span-5 space-y-2">
             <label className="font-bold text-slate-700 block">
-              Órgão / Destinatário do Encaminhamento:
+              Órgão destinatário:
             </label>
             <select
               value={destinatario}
@@ -176,7 +173,7 @@ export default function DossieClient({
                 className="rounded border-slate-300 text-sky-600"
               />
               <span className="text-slate-600 font-medium">
-                Incluir texto integral de cada mensagem WhatsApp na tabela impressa
+                Incluir texto integral das mensagens
               </span>
             </label>
 
@@ -188,7 +185,7 @@ export default function DossieClient({
                 className="rounded border-slate-300 text-emerald-600"
               />
               <span className="text-slate-700 font-bold">
-                Anonimizar iniciais de outros estudantes em atas conjuntas (ECA / Art. 17 e 143)
+                Anonimizar outros estudantes (ECA)
               </span>
             </label>
 
@@ -200,14 +197,14 @@ export default function DossieClient({
                 className="rounded border-slate-300 text-rose-600"
               />
               <span className="text-rose-700 font-bold">
-                Incluir atas sob Sigilo Reforçado (exclusivo para Ministério Público / CT)
+                Incluir atas sob sigilo (Ministério Público / Conselho Tutelar)
               </span>
             </label>
           </div>
 
           <div className="lg:col-span-7 space-y-1">
             <label className="font-bold text-slate-700 block">
-              Parecer Técnico-Pedagógico Conclusivo (editável para este documento):
+              Parecer técnico-pedagógico conclusivo:
             </label>
             <textarea
               rows={3}
@@ -256,7 +253,7 @@ export default function DossieClient({
               </div>
             )}
             <div className="pt-1 text-[9px] font-mono font-bold text-emerald-800 border-t border-slate-200 mt-1">
-              Selo Pericial: {dossierIntegritySeal}
+              Selo de Integridade: {dossierIntegritySeal}
             </div>
           </div>
         </header>
@@ -264,7 +261,7 @@ export default function DossieClient({
         {/* 2. Identificação do Estudante e Contatos Familiares */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            1. Identificação Cadastral do(a) Estudante e Responsáveis
+            1. Identificação do Estudante e Responsáveis
           </h3>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border border-slate-300 rounded-lg p-3 text-[11px]">
@@ -295,7 +292,7 @@ export default function DossieClient({
           {contacts.length > 0 && (
             <div className="border border-slate-200 rounded-lg p-2.5 text-[11px]">
               <strong className="block mb-1 text-slate-700">
-                Contatos Adicionais Cadastrados da Família:
+                Contatos Adicionais da Família:
               </strong>
               <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                 {contacts.map((c) => (
@@ -314,8 +311,8 @@ export default function DossieClient({
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
             {isIntegrated
-              ? "2. Indicadores Oficiais de Frequência Escolar (BI / SEED-PR) e SERP"
-              : "2. Indicadores Oficiais de Frequência Escolar e Rede de Proteção"}
+              ? "2. Frequência Escolar e Acompanhamento na Rede"
+              : "2. Frequência Escolar e Acompanhamento"}
           </h3>
 
           {lowAtt ? (
@@ -354,7 +351,7 @@ export default function DossieClient({
 
               {chronologicalSnapshots.length > 1 && (
                 <div className="pt-2 border-t border-slate-200">
-                  <strong className="block mb-1">Histórico Semanal Coletado:</strong>
+                  <strong className="block mb-1">Histórico Semanal:</strong>
                   <div className="flex flex-wrap gap-2 font-mono text-[10px]">
                     {chronologicalSnapshots.map((s: any) => (
                       <span
@@ -370,7 +367,7 @@ export default function DossieClient({
             </div>
           ) : (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-3">
-              Estudante sem registro ativo de infrequência crítica importado do Power BI na presente data.
+              Sem registros de infrequência crítica na data de emissão.
             </p>
           )}
         </section>
@@ -378,12 +375,12 @@ export default function DossieClient({
         {/* 4. Atestados Médicos e Justificativas (se houver) */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            3. Atestados Médicos e Justificativas Formais Apresentadas ({justifications.length})
+            3. Atestados e Justificativas de Ausência ({justifications.length})
           </h3>
 
           {justifications.length === 0 ? (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-2.5">
-              Nenhum atestado médico ou justificativa documental entregue na instituição no período.
+              Nenhuma justificativa ou atestado apresentado no período.
             </p>
           ) : (
             <table className="w-full border-collapse border border-slate-300 text-[11px]">
@@ -421,12 +418,12 @@ export default function DossieClient({
         {/* 4. Atas do Livro Oficial de Atendimento Pedagógico */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            4. Atas Oficiais do Atendimento Pedagógico Digital ({minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length})
+            4. Atas de Atendimento Pedagógico ({minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length})
           </h3>
 
           {minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length === 0 ? (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-2.5">
-              Não constam atas oficiais lavradas no Livro Digital para este estudante até a presente data.
+              Nenhuma ata registrada para este estudante.
             </p>
           ) : (
             <div className="space-y-2.5">
@@ -486,7 +483,7 @@ export default function DossieClient({
         {attendances.length > 0 && (
           <section className="space-y-2 break-inside-avoid">
             <h3 className="text-xs font-bold uppercase tracking-wider bg-slate-50 border-l-4 border-slate-400 px-2.5 py-1 text-slate-700">
-              5. Atendimentos Presenciais Anteriores (Histórico Legado — {attendances.length})
+              5. Atendimentos Presenciais Anteriores ({attendances.length})
             </h3>
             <div className="space-y-2">
               {attendances.map((att) => (
@@ -508,7 +505,7 @@ export default function DossieClient({
                   </div>
                   {att.agreements && (
                     <div>
-                      <strong>Encaminhamentos Firmados:</strong> {att.agreements}
+                      <strong>Encaminhamentos:</strong> {att.agreements}
                     </div>
                   )}
                 </div>
@@ -520,12 +517,12 @@ export default function DossieClient({
         {/* 6. Histórico Completo e Auditado de Tentativas de Contato (Busca Ativa) */}
         <section className="space-y-2">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            5. Registro Cronológico Auditado de Tentativas de Contato / Busca Ativa ({totalLogs})
+            {attendances.length > 0 ? "6" : "5"}. Registro de Tentativas de Contato e Busca Ativa ({totalLogs})
           </h3>
 
           {totalLogs === 0 ? (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-2.5">
-              Nenhuma comunicação via WhatsApp registrada no sistema para este estudante.
+              Nenhuma tentativa de contato registrada para este estudante.
             </p>
           ) : (
             <table className="w-full border-collapse border border-slate-300 text-[10.5px]">
@@ -535,7 +532,7 @@ export default function DossieClient({
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Motivo / Mensagem</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Telefone</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Profissional</th>
-                  <th className="border border-slate-300 px-2 py-1.5 text-left">Selo Probatório SHA-256</th>
+                  <th className="border border-slate-300 px-2 py-1.5 text-left">Selo SHA-256</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-center">Retorno?</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">
                     Manifestação da Família / Observações
@@ -602,7 +599,7 @@ export default function DossieClient({
                       <td className="border border-slate-300 px-2 py-1">
                         {log.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
                           <strong>
-                            Tentativa frustrada — Número informado no cadastro não possui WhatsApp ativo.
+                            Tentativa sem entrega — Telefone sem WhatsApp ativo.
                           </strong>
                         ) : (
                           <>
@@ -613,7 +610,7 @@ export default function DossieClient({
                             )}
                             {log.replyNotes ||
                               (log.guardianReplied
-                                ? "Retorno confirmado sem observação textual."
+                                ? "Retorno confirmado."
                                 : "Sem retorno registrado.")}
                           </>
                         )}
@@ -629,7 +626,7 @@ export default function DossieClient({
         {/* 7. Parecer Técnico-Pedagógico e Assinaturas */}
         <section className="space-y-4 pt-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            6. Parecer Técnico-Pedagógico e Encaminhamento Institucional
+            {attendances.length > 0 ? "7" : "6"}. Parecer Técnico-Pedagógico e Encaminhamentos
           </h3>
 
           <p className="border border-slate-300 rounded-lg p-3 text-[11px] text-justify leading-relaxed">
@@ -659,12 +656,12 @@ export default function DossieClient({
           <div className="pt-4 border-t border-slate-300 text-[9px] text-slate-500 font-mono flex flex-wrap justify-between items-center gap-2">
             <div>
               <span className="font-bold text-slate-700 block">
-                CERTIDÃO PROBATÓRIA ELETRÔNICA — LEI Nº 14.063/2020 E MP Nº 2.200-2/2001
+                CERTIDÃO ELETRÔNICA DE INTEGRIDADE — LEI Nº 14.063/2020 E MP Nº 2.200-2/2001
               </span>
-              <span>Selo de Autenticidade do Dossiê: <strong className="text-emerald-800 font-mono">{dossierIntegritySeal}</strong></span>
+              <span>Selo de Integridade do Dossiê: <strong className="text-emerald-800 font-mono">{dossierIntegritySeal}</strong></span>
             </div>
             <div className="text-right">
-              <span>Evidências cronológicas com cadeia de custódia certificada via SHA-256</span>
+              <span>Registros autenticados por hash SHA-256</span>
               <span className="block">Emissão: {emittedDate.toISOString()}</span>
             </div>
           </div>

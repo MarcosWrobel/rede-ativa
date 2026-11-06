@@ -39,9 +39,9 @@ export default async function ValidarAtaPage({ params }: Props) {
           <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
             <AlertTriangle className="w-8 h-8" />
           </div>
-          <h1 className="text-lg font-black text-slate-900">Documento Não Encontrado</h1>
+          <h1 className="text-lg font-black text-slate-900">Documento não encontrado</h1>
           <p className="text-xs text-slate-500 leading-relaxed">
-            O código de validação <strong>{cleanCode}</strong> não corresponde a nenhum documento oficial lavrado no sistema. Verifique se o código digitado ou o QR Code escaneado está correto.
+            Código de validação <strong>{cleanCode}</strong> não localizado. Verifique os dados digitados ou o QR Code escaneado.
           </p>
         </div>
       </div>
@@ -116,15 +116,15 @@ export default async function ValidarAtaPage({ params }: Props) {
           </span>
           <h1 className="text-xl font-black mt-2">
             {!isAuthentic
-              ? "ALERTA PERICIAL: Violação de Integridade Detectada"
+              ? "Violação de integridade detectada"
               : isVoid
                 ? "Ata Tornada Sem Efeito"
-                : "Ata Pedagógica Oficial e Autêntica"}
+                : "Ata pedagógica autêntica"}
           </h1>
           <p className="text-xs text-white/90 mt-1">
             {!isAuthentic
-              ? "O hash criptográfico recalculado diverge do selo original lavrado."
-              : "Conferência em tempo real conforme Lei Federal nº 14.063/2020, CPC Art. 411 e ECA"}
+              ? "O hash recalculado diverge do registro original."
+              : "Conferência oficial conforme Lei nº 14.063/2020 e ECA"}
           </p>
         </div>
 
@@ -160,7 +160,7 @@ export default async function ValidarAtaPage({ params }: Props) {
           </div>
 
           <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Servidora Responsável (Fé Pública)</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Responsável pela lavratura</span>
             <p className="font-bold text-slate-800">
               {maskName(minute.authorName)} — {minute.authorRole}
             </p>
@@ -169,10 +169,10 @@ export default async function ValidarAtaPage({ params }: Props) {
           {/* Participantes Mascarados (LGPD) */}
           <div className="space-y-2 border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Presentes e Assinaturas Registradas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Participantes e assinaturas</span>
               <span className="text-[10px] text-slate-400 flex items-center space-x-1">
                 <Lock className="w-3 h-3" />
-                <span>Dados sensíveis mascarados (LGPD/ECA)</span>
+                <span>Dados mascarados (LGPD)</span>
               </span>
             </div>
             <ul className="space-y-1.5">
@@ -190,12 +190,12 @@ export default async function ValidarAtaPage({ params }: Props) {
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
                     {p.signatureMode === "REFUSED"
-                      ? "Recusa Certificada"
+                      ? "Recusa registrada"
                       : p.verifiedEmail
                       ? "✓ Assinado via @escola.pr.gov.br"
                       : p.biometricVerified
-                      ? "Assinatura Biométrica (WebAuthn)"
-                      : "Assinatura Registrada"}
+                      ? "Biometria (WebAuthn)"
+                      : "Registrada"}
                   </span>
                 </li>
               ))}
@@ -204,13 +204,13 @@ export default async function ValidarAtaPage({ params }: Props) {
 
           {/* Integridade Criptográfica */}
           <div className="space-y-1.5 border-t border-slate-100 pt-4">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Hash SHA-256 Canônico</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Hash SHA-256</span>
             <p className="font-mono text-[10px] text-slate-600 bg-slate-100 p-2.5 rounded-xl break-all">
               {minute.contentHash}
             </p>
             {minute.govBrVerified && (
               <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
-                ✓ Averbação ICP-Brasil / Assinador Gov.br verificada
+                ✓ Assinatura Gov.br verificada
                 {minute.govBrProtocol ? ` • Protocolo: ${minute.govBrProtocol}` : ""}
               </p>
             )}
@@ -219,10 +219,10 @@ export default async function ValidarAtaPage({ params }: Props) {
           {minute.addendums.length > 0 && (
             <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 space-y-1">
               <strong className="font-bold block">
-                Aviso: Constam {minute.addendums.length} Termo(s) de Aditamento (&quot;Em tempo&quot;) encadeados.
+                Constam {minute.addendums.length} termo(s) de aditamento (&quot;Em tempo&quot;).
               </strong>
               <p className="text-[11px] text-amber-800">
-                O teor integral deste documento pedagógico e seus aditamentos pode ser consultado fisicamente na Secretaria Escolar ou mediante acesso autenticado ao sistema pelos órgãos de proteção competentes.
+                O teor integral pode ser consultado na secretaria escolar ou pelos órgãos de proteção competentes.
               </p>
             </div>
           )}

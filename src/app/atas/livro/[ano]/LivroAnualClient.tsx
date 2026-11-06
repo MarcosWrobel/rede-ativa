@@ -52,7 +52,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
           className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Voltar às Atas</span>
+          <span>Atas</span>
         </Link>
 
         <button
@@ -61,7 +61,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
           className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
         >
           <Printer className="w-4 h-4 text-amber-400" />
-          <span>Imprimir Livro</span>
+          <span>Imprimir livro</span>
         </button>
       </div>
 
@@ -108,7 +108,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
 
           <div className="space-y-4 text-justify text-sm leading-relaxed border-t border-slate-300 pt-6">
             <h3 className="font-sans text-center font-extrabold uppercase text-xs tracking-wider">
-              Termo de Abertura Oficial
+              Termo de Abertura
             </h3>
             <p>
               Aos 02 dias do mês de fevereiro de {year}, abre-se o presente Livro de Atas do
@@ -135,15 +135,15 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
         {/* ÍNDICE CRONOLÓGICO */}
         <div className="space-y-4 border-b border-slate-200 pb-8 page-break-after">
           <h3 className="font-sans font-black text-sm uppercase tracking-wider text-slate-900 border-b border-slate-900 pb-1">
-            Sumário Cronológico das Atas Lavradas ({year})
+            Sumário das Atas Lavradas ({year})
           </h3>
           <table className="w-full text-xs font-sans border-collapse">
             <thead>
               <tr className="border-b border-slate-300 text-left font-bold text-slate-700">
                 <th className="py-2">Nº / Ano</th>
                 <th className="py-2">Data</th>
-                <th className="py-2">Estudante(s) Vinculado(s)</th>
-                <th className="py-2">Assunto / Pauta</th>
+                <th className="py-2">Estudantes</th>
+                <th className="py-2">Pauta</th>
                 <th className="py-2">Status</th>
               </tr>
             </thead>
@@ -185,7 +185,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               </div>
 
               <p className="font-sans text-xs font-bold text-slate-800">
-                Pauta: {m.subject} • Aluno(s): {m.students?.map((s: any) => s.studentNameSnapshot).join(", ")}
+                Pauta: {m.subject} • Estudantes: {m.students?.map((s: any) => s.studentNameSnapshot).join(", ")}
               </p>
 
               <p className="text-sm leading-relaxed whitespace-pre-line text-justify">
@@ -194,7 +194,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
 
               {m.agreementsSummary && (
                 <div className="font-sans text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <strong className="block font-bold">Combinados e Prazos:</strong>
+                  <strong className="block font-bold">Encaminhamentos e combinados:</strong>
                   <p className="mt-0.5">{m.agreementsSummary}</p>
                 </div>
               )}
@@ -219,7 +219,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
         <div className="min-h-[400px] flex flex-col justify-between border-t-2 border-slate-900 pt-8">
           <div className="space-y-4 text-justify text-sm leading-relaxed">
             <h3 className="font-sans text-center font-extrabold uppercase text-xs tracking-wider">
-              Termo de Encerramento Oficial
+              Termo de Encerramento
             </h3>
             <p>
               Aos 22 dias do mês de dezembro de {year}, encerra-se o presente Livro de Atas do
