@@ -61,11 +61,13 @@ export async function GET(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
+    const { syncTokenHash, ...safeSchool } = school;
+
     return NextResponse.json({
       success: true,
       school: {
-        ...school,
-        hasSyncToken: Boolean(school.syncTokenHash),
+        ...safeSchool,
+        hasSyncToken: Boolean(syncTokenHash),
       },
     });
   } catch (error: any) {
@@ -156,6 +158,7 @@ export async function PUT(
       action: "UPDATE_SCHOOL",
       entityType: "School",
       entityId: id,
+      schoolId: id,
       details: {
         name: updated.name,
         inepCode: updated.inepCode,
@@ -170,11 +173,13 @@ export async function PUT(
       req,
     });
 
+    const { syncTokenHash: updatedSyncTokenHash, ...safeUpdated } = updated;
+
     return NextResponse.json({
       success: true,
       school: {
-        ...updated,
-        hasSyncToken: Boolean(updated.syncTokenHash),
+        ...safeUpdated,
+        hasSyncToken: Boolean(updatedSyncTokenHash),
       },
     });
   } catch (error: any) {
@@ -250,6 +255,7 @@ export async function DELETE(
       action: "DELETE_SCHOOL",
       entityType: "School",
       entityId: id,
+      schoolId: id,
       details: {
         deletedSchoolName: target.name,
         inepCode: target.inepCode,

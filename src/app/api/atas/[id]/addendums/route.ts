@@ -5,14 +5,19 @@ import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeAddendumHash } from "@/lib/ataCrypto";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { verifyServerSigningPin } from "@/lib/signingPin";
+import { checkRateLimit, resetRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const DATA_IMAGE_REGEX = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$/;
 
 const addendumSchema = z.object({
   content: z.string().min(5, "Informe o texto do termo de aditamento/retificação"),
   participantSignatureData: z.string().optional().nullable(),
   participantSignerName: z.string().optional().nullable(),
+  signingPin: z.string().optional().nullable(),
 });
 
 export async function POST(
@@ -32,7 +37,53 @@ export async function POST(
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const { content, participantSignatureData, participantSignerName } = parsed.data;
+    const { content, participantSignatureData, participantSignerName, signingPin } = parsed.data;
+
+    if (participantSignatureData) {
+      if (participantSignatureData.length > 512 * 1024 || !DATA_IMAGE_REGEX.test(participantSignatureData.trim())) {
+        return NextResponse.json(
+          { error: "Formato ou tamanho de assinatura inválido no adendo (use imagem PNG/JPEG até 500KB)." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Pré-validação de existência e posse de tenant antes de checar PIN de Fé Pública
+    const preCheckMinute = await prisma.pedagogicalMinute.findUnique({
+      where: { id },
+    });
+    if (!preCheckMinute) {
+      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    }
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (!assertTenantOwnership(preCheckMinute.schoolId, currentSchool.id, authCheck.session)) {
+      return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
+    }
+    if (preCheckMinute.status !== "FINALIZED") {
+      return NextResponse.json(
+        { error: "Termos de aditamento ('Em tempo') só podem ser lavrados em atas já finalizadas." },
+        { status: 400 }
+      );
+    }
+
+    // Simetria das Formas (Lei nº 14.063/2020): exige PIN de Fé Pública para aditar ata oficial
+    const pinLockKey = `pin-fail:${authCheck.userId}`;
+    const pinRateCheck = await checkRateLimit(pinLockKey, RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE);
+    if (!pinRateCheck.success) {
+      return NextResponse.json(
+        {
+          error: `Muitas tentativas incorretas de PIN. Uso bloqueado por ${pinRateCheck.retryAfterSeconds} segundos.`,
+          retryAfter: pinRateCheck.retryAfterSeconds,
+        },
+        { status: 429 }
+      );
+    }
+
+    const pinCheck = await verifyServerSigningPin(prisma, authCheck.userId, signingPin);
+    if (!pinCheck.ok) {
+      return NextResponse.json({ error: pinCheck.error }, { status: pinCheck.status || 401 });
+    }
+    await resetRateLimit(pinLockKey);
 
     // Executa em transação atômica para garantir encadeamento linear estrito dos hashes dos adendos
     const addendum = await prisma.$transaction(async (tx) => {
@@ -79,7 +130,9 @@ export async function POST(
         previousHash,
         content,
         authCheck.email,
-        now.toISOString()
+        now.toISOString(),
+        participantSignerName,
+        participantSignatureData
       );
 
       const created = await tx.pedagogicalMinuteAddendum.create({

@@ -46,7 +46,10 @@ export type AuditAction =
   | "REMOVE_PHYSICAL_SCAN"
   | "SETUP_SIGNING_PIN"
   | "CHANGE_SIGNING_PIN"
-  | "RESET_SIGNING_PIN_GOOGLE";
+  | "RESET_SIGNING_PIN_GOOGLE"
+  | "SIGNING_PIN_LOCKOUT"
+  | "SYNC_TOKEN_LOCKOUT";
+
 
 export interface AuditUser {
   id?: string;

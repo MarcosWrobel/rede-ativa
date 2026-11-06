@@ -41,8 +41,12 @@ export default function PhysicalScanModal({
 
   if (!isOpen || !minute) return null;
 
-  const currentScanData = minute.physicalSignedScanData;
-  const isCurrentPdf = currentScanData?.startsWith("data:application/pdf") || currentScanData?.startsWith("%PDF");
+  const hasScan = Boolean(minute.physicalSignedScanData || minute.physicalScanStorageKey || minute.hasPhysicalScan);
+  const currentScanUrl = `/api/atas/${minute.id}/physical-scan`;
+  const isCurrentPdf =
+    minute.physicalScanMimeType === "application/pdf" ||
+    minute.physicalSignedScanData?.startsWith("data:application/pdf") ||
+    minute.physicalSignedScanData?.startsWith("%PDF");
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -69,7 +73,7 @@ export default function PhysicalScanModal({
   };
 
   const handleSave = async () => {
-    if (!fileDataUrl && !currentScanData) {
+    if (!fileDataUrl && !hasScan) {
       setError("Selecione ou fotografe a folha física da ata para anexar.");
       return;
     }
@@ -79,7 +83,7 @@ export default function PhysicalScanModal({
 
     try {
       const payload = {
-        scanData: fileDataUrl || currentScanData,
+        scanData: fileDataUrl || minute.physicalSignedScanData,
         govBrVerified: isGovBr,
         govBrProtocol: govBrProtocol.trim() || null,
       };
@@ -173,7 +177,7 @@ export default function PhysicalScanModal({
           )}
 
           {/* Estado Atual: Já possui anexo */}
-          {currentScanData && !fileDataUrl && (
+          {hasScan && !fileDataUrl && (
             <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-emerald-800 dark:text-emerald-300 font-bold">
@@ -204,7 +208,7 @@ export default function PhysicalScanModal({
                     <FileText className="w-10 h-10 text-rose-500" />
                     <span className="font-medium">Documento PDF da Ata Assinada</span>
                     <a
-                      href={currentScanData}
+                      href={`${currentScanUrl}?download=1`}
                       download={`Ata_${minute.ataNumber}_${minute.year}_Assinada.pdf`}
                       className="inline-flex items-center space-x-1 text-sky-600 hover:underline font-bold"
                     >
@@ -214,12 +218,18 @@ export default function PhysicalScanModal({
                   </div>
                 ) : (
                   <img
-                    src={currentScanData}
+                    src={currentScanUrl}
                     alt="Via Física da Ata Assinada"
                     className="max-h-52 object-contain rounded-lg"
                   />
                 )}
               </div>
+
+              {minute.physicalScanSha256 && (
+                <p className="text-[10px] font-mono text-slate-500 truncate">
+                  SHA-256: {minute.physicalScanSha256}
+                </p>
+              )}
 
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[10.5px] text-slate-500">

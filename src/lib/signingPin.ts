@@ -115,3 +115,98 @@ export function calculateBusinessDaysDiff(startDate: Date, endDate: Date = new D
 
   return count;
 }
+
+export interface ServerPinCheckResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
+/**
+ * Valida o PIN Pessoal de Fé Pública do servidor público antes de lavrar, aditar ou anular
+ * atas oficiais (Lei nº 14.063/2020, Art. 4º, II — autoria pessoal intransferível).
+ *
+ * - Se o registro do servidor existir no banco e `signingPinHash` for nulo, rejeita com 401
+ *   (`PIN_REQUIRED`) exigindo o cadastro prévio do PIN (impedindo bypass por omissão).
+ * - Aplica trava progressiva temporária (5 minutos) após 3 tentativas incorretas consecutivas.
+ */
+export async function verifyServerSigningPin(
+  prismaClient: any,
+  userId: string | undefined,
+  rawProvidedPin?: unknown
+): Promise<ServerPinCheckResult> {
+  if (!userId || !prismaClient?.user?.findUnique) {
+    return { ok: true };
+  }
+
+  const userDb = await prismaClient.user.findUnique({
+    where: { id: userId },
+    select: { id: true, signingPinHash: true, pinAttempts: true, pinLockedUntil: true },
+  });
+
+  if (!userDb) {
+    return { ok: true };
+  }
+
+  if (!userDb.signingPinHash) {
+    return {
+      ok: false,
+      status: 401,
+      error:
+        "PIN_REQUIRED:Cadastre seu PIN Pessoal de Fé Pública antes de assinar ou averbar atos oficiais (Lei nº 14.063/2020).",
+    };
+  }
+
+  const now = new Date();
+  if (userDb.pinLockedUntil && userDb.pinLockedUntil > now) {
+    const minsLeft = Math.ceil((userDb.pinLockedUntil.getTime() - now.getTime()) / 60000);
+    return {
+      ok: false,
+      status: 403,
+      error: `PIN de fé pública temporariamente bloqueado. Aguarde ${minsLeft} minuto(s) para tentar novamente.`,
+    };
+  }
+
+  const providedPin = rawProvidedPin ? String(rawProvidedPin).trim() : "";
+  if (!providedPin) {
+    return {
+      ok: false,
+      status: 401,
+      error: "PIN_REQUIRED:Informe seu PIN de fé pública para assinar este ato oficial.",
+    };
+  }
+
+  const isValidPin = await verifyPin(providedPin, userDb.signingPinHash);
+  if (!isValidPin) {
+    const nextAttempts = (userDb.pinAttempts || 0) + 1;
+    const shouldLock = nextAttempts >= 3;
+    const lockUntil = shouldLock ? new Date(now.getTime() + 5 * 60000) : null;
+
+    if (prismaClient.user?.update) {
+      await prismaClient.user.update({
+        where: { id: userDb.id },
+        data: {
+          pinAttempts: shouldLock ? 0 : nextAttempts,
+          pinLockedUntil: lockUntil,
+        },
+      });
+    }
+
+    return {
+      ok: false,
+      status: 401,
+      error: shouldLock
+        ? "PIN de fé pública incorreto. Limite de 3 tentativas excedido. Bloqueado por 5 minutos."
+        : `PIN de fé pública incorreto. Tentativas restantes: ${3 - nextAttempts}.`,
+    };
+  }
+
+  if ((userDb.pinAttempts || 0) > 0 && prismaClient.user?.update) {
+    await prismaClient.user.update({
+      where: { id: userDb.id },
+      data: { pinAttempts: 0, pinLockedUntil: null },
+    });
+  }
+
+  return { ok: true };
+}

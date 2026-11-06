@@ -4,7 +4,7 @@ import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { generateVerificationCode } from "@/lib/ataCrypto";
+import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -136,6 +136,13 @@ export async function GET(
       );
     }
 
+    if (!canAccessConfidentialMinute(minute, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor." },
+        { status: 403 }
+      );
+    }
+
     // Auto-recuperação de fé pública: assegura verificationCode para ata finalizada legada
     if (minute.status === "FINALIZED" && !minute.verificationCode) {
       const code = generateVerificationCode();
@@ -150,7 +157,15 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ success: true, minute });
+    const safeMinute = {
+      ...minute,
+      participants: (minute.participants || []).map(({ mobileSignToken, ...rest }: any) => ({
+        ...rest,
+        hasActiveSignLink: Boolean(mobileSignToken),
+      })),
+    };
+
+    return NextResponse.json({ success: true, minute: safeMinute });
   } catch (error: any) {
     console.error("[GET /api/atas/[id]] Erro:", error);
     return NextResponse.json({ error: error.message || "Erro ao consultar ata" }, { status: 500 });
@@ -184,21 +199,12 @@ export async function PATCH(
     }
 
     // REGRA DE OURO JURÍDICA: Se já foi lavrada (FINALIZED) ou cancelada (VOIDED),
-    // o texto da ata é 100% imutável. Permite apenas anexar scan físico ou atualizar ação.
+    // o registro é 100% imutável via PATCH. Vias físicas digitalizadas exigem o endpoint auditado /physical-scan.
     if (existing.status !== "DRAFT") {
-      const rawBody = await req.json();
-      if (rawBody.physicalSignedScanData !== undefined) {
-        const updated = await prisma.pedagogicalMinute.update({
-          where: { id },
-          data: { physicalSignedScanData: rawBody.physicalSignedScanData },
-        });
-        return NextResponse.json({ success: true, minute: updated });
-      }
-
       return NextResponse.json(
         {
           error:
-            "Ata já lavrada e imutável juridicamente (Lei nº 14.063/2020). Qualquer retificação deve ser feita via Adendo ('Em tempo') ou Despacho de Cancelamento.",
+            "Ata já lavrada e imutável juridicamente (Lei nº 14.063/2020). Qualquer retificação deve ser feita via Adendo ('Em tempo'), Despacho de Cancelamento ou anexo auditado em /physical-scan.",
         },
         { status: 403 }
       );
@@ -306,6 +312,9 @@ export async function PATCH(
           signatureData: sigData,
           signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
           signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
+          signerUserAgent: shouldClear || isRefused ? null : (match?.signerUserAgent || null),
+          biometricStrokeData: shouldClear || isRefused ? null : (match?.biometricStrokeData || null),
+          clientTimestampIso: shouldClear || isRefused ? null : (match?.clientTimestampIso || null),
           mobileSignToken: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignToken || null),
           mobileSignExpiresAt: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignExpiresAt || null),
           biometricVerified: bioVerified,

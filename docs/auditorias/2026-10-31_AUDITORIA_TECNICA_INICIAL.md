@@ -1,4 +1,9 @@
-# Relatório de Auditoria Técnica — Rede Ativa SaaS
+# Relatório de Auditoria Técnica Inicial & Matriz de Remediação — Rede Ativa SaaS
+
+> [!IMPORTANT]
+> **Documento Histórico de Diagnóstico Inicial + Rastreabilidade de Remediação (Baseline: 31/10/2026 · Atualizado até 05/11/2026):**
+> - As **Seções 1 e 6** refletem o status remediado acumulado (C-01 a C-08 resolvidos, isolamento multi-tenant adversarialmente certificado e suíte expandida para **208 testes em 36 arquivos**).
+> - As **Seções 2.4 a 5** preservam intencionalmente o *diagnóstico fotográfico original* da auditoria inicial (quando havia 12 arquivos / 71 testes) para fins de rastreabilidade de engenharia. Para a arquitetura vigente e o backlog ativo, consulte [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md) e [`../BACKLOG.md`](../BACKLOG.md).
 
 > **Sistema:** Rede Ativa SaaS — Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência & Livro Oficial de Atas Pedagógicas  
 > **Unidade Piloto Fundadora:** Colégio Estadual Leopoldina B. Pedroso (INEP `41042730`) — NRE Ponta Grossa / Tibagi (SEED-PR)  
@@ -99,7 +104,7 @@ Legenda: **A** = `requireAuth`; **ADM** = `requireAdmin`; **TOK** = `SYNC_API_TO
 | `users` | GET/POST/PUT | ADM | ✔ | ✔ | Allowlist institucional; trava contra autodesativação do bootstrap admin. |
 | `webhooks/whatsapp` | POST | segredo | ❌ | — | Inativo com 503 por padrão enquanto `WHATSAPP_WEBHOOK_SECRET` não for configurado. |
 
-**Conclusão:** **nenhuma rota de dados está totalmente desprotegida** (todas exigem sessão, token ou segredo). Porém, a camada de **autorização por recurso** (escola/dono) é inconsistente: apenas listagens (`GET`) filtram por escola; operações por `id` (`PATCH/PUT/DELETE/POST`) não conferem pertencimento.
+**Conclusão Pós-Remediação:** **nenhuma rota de dados está desprotegida** (todas exigem sessão, token ou segredo) e a autorização institucional por recurso (`schoolId` via `getCurrentSchool` + `assertTenantOwnership` em REST e SSR) encontra-se integralmente aplicada e validada pela bateria adversarial [`2026-11-05_AUDITORIA_ADVERSARIAL_MULTITENANT.md`](./2026-11-05_AUDITORIA_ADVERSARIAL_MULTITENANT.md).
 
 ### 2.2 Achados críticos de segurança
 

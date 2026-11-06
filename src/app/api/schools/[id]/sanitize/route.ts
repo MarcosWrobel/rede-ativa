@@ -40,18 +40,15 @@ export async function POST(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
-    // Proteção da escola sede principal Leopoldina: exige confirmação adicional no body
+    // Proteção atômica inviolável da escola sede fundadora Leopoldina (INEP 41042730)
     if (target.inepCode === "41042730" || target.name.toLowerCase().includes("leopoldina")) {
-      const body = await req.json().catch(() => ({}));
-      if (body?.confirmationCode !== "RESET_LEOPOLDINA_PROD") {
-        return NextResponse.json(
-          {
-            error:
-              "O Colégio Estadual Leopoldina B. Pedroso é a escola sede de produção com 689 alunos. A higienização de produção é bloqueada por segurança.",
-          },
-          { status: 403 }
-        );
-      }
+      return NextResponse.json(
+        {
+          error:
+            "O Colégio Estadual Leopoldina B. Pedroso (INEP 41042730) é a Unidade Piloto Fundadora de produção e não pode ser higienizado ou resetado.",
+        },
+        { status: 403 }
+      );
     }
 
     // Executa a higienização de todos os registros em transação atômica
@@ -79,6 +76,7 @@ export async function POST(
       action: "SANITIZE_SCHOOL",
       entityType: "School",
       entityId: id,
+      schoolId: id,
       details: {
         schoolName: target.name,
         inepCode: target.inepCode,

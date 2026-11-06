@@ -21,9 +21,28 @@ for (const key of ["AUTH_SECRET", "NEXTAUTH_SECRET"]) {
   }
 }
 
-// Garante compatibilidade estrita com Auth.js v5 em qualquer host da Vercel
-const fallbackSecret = "rede-ativa-saas-auth-secret-production-stable-2026";
-const resolvedSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || fallbackSecret;
+// Garante compatibilidade estrita com Auth.js v5 e bloqueia segredo fixo em runtime de produção
+export function resolveAuthSecret(env: Record<string, string | undefined> = process.env): string {
+  const configured = (env.AUTH_SECRET || env.NEXTAUTH_SECRET || "").trim();
+  if (configured && configured.length >= 16) {
+    return configured;
+  }
+
+  const isProdRuntime =
+    env.NODE_ENV === "production" &&
+    env.NEXT_PHASE !== "phase-production-build" &&
+    env.VITEST !== "true";
+
+  if (isProdRuntime) {
+    throw new Error(
+      "[CRITICAL SECURITY] AUTH_SECRET / NEXTAUTH_SECRET ausente ou curto demais em ambiente de produção. Configure um segredo criptográfico forte (>= 32 bytes)."
+    );
+  }
+
+  return "rede-ativa-saas-dev-test-ephemeral-secret-only";
+}
+
+const resolvedSecret = resolveAuthSecret(process.env);
 if (!process.env.AUTH_SECRET) {
   process.env.AUTH_SECRET = resolvedSecret;
 }

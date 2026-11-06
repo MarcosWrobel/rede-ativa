@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
 import { GoogleGenAI } from "@google/genai";
+import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -9,6 +10,10 @@ export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
+
+    const rateLimitKey = `ai:${authCheck.schoolId || "global"}:${authCheck.userId}`;
+    const rlCheck = await enforceRateLimit(rateLimitKey, RATE_LIMIT_POLICIES.AI_ENDPOINT);
+    if (!rlCheck.ok) return rlCheck.response;
 
     const body = await req.json();
     const prompt = body?.prompt;

@@ -1,5 +1,8 @@
 # Relatório Oficial de Auditoria 360º — Rede Ativa SaaS (2026)
 
+> [!NOTE]
+> **Snapshot Histórico Imutável (Data-Base: 01/11/2026):** Este relatório registra o marco de transição de mono-escola para SaaS Multi-Tenant 4-Tier (à época com 97 testes). Foi posteriormente aprofundado e sucedido pela certificação adversarial ao vivo em [`2026-11-05_AUDITORIA_ADVERSARIAL_MULTITENANT.md`](./2026-11-05_AUDITORIA_ADVERSARIAL_MULTITENANT.md) e pela documentação canônica [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md) (**208 testes em 36 suítes**).
+
 **Data da Auditoria:** 01 de Novembro de 2026  
 **Versão da Plataforma:** Rede Ativa SaaS v1.0.0 (Next.js 16.4.3, React 19, Prisma 6, Turbopack)  
 **Status de Qualidade:** Aprovado em todos os portões de teste (97 testes unitários/integrados) e compilação de produção com 0 erros.  

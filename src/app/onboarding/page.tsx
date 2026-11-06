@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { checkIsAdmin, checkIsSuperAdmin } from "@/lib/roles";
+import { checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
 import OnboardingClient from "./OnboardingClient";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +19,10 @@ export default async function OnboardingPage() {
   }
 
   const isSuper = checkIsSuperAdmin(session);
-  const isAdmin = checkIsAdmin(session);
+  const isSecretariat = checkIsSecretariat(session);
 
-  // Apenas perfis com privilégio administrativo ou gestores podem provisionar novas unidades
-  if (!isSuper && !isAdmin) {
+  // Apenas SuperAdmin ou Gestão de Secretaria de Educação podem provisionar novas escolas no SaaS
+  if (!isSuper && !isSecretariat) {
     redirect("/");
   }
 

@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { generateVerificationCode } from "@/lib/ataCrypto";
+import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { generateQrCodeSvg, getAtaValidationUrl, getRequestOrigin } from "@/lib/qrCode";
 import PrintPageClient from "./PrintPageClient";
 
@@ -37,9 +37,9 @@ export default async function AtaPrintPage({ params }: Props) {
 
   const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
 
-  // Validação estrita de isolamento multi-tenant (Ponto 2)
+  // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
   const isOwner = assertTenantOwnership(minute.schoolId, currentSchool.id, session);
-  if (!isOwner) {
+  if (!isOwner || !canAccessConfidentialMinute(minute, session)) {
     notFound();
   }
 

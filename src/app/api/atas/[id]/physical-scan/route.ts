@@ -1,19 +1,143 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, checkIsSchoolManager, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
+import {
+  savePhysicalScanFile,
+  getPhysicalScanBuffer,
+  deletePhysicalScanFile,
+} from "@/lib/objectStorage";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
-const physicalScanSchema = z.object({
-  scanData: z.string().min(10, "Dados do anexo digitalizado não informados"),
-  govBrVerified: z.boolean().default(false),
-  govBrProtocol: z.string().optional().nullable(),
-});
+const ALLOWED_SCAN_PREFIX = /^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/i;
 
+const physicalScanSchema = z
+  .object({
+    scanData: z
+      .string()
+      .min(10, "Dados do anexo digitalizado não informados")
+      .refine((v) => ALLOWED_SCAN_PREFIX.test(v.trim()), {
+        message: "Formato de arquivo inválido. Envie apenas imagem (PNG, JPEG, WEBP) ou documento PDF codificado em Base64.",
+      }),
+    govBrVerified: z.boolean().default(false),
+    govBrProtocol: z.string().optional().nullable(),
+  })
+  .refine((d) => !d.govBrVerified || Boolean(d.govBrProtocol && d.govBrProtocol.trim().length >= 5), {
+    message: "Informe o código/protocolo verificador ICP-Brasil/Gov.br (mínimo 5 caracteres) ao marcar assinatura Gov.br verificada.",
+    path: ["govBrProtocol"],
+  });
+
+/**
+ * GET /api/atas/[id]/physical-scan
+ * Proxy Autenticado Anti-IDOR para Visualização e Download do Anexo Físico
+ */
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const authCheck = await requireAuth();
+    if (!authCheck.ok) return authCheck.response;
+
+    const { id } = await params;
+    const { searchParams } = new URL(req.url);
+    const download = searchParams.get("download") === "1";
+
+    const minute = await prisma.pedagogicalMinute.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        schoolId: true,
+        ataNumber: true,
+        year: true,
+        subject: true,
+        isConfidential: true,
+        authorId: true,
+        authorEmail: true,
+        physicalSignedScanData: true,
+        physicalScanStorageKey: true,
+        physicalScanProvider: true,
+        physicalScanMimeType: true,
+        physicalScanSizeBytes: true,
+        physicalScanSha256: true,
+      },
+    });
+
+    if (!minute) {
+      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    }
+
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
+
+    // Sigilo Reforçado (ECA Art. 143): Se for ata confidencial, apenas autor, Gestão Escolar ou SuperAdmin acessam
+    if (minute.isConfidential) {
+      const isAuthor =
+        minute.authorId === authCheck.userId ||
+        minute.authorEmail?.toLowerCase() === authCheck.email?.toLowerCase();
+      const isManager =
+        checkIsSuperAdmin(authCheck.session) ||
+        checkIsSchoolManager(authCheck.session, minute.schoolId || currentSchool.id);
+
+      if (!isAuthor && !isManager) {
+        return NextResponse.json(
+          {
+            error:
+              "Acesso restrito. Este documento possui sigilo reforçado (ECA Art. 143) e sua via física só pode ser acessada pelo autor ou direção escolar.",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (!minute.physicalSignedScanData && !minute.physicalScanStorageKey) {
+      return NextResponse.json(
+        { error: "Esta ata não possui via física digitalizada anexada." },
+        { status: 404 }
+      );
+    }
+
+    const { buffer, mimeType, isVerifiedSha256 } = await getPhysicalScanBuffer(minute);
+
+    const ext = mimeType === "application/pdf" ? "pdf" : mimeType.split("/")[1] || "bin";
+    const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "SN";
+    const filename = `Ata_${numStr}_${minute.year}_ViaFisica.${ext}`;
+    const disposition = download ? "attachment" : "inline";
+
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "Content-Type": mimeType,
+        "Content-Disposition": `${disposition}; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+        "X-Content-Type-Options": "nosniff",
+        "X-Scan-SHA256": minute.physicalScanSha256 || "",
+        "X-Scan-Integrity-Verified": String(isVerifiedSha256),
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      },
+    });
+  } catch (error: any) {
+    console.error("[GET /api/atas/[id]/physical-scan] Erro:", error);
+    return NextResponse.json(
+      { error: error.message || "Erro interno ao obter anexo da via física" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/atas/[id]/physical-scan
+ * Upload Multi-Driver de Anexo Físico com Custódia SHA-256 e Fallback Automático
+ */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -32,6 +156,8 @@ export async function POST(
         year: true,
         subject: true,
         status: true,
+        physicalScanStorageKey: true,
+        physicalScanProvider: true,
       },
     });
 
@@ -58,19 +184,24 @@ export async function POST(
 
     const { scanData, govBrVerified, govBrProtocol } = parsed.data;
 
-    // Limite de segurança: 12MB para payload base64
-    if (scanData.length > 12 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "Arquivo muito grande. O limite máximo para digitalização é 8MB." },
-        { status: 400 }
-      );
-    }
+    // Salva via motor híbrido (Object Storage se configurado ou Fallback Base64 no Postgres)
+    const stored = await savePhysicalScanFile({
+      schoolId: existing.schoolId,
+      minuteId: id,
+      year: existing.year,
+      dataUrl: scanData,
+    });
 
     const now = new Date();
     const updated = await prisma.pedagogicalMinute.update({
       where: { id },
       data: {
-        physicalSignedScanData: scanData,
+        physicalSignedScanData: stored.fallbackBase64,
+        physicalScanStorageKey: stored.storageKey,
+        physicalScanProvider: stored.provider,
+        physicalScanMimeType: stored.mimeType,
+        physicalScanSizeBytes: stored.sizeBytes,
+        physicalScanSha256: stored.sha256,
         physicalScanUploadedAt: now,
         physicalScanUploadedBy: authCheck.userName,
         govBrVerified: Boolean(govBrVerified),
@@ -79,6 +210,11 @@ export async function POST(
       select: {
         id: true,
         physicalSignedScanData: true,
+        physicalScanStorageKey: true,
+        physicalScanProvider: true,
+        physicalScanMimeType: true,
+        physicalScanSizeBytes: true,
+        physicalScanSha256: true,
         physicalScanUploadedAt: true,
         physicalScanUploadedBy: true,
         govBrVerified: true,
@@ -96,7 +232,9 @@ export async function POST(
         subject: existing.subject,
         govBrVerified: Boolean(govBrVerified),
         govBrProtocol: govBrProtocol?.trim() || null,
-        dataSizeBytes: scanData.length,
+        storageProvider: stored.provider,
+        dataSizeBytes: stored.sizeBytes,
+        scanSha256: stored.sha256,
       },
       user: {
         id: authCheck.userId,
@@ -120,6 +258,10 @@ export async function POST(
   }
 }
 
+/**
+ * DELETE /api/atas/[id]/physical-scan
+ * Remoção com Purga do Storage Externo e Auditoria
+ */
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -137,6 +279,9 @@ export async function DELETE(
         ataNumber: true,
         year: true,
         subject: true,
+        status: true,
+        physicalScanStorageKey: true,
+        physicalScanProvider: true,
       },
     });
 
@@ -152,10 +297,34 @@ export async function DELETE(
       );
     }
 
+    // Cadeia de Custódia Probatória: em atas já lavradas (FINALIZED/VOIDED), apenas Direção Escolar ou SuperAdmin removem
+    if (existing.status === "FINALIZED" || existing.status === "VOIDED") {
+      const canRemoveOfficialScan =
+        checkIsSuperAdmin(authCheck.session) ||
+        checkIsSchoolManager(authCheck.session, existing.schoolId || currentSchool.id);
+      if (!canRemoveOfficialScan) {
+        return NextResponse.json(
+          {
+            error:
+              "A remoção de via física assinada em ata oficial lavrada é restrita à Direção/Gestão Escolar.",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Remove do storage externo (se estiver no S3/Blob)
+    await deletePhysicalScanFile(existing);
+
     await prisma.pedagogicalMinute.update({
       where: { id },
       data: {
         physicalSignedScanData: null,
+        physicalScanStorageKey: null,
+        physicalScanProvider: null,
+        physicalScanMimeType: null,
+        physicalScanSizeBytes: null,
+        physicalScanSha256: null,
         physicalScanUploadedAt: null,
         physicalScanUploadedBy: null,
         govBrVerified: false,

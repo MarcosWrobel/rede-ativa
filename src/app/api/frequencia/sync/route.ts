@@ -13,6 +13,8 @@ import {
 } from "@/lib/studentMatcher";
 import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { findSchoolBySyncToken } from "@/lib/syncToken";
+import { checkRateLimit, resetRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
 
@@ -55,6 +57,19 @@ export async function POST(req: Request) {
       const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
       const providedToken = bearerToken || customTokenHeader.trim();
 
+      // Trava Anti-Brute-Force contra adivinhação de Token da Extensão (SEC-08)
+      const syncLockKey = getPublicIpRateLimitKey("sync-fail", req);
+      const syncRateCheck = await checkRateLimit(syncLockKey, RATE_LIMIT_POLICIES.EXTENSION_SYNC_AUTH);
+      if (!syncRateCheck.success) {
+        return NextResponse.json(
+          {
+            error: `Muitas tentativas com token inválido. Acesso bloqueado por ${syncRateCheck.retryAfterSeconds} segundos.`,
+            retryAfter: syncRateCheck.retryAfterSeconds,
+          },
+          { status: 429, headers: corsHeaders }
+        );
+      }
+
       if (!providedToken) {
         return NextResponse.json(
           {
@@ -65,21 +80,20 @@ export async function POST(req: Request) {
         );
       }
 
-      // 1.1 Procura se é a chave de sincronização de uma escola específica
-      const schoolByToken = await prisma.school.findFirst({
-        where: { syncTokenHash: providedToken, active: true },
-        select: { id: true, name: true },
-      });
+      // 1.1 Procura se é a chave de sincronização de uma escola específica (SHA-256 ou fallback legado)
+      const schoolByToken = await findSchoolBySyncToken(prisma, providedToken);
 
       if (schoolByToken) {
         targetSchoolId = schoolByToken.id;
         userName = `Extensão Power BI (${schoolByToken.name})`;
+        await resetRateLimit(syncLockKey);
       } else if (configuredToken && verifySyncToken(providedToken, configuredToken)) {
         // 1.2 Token global: vincula à escola especificada em header/query ou escola sede padrão
         const { searchParams } = new URL(req.url);
         const reqSchoolId = searchParams.get("schoolId") || req.headers.get("x-school-id");
         const resolved = await getCurrentSchool(reqSchoolId);
         targetSchoolId = resolved.id;
+        await resetRateLimit(syncLockKey);
       } else {
         return NextResponse.json(
           {

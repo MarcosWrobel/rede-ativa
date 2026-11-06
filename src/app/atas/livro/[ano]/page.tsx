@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import LivroAnualClient from "./LivroAnualClient";
 
 interface Props {
@@ -52,5 +53,19 @@ export default async function LivroAnualPage({ params }: Props) {
     console.error("[LivroAnualPage] Erro ao consultar atas do livro anual:", err);
   }
 
-  return <LivroAnualClient school={school} year={year} minutes={minutes} />;
+  const safeMinutes = minutes.map((m: any) => {
+    if (!canAccessConfidentialMinute(m, session)) {
+      return {
+        ...m,
+        rawNotes: null,
+        summary: "[REGISTRO SOB SIGILO REFORÇADO ECA — ACESSO INTEGRAL RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
+        agreementsSummary: null,
+        actionItems: [],
+        addendums: [],
+      };
+    }
+    return m;
+  });
+
+  return <LivroAnualClient school={school} year={year} minutes={safeMinutes} />;
 }

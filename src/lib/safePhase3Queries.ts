@@ -70,12 +70,17 @@ export async function loadStudent360Bundle(studentId: string) {
 
   if (!student) return null;
 
+  // Garante que atas vinculadas no prontuário/dossiê pertençam estritamente ao mesmo tenant do estudante
+  const scopedMinutes = minutes.filter(
+    (m: any) => !student.schoolId || !m.schoolId || m.schoolId === student.schoolId
+  );
+
   return {
     student,
     contacts,
     justifications,
     attendances,
     snapshots,
-    minutes,
+    minutes: scopedMinutes,
   };
 }

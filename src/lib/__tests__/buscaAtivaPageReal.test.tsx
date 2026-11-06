@@ -22,7 +22,11 @@ vi.mock("@/lib/auth", () => ({
 
 import BuscaAtivaPage from "@/app/busca-ativa/page";
 
-describe("BuscaAtivaPage with real database", () => {
+const hasRealDb = Boolean(
+  process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("placeholder")
+);
+
+describe.skipIf(!hasRealDb)("BuscaAtivaPage with real database", () => {
   it("renders BuscaAtivaPage without error", async () => {
     const pageComponent = await BuscaAtivaPage({
       searchParams: Promise.resolve({}),

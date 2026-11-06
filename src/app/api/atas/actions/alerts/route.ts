@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { classifyActionItemCategory } from "@/lib/actionClassifier";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,10 @@ export async function GET(req: Request) {
         minute: {
           select: {
             id: true,
+            schoolId: true,
+            isConfidential: true,
+            authorId: true,
+            authorEmail: true,
             ataNumber: true,
             year: true,
             subject: true,
@@ -71,11 +76,15 @@ export async function GET(req: Request) {
       },
     });
 
+    const visiblePendingActions = pendingActions.filter((item) =>
+      canAccessConfidentialMinute(item.minute as any, authCheck.session)
+    );
+
     let overdueCount = 0;
     let dueTodayCount = 0;
     let dueSoonCount = 0;
 
-    const criticalItems = pendingActions.map((item) => {
+    const criticalItems = visiblePendingActions.map((item) => {
       let urgency: "OVERDUE" | "DUE_TODAY" | "DUE_SOON" | "NORMAL" = "NORMAL";
       let daysDiff: number | null = null;
 
@@ -135,7 +144,7 @@ export async function GET(req: Request) {
       schoolId: school.id,
       todayStr,
       metrics: {
-        totalPending: pendingActions.length,
+        totalPending: visiblePendingActions.length,
         overdueCount,
         dueTodayCount,
         dueSoonCount,

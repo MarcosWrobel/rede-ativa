@@ -257,19 +257,26 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
       expect(school.name).toBe("Escola Municipal Beta");
     });
 
-    it("aceita cookie active_school_id quando usuário é GESTAO_SECRETARIA", async () => {
+    it("aceita cookie active_school_id quando GESTAO_SECRETARIA alterna dentro de sua rede municipal autorizada e rejeita outra cidade", async () => {
       mockState.session = {
         user: {
           id: "usr-secretaria",
           email: "gestor.semec@tibagi.pr.gov.br",
           role: "GESTAO_SECRETARIA",
-          schoolId: "escola-b",
+          schoolId: "default-leopoldina",
+          networks: [{ networkId: "semec-tibagi", city: "Tibagi" }],
         },
       };
-      mockState.cookies = { active_school_id: "escola-a" };
 
-      const school = await getCurrentSchool(null);
-      expect(school.id).toBe("escola-a");
+      // 1. Aceita escola municipal de Tibagi (escola-b)
+      mockState.cookies = { active_school_id: "escola-b" };
+      const allowedSchool = await getCurrentSchool(null);
+      expect(allowedSchool.id).toBe("escola-b");
+
+      // 2. Rejeita tentativa de escalar para escola estadual de Ponta Grossa (escola-a)
+      mockState.cookies = { active_school_id: "escola-a" };
+      const blockedSchool = await getCurrentSchool("escola-b");
+      expect(blockedSchool.id).toBe("escola-b");
     });
 
     it("aceita cookie quando usuário possui vínculo explícito na lista user.schools", async () => {

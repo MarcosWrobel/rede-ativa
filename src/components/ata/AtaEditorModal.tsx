@@ -36,6 +36,7 @@ import {
   Key,
   Send,
   Clock,
+  Download,
 } from "lucide-react";
 
 interface StudentOption {
@@ -135,6 +136,7 @@ export default function AtaEditorModal({
     existingMinute?.extemporaneousReason || ""
   );
   const [showPinModal, setShowPinModal] = useState(false);
+  const [pendingPinAction, setPendingPinAction] = useState<"finalize" | "addendum" | "void">("finalize");
   const [hasSigningPin, setHasSigningPin] = useState<boolean | undefined>(undefined);
 
   // Estados exclusivos para visualização de Ata já Lavrada (Adendo / Cancelamento / Ações)
@@ -714,6 +716,7 @@ export default function AtaEditorModal({
       const data = await res.json();
       if (!res.ok) {
         if (data.error && data.error.includes("PIN_REQUIRED")) {
+          setPendingPinAction("finalize");
           setShowPinModal(true);
           return;
         }
@@ -810,7 +813,7 @@ export default function AtaEditorModal({
   };
 
   // Handlers de Ata Já Lavrada (Adendo, Status de Ação, Tornar Sem Efeito)
-  const handleAddAddendum = async () => {
+  const handleAddAddendum = async (overridePin?: string) => {
     if (!viewMinuteData?.id) return;
     if (addendumText.trim().length < 5) {
       setPostFinalizeMsg({ type: "err", text: "O texto do aditamento deve ter pelo menos 5 caracteres." });
@@ -823,10 +826,17 @@ export default function AtaEditorModal({
       const res = await fetch(`/api/atas/${viewMinuteData.id}/addendums`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: addendumText.trim() }),
+        body: JSON.stringify({ content: addendumText.trim(), signingPin: overridePin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao registrar aditamento");
+      if (!res.ok) {
+        if (data.error && data.error.includes("PIN_REQUIRED")) {
+          setPendingPinAction("addendum");
+          setShowPinModal(true);
+          return;
+        }
+        throw new Error(data.error || "Erro ao registrar aditamento");
+      }
 
       setViewMinuteData((prev: any) => ({
         ...prev,
@@ -864,7 +874,7 @@ export default function AtaEditorModal({
     }
   };
 
-  const handleVoidMinute = async () => {
+  const handleVoidMinute = async (overridePin?: string) => {
     if (!viewMinuteData?.id) return;
     if (voidReason.trim().length < 10) {
       setPostFinalizeMsg({
@@ -880,10 +890,17 @@ export default function AtaEditorModal({
       const res = await fetch(`/api/atas/${viewMinuteData.id}/void`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: voidReason.trim() }),
+        body: JSON.stringify({ reason: voidReason.trim(), signingPin: overridePin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao tornar ata sem efeito");
+      if (!res.ok) {
+        if (data.error && data.error.includes("PIN_REQUIRED")) {
+          setPendingPinAction("void");
+          setShowPinModal(true);
+          return;
+        }
+        throw new Error(data.error || "Erro ao tornar ata sem efeito");
+      }
 
       setViewMinuteData((prev: any) => ({
         ...prev,
@@ -1158,7 +1175,7 @@ export default function AtaEditorModal({
                     <div className="flex justify-end">
                       <button
                         type="button"
-                        onClick={handleAddAddendum}
+                        onClick={() => handleAddAddendum()}
                         disabled={savingAddendum}
                         className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition disabled:opacity-50 cursor-pointer"
                       >
@@ -1301,7 +1318,7 @@ export default function AtaEditorModal({
                           </button>
                           <button
                             type="button"
-                            onClick={handleVoidMinute}
+                            onClick={() => handleVoidMinute()}
                             disabled={savingVoid}
                             className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer disabled:opacity-50"
                           >
@@ -1367,6 +1384,14 @@ export default function AtaEditorModal({
               >
                 <Printer className="w-4 h-4 text-amber-400" />
                 <span>Imprimir / PDF Oficial A4</span>
+              </a>
+              <a
+                href={`/api/atas/${viewMinuteData.id}/pdfa?download=1`}
+                className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold transition"
+                title="Arquivo arquivístico oficial com certificação XMP e normas ISO 19005-1 Level B"
+              >
+                <Download className="w-4 h-4 text-emerald-600" />
+                <span>Baixar PDF/A-1b</span>
               </a>
               {viewMinuteData.verificationCode && (
                 <a
@@ -2600,7 +2625,13 @@ export default function AtaEditorModal({
         onClose={() => setShowPinModal(false)}
         onSuccess={(pin) => {
           setShowPinModal(false);
-          handleFinalize(pin);
+          if (pendingPinAction === "addendum") {
+            handleAddAddendum(pin);
+          } else if (pendingPinAction === "void") {
+            handleVoidMinute(pin);
+          } else {
+            handleFinalize(pin);
+          }
         }}
         hasPinInitial={hasSigningPin}
       />

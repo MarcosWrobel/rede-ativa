@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import MobileSignClient from "./MobileSignClient";
 
 interface Props {
@@ -15,6 +15,7 @@ export default async function AssinarAtaPage({ params }: Props) {
       minute: {
         include: {
           school: true,
+          students: true,
         },
       },
     },
@@ -59,6 +60,27 @@ export default async function AssinarAtaPage({ params }: Props) {
     );
   }
 
+  // Proteção ECA Arts. 17 e 143: quando a ata envolve múltiplos menores e o link pertence a responsável/estudante,
+  // anonimiza os nomes dos outros menores co-envolvidos antes de enviar ao dispositivo móvel não autenticado.
+  const linkedStudents = ((participant.minute as any).students || []).map((s: any) => ({
+    id: s.studentId,
+    name: s.studentNameSnapshot || "",
+  }));
+  const shouldAnonymizeOthers =
+    linkedStudents.length > 1 &&
+    (participant.role === "RESPONSAVEL" || participant.role === "ESTUDANTE");
+
+  const safeSubject = shouldAnonymizeOthers
+    ? anonymizeOtherMinorsInText(participant.minute.subject, participant.studentId, linkedStudents)
+    : participant.minute.subject;
+  const safeSummary = shouldAnonymizeOthers
+    ? anonymizeOtherMinorsInText(participant.minute.summary, participant.studentId, linkedStudents)
+    : participant.minute.summary;
+  const safeAgreements =
+    shouldAnonymizeOthers && participant.minute.agreementsSummary
+      ? anonymizeOtherMinorsInText(participant.minute.agreementsSummary, participant.studentId, linkedStudents)
+      : participant.minute.agreementsSummary;
+
   return (
     <MobileSignClient
       token={token}
@@ -66,9 +88,9 @@ export default async function AssinarAtaPage({ params }: Props) {
       participantRole={participant.role}
       expectedEmail={participant.expectedEmail}
       schoolName={participant.minute.school.name}
-      subject={participant.minute.subject}
-      summary={participant.minute.summary}
-      agreementsSummary={participant.minute.agreementsSummary}
+      subject={safeSubject}
+      summary={safeSummary}
+      agreementsSummary={safeAgreements}
       googleClientId={process.env.GOOGLE_CLIENT_ID || ""}
     />
   );

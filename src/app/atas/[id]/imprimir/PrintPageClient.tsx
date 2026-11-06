@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, ShieldCheck } from "lucide-react";
+import { Printer, ArrowLeft, ShieldCheck, Download } from "lucide-react";
 import AtaQrCode from "@/components/ata/AtaQrCode";
 import { getAtaValidationUrl } from "@/lib/qrCode";
 
@@ -84,14 +84,27 @@ export default function PrintPageClient({
           <span>Voltar ao Livro de Atas</span>
         </Link>
 
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
-        >
-          <Printer className="w-4 h-4 text-amber-400" />
-          <span>Imprimir / Salvar PDF A4</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          {isFinal && (
+            <a
+              href={`/api/atas/${minute.id}/pdfa?download=1`}
+              className="inline-flex items-center space-x-2 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition shadow-xs"
+              title="Baixar arquivo binário padronizado para preservação arquivística de longo prazo (ISO 19005-1 Level B)"
+            >
+              <Download className="w-4 h-4 text-sky-600" />
+              <span>Baixar PDF/A-1b (ISO 19005)</span>
+            </a>
+          )}
+
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
+          >
+            <Printer className="w-4 h-4 text-amber-400" />
+            <span>Imprimir / Salvar PDF A4</span>
+          </button>
+        </div>
       </div>
 
       {/* Folha Oficial A4 com Moldura Perimétrica e Margem Padronizada */}

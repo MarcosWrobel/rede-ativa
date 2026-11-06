@@ -1062,7 +1062,7 @@ export default function ProntuarioClient({
                             type="button"
                             onClick={() => setScanningMinute(m)}
                             className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                              m.physicalSignedScanData
+                              m.physicalSignedScanData || m.physicalScanStorageKey
                                 ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
                                 : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                             }`}
@@ -1070,7 +1070,7 @@ export default function ProntuarioClient({
                           >
                             <Camera className="w-3.5 h-3.5 text-indigo-600" />
                             <span>
-                              {m.physicalSignedScanData
+                              {m.physicalSignedScanData || m.physicalScanStorageKey
                                 ? m.govBrVerified
                                   ? "🏛️ Gov.br Anexo"
                                   : "📄 Via Física Anexa"

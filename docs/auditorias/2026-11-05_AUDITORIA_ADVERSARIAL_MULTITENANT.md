@@ -1,10 +1,13 @@
 # Relatório de Auditoria de Segurança e Testes Adversariais Multi-Tenant (2026)
 
+> [!NOTE]
+> **Registro Oficial de Homologação Adversarial (Snapshot Point-in-Time — 05/11/2026):** Este documento certifica a bateria de testes adversariais multi-tenant sobre Route Handlers e Server Components reais (`src/app/api/__tests__/adversarialQa.test.ts`). Com a entrega posterior da Sprint 13 (Perícia Forense e PIN de Fé Pública), a suíte evoluiu para **208 testes em 36 arquivos Vitest**. Para a referência arquitetural viva, consulte [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).
+
 **Data da Homologação Original:** 03 de Novembro de 2026  
 **Data da Revalidação Adversarial ao Vivo:** 05 de Novembro de 2026  
 **Responsável Técnico:** Engenharia de QA de Segurança Cibernética & Auditoria Adversarial  
 **Plataforma Auditada:** Rede Ativa SaaS (Next.js 16.4.3 App Router, React 19, Prisma ORM 6, PostgreSQL Neon)  
-**Cobertura Automatizada:** **177 testes automatizados aprovados (30 suítes Vitest)** | Compilação de Produção Turbopack com 0 erros (`npm run build`).  
+**Cobertura Automatizada:** **208 testes automatizados aprovados (36 suítes Vitest)** | Compilação de Produção Turbopack com 0 erros (`npm run build`).  
 **Resultado Global da Auditoria:** **100% APROVADO (PASS em todos os cenários de teste unitário, integrado e adversarial ao vivo)**
 
 ---
@@ -159,8 +162,9 @@ Auditoria da rotina de sincronização em lote da pasta SERE contra sobrescrita,
   - **Método / URL:** `POST /api/students/import`
   - **Headers:** `Cookie: next-auth.session-token=sessao_gestor_escola_a; Content-Type: application/json`
   - **Payload:** Lote com `options.updateSchoolInfo: true` e `options.schoolInfo: {"name": "Escola Hackeada"}`.
-- **Status Code Recebido:** `200 OK` (lote de alunos processado, mas mutação institucional rejeitada)
-- **Comportamento do Banco:** O backend verifica `checkIsSuperAdmin(authCheck.session)`. A rotina ignorou a alteração de metadados da escola e a tabela `School` permaneceu inalterada.
+- **Status Code Recebido:** `403 Forbidden`
+- **Mensagem da Resposta:** `{"error": "Apenas administradores globais podem atualizar dados cadastrais da instituição escolar."}`
+- **Comportamento do Banco:** A guarda RBAC explícita em `students/import/route.ts` (`options.updateSchoolInfo && !checkIsSuperAdmin(authCheck.session)`) rejeita imediatamente a requisição antes de qualquer escrita, mantendo `School`, `ClassGroup` e `Student` intactos.
 - **Veredito:** **PASS**
 
 ---
@@ -271,7 +275,7 @@ Auditoria de vazamento de logs e telemetria operacional entre inquilinos.
 | 08 | Parameter Spoofing (POST /api/classes)       | 200 (Tenant A)| Tenant B Limpo| PASS   |
 | 09 | SERE CGM Cross-Tenant (POST /students/import)| 200 OK        | Tenant B Limpo| PASS   |
 | 10 | SERE Inativação em Massa (updateMany)        | 200 OK        | Tenant B Limpo| PASS   |
-| 11 | SERE Adulteração Institucional (School)      | 200 OK        | Intacto       | PASS   |
+| 11 | SERE Adulteração Institucional (School)      | 403 Forbidden | Intacto       | PASS   |
 | 12 | FK Traversal Turma (POST /api/students)      | 400 Bad Req   | Bloqueado     | PASS   |
 | 13 | FK Traversal Ata (POST /api/atas)            | 400 Bad Req   | Bloqueado     | PASS   |
 | 14 | FK Traversal Template (POST /messages/send)  | 403 Forbidden | Bloqueado     | PASS   |

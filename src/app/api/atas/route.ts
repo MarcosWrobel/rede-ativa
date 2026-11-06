@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { generateVerificationCode } from "@/lib/ataCrypto";
+import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -173,19 +173,44 @@ export async function GET(req: Request) {
 
     const includeSignatures = searchParams.get("includeSignatures") === "true";
 
-    const responseMinutes = includeSignatures
-      ? minutes
-      : minutes.map((m) => ({
+    const responseMinutes = minutes.map((m) => {
+      const allowedConfidential = canAccessConfidentialMinute(m, authCheck.session);
+      const safeParticipants = m.participants.map((p) => {
+        const { signatureData, mobileSignToken, ...rest } = p as any;
+        return {
+          ...rest,
+          ...(includeSignatures && allowedConfidential ? { signatureData } : {}),
+          hasSignature: Boolean(signatureData),
+          hasActiveSignLink: Boolean(mobileSignToken),
+        };
+      });
+
+      if (!allowedConfidential) {
+        return {
           ...m,
-          physicalSignedScanData: m.physicalSignedScanData ? true : false,
-          participants: m.participants.map((p) => {
-            const { signatureData, ...rest } = p;
-            return {
-              ...rest,
-              hasSignature: Boolean(signatureData),
-            };
-          }),
-        }));
+          rawNotes: null,
+          summary: "[CONTEÚDO SOB SIGILO REFORÇADO ECA — ACESSO RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
+          agreementsSummary: null,
+          actionItems: [],
+          addendums: [],
+          physicalSignedScanData: false,
+          hasPhysicalScan: false,
+          restrictedConfidential: true,
+          participants: safeParticipants,
+        };
+      }
+
+      const hasScan = Boolean(m.physicalSignedScanData || m.physicalScanStorageKey);
+
+      return {
+        ...m,
+        hasPhysicalScan: hasScan,
+        physicalSignedScanData: includeSignatures
+          ? m.physicalSignedScanData
+          : hasScan,
+        participants: safeParticipants,
+      };
+    });
 
     return NextResponse.json({ success: true, minutes: responseMinutes, year, school });
   } catch (error: any) {

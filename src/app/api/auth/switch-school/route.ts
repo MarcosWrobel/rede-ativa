@@ -123,6 +123,7 @@ export async function POST(req: Request) {
         action: "UPDATE_USER",
         entityType: "SchoolContext",
         entityId: schoolId,
+        schoolId: targetSchool.id,
         details: {
           switchedTo: targetSchool.name,
           inepCode: targetSchool.inepCode,
@@ -153,6 +154,8 @@ export async function POST(req: Request) {
     response.cookies.set("active_school_id", schoolId, {
       path: "/",
       maxAge: 60 * 60 * 24 * 30, // 30 dias
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
     });
 

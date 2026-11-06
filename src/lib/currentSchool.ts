@@ -63,9 +63,12 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
     if (cookieVal) {
       if (session?.user) {
         const role = (session.user as any).role;
-        const isGlobal = checkIsSuperAdmin(session) || role === "GESTAO_SECRETARIA";
+        const isSuper = checkIsSuperAdmin(session);
         const userSchools = ((session.user as any).schools as any[]) || [];
-        const hasAccess =
+        const userNetworks = ((session.user as any).networks as any[]) || [];
+
+        let hasAccess =
+          isSuper ||
           sessionSchoolId === cookieVal ||
           userSchools.some(
             (s: any) =>
@@ -73,7 +76,34 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
               (s.schoolId && s.schoolId === cookieVal)
           );
 
-        if (isGlobal || hasAccess) {
+        // Gestor de Secretaria Municipal: acesso via cookie restrito às escolas de sua rede/município vinculado
+        if (!hasAccess && role === "GESTAO_SECRETARIA" && userNetworks.length > 0) {
+          const candidateSchool = await prisma.school.findUnique({
+            where: { id: cookieVal },
+          });
+          if (candidateSchool && candidateSchool.active !== false) {
+            const allowedNetIds = userNetworks
+              .map((n: any) => n.networkId || n.id)
+              .filter(Boolean);
+            const allowedCities = userNetworks
+              .map((n: any) => (n.city || n.network?.city || "").toLowerCase().trim())
+              .filter(Boolean);
+
+            const matchesNetworkId =
+              Boolean((candidateSchool as any).networkId) &&
+              allowedNetIds.includes((candidateSchool as any).networkId);
+            const matchesMunicipalCity =
+              ((candidateSchool as any).network || "ESTADUAL") === "MUNICIPAL" &&
+              Boolean(candidateSchool.city) &&
+              allowedCities.includes(candidateSchool.city.toLowerCase().trim());
+
+            if (matchesNetworkId || matchesMunicipalCity) {
+              hasAccess = true;
+            }
+          }
+        }
+
+        if (hasAccess) {
           targetId = cookieVal;
         } else {
           console.warn(

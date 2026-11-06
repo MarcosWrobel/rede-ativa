@@ -22,7 +22,11 @@ vi.mock("@/lib/auth", () => ({
 
 import FaltasPage from "@/app/faltas/page";
 
-describe("FaltasPage with real database", () => {
+const hasRealDb = Boolean(
+  process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("placeholder")
+);
+
+describe.skipIf(!hasRealDb)("FaltasPage with real database", () => {
   it("renders FaltasPage without error", async () => {
     const pageComponent = await FaltasPage();
     const html = renderToString(pageComponent);

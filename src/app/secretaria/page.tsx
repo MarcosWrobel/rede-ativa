@@ -25,16 +25,39 @@ export default async function SecretariaPage({ searchParams }: Props) {
   const isSuper = checkIsSuperAdmin(session);
   const isSec = checkIsSecretariat(session);
 
-  if (!isSuper && !isSec && !checkIsAdmin(session)) {
+  if (!isSuper && !isSec) {
     redirect("/");
   }
 
   const userNetworks = ((session.user as any)?.networks as any[]) || [];
-  const defaultCity = resolvedSearchParams.city?.trim() || userNetworks[0]?.city || "Tibagi";
+  const allowedCities = userNetworks
+    .map((n: any) => (n.city || n.network?.city || "").trim())
+    .filter(Boolean);
 
-  // Buscar cidades disponíveis na rede municipal
+  const requestedCity = resolvedSearchParams.city?.trim();
+  let defaultCity = requestedCity || allowedCities[0] || "Tibagi";
+
+  if (!isSuper) {
+    const effectiveAllowed = allowedCities.length > 0 ? allowedCities : ["Tibagi"];
+    const matchesAllowed = effectiveAllowed.some(
+      (c) => c.toLowerCase() === defaultCity.toLowerCase()
+    );
+    if (!matchesAllowed) {
+      defaultCity = effectiveAllowed[0];
+    }
+  }
+
+  // Buscar cidades disponíveis na rede municipal (restrito às redes autorizadas se não for SuperAdmin)
   const availableMunicipalCities = await prisma.school.findMany({
-    where: { active: true, network: "MUNICIPAL" },
+    where: {
+      active: true,
+      network: "MUNICIPAL",
+      ...(!isSuper && allowedCities.length > 0
+        ? { OR: allowedCities.map((c) => ({ city: { equals: c, mode: "insensitive" as const } })) }
+        : !isSuper
+          ? { city: { equals: defaultCity, mode: "insensitive" as const } }
+          : {}),
+    },
     select: { city: true },
     distinct: ["city"],
   });

@@ -1,9 +1,9 @@
 # Diretrizes e Regras de Workspace — Rede Ativa SaaS
 
 Você é o assistente técnico do projeto **Rede Ativa SaaS** (antigo Busca Ativa Leopoldina).
-A plataforma é um SaaS educacional multi-escola full-stack construído com **Next.js 16 (App Router + Turbopack)**, **React 19**, **TypeScript estrito**, **Prisma ORM 6**, **Neon PostgreSQL Serverless (AWS sa-east-1)** e **NextAuth v5**.
+A plataforma é um SaaS educacional multi-escola full-stack construído com **Next.js 16 (App Router + Turbopack)**, **React 19**, **TypeScript 6 estrito**, **Prisma ORM 6**, **Neon PostgreSQL Serverless (AWS sa-east-1)** e **NextAuth v5**.
 
-Siga rigorosamente as diretrizes e regras inegociáveis abaixo em qualquer tarefa neste repositório:
+Consulte [`AI_CONTEXT.md`](file:///home/marcoswrobel/Documents/Registro/AI_CONTEXT.md) e [`docs/ARQUITETURA_E_ENGENHARIA.md`](file:///home/marcoswrobel/Documents/Registro/docs/ARQUITETURA_E_ENGENHARIA.md) para o catálogo completo de módulos, schemas e contratos. Siga rigorosamente as diretrizes e regras inegociáveis abaixo em qualquer tarefa neste repositório:
 
 ---
 
@@ -18,7 +18,7 @@ Siga rigorosamente as diretrizes e regras inegociáveis abaixo em qualquer taref
 ## 2. Isolamento Lógico Multi-Tenant (Prevenção Absoluta contra IDOR)
 - Todas as consultas e mutações de dados operacionais (`Student`, `ClassGroup`, `MessageLog`, `PedagogicalMinute`, `AbsenceJustification`, `StudentContact`, etc.) **DEVEM conter o filtro obrigatório por `schoolId`**.
 - Nunca realize buscas ou mutações globais que possam cruzar dados entre diferentes instituições escolares ou redes.
-- Em rotas de mutação direta por ID (`/api/students/[id]`, `/api/atas/[id]`), valide se o registro pertence à instituição sob controle da sessão do usuário autenticado.
+- Em rotas de mutação direta por ID (`/api/students/[id]`, `/api/atas/[id]`), valide se o registro pertence à instituição sob controle da sessão do usuário autenticado via `assertTenantOwnership(...)`.
 - **Validação de Cookie de Contexto (`active_school_id`):** Em `getCurrentSchool()`, nunca confie no cookie `active_school_id` sem validar se o usuário autenticado na sessão possui vínculo ativo com aquela escola (`session.user.schools` / `schoolId`) ou privilégio global (`SUPERADMIN` / `GESTAO_SECRETARIA` autorizado). Nunca ignore `schoolId` do corpo apenas parcialmente: o tenant efetivo sempre deriva da sessão validada.
 - **Integridade de FKs em Criação E Atualização (`POST`, `PUT`, `PATCH`, `/finalize`):** Sempre valide que chaves estrangeiras referenciadas em arrays ou campos (`studentIds`, `classGroupId`, `templateId`) pertençam estritamente ao mesmo `schoolId` do recurso/sessão (conferindo `matched.length === requestedIds.length`), inclusive em edições de rascunho e finalizações.
 - **Rejeição Explícita de Parâmetros Restritos (RBAC):** Quando um payload contiver flags ou operações restritas a papéis superiores (ex.: `updateSchoolInfo: true` para não-`SUPERADMIN`), retorne explicitamente **`403 Forbidden`** — nunca ignore silenciosamente retornando `200 OK`.
@@ -37,6 +37,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 4. Fé Pública & Imutabilidade do Livro de Atas (Lei nº 14.063/2020)
 - Atas no status `FINALIZED` **nunca sofrem edição de texto in loco**.
+- A lavratura oficial exige verificação do PIN de Fé Pública do servidor (`signingPin.ts`) e justificativa de lavratura extemporânea (`extemporaneousReason`) quando `attendedAt` exceder 5 dias úteis.
 - Retificações ou complementações devem ser lavradas obrigatoriamente através de **Termo Aditivo (*"Em tempo"* - `PedagogicalMinuteAddendum`)** com *hash-chaining* criptográfico.
 - Cancelamentos devem manter o registro histórico marcado como `VOIDED` com justificativa legal expressa (`voidReason`), sem apagar a ata.
 - Exclusão física atômica de atas é estritamente restrita a administradores gerais e exclusiva para minutas de teste.
@@ -61,6 +62,6 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **todos os testes passem (177+ testes, incluindo `adversarialQa.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (200+ testes em 36+ suítes Vitest, incluindo `adversarialQa.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.

@@ -355,7 +355,14 @@ model PedagogicalMinute {
   // Integridade e Validação Jurídica
   contentHash           String?                        // SHA-256 canônico gerado no momento da lavratura
   verificationCode      String?                        @unique // Código curto aleatório não sequencial para o QR Code público
-  physicalSignedScanData String?                       // Base64 compactado de imagem/PDF da via física assinada
+  pdfArchiveSha256      String?                        // Último SHA-256 emitido da certidão arquivística PDF/A-1b (ISO 19005-1)
+  pdfArchiveGeneratedAt DateTime?                      // Timestamp da última geração/conferência do PDF/A-1b
+  physicalSignedScanData String?                       // Base64 compactado de imagem/PDF da via física assinada (Fallback DB)
+  physicalScanStorageKey String?                       // Chave privada no Object Storage externo (S3/R2/Vercel Blob)
+  physicalScanProvider   String?                       // Provedor ativo no ato do upload: "DATABASE" | "S3" | "VERCEL_BLOB"
+  physicalScanMimeType   String?                       // MIME Type estrito: "image/png" | "image/jpeg" | "image/webp" | "application/pdf"
+  physicalScanSizeBytes  Int?                          // Tamanho binário decodificado em bytes
+  physicalScanSha256     String?                       // Hash SHA-256 canônico dos bytes brutos do documento anexado (Cadeia de Custódia)
   physicalScanUploadedAt DateTime?                     // Data do upload da via física escaneada/fotografada (JUR-04)
   physicalScanUploadedBy String?                       // Nome do profissional que digitalizou (JUR-04)
   govBrVerified         Boolean                        @default(false) // Autenticado via Assinador ITI / Gov.br (JUR-04)
@@ -487,3 +494,17 @@ model PedagogicalActionItem {
   @@index([minuteId])
   @@index([status, dueDate])
 }
+
+// ---------------------------------------------------------------------------
+// RATE LIMITING DISTRIBUÍDO E DEFESA ANTI-BRUTE-FORCE (SEC-08)
+// ---------------------------------------------------------------------------
+
+model RateLimitBucket {
+  key         String   @id // Ex: "rl:pub-ata:203.0.113.10" ou "rl:pin-fail:usr_123"
+  count       Int      @default(1)
+  windowStart DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+}
+

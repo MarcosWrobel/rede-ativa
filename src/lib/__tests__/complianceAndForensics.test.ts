@@ -221,6 +221,8 @@ describe("Compliance & Forensics - Épicos 1, 2 e 3", () => {
   });
 
   it("exige justificativa de lavratura extemporânea se o atendimento ocorreu há mais de 5 dias úteis", async () => {
+    mockState.db.users[0].signingPinHash = await hashPin("8391");
+
     // Reunião realizada há 15 dias corridos (cerca de 10 dias úteis)
     const oldDate = new Date();
     oldDate.setDate(oldDate.getDate() - 15);
@@ -230,7 +232,7 @@ describe("Compliance & Forensics - Épicos 1, 2 e 3", () => {
     const reqSemJust = new Request("http://localhost:3000/api/atas/minute-1/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ signingPin: "8391" }),
     });
 
     try {
@@ -247,6 +249,7 @@ describe("Compliance & Forensics - Épicos 1, 2 e 3", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        signingPin: "8391",
         extemporaneousReason: "Aguardando comparecimento presencial do responsável para assinatura.",
       }),
     });

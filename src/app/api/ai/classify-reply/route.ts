@@ -7,6 +7,7 @@ import {
 } from "@/lib/whatsappProvider";
 import { GoogleGenAI } from "@google/genai";
 import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
+import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 45;
 export const dynamic = "force-dynamic";
@@ -49,6 +50,10 @@ export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
+
+    const rateLimitKey = `ai:${authCheck.schoolId || "global"}:${authCheck.userId}`;
+    const rlCheck = await enforceRateLimit(rateLimitKey, RATE_LIMIT_POLICIES.AI_ENDPOINT);
+    if (!rlCheck.ok) return rlCheck.response;
 
     const rawBody = await req.json();
     const parsed = aiClassifyReplySchema.safeParse(rawBody);

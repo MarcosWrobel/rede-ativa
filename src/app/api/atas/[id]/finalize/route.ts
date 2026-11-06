@@ -5,7 +5,8 @@ import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeMinuteHash, generateVerificationCode } from "@/lib/ataCrypto";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { verifyPin, calculateBusinessDaysDiff } from "@/lib/signingPin";
+import { verifyServerSigningPin, calculateBusinessDaysDiff } from "@/lib/signingPin";
+import { checkRateLimit, resetRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -31,66 +32,42 @@ export async function POST(
       rawBody = null;
     }
 
-    // Validação de Fé Pública: Se o servidor cadastrou um PIN de assinatura, exige a validação da credencial
-    if (authCheck.userId && prisma.user?.findUnique) {
-      const userDb = await prisma.user.findUnique({
-        where: { id: authCheck.userId },
-        select: { id: true, signingPinHash: true, pinAttempts: true, pinLockedUntil: true },
+    // Proteção Anti-Brute-Force contra adivinhação de PIN de Fé Pública (SEC-08)
+    const pinLockKey = `pin-fail:${authCheck.userId}`;
+    const pinRateCheck = await checkRateLimit(pinLockKey, RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE);
+    if (!pinRateCheck.success) {
+      await logAudit({
+        action: "SIGNING_PIN_LOCKOUT",
+        entityType: "User",
+        entityId: authCheck.userId,
+        details: {
+          reason: "Bloqueio temporário por excesso de tentativas incorretas de PIN de Fé Pública (15 min)",
+          attemptedMinuteId: id,
+          retryAfterSeconds: pinRateCheck.retryAfterSeconds,
+        },
+        user: { id: authCheck.userId, name: authCheck.userName, email: authCheck.email },
+        schoolId: authCheck.schoolId || "global",
+        req,
       });
 
-      if (userDb?.signingPinHash) {
-        const now = new Date();
-        if (userDb.pinLockedUntil && userDb.pinLockedUntil > now) {
-          const minsLeft = Math.ceil((userDb.pinLockedUntil.getTime() - now.getTime()) / 60000);
-          return NextResponse.json(
-            { error: `PIN de fé pública temporariamente bloqueado. Aguarde ${minsLeft} minuto(s) para tentar novamente.` },
-            { status: 403 }
-          );
-        }
-
-        const providedPin = rawBody?.signingPin ? String(rawBody.signingPin).trim() : "";
-        if (!providedPin) {
-          return NextResponse.json(
-            { error: "PIN_REQUIRED:Informe seu PIN de fé pública para lavrar e assinar a ata oficial." },
-            { status: 401 }
-          );
-        }
-
-        const isValidPin = await verifyPin(providedPin, userDb.signingPinHash);
-        if (!isValidPin) {
-          const nextAttempts = userDb.pinAttempts + 1;
-          const shouldLock = nextAttempts >= 3;
-          const lockUntil = shouldLock ? new Date(now.getTime() + 5 * 60000) : null;
-
-          if (prisma.user?.update) {
-            await prisma.user.update({
-              where: { id: userDb.id },
-              data: {
-                pinAttempts: shouldLock ? 0 : nextAttempts,
-                pinLockedUntil: lockUntil,
-              },
-            });
-          }
-
-          return NextResponse.json(
-            {
-              error: shouldLock
-                ? "PIN de fé pública incorreto. Limite de 3 tentativas excedido. Bloqueado por 5 minutos."
-                : `PIN de fé pública incorreto. Tentativas restantes: ${3 - nextAttempts}.`,
-            },
-            { status: 401 }
-          );
-        }
-
-        // Reseta tentativas incorretas após sucesso
-        if (userDb.pinAttempts > 0 && prisma.user?.update) {
-          await prisma.user.update({
-            where: { id: userDb.id },
-            data: { pinAttempts: 0, pinLockedUntil: null },
-          });
-        }
-      }
+      return NextResponse.json(
+        {
+          error: `Muitas tentativas incorretas de PIN. Por segurança, o uso do PIN foi temporariamente bloqueado por ${pinRateCheck.retryAfterSeconds} segundos.`,
+          retryAfter: pinRateCheck.retryAfterSeconds,
+        },
+        { status: 429 }
+      );
     }
+
+    // Validação estrita de Fé Pública (Lei nº 14.063/2020, Art. 4º, II):
+    // Exige PIN cadastrado e verificado antes de lavrar oficialmente a ata (sem bypass para signingPinHash nulo)
+    const pinCheck = await verifyServerSigningPin(prisma, authCheck.userId, rawBody?.signingPin);
+    if (!pinCheck.ok) {
+      return NextResponse.json({ error: pinCheck.error }, { status: pinCheck.status || 401 });
+    }
+
+    // PIN validado com sucesso: reseta eventuais falhas anteriores
+    await resetRateLimit(pinLockKey);
 
     const currentYear = new Date().getFullYear();
 
@@ -234,9 +211,9 @@ export async function POST(
                     signatureData: sigData,
                     signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
                     signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
-                    signerUserAgent: shouldClear || isRefused ? null : (p.signerUserAgent || match?.signerUserAgent || null),
-                    biometricStrokeData: shouldClear || isRefused ? null : (p.biometricStrokeData || match?.biometricStrokeData || null),
-                    clientTimestampIso: shouldClear || isRefused ? null : (p.clientTimestampIso || match?.clientTimestampIso || null),
+                    signerUserAgent: shouldClear || isRefused ? null : (match?.signerUserAgent || p.signerUserAgent || null),
+                    biometricStrokeData: shouldClear || isRefused ? null : (match?.biometricStrokeData || p.biometricStrokeData || null),
+                    clientTimestampIso: shouldClear || isRefused ? null : (match?.clientTimestampIso || p.clientTimestampIso || null),
                     mobileSignToken: null,
                     mobileSignExpiresAt: null,
                     biometricVerified: bioVerified,
@@ -377,6 +354,7 @@ export async function POST(
                 documentNumber: p.documentNumber,
                 signatureMode: p.signatureMode,
                 signatureData: p.signatureData,
+                biometricStrokeData: p.biometricStrokeData,
                 biometricVerified: p.biometricVerified,
                 verifiedEmail: p.verifiedEmail,
                 refusalReason: p.refusalReason,

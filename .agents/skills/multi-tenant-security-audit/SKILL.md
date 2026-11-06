@@ -15,7 +15,7 @@ Never rely solely on static code reading or isolated helper unit tests when audi
 ## Audit Workflow
 
 1. **Inspect Delta Since Last Audit**
-   - Check `docs/AUDITORIA_SEGURANCA_MULTITENANT_2026.md` (and any newer audit reports in `docs/`) and run `git log --oneline` / `git diff` from the last audited commit to `HEAD` to pinpoint newly touched routes, SSR pages, and Prisma filters.
+   - Check `docs/auditorias/2026-11-05_AUDITORIA_ADVERSARIAL_MULTITENANT.md` (and any newer audit reports in `docs/auditorias/`) and run `git log --oneline` / `git diff` from the last audited commit to `HEAD` to pinpoint newly touched routes, SSR pages, and Prisma filters.
 
 2. **Execute & Extend Live Adversarial Integration Suite**
    - Run the integration suite in `src/app/api/__tests__/adversarialQa.test.ts` via `npx vitest run src/app/api/__tests__/adversarialQa.test.ts`.

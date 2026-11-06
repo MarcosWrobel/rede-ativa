@@ -1,0 +1,49 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Typecheck, Unit Tests & Production Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: TypeScript Static Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run Vitest Test Suites
+        run: npm test
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
+
+      - name: Build Next.js Application (Turbopack)
+        run: npm run build
+        env:
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
+          VERCEL: "0"

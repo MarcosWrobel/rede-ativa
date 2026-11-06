@@ -89,13 +89,25 @@ export async function GET() {
         orderBy: { school: { name: "asc" } },
       });
 
-      schools = userSchools.map((us) => ({
-        ...us.school,
-        userRole: us.role,
-      }));
+      schools = userSchools.map((us) => {
+        const { syncTokenHash, ...safeSchool } = us.school as any;
+        return {
+          ...safeSchool,
+          hasSyncToken: Boolean(syncTokenHash),
+          userRole: us.role,
+        };
+      });
     }
 
-    return NextResponse.json({ success: true, schools });
+    const sanitizedSchools = schools.map((s: any) => {
+      const { syncTokenHash, userBySchools, ...safe } = s;
+      return {
+        ...safe,
+        hasSyncToken: safe.hasSyncToken ?? Boolean(syncTokenHash),
+      };
+    });
+
+    return NextResponse.json({ success: true, schools: sanitizedSchools });
   } catch (error: any) {
     console.error("[GET /api/schools] Erro:", error);
     return NextResponse.json({ error: "Erro ao consultar instituições escolares" }, { status: 500 });
@@ -107,6 +119,17 @@ export async function POST(req: Request) {
     const authCheck = await requireAdmin();
     if (!authCheck.ok) return authCheck.response;
 
+    const effectiveRole = authCheck.role || (authCheck.session?.user as any)?.role;
+    const isRoot = isBootstrapAdminEmail(authCheck.email) || effectiveRole === "SUPERADMIN" || effectiveRole === "ADMIN";
+    const isSec = effectiveRole === "GESTAO_SECRETARIA";
+
+    if (!isRoot && !isSec) {
+      return NextResponse.json(
+        { error: "Provisionamento de novas instituições é restrito à Administração Geral ou à Secretaria Municipal de Educação." },
+        { status: 403 }
+      );
+    }
+
     const rawBody = await req.json();
     const parsed = createSchoolSchema.safeParse(rawBody);
     if (!parsed.success) {
@@ -114,6 +137,26 @@ export async function POST(req: Request) {
     }
 
     const data = parsed.data;
+
+    // Gestor de Secretaria Municipal só pode provisionar escolas municipais vinculadas ao seu município
+    if (!isRoot && isSec) {
+      if (data.network !== "MUNICIPAL") {
+        return NextResponse.json(
+          { error: "Gestores de Secretaria Municipal só podem cadastrar unidades da rede MUNICIPAL." },
+          { status: 403 }
+        );
+      }
+      const sessionNets = ((authCheck.session?.user as any)?.networks as any[]) || [];
+      const allowedCities = sessionNets
+        .map((n: any) => (n.city || n.network?.city || "").toLowerCase().trim())
+        .filter(Boolean);
+      if (allowedCities.length > 0 && !allowedCities.includes(data.city.toLowerCase().trim())) {
+        return NextResponse.json(
+          { error: `Você não possui autorização para provisionar unidades fora do seu município (${data.city}).` },
+          { status: 403 }
+        );
+      }
+    }
 
     // 0. Proteção Inviolável da Escola Piloto Fundadora Leopoldina (INEP 41042730)
     if (data.inepCode === "41042730") {
@@ -240,6 +283,7 @@ export async function POST(req: Request) {
       action: "CREATE_SCHOOL",
       entityType: "School",
       entityId: createdSchool.id,
+      schoolId: createdSchool.id,
       details: {
         name: createdSchool.name,
         inepCode: createdSchool.inepCode,

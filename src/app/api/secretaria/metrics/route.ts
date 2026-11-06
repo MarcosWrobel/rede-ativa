@@ -21,7 +21,37 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const requestedCity = searchParams.get("city")?.trim() || "Tibagi";
+    const sessionNetworks = ((authCheck.session?.user as any)?.networks as any[]) || [];
+    let allowedCities = sessionNetworks
+      .map((n: any) => (n.city || n.network?.city || "").trim())
+      .filter(Boolean);
+
+    if (!isSuper && allowedCities.length === 0 && authCheck.userId && (prisma as any).userNetwork?.findMany) {
+      const dbNetworks = await prisma.userNetwork.findMany({
+        where: { userId: authCheck.userId, active: true },
+        include: { network: true },
+      });
+      allowedCities = dbNetworks
+        .map((un: any) => (un.network?.city || "").trim())
+        .filter(Boolean);
+    }
+
+    const rawCityParam = searchParams.get("city")?.trim();
+    const fallbackCity = allowedCities[0] || "Tibagi";
+    const requestedCity = rawCityParam || fallbackCity;
+
+    if (!isSuper) {
+      const effectiveAllowed = allowedCities.length > 0 ? allowedCities : ["Tibagi"];
+      const isCityAllowed = effectiveAllowed.some(
+        (c) => c.toLowerCase() === requestedCity.toLowerCase()
+      );
+      if (!isCityAllowed) {
+        return NextResponse.json(
+          { error: "Acesso negado às métricas consolidadas de outro município." },
+          { status: 403 }
+        );
+      }
+    }
 
     // 1. Busca todas as escolas municipais da cidade
     const municipalSchools = await prisma.school.findMany({

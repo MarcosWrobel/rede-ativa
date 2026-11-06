@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp } from "@/lib/audit";
+import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import { z } from "zod";
 import {
   verifyEscolaGoogleIdToken,
   verifyParticipantIdentityMatch,
 } from "@/lib/escolaGoogleVerify";
+import { enforceRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
+
+const ALLOWED_SIG_IMAGE = /^data:image\/(png|jpeg|jpg|webp);base64,/i;
+const MAX_SIG_BYTES = 512 * 1024; // 512 KB
+const MAX_STROKE_BYTES = 200 * 1024; // 200 KB
 
 const submitSignSchema = z.object({
   // Modo 1: Assinatura manuscrita em tela (canvas)
@@ -27,6 +33,10 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
+    const rlKey = getPublicIpRateLimitKey("sign-token", req);
+    const rlCheck = await enforceRateLimit(rlKey, RATE_LIMIT_POLICIES.SIGN_TOKEN_ACCESS);
+    if (!rlCheck.ok) return rlCheck.response;
+
     const { token } = await params;
     const participant = await prisma.pedagogicalMinuteParticipant.findUnique({
       where: { mobileSignToken: token },
@@ -40,6 +50,12 @@ export async function GET(
             agreementsSummary: true,
             attendedAt: true,
             school: { select: { name: true } },
+            students: {
+              select: {
+                studentId: true,
+                studentNameSnapshot: true,
+              },
+            },
           },
         },
       },
@@ -60,6 +76,25 @@ export async function GET(
       return NextResponse.json({ error: "Este link de assinatura expirou. Solicite um novo link à equipe escolar." }, { status: 410 });
     }
 
+    const linkedStudents = ((participant.minute as any).students || []).map((s: any) => ({
+      id: s.studentId,
+      name: s.studentNameSnapshot || "",
+    }));
+    const shouldAnonymizeOthers =
+      linkedStudents.length > 1 &&
+      (participant.role === "RESPONSAVEL" || participant.role === "ESTUDANTE");
+
+    const safeSubject = shouldAnonymizeOthers
+      ? anonymizeOtherMinorsInText(participant.minute.subject, participant.studentId, linkedStudents)
+      : participant.minute.subject;
+    const safeSummary = shouldAnonymizeOthers
+      ? anonymizeOtherMinorsInText(participant.minute.summary, participant.studentId, linkedStudents)
+      : participant.minute.summary;
+    const safeAgreements =
+      shouldAnonymizeOthers && participant.minute.agreementsSummary
+        ? anonymizeOtherMinorsInText(participant.minute.agreementsSummary, participant.studentId, linkedStudents)
+        : participant.minute.agreementsSummary;
+
     return NextResponse.json({
       success: true,
       participant: {
@@ -70,9 +105,9 @@ export async function GET(
         hasSigned: Boolean(participant.signatureData) || Boolean(participant.verifiedEmail),
         verifiedEmail: participant.verifiedEmail,
         schoolName: participant.minute.school.name,
-        subject: participant.minute.subject,
-        summary: participant.minute.summary,
-        agreementsSummary: participant.minute.agreementsSummary,
+        subject: safeSubject,
+        summary: safeSummary,
+        agreementsSummary: safeAgreements,
         attendedAt: participant.minute.attendedAt,
         expiresAt: participant.mobileSignExpiresAt?.toISOString() || null,
       },
@@ -88,6 +123,10 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
+    const rlKey = getPublicIpRateLimitKey("sign-token", req);
+    const rlCheck = await enforceRateLimit(rlKey, RATE_LIMIT_POLICIES.SIGN_TOKEN_ACCESS);
+    if (!rlCheck.ok) return rlCheck.response;
+
     const { token } = await params;
     const ip = extractClientIp(req);
     const userAgent = req.headers.get("user-agent") || null;
@@ -121,6 +160,29 @@ export async function POST(
     }
 
     const { signatureData, biometricStrokeData, clientTimestampIso, biometricVerified, biometricDeviceType, googleIdToken, dryRun } = parsed.data;
+
+    if (participant.signedAt || participant.signatureData || participant.verifiedEmail) {
+      return NextResponse.json(
+        { error: "Esta assinatura já foi registrada anteriormente. Solicite um novo link caso precise assinar novamente." },
+        { status: 409 }
+      );
+    }
+
+    if (signatureData) {
+      if (signatureData.length > MAX_SIG_BYTES || !ALLOWED_SIG_IMAGE.test(signatureData.trim())) {
+        return NextResponse.json(
+          { error: "Imagem de assinatura inválida ou excede o tamanho máximo permitido (512KB)." },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (biometricStrokeData && biometricStrokeData.length > MAX_STROKE_BYTES) {
+      return NextResponse.json(
+        { error: "Dados vetoriais de biometria excedem o tamanho máximo permitido (200KB)." },
+        { status: 400 }
+      );
+    }
 
     // FLUXO A: Assinatura Institucional via Google @escola.pr.gov.br
     if (googleIdToken) {
@@ -214,23 +276,42 @@ export async function POST(
     }
 
     const now = new Date();
-    await prisma.pedagogicalMinuteParticipant.update({
-      where: { id: participant.id },
-      data: {
-        signatureMode: "MOBILE_QR",
-        signatureData,
-        signedAt: now,
-        signerIp: ip,
-        signerUserAgent: userAgent,
-        biometricStrokeData: biometricStrokeData || null,
-        clientTimestampIso: clientTimestampIso || now.toISOString(),
-        biometricVerified,
-        biometricDeviceType: biometricDeviceType || null,
-        biometricAuthTime: biometricVerified ? now : null,
-        mobileSignToken: null, // Queima o token de uso único
-        mobileSignExpiresAt: null,
-      },
-    });
+    const updateData = {
+      signatureMode: "MOBILE_QR",
+      signatureData,
+      signedAt: now,
+      signerIp: ip,
+      signerUserAgent: userAgent,
+      biometricStrokeData: biometricStrokeData || null,
+      clientTimestampIso: clientTimestampIso || now.toISOString(),
+      biometricVerified,
+      biometricDeviceType: biometricDeviceType || null,
+      biometricAuthTime: biometricVerified ? now : null,
+      mobileSignToken: null, // Queima o token de uso único atomicamente
+      mobileSignExpiresAt: null,
+    };
+
+    if (typeof (prisma.pedagogicalMinuteParticipant as any).updateMany === "function") {
+      const atomicRes = await prisma.pedagogicalMinuteParticipant.updateMany({
+        where: {
+          id: participant.id,
+          mobileSignToken: token,
+          signedAt: null,
+        },
+        data: updateData,
+      });
+      if (atomicRes.count === 0) {
+        return NextResponse.json(
+          { error: "Este link de assinatura já foi utilizado em outra requisição simultânea." },
+          { status: 409 }
+        );
+      }
+    } else {
+      await prisma.pedagogicalMinuteParticipant.update({
+        where: { id: participant.id },
+        data: updateData,
+      });
+    }
 
     return NextResponse.json({
       success: true,

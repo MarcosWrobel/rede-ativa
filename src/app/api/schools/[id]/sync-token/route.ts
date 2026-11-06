@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSchoolAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { hashSchoolSyncToken } from "@/lib/syncToken";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -44,19 +45,21 @@ export async function POST(
     const authCheck = await requireSchoolAdmin(id);
     if (!authCheck.ok) return authCheck.response;
 
-    // Gera novo token de 256 bits (64 hexadecimais)
+    // Gera novo token de 256 bits (64 hexadecimais) e persiste apenas seu hash SHA-256 no banco
     const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenDigest = hashSchoolSyncToken(rawToken);
 
     await prisma.school.update({
       where: { id },
-      data: { syncTokenHash: rawToken },
+      data: { syncTokenHash: tokenDigest },
     });
 
     await logAudit({
       action: "UPDATE_USER",
       entityType: "SchoolSyncToken",
       entityId: id,
-      details: { action: "ROTATE_SYNC_TOKEN", schoolId: id },
+      schoolId: id,
+      details: { action: "ROTATE_SYNC_TOKEN" },
       user: {
         id: authCheck.userId,
         name: authCheck.userName,

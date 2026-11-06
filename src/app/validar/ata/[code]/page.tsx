@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
-import { ShieldCheck, School, Calendar, CheckCircle2, AlertTriangle, Lock } from "lucide-react";
-import { maskName, maskDocument, maskEmail } from "@/lib/ataCrypto";
+import { ShieldCheck, AlertTriangle, Lock } from "lucide-react";
+import {
+  maskName,
+  maskDocument,
+  maskEmail,
+  verifyMinuteIntegrity,
+  verifyAddendumChain,
+} from "@/lib/ataCrypto";
 
 interface Props {
   params: Promise<{ code: string }>;
@@ -20,7 +25,9 @@ export default async function ValidarAtaPage({ params }: Props) {
     where: { verificationCode: cleanCode },
     include: {
       school: true,
+      students: true,
       participants: true,
+      actionItems: true,
       addendums: { orderBy: { createdAt: "asc" } },
     },
   });
@@ -44,26 +51,80 @@ export default async function ValidarAtaPage({ params }: Props) {
   const isVoid = minute.status === "VOIDED";
   const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N";
 
+  let minuteHashValid = false;
+  if (minute.contentHash && minute.ataNumber) {
+    const canonicalPayload = {
+      schoolId: minute.schoolId,
+      year: minute.year,
+      ataNumber: minute.ataNumber,
+      attendedAt: minute.attendedAt.toISOString(),
+      category: minute.category,
+      isConfidential: minute.isConfidential,
+      isExtemporaneous: minute.isExtemporaneous,
+      extemporaneousReason: minute.extemporaneousReason,
+      subject: minute.subject,
+      summary: minute.summary,
+      agreementsSummary: minute.agreementsSummary,
+      authorEmail: minute.authorEmail,
+      students: (minute.students || []).map((s: any) => ({
+        studentId: s.studentId,
+        name: s.studentNameSnapshot,
+        className: s.classNameSnapshot,
+        cgm: s.cgmSnapshot,
+      })),
+      participants: (minute.participants || []).map((p: any) => ({
+        role: p.role,
+        name: p.name,
+        documentType: p.documentType,
+        documentNumber: p.documentNumber,
+        signatureMode: p.signatureMode,
+        signatureData: p.signatureData,
+        biometricStrokeData: p.biometricStrokeData,
+        biometricVerified: p.biometricVerified,
+        verifiedEmail: p.verifiedEmail,
+        refusalReason: p.refusalReason,
+      })),
+      actionItems: (minute.actionItems || []).map((a: any) => ({
+        description: a.description,
+        responsible: a.responsible,
+        dueDate: a.dueDate ? a.dueDate.toISOString() : null,
+      })),
+    };
+    minuteHashValid = verifyMinuteIntegrity(canonicalPayload, minute.contentHash).isValid;
+  }
+  const addendumIntegrity = verifyAddendumChain(minute.contentHash, minute.addendums || []);
+  const isAuthentic = minuteHashValid && addendumIntegrity.isValid;
+
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 flex items-center justify-center">
       <div className="max-w-xl w-full bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Banner de Status */}
         <div
           className={`p-6 text-center text-white ${
-            isVoid ? "bg-rose-600" : "bg-emerald-600"
+            !isAuthentic ? "bg-rose-700" : isVoid ? "bg-rose-600" : "bg-emerald-600"
           }`}
         >
           <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-xs">
-            <ShieldCheck className="w-8 h-8 text-white" />
+            {!isAuthentic ? (
+              <AlertTriangle className="w-8 h-8 text-white" />
+            ) : (
+              <ShieldCheck className="w-8 h-8 text-white" />
+            )}
           </div>
           <span className="text-[10px] font-black uppercase tracking-widest bg-black/20 px-3 py-1 rounded-full">
             Certidão de Autenticidade Digital
           </span>
           <h1 className="text-xl font-black mt-2">
-            {isVoid ? "Ata Tornada Sem Efeito" : "Ata Pedagógica Oficial e Autêntica"}
+            {!isAuthentic
+              ? "ALERTA PERICIAL: Violação de Integridade Detectada"
+              : isVoid
+                ? "Ata Tornada Sem Efeito"
+                : "Ata Pedagógica Oficial e Autêntica"}
           </h1>
           <p className="text-xs text-white/90 mt-1">
-            Conferência em conformidade com a Lei Federal nº 14.063/2020 e ECA
+            {!isAuthentic
+              ? "O hash criptográfico recalculado diverge do selo original lavrado."
+              : "Conferência em tempo real conforme Lei Federal nº 14.063/2020, CPC Art. 411 e ECA"}
           </p>
         </div>
 
@@ -147,6 +208,12 @@ export default async function ValidarAtaPage({ params }: Props) {
             <p className="font-mono text-[10px] text-slate-600 bg-slate-100 p-2.5 rounded-xl break-all">
               {minute.contentHash}
             </p>
+            {minute.govBrVerified && (
+              <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
+                ✓ Averbação ICP-Brasil / Assinador Gov.br verificada
+                {minute.govBrProtocol ? ` • Protocolo: ${minute.govBrProtocol}` : ""}
+              </p>
+            )}
           </div>
 
           {minute.addendums.length > 0 && (
