@@ -25,7 +25,9 @@
     "*://web.whatsapp.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*",
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://redeativa.app.br/*",
+    "https://*.redeativa.app.br/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -68,6 +70,8 @@
     {
       "matches": [
         "https://*.vercel.app/*",
+        "https://redeativa.app.br/*",
+        "https://*.redeativa.app.br/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],

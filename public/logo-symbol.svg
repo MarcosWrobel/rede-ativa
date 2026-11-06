@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <!-- Emblema Minimalista Geométrico & Arejado (Rede Ativa: Livro + Rede Humana + Proteção) -->
+  <defs>
+    <linearGradient id="ra-clean-primary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="ra-clean-secondary" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#0D9488" />
+    </linearGradient>
+  </defs>
+
+  <!-- Arco Esquerdo (Página Esquerda do Saber & Laço Protetor) -->
+  <path
+    d="M 60 28
+       C 44 28 22 40 22 64
+       C 22 84 40 96 60 102
+       C 48 88 38 78 38 64
+       C 38 48 48 38 60 38"
+    fill="url(#ra-clean-secondary)"
+  />
+
+  <!-- Arco Direito (Página Direita do Saber & Ação Ativa) -->
+  <path
+    d="M 60 28
+       C 76 28 98 40 98 64
+       C 98 84 80 96 60 102
+       C 72 88 82 78 82 64
+       C 82 48 72 38 60 38"
+    fill="url(#ra-clean-primary)"
+  />
+
+  <!-- Laço Central Dinâmico (Cruzamento da Rede) -->
+  <path
+    d="M 44 68
+       C 52 76 60 82 60 82
+       C 60 82 68 76 76 68
+       C 70 60 60 56 60 56
+       C 60 56 50 60 44 68
+       Z"
+    fill="#10B981"
+    opacity="0.9"
+  />
+
+  <!-- Vértice Central: O Estudante Acolhido no Centro da Rede -->
+  <circle cx="60" cy="22" r="8" fill="#10B981" />
+  <circle cx="60" cy="22" r="4" fill="#FFFFFF" />
+</svg>

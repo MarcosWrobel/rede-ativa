@@ -83,6 +83,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Notifica todas as abas abertas da aplicação Registro
         const targetUrls = [
           "https://*.vercel.app/*",
+          "https://redeativa.app.br/*",
+          "https://*.redeativa.app.br/*",
           "http://localhost/*",
           "http://127.0.0.1/*",
         ];

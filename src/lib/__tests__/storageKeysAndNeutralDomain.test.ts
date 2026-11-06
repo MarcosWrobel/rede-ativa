@@ -24,7 +24,7 @@ describe("NEUTRAL-01: Neutralização de LocalStorage com Retrocompatibilidade",
   beforeAll(() => {
     (globalThis as any).localStorage = localStorageMock;
     (globalThis as any).window = {
-      location: { origin: "https://registro-leopoldina.vercel.app" },
+      location: { origin: `https://${DEFAULT_FALLBACK_DOMAIN}` },
     };
   });
 

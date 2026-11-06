@@ -42,7 +42,7 @@ export async function generateQrCodeDataUrl(
   });
 }
 
-export const DEFAULT_FALLBACK_DOMAIN = "registro-leopoldina.vercel.app";
+export const DEFAULT_FALLBACK_DOMAIN = "redeativa.app.br";
 
 /**
  * Resolve a URL base absoluta da aplicação respeitando variáveis de ambiente,
