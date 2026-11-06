@@ -127,14 +127,6 @@ function IconCheck({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
-function IconCross({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  );
-}
-
 function IconWarning({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -266,7 +258,7 @@ export default function ImpactoClient() {
   // ============================================================================
   // Na rotina manual: horas crescem com o número de alunos (faltas, ligações, atas) e tamanho da equipe
   const manualWeeklyTotal = Math.round((numStaff * 4) + (numStudents * 0.046));
-  // Na Rede Ativa SaaS: automação por SERE + modelos + IA consome apenas fração mínima de tempo
+  // Na Rede Ativa: automação por SERE + modelos + IA consome apenas fração mínima de tempo
   const platformWeeklyTotal = Math.max(2, Math.round((numStaff * 1.2) + (numStudents * 0.006)));
 
   const hoursSavedPerMonth = Math.round((manualWeeklyTotal - platformWeeklyTotal) * 4.3);
@@ -355,10 +347,19 @@ export default function ImpactoClient() {
     };
   };
 
-  const whatsappMessage = encodeURIComponent(
-    `Olá! Estive analisando a página da Rede Ativa SaaS para uma instituição com ${numStudents} estudantes e gostaria de agendar uma demonstração guiada de 15 minutos.`
+  // WhatsApp oficial para agendamento e demonstração institucional
+  // TODO: Inserir número oficial com DDD caso venha de variável de ambiente
+  const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "5542999999999";
+
+  const generalWhatsappMsg = encodeURIComponent(
+    "Olá! Gostaria de conhecer a Rede Ativa e agendar uma demonstração rápida de 15 minutos para minha escola."
   );
-  const whatsappUrl = `https://wa.me/?text=${whatsappMessage}`;
+  const generalWhatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${generalWhatsappMsg}`;
+
+  const calculatorWhatsappMsg = encodeURIComponent(
+    `Olá! Simulei a redução de horas para uma escola com ${numStudents} estudantes e gostaria de agendar uma demonstração rápida da Rede Ativa.`
+  );
+  const calculatorWhatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${calculatorWhatsappMsg}`;
 
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-emerald-100 selection:text-emerald-900 print:bg-white print:text-black">
@@ -374,7 +375,7 @@ export default function ImpactoClient() {
             </div>
             <div className="hidden md:flex flex-col">
               <span className="text-[10px] uppercase font-extrabold tracking-widest text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 self-start">
-                Rede Ativa SaaS
+                Rede Ativa
               </span>
               <p className="text-xs text-slate-500 mt-0.5 font-medium">
                 Plataforma Integrada de Busca Ativa & Atas Digitais
@@ -420,7 +421,7 @@ export default function ImpactoClient() {
             </button>
 
             <a
-              href={whatsappUrl}
+              href={generalWhatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="hidden sm:flex px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 items-center gap-1.5 transition-colors"
@@ -431,10 +432,11 @@ export default function ImpactoClient() {
 
             <Link
               href="/login"
+              aria-label="Acessar Plataforma"
               className="px-4.5 py-2.5 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 shadow-sm shadow-slate-900/10 transition-all transform hover:-translate-y-0.5"
             >
               <IconLogin className="w-4 h-4 text-emerald-400" />
-              <span>Acessar Plataforma</span>
+              <span>Acessar sistema</span>
             </Link>
           </div>
         </div>
@@ -445,26 +447,6 @@ export default function ImpactoClient() {
           ============================================================================== */}
       <section className="relative pt-10 pb-16 md:pt-16 md:pb-24 overflow-hidden border-b border-slate-100 bg-gradient-to-b from-slate-50/80 via-white to-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          {/* Card de Marca em Destaque Proporcional no Topo do Hero */}
-          <div className="inline-flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 px-7 py-4 sm:px-10 sm:py-5 rounded-2xl sm:rounded-3xl bg-white border border-slate-200/90 shadow-md shadow-emerald-500/5 mb-8 sm:mb-10 max-w-xl mx-auto transition-transform hover:scale-101">
-            <div className="h-12 sm:h-14 w-auto flex items-center justify-center">
-              <img
-                src="/logo.svg"
-                alt="Rede Ativa - Busca Ativa & Livro de Atas"
-                className="h-11 sm:h-13 w-auto object-contain"
-              />
-            </div>
-            <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
-            <div className="text-center sm:text-left">
-              <span className="text-[11px] uppercase font-extrabold tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 inline-block">
-                Rede Ativa SaaS
-              </span>
-              <p className="text-xs text-slate-600 mt-1 font-semibold">
-                Plataforma Integrada de Busca Ativa & Atas Digitais
-              </p>
-            </div>
-          </div>
-
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.15] max-w-4xl mx-auto">
             Busca ativa e atas de atendimento conectadas:{" "}
             <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 bg-clip-text text-transparent">
@@ -478,7 +460,7 @@ export default function ImpactoClient() {
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <a
-              href={whatsappUrl}
+              href={generalWhatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2.5 transition-all transform hover:-translate-y-0.5"
@@ -576,7 +558,7 @@ export default function ImpactoClient() {
               </div>
               <div className="text-left leading-tight">
                 <span className="text-xs block">1. Busca Ativa & WhatsApp Protegido</span>
-                <span className="text-[10px] font-normal text-slate-500">Janela 480x760</span>
+                <span className="text-[10px] font-normal text-slate-500">Modo Privacidade</span>
               </div>
             </a>
 
@@ -636,7 +618,7 @@ export default function ImpactoClient() {
                     <IconCheck className="w-3.5 h-3.5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900">Janela Compacta e Isolada (480x760px)</h4>
+                    <h4 className="text-xs font-bold text-slate-900">Chat Isolado com Modo Privacidade</h4>
                     <p className="text-xs text-slate-500">
                       Abre unicamente o chat do responsável selecionado, mantendo toda a lista lateral de contatos e conversas pessoais blindada contra olhares de terceiros.
                     </p>
@@ -648,7 +630,7 @@ export default function ImpactoClient() {
                     <IconCheck className="w-3.5 h-3.5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900">Templates Institucionais com Interpolação Segura</h4>
+                    <h4 className="text-xs font-bold text-slate-900">Mensagens Padronizadas com Preenchimento Automático</h4>
                     <p className="text-xs text-slate-500">
                       Mensagens acolhedoras padronizadas que puxam o nome do estudante, turma e faltas sem digitação manual nem risco de vazamento de dados de outros alunos.
                     </p>
@@ -678,7 +660,7 @@ export default function ImpactoClient() {
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                       <h3 className="font-bold text-slate-900 text-sm">Simulador de Busca Ativa Humanizada</h3>
                     </div>
-                    <p className="text-xs text-slate-500">Interaja com os estudantes e alterne os modos de privacidade</p>
+                    <p className="text-xs text-slate-500">Simulação de disparo oficial com proteção de dados (LGPD)</p>
                   </div>
 
                   {/* Toggle de Privacidade */}
@@ -767,7 +749,7 @@ export default function ImpactoClient() {
                     <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 mb-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <IconShield className="w-4 h-4 text-emerald-600" />
-                        <span><strong>Janela Protegida Ativa:</strong> 480x760px focada unicamente no responsável {selectedStudent.parent}.</span>
+                        <span><strong>Modo Privacidade Ativo:</strong> Tela focada unicamente no responsável {selectedStudent.parent}.</span>
                       </div>
                       <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-emerald-200 text-emerald-900">
                         100% LGPD
@@ -933,7 +915,7 @@ export default function ImpactoClient() {
                         1. PIN de Fé Pública (Servidora)
                       </div>
                       <p className="text-[11px] text-slate-500 leading-tight">
-                        Criptografia PBKDF2 com 100.000 iterações.
+                        Validação por PIN pessoal intransferível da servidora.
                       </p>
                     </div>
                     <button
@@ -1010,7 +992,7 @@ export default function ImpactoClient() {
               </h2>
 
               <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                Adeus aos pesados cadernos de capa preta manuscritos e às folhas avulsas que se perdem nas gavetas. O Livro de Atas da Rede Ativa SaaS opera sob o regime de Fé Pública Administrativa com assinatura eletrônica avançada.
+                Adeus aos pesados cadernos de capa preta manuscritos e às folhas avulsas que se perdem nas gavetas. O Livro de Atas da Rede Ativa opera sob o regime de Fé Pública Administrativa com assinatura eletrônica avançada.
               </p>
 
               <div className="space-y-3 pt-2">
@@ -1045,7 +1027,7 @@ export default function ImpactoClient() {
                   <div>
                     <h4 className="text-xs font-bold text-slate-900">Termo Aditivo (&quot;Em tempo&quot;) Criptográfico</h4>
                     <p className="text-xs text-slate-500">
-                      Após lavrada, a ata é imutável. Qualquer correção exige Termo Aditivo vinculado com hash-chaining forense.
+                      Após lavrada, a ata é imutável. Qualquer correção pós-assinatura exige Termo Aditivo vinculado com rastreabilidade jurídica.
                     </p>
                   </div>
                 </div>
@@ -1229,7 +1211,7 @@ export default function ImpactoClient() {
               Horas Semanais Gastas com Burocracia Mecânica
             </h2>
             <p className="mt-3 text-sm sm:text-base text-slate-600">
-              Mova os controles abaixo: as colunas do gráfico se ajustam em tempo real demonstrando o tempo consumido em cada modelo conforme a quantidade de alunos e servidoras.
+              Selecione o porte da sua instituição para calcular a economia semanal de tempo da equipe pedagógica.
             </p>
           </div>
 
@@ -1286,12 +1268,6 @@ export default function ImpactoClient() {
                   <span>1 servidora</span>
                   <span>10 pedagogas/coordenadoras</span>
                 </div>
-              </div>
-
-              <div className="p-4 bg-slate-50/90 rounded-xl border border-slate-200 text-xs text-slate-600 leading-relaxed">
-                <p>
-                  <strong>Fórmula Factual:</strong> Com mais estudantes, o volume de faltas, ligações individuais, atas e dossiês físicos cresce exponencialmente. Na Rede Ativa, a rotina é automatizada e consome apenas frações mínimas de tempo da equipe.
-                </p>
               </div>
             </div>
 
@@ -1355,7 +1331,7 @@ export default function ImpactoClient() {
                     </div>
                   </div>
 
-                  {/* Coluna 2: Com a Rede Ativa SaaS */}
+                  {/* Coluna 2: Com a Rede Ativa */}
                   <div className="w-1/2 flex flex-col items-center h-full justify-end group">
                     {/* Badge Superior Flutuante */}
                     <div className="mb-2 text-center transition-all duration-300">
@@ -1376,7 +1352,7 @@ export default function ImpactoClient() {
                     </div>
 
                     <div className="mt-2 text-center">
-                      <p className="text-xs font-bold text-emerald-800">Com a Rede Ativa SaaS</p>
+                      <p className="text-xs font-bold text-emerald-800">Com a Rede Ativa</p>
                       <p className="text-[10px] text-emerald-600 font-semibold hidden sm:block">Importação SERE & IA</p>
                     </div>
                   </div>
@@ -1402,89 +1378,29 @@ export default function ImpactoClient() {
                   <p className="text-[11px] text-slate-500 font-medium">Retenção escolar</p>
                 </div>
               </div>
+
+              {/* CTA Dinâmico com Quantidade de Estudantes */}
+              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <p className="text-xs text-slate-500 text-center sm:text-left">
+                  Estimativa baseada no porte de {numStudents} estudantes e {numStaff} profissionais.
+                </p>
+                <a
+                  href={calculatorWhatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-2 transition-all shrink-0"
+                >
+                  <IconPhone className="w-3.5 h-3.5" />
+                  <span>Agendar demonstração para instituição com {numStudents} estudantes</span>
+                </a>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* ==============================================================================
-          8. SEÇÃO 5: QUADRO COMPARATIVO ANTES VS DEPOIS
-          ============================================================================== */}
-      <section className="py-16 md:py-24 border-b border-slate-100 bg-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-12">
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              A Diferença Prática no Cotidiano da Sua Escola
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Veja o que muda do modelo analógico fragmentado para a gestão digital unificada.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Antes (Caos Manual) */}
-            <div className="bg-rose-50/50 rounded-2xl border border-rose-200 p-6 space-y-4">
-              <div className="flex items-center gap-2.5 pb-3 border-b border-rose-200">
-                <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-                  <IconCross className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-sm">Como a maioria das escolas opera hoje</h3>
-              </div>
-
-              <ul className="space-y-3 text-xs text-slate-700">
-                <li className="flex items-start gap-2.5">
-                  <IconCross className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span><strong>WhatsApp Pessoal no Computador:</strong> Notificações particulares pulam na tela na presença de pais e estudantes.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCross className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span><strong>Cadernos Manuscritos de Atas:</strong> Risco constante de extravio, páginas rasgadas e caligrafia ilegível em auditorias.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCross className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span><strong>Dossiês Feitos às Pressas:</strong> 2 a 3 dias úteis revirando arquivos físicos quando o Conselho Tutelar solicita histórico.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCross className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span><strong>Falta de Memória Institucional:</strong> Se a pedagoga for transferida, todo o histórico das famílias se perde.</span>
-                </li>
-              </ul>
-            </div>
-
-            {/* Depois (Com a Rede Ativa) */}
-            <div className="bg-emerald-50/50 rounded-2xl border border-emerald-200 p-6 space-y-4">
-              <div className="flex items-center gap-2.5 pb-3 border-b border-emerald-200">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                  <IconCheck className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-sm">Com a Rede Ativa SaaS</h3>
-              </div>
-
-              <ul className="space-y-3 text-xs text-slate-700">
-                <li className="flex items-start gap-2.5">
-                  <IconCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                  <span><strong>Janela Blindada 480x760:</strong> Exibe exclusivamente a conversa do responsável com auditoria de entrega.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                  <span><strong>Fé Pública Digital (Lei 14.063):</strong> PIN de servidora, QR Code de assinatura e integridade via SHA-256.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                  <span><strong>Dossiê em 30 Segundos:</strong> Geração instantânea de PDF oficial consolidado para órgãos fiscalizadores.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <IconCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                  <span><strong>Histórico Blindado e Centralizado:</strong> Toda a trajetória pedagógica do estudante fica protegida na nuvem institucional.</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ==============================================================================
-          9. SEÇÃO 6: CASE REAL DA ESCOLA PILOTO FUNDADORA
+          8. SEÇÃO 6: CASE REAL DA ESCOLA PILOTO FUNDADORA
           ============================================================================== */}
       <section className="py-16 md:py-20 border-b border-slate-100 bg-slate-50/50">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -1552,7 +1468,7 @@ export default function ImpactoClient() {
                 É necessário instalar programas pesados ou trocar os computadores da escola?
               </h3>
               <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                Não. A Rede Ativa SaaS roda 100% no navegador (Chrome, Edge, Firefox) e não exige instalação de nenhum software pesado nos computadores da escola, funcionando com excelente desempenho mesmo em máquinas mais antigas.
+                Não. A Rede Ativa roda 100% no navegador (Chrome, Edge, Firefox) e não exige instalação de nenhum software pesado nos computadores da escola, funcionando com excelente desempenho mesmo em máquinas mais antigas.
               </p>
             </div>
 
@@ -1592,12 +1508,12 @@ export default function ImpactoClient() {
             Pronto para Levar Segurança e Modernidade à Sua Rede?
           </h2>
           <p className="mt-4 text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
-            Agende uma apresentação executiva de 15 minutos e veja como implantar a Rede Ativa SaaS na sua instituição ou município.
+            Agende uma apresentação executiva de 15 minutos e veja como implantar a Rede Ativa na sua instituição ou município.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <a
-              href={whatsappUrl}
+              href={generalWhatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2 transition-all transform hover:-translate-y-0.5"
@@ -1609,7 +1525,7 @@ export default function ImpactoClient() {
               href="/login"
               className="px-6 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm border border-slate-200 shadow-xs flex items-center gap-2 transition-all"
             >
-              Acessar Painel Escolar
+              Acessar sistema
               <IconChevronRight className="w-4 h-4" />
             </Link>
           </div>
@@ -1622,7 +1538,7 @@ export default function ImpactoClient() {
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="Rede Ativa" className="h-8 w-auto object-contain" />
             <span className="text-slate-300">|</span>
-            <span className="font-semibold text-slate-600">SaaS Educacional • Paraná</span>
+            <span className="font-semibold text-slate-600">Gestão Pedagógica • Paraná</span>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-5">
@@ -1631,7 +1547,7 @@ export default function ImpactoClient() {
             <a href="#dossie-eca" className="hover:text-slate-900 transition-colors">Dossiê ECA</a>
             <a href="#calculadora" className="hover:text-slate-900 transition-colors">Calculadora de Horas</a>
             <Link href="/login" className="font-bold text-emerald-700 hover:underline">
-              Entrar no Sistema
+              Acessar sistema
             </Link>
           </div>
         </div>
@@ -1721,7 +1637,7 @@ export default function ImpactoClient() {
             {/* Simulação de Folha A4 */}
             <div className="bg-white border border-slate-300 rounded-lg p-6 font-serif shadow-xs space-y-4 text-xs leading-relaxed">
               <div className="text-center border-b border-slate-200 pb-3">
-                <p className="font-sans font-extrabold text-sm text-slate-900 tracking-tight">REDE ATIVA SAAS • COORDENAÇÃO PEDAGÓGICA</p>
+                <p className="font-sans font-extrabold text-sm text-slate-900 tracking-tight">REDE ATIVA • COORDENAÇÃO PEDAGÓGICA</p>
                 <p className="font-sans text-[11px] text-slate-500">RELATÓRIO CIRCUNSTANCIADO DE INFREQUÊNCIA ESCOLAR (ART. 56 ECA)</p>
                 <p className="font-mono text-[10px] text-slate-400 mt-1">CERTIDÃO DIGITAL Nº 2026/089-ECA</p>
               </div>
