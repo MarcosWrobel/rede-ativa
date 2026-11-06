@@ -93,7 +93,7 @@ export default function SchoolSelector({
             ? "bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 cursor-pointer"
             : "bg-transparent border-transparent cursor-default"
         }`}
-        title={hasMultiple ? "Clique para alternar de instituição escolar" : undefined}
+        title={hasMultiple ? "Alternar escola" : undefined}
       >
         <div className="w-6 h-6 rounded-md bg-white dark:bg-slate-700 flex items-center justify-center p-0.5 border border-slate-200 dark:border-slate-600 flex-shrink-0 overflow-hidden">
           {currentSchool?.logoUrl ? (
@@ -145,7 +145,7 @@ export default function SchoolSelector({
         <div className="absolute left-0 mt-1.5 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
           <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700/80">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
-              Instituições com seu Vínculo
+              Suas escolas
             </span>
           </div>
 

@@ -93,7 +93,7 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
         </main>
 
         <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-6 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden transition-colors">
-          {currentSchool?.name || "Rede Ativa"} — Sistema de Busca Ativa & Comunicação Escolar. Acesso institucional seguro.
+          {currentSchool?.name || "Rede Ativa"} — Busca Ativa e Livro de Atas.
         </footer>
       </div>
     </div>

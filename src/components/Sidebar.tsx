@@ -102,95 +102,95 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
   const navSections: NavSection[] = [
     {
       id: "busca-ativa",
-      title: "Busca Ativa & Frequência",
+      title: "Busca Ativa",
       items: [
         {
           href: "/faltas",
-          label: "Frequência & Alertas",
+          label: "Frequência",
           icon: AlertTriangle,
-          description: "Risco crítico, alertas de queda abrupta e protocolos SERP",
+          description: "Alertas de infrequência e SERP",
         },
         {
           href: "/busca-ativa",
-          label: "Enviar Mensagem",
+          label: "Busca Ativa",
           icon: Send,
-          description: "Envio individual e fila assistida por turma via wa.me",
+          description: "Envio de mensagens aos responsáveis",
         },
         {
           href: "/historico",
-          label: "Histórico & Retornos",
+          label: "Histórico",
           icon: History,
-          description: "Controle de contatos, retornos dos pais e triagem IA",
+          description: "Contatos e retornos familiares",
         },
       ],
     },
     {
       id: "registro",
-      title: "Registro Pedagógico",
+      title: "Registros",
       items: [
         {
           href: "/alunos",
-          label: "Alunos e Turmas",
+          label: "Estudantes e Turmas",
           icon: Users,
-          description: "Base de alunos, importação SERE, Prontuário 360 e Dossiê A4",
+          description: "Prontuário 360º e dossiê",
         },
         {
           href: "/atestados",
-          label: "Painel de Atestados",
+          label: "Atestados",
           icon: Stethoscope,
-          description: "Lançamento rápido e controle de atestados médicos e licenças",
+          description: "Controle de atestados médicos",
         },
         {
           href: "/atas",
-          label: "Livro de Atas Digital",
+          label: "Livro de Atas",
           icon: BookOpenCheck,
-          description: "Atas eletrônicas, assinaturas digitais, fé pública e Livro Anual",
+          description: "Atas e assinaturas com fé pública",
         },
         {
           href: "/encaminhamentos",
-          label: "Combinados & Prazos",
+          label: "Encaminhamentos",
           icon: ListTodo,
           badge: overdueActionsCount > 0 ? `${overdueActionsCount}` : undefined,
-          description: "Acompanhamento e baixa em compromissos e prazos de atas",
+          description: "Prazos e compromissos firmados",
         },
       ],
     },
     {
       id: "diagnostico",
-      title: "Diagnóstico & Gestão",
+      title: "Relatórios",
       items: [
         {
           href: "/boletim",
           label: "Boletim Semanal",
           icon: FileSpreadsheet,
-          description: "Diagnóstico executivo de infrequência para reuniões",
+          description: "Diagnóstico semanal de infrequência",
         },
         {
           href: "/relatorios",
-          label: "Relatórios & Gráficos",
+          label: "Relatórios",
           icon: BarChart3,
-          description: "Indicadores por trimestre, motivos e causas de faltas",
+          description: "Indicadores e causas de faltas",
         },
       ],
     },
     {
       id: "sistema",
-      title: "Sistema & Ajustes",
+      title: "Configurações",
       items: [
         {
           href: "/modelos",
           label: "Modelos de Mensagem",
           icon: FileText,
-          description: "Textos padronizados de comunicação e gerador IA",
+          description: "Textos padronizados de comunicação",
         },
         ...(isSecretariat
           ? [
               {
                 href: "/secretaria",
-                label: "Painel SEMEC / Rede",
+                label: "Secretaria",
                 icon: Landmark,
-                badge: "SEMEC",
-                description: "Visão executiva consolidada da rede municipal de ensino",
+                badge: "Rede",
+                description: "Indicadores da rede municipal",
               },
             ]
           : []),
@@ -198,24 +198,24 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           ? [
               {
                 href: "/gestao",
-                label: "Painel da Direção",
+                label: "Gestão Escolar",
                 icon: Building2,
-                badge: "GESTOR",
-                description: "Visão executiva, KPIs e atalhos da direção da escola",
+                badge: "Gestão",
+                description: "Visão da direção da escola",
               },
               {
                 href: "/configuracoes/escola",
-                label: "Identidade da Escola",
+                label: "Dados da Escola",
                 icon: Building2,
-                badge: "GESTOR",
-                description: "Personalização de dados, brasão institucional e chave da extensão",
+                badge: "Gestão",
+                description: "Identidade visual e chave de extensão",
               },
               {
                 href: "/equipe",
-                label: "Equipe & Acessos",
+                label: "Equipe Escolar",
                 icon: UserCheck,
-                badge: "GESTOR",
-                description: "Servidores autorizados e controle de papéis da unidade",
+                badge: "Gestão",
+                description: "Acessos e equipe da unidade",
               },
             ]
           : []),
@@ -223,24 +223,24 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           ? [
               {
                 href: "/admin",
-                label: "Painel Global SaaS",
+                label: "Administração Global",
                 icon: ShieldCheck,
-                badge: "SUPER",
-                description: "Painel operacional e métricas globais da plataforma",
+                badge: "Admin",
+                description: "Painel operacional global",
               },
               {
                 href: "/admin/escolas",
-                label: "Gestão SaaS de Escolas",
+                label: "Cadastro de Escolas",
                 icon: Building2,
-                badge: "SUPER",
-                description: "Cadastro e gestão de unidades escolares e redes municipais/estaduais",
+                badge: "Admin",
+                description: "Unidades escolares e redes",
               },
               {
                 href: "/auditoria",
-                label: "Trilha de Auditoria",
+                label: "Auditoria",
                 icon: ShieldCheck,
-                badge: "ADM",
-                description: "Logs imutáveis de auditoria e conformidade com IP",
+                badge: "Admin",
+                description: "Registros imutáveis de ações",
               },
             ]
           : []),
@@ -252,23 +252,23 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
 
   let primaryHomeHref = "/busca-ativa";
   let primaryHomeLabel = "Busca Ativa";
-  let primaryHomeDesc = "Fila e disparos via WhatsApp";
+  let primaryHomeDesc = "Fila e envio de mensagens";
   let PrimaryHomeIcon = Send;
 
   if (isSuper) {
     primaryHomeHref = "/admin";
-    primaryHomeLabel = "Painel Global SaaS";
-    primaryHomeDesc = "Gestão operacional global do SaaS";
+    primaryHomeLabel = "Administração Global";
+    primaryHomeDesc = "Painel operacional global";
     PrimaryHomeIcon = ShieldCheck;
   } else if (isSecretariat) {
     primaryHomeHref = "/secretaria";
-    primaryHomeLabel = "Painel SEMEC";
+    primaryHomeLabel = "Secretaria";
     primaryHomeDesc = "Indicadores da rede municipal";
     PrimaryHomeIcon = Landmark;
   } else if (isSchoolManager) {
     primaryHomeHref = "/gestao";
-    primaryHomeLabel = "Painel da Direção";
-    primaryHomeDesc = "Gestão da unidade e equipe";
+    primaryHomeLabel = "Gestão Escolar";
+    primaryHomeDesc = "Visão da direção da unidade";
     PrimaryHomeIcon = Building2;
   }
 
@@ -383,7 +383,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
                   }`}
                 />
                 {(!collapsed || mobileOpen) && (
-                  <span className="ml-3 truncate text-slate-300">Visão Geral da Unidade</span>
+                  <span className="ml-3 truncate text-slate-300">Visão Geral</span>
                 )}
               </Link>
             </div>

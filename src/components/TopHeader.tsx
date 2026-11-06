@@ -21,40 +21,40 @@ export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: 
 
   if (pathname === "/login") return null;
 
-  const pageTitles: Record<string, { title: string; subtitle: string }> = {
-    "/": { title: "Início", subtitle: "Redirecionamento inteligente por perfil" },
-    "/admin": { title: "Super Admin SaaS", subtitle: "Painel operacional e métricas globais da plataforma" },
-    "/secretaria": { title: "Painel SEMEC / Rede", subtitle: "Consolidado executivo municipal e indicadores da rede" },
-    "/gestao": { title: "Painel da Direção", subtitle: "Visão gerencial da unidade, equipe e turmas" },
-    "/visao-geral": { title: "Visão Geral da Unidade", subtitle: "Painel de controle e métricas gerais da escola" },
-    "/faltas": { title: "Painel de Frequência & Alertas", subtitle: "Monitoramento de infrequência, risco crítico e SERP" },
-    "/busca-ativa": { title: "Enviar Mensagem", subtitle: "Envio individual e fila assistida por turma via wa.me" },
-    "/historico": { title: "Histórico & Retornos", subtitle: "Controle de contatos e retornos familiares com IA" },
-    "/alunos": { title: "Alunos e Turmas", subtitle: "Gestão cadastral, prontuários 360º e importação oficial" },
-    "/atestados": { title: "Painel de Atestados", subtitle: "Lançamento ágil e controle de atestados e licenças médicas" },
-    "/atas": { title: "Livro de Atas Digital", subtitle: "Atendimento pedagógico, assinaturas digitais e fé pública" },
-    "/encaminhamentos": { title: "Combinados & Encaminhamentos", subtitle: "Gestão e baixa de prazos e compromissos firmados em atas" },
-    "/boletim": { title: "Boletim Semanal", subtitle: "Diagnóstico executivo de busca ativa e infrequência" },
-    "/relatorios": { title: "Relatórios & Estatísticas", subtitle: "Indicadores de ocorrências, causas e metas" },
-    "/modelos": { title: "Modelos de Mensagem", subtitle: "Textos padronizados de comunicação institucional" },
-    "/equipe": { title: "Equipe & Acessos", subtitle: "Controle institucional de servidores autorizados" },
-    "/auditoria": { title: "Trilha de Auditoria", subtitle: "Histórico imutável de conformidade e auditoria com IP" },
-    "/configuracoes/escola": { title: "Identidade da Escola", subtitle: "Personalização de dados, brasão e chave da extensão" },
-    "/admin/escolas": { title: "Gestão de Escolas", subtitle: "Administração de escolas e redes municipais/estaduais" },
+  const pageTitles: Record<string, { title: string }> = {
+    "/": { title: "Início" },
+    "/admin": { title: "Administração Global" },
+    "/secretaria": { title: "Secretaria de Educação" },
+    "/gestao": { title: "Gestão Escolar" },
+    "/visao-geral": { title: "Visão Geral" },
+    "/faltas": { title: "Frequência e Alertas" },
+    "/busca-ativa": { title: "Busca Ativa" },
+    "/historico": { title: "Histórico de Contatos" },
+    "/alunos": { title: "Estudantes e Turmas" },
+    "/atestados": { title: "Atestados e Justificativas" },
+    "/atas": { title: "Livro de Atas" },
+    "/encaminhamentos": { title: "Encaminhamentos e Prazos" },
+    "/boletim": { title: "Boletim de Frequência" },
+    "/relatorios": { title: "Relatórios" },
+    "/modelos": { title: "Modelos de Mensagem" },
+    "/equipe": { title: "Equipe Escolar" },
+    "/auditoria": { title: "Auditoria" },
+    "/configuracoes/escola": { title: "Configurações da Escola" },
+    "/admin/escolas": { title: "Cadastro de Escolas" },
   };
 
   let currentInfo = pageTitles[pathname];
   if (!currentInfo) {
     if (pathname.includes("/dossie")) {
-      currentInfo = { title: "Dossiê Oficial do Estudante", subtitle: "Relatório técnico em conformidade com o ECA para CT/MP/SERP" };
+      currentInfo = { title: "Dossiê do Estudante" };
     } else if (pathname.startsWith("/alunos/")) {
-      currentInfo = { title: "Prontuário 360º do Aluno", subtitle: "Ficha individual com frequência, atestados e linha do tempo" };
+      currentInfo = { title: "Prontuário do Estudante" };
     } else if (pathname.includes("/imprimir")) {
-      currentInfo = { title: "Impressão da Ata Oficial", subtitle: "Documento oficial A4 com fé pública e assinaturas" };
+      currentInfo = { title: "Impressão da Ata" };
     } else if (pathname.startsWith("/atas/livro/")) {
-      currentInfo = { title: "Livro Anual Consolidado", subtitle: "Termo de abertura, atas sequenciais e encerramento anual" };
+      currentInfo = { title: "Livro Anual" };
     } else {
-      currentInfo = { title: currentSchool?.name || "Colégio Estadual", subtitle: "Sistema de Busca Ativa & Atas" };
+      currentInfo = { title: currentSchool?.name || "Rede Ativa" };
     }
   }
 

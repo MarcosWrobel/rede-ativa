@@ -64,8 +64,8 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
         onClick={toggleMode}
         title={
           mode === "extension"
-            ? "Modo Ativo: Janela Dedicada Compacta via Extensão. Clique para alternar para o Modo Convencional."
-            : "Modo Ativo: Convencional (Nova Aba). Clique para alternar para o Modo Janela Dedicada."
+            ? "Disparo via extensão. Clique para alternar."
+            : "Disparo em nova aba. Clique para alternar."
         }
         className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer shadow-2xs ${
           mode === "extension"
@@ -76,12 +76,12 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
         {mode === "extension" ? (
           <>
             <Zap className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600" />
-            <span>Janela Compacta (Extensão)</span>
+            <span>Extensão</span>
           </>
         ) : (
           <>
             <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-            <span>Convencional (Nova Aba)</span>
+            <span>Nova aba</span>
           </>
         )}
       </button>
@@ -103,10 +103,10 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
             ? "bg-emerald-600 text-white shadow-xs"
             : "text-slate-600 hover:bg-slate-100"
         }`}
-        title="Abre e reutiliza a Janela Dedicada Compacta do WhatsApp Web sem barras de navegação"
+        title="Abre o WhatsApp na janela da extensão"
       >
         <Zap className="w-3.5 h-3.5" />
-        <span>Janela Dedicada (Extensão)</span>
+        <span>Extensão</span>
       </button>
 
       <button
@@ -120,10 +120,10 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
             ? "bg-slate-800 text-white shadow-xs"
             : "text-slate-600 hover:bg-slate-100"
         }`}
-        title="Abre o WhatsApp Web pelo método tradicional do navegador"
+        title="Abre o WhatsApp em nova aba"
       >
         <ExternalLink className="w-3.5 h-3.5" />
-        <span>Convencional (Nova Aba)</span>
+        <span>Nova aba</span>
       </button>
     </div>
   );

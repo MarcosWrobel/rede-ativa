@@ -99,7 +99,7 @@ export default function ModalDialog({
           <button
             type="button"
             onClick={() => dialogRef.current?.close()}
-            aria-label="Fechar janela"
+            aria-label="Fechar"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
           >
             <X className="w-4 h-4" />

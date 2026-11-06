@@ -34,8 +34,8 @@ export default function ElevationBanner({ currentUser, currentSchool }: Elevatio
   if (isSecretariat && pathname === "/secretaria") return null;
 
   const returnHref = isSuperAdmin ? "/admin" : "/secretaria";
-  const returnLabel = isSuperAdmin ? "Voltar ao Painel Global" : "Voltar ao Painel SEMEC";
-  const roleBadge = isSuperAdmin ? "MODO SUPER ADMIN" : "GESTÃO DA SECRETARIA";
+  const returnLabel = isSuperAdmin ? "Voltar à Administração" : "Voltar à Secretaria";
+  const roleBadge = isSuperAdmin ? "Superadmin" : "Secretaria";
   const badgeColor = isSuperAdmin
     ? "bg-indigo-600 text-white"
     : "bg-amber-600 text-white";
@@ -43,13 +43,13 @@ export default function ElevationBanner({ currentUser, currentSchool }: Elevatio
   return (
     <div className="bg-slate-900 border-b border-indigo-500/30 text-white px-4 py-2 text-xs flex flex-col sm:flex-row items-center justify-between gap-2 shadow-sm sticky top-14 z-20 transition-all">
       <div className="flex items-center space-x-2.5 min-w-0">
-        <span className={`px-2 py-0.5 rounded-md font-black text-[10px] tracking-wider uppercase flex items-center space-x-1 ${badgeColor}`}>
+        <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 ${badgeColor}`}>
           {isSuperAdmin ? <ShieldAlert className="w-3 h-3 mr-1" /> : <Landmark className="w-3 h-3 mr-1" />}
           {roleBadge}
         </span>
 
         <span className="text-slate-300 truncate">
-          Visualizando unidade: <strong className="text-white">{currentSchool?.name || "Escola Ativa"}</strong>
+          Unidade ativa: <strong className="text-white">{currentSchool?.name || "Escola Ativa"}</strong>
           {currentSchool?.city && <span className="text-slate-400 font-normal"> ({currentSchool.city})</span>}
         </span>
       </div>
