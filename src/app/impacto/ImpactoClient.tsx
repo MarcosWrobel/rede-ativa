@@ -1,7 +1,13 @@
 "use client";
 
-import React, { useState, useId } from "react";
+import React, { useState, useEffect, useId } from "react";
 import Link from "next/link";
+
+const HERO_ROTATING_PHRASES = [
+  "da busca ativa ao livro de atas",
+  "com proteção e respaldo jurídico",
+  "organizada em um prontuário único",
+];
 
 /* ==============================================================================
    VETORES SVG PRÓPRIOS (DESIGN SYSTEM PROFISSIONAL - STRICT NO EMOJIS)
@@ -227,6 +233,21 @@ export default function ImpactoClient() {
   const [numStaff, setNumStaff] = useState<number>(3);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Rotação dinâmica do H1 no Hero
+  const [heroPhraseIndex, setHeroPhraseIndex] = useState(0);
+  const [heroPhraseVisible, setHeroPhraseVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setHeroPhraseVisible(false);
+      setTimeout(() => {
+        setHeroPhraseIndex((prev) => (prev + 1) % HERO_ROTATING_PHRASES.length);
+        setHeroPhraseVisible(true);
+      }, 300);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, []);
+
   // Simulador 1: Busca Ativa
   const [selectedStudent, setSelectedStudent] = useState<StudentProfile>(SAMPLE_STUDENTS[0]);
   const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplateType>("preventivo");
@@ -445,12 +466,21 @@ export default function ImpactoClient() {
       {/* ==============================================================================
           2. HERO SECTION COM BRANDING EM ALTO RELEVO & CREDENCIAIS LEGAIS
           ============================================================================== */}
-      <section className="relative pt-10 pb-16 md:pt-16 md:pb-24 overflow-hidden border-b border-slate-100 bg-gradient-to-b from-slate-50/80 via-white to-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.15] max-w-4xl mx-auto">
-            Busca ativa e atas de atendimento conectadas:{" "}
-            <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 bg-clip-text text-transparent">
-              todo o histórico com respaldo jurídico real
+      <section className="relative pt-12 pb-16 md:pt-16 md:pb-24 overflow-hidden border-b border-slate-100 bg-gradient-to-b from-slate-50/80 via-white to-white">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 leading-[1.2] max-w-3xl mx-auto">
+            <span className="block text-slate-800">A rotina da sua escola conectada:</span>
+            <span
+              className="block min-h-[44px] sm:min-h-[56px] transition-all duration-500 ease-out"
+              style={{
+                opacity: heroPhraseVisible ? 1 : 0,
+                transform: heroPhraseVisible ? "translateY(0)" : "translateY(8px)",
+              }}
+              aria-live="polite"
+            >
+              <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 bg-clip-text text-transparent inline-block">
+                {HERO_ROTATING_PHRASES[heroPhraseIndex]}
+              </span>
             </span>
           </h1>
 
@@ -632,7 +662,7 @@ export default function ImpactoClient() {
                   <div>
                     <h4 className="text-xs font-bold text-slate-900">Mensagens Padronizadas com Preenchimento Automático</h4>
                     <p className="text-xs text-slate-500">
-                      Mensagens acolhedoras padronizadas que puxam o nome do estudante, turma e faltas sem digitação manual nem risco de vazamento de dados de outros alunos.
+                      Modelos acolhedores que puxam automaticamente o nome do estudante, turma e faltas sem digitação manual nem risco de vazamento de dados de outros alunos.
                     </p>
                   </div>
                 </div>
