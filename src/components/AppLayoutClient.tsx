@@ -47,6 +47,7 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
   }, []);
 
   const isStandalonePage =
+    pathname === "/" ||
     pathname === "/login" ||
     pathname === "/impacto" ||
     pathname.startsWith("/impacto/") ||

@@ -4,17 +4,24 @@ import { renderToString } from "react-dom/server";
 import ImpactoClient from "../ImpactoClient";
 import ImpactoPage from "../page";
 
+// Mock do next/navigation
+vi.mock("next/navigation", () => ({
+  permanentRedirect: vi.fn((url: string) => {
+    throw new Error(`PERMANENT_REDIRECT:${url}`);
+  }),
+}));
+
 describe("Landing Page de Vendas & Playground Interativo (/impacto)", () => {
-  it("renderiza o cabeçalho executivo, selos legais e simulador de tempo via renderToString", () => {
+  it("renderiza o cabeçalho executivo com botão Acessar Plataforma para /login", () => {
     const html = renderToString(<ImpactoClient />);
 
     expect(html).toContain("Rede Ativa");
+    expect(html).toContain("Acessar Plataforma");
+    expect(html).toContain('href="/login"');
     expect(html).toContain("Lei 14.063/2020");
     expect(html).toContain("ECA Art. 56");
     expect(html).toContain("ISO 19005-1");
     expect(html).toContain("Horas Semanais Gastas com Burocracia Mecânica");
-    expect(html).toContain("Rotina Manual Tradicional");
-    expect(html).toContain("Com a Rede Ativa SaaS");
   });
 
   it("renderiza a bancada interativa do playground com as 3 abas essenciais", () => {
@@ -37,9 +44,7 @@ describe("Landing Page de Vendas & Playground Interativo (/impacto)", () => {
     expect(html).toContain("Disparar Mensagem de Busca Ativa");
   });
 
-  it("renderiza a página Server Component ImpactoPage com sucesso", () => {
-    const pageHtml = renderToString(<ImpactoPage />);
-    expect(pageHtml).toContain("Rede Ativa");
-    expect(pageHtml).toContain("Da Sobrecarga Burocrática");
+  it("redireciona a rota legada /impacto permanentemente (308) para a raiz /", () => {
+    expect(() => ImpactoPage()).toThrow("PERMANENT_REDIRECT:/");
   });
 });

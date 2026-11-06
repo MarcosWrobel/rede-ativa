@@ -79,6 +79,14 @@ function IconKey({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
+function IconLogin({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l3 3m0 0l-3 3m3-3H3" />
+    </svg>
+  );
+}
+
 function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -404,22 +412,30 @@ export default function ImpactoClient() {
             <button
               type="button"
               onClick={handlePrint}
-              className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 flex items-center gap-1.5 transition-colors shadow-xs"
+              className="hidden lg:flex px-3.5 py-2 text-xs font-semibold rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 items-center gap-1.5 transition-colors shadow-xs"
               title="Salvar como documento em PDF"
             >
               <IconDocument className="w-4 h-4 text-emerald-600" />
-              <span className="hidden sm:inline">Salvar em PDF</span>
+              <span>Salvar em PDF</span>
             </button>
 
             <a
               href={whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-4.5 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm shadow-emerald-600/20 transition-all transform hover:-translate-y-0.5"
+              className="hidden sm:flex px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 items-center gap-1.5 transition-colors"
             >
-              <IconPhone className="w-4 h-4" />
-              <span>Agendar com Especialista</span>
+              <IconPhone className="w-4 h-4 text-emerald-600" />
+              <span>Agendar</span>
             </a>
+
+            <Link
+              href="/login"
+              className="px-4.5 py-2.5 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 shadow-sm shadow-slate-900/10 transition-all transform hover:-translate-y-0.5"
+            >
+              <IconLogin className="w-4 h-4 text-emerald-400" />
+              <span>Acessar Plataforma</span>
+            </Link>
           </div>
         </div>
       </header>
