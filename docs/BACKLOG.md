@@ -122,7 +122,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ---
 
-## Roadmap Futuro — Próximas Sprints Planejadas
+## Épico 12: Roadmap de Conclusão da Fundação SaaS (Sprint 14)
 
 - [x] **`INFRA-01`** `[P1 | Esforço: P]` **Pipeline CI Automatizado (GitHub Actions)**  
   Execução automática de `npx prisma generate`, `npx tsc --noEmit`, `npm test` e `npm run build` em todo Pull Request/push apontando para `main` via [ci.yml](file:///home/marcoswrobel/Documents/Registro/.github/workflows/ci.yml).
@@ -132,6 +132,26 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
   Geração determinística server-side de artefato PDF/A-1b com metadados XMP (`pdfaid:part=1`, `conformance=B`), perfil de cor `sRGB IEC61966-2.1` (`/GTS_PDFA1`), fontes TrueType embutidas (`LiberationSans`), QR Code e chancela de fé pública via [ataPdfArchive.ts](file:///home/marcoswrobel/Documents/Registro/src/lib/ataPdfArchive.ts) e rota protegida [GET /api/atas/[id]/pdfa](file:///home/marcoswrobel/Documents/Registro/src/app/api/atas/[id]/pdfa/route.ts).
 - [x] **`STORAGE-01`** `[P3 | Esforço: G]` **Externalização de Scans Físicos Pesados para Object Storage (S3/R2/Vercel Blob)**  
   Arquitetura multi-driver em [objectStorage.ts](file:///home/marcoswrobel/Documents/Registro/src/lib/objectStorage.ts) com validação de magic bytes anti-spoofing, assinatura nativa AWS SigV4, hash de integridade SHA-256 (`physicalScanSha256`), proxy autenticado anti-IDOR e com sigilo ECA em [GET /api/atas/[id]/physical-scan](file:///home/marcoswrobel/Documents/Registro/src/app/api/atas/[id]/physical-scan/route.ts), e **fallback automático zero-custo para PostgreSQL Base64** quando nenhuma credencial externa estiver configurada.
+
+---
+
+## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Não-Essencial no Momento)
+
+> **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM).  
+> **Classificação de Prioridade:** **Não são necessários nem essenciais para a operação atual ou para a entrada das primeiras dezenas de escolas**, pois a plataforma já é estável, segura e auditada. Devem ser ativados gradualmente conforme o projeto alcançar escala de múltiplas redes municipais e geração de receita.
+
+- [ ] **`SAAS-OPS-01`** `[P3 | Esforço: P]` **Observabilidade Externa & Error Tracking em Tempo Real (Sentry / BetterStack)**  
+  - **Objetivo:** Captura automatizada de exceções em runtime no cliente (`error.tsx`), no middleware (`src/proxy.ts`) e nos Route Handlers de background (sincronização SERE, webhooks).  
+  - **Gatilho de Ativação:** Operação simultânea com mais de 20 escolas ativas, reduzindo a necessidade de suporte técnico reativo.
+- [ ] **`SAAS-ARCH-01`** `[P3 | Esforço: M]` **Camada de Casos de Uso / Domain Services (Refatoração DDD)**  
+  - **Objetivo:** Desacoplar regras de negócio complexas hoje contidas diretamente em Route Handlers extensos (ex: `/api/atas/[id]/finalize` e `/api/frequencia/sync`) para serviços puros de aplicação em `src/services/` (ex: `AtaFinalizationService.ts`, `SereIngestionService.ts`).  
+  - **Gatilho de Ativação:** Entrada de novos desenvolvedores no time ou necessidade de expor funcionalidades via CLI/SDK.
+- [ ] **`SAAS-QUEUE-01`** `[P4 | Esforço: G]` **Processamento Assíncrono com Filas em Background (Inngest / QStash)**  
+  - **Objetivo:** Deslocar importações massivas do SERE (> 5.000 alunos) e disparos em lote de mensagens para filas desacopladas com *retries* automáticos, emitindo `202 Accepted` e barra de progresso via Server-Sent Events (SSE).  
+  - **Gatilho de Ativação:** Contratação da plataforma por redes municipais de grande porte (capitais ou redes com mais de 50.000 matrículas).
+- [ ] **`SAAS-UI-01`** `[P3 | Esforço: M]` **Modularização Componentizada do Editor de Atas (`AtaEditorModal.tsx`)**  
+  - **Objetivo:** Decomposição do modal mestre (~2.600 linhas) em submódulos isolados com tipagem limpa (`AtaWizardStep1.tsx`, `AtaWizardStep2.tsx`, `AtaViewerMode.tsx`, `AtaAddendumForm.tsx`), facilitando a manutenção e testes isolados de interface.  
+  - **Gatilho de Ativação:** Manutenções evolutivas na interface ou inclusão de novos tipos de atas especializadas (ex: atas de Conselho de Classe).
 
 ---
 
@@ -150,4 +170,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 11** | Consolidação Adversarial dos 7 Vetores Multi-Tenant | Épico 9 | ✅ Concluído |
 | **Sprint 12** | Selo Pericial de Mensagens/Dossiê, Onboarding & Preditiva | Épico 10 | ✅ Concluído |
 | **Sprint 13** | Perícia Grafotécnica Vetorial, PIN PBKDF2 & Extemporânea | Épico 11 | ✅ Concluído |
-| **Próximas** | PDF/A-1b, GitHub Actions CI, Rate-Limiting & Blob Storage | Roadmap | `[ ]` Planejado |
+| **Sprint 14** | CI GitHub Actions, Rate-Limiter, PDF/A-1b & Storage Multi-Driver | Épico 12 | ✅ Concluído |
+| **Futuro** | Observabilidade APM, Filas Assíncronas & Refatoração DDD | Expansão | ⏳ Planejado sob Demanda |
