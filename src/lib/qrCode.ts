@@ -42,18 +42,28 @@ export async function generateQrCodeDataUrl(
   });
 }
 
+export const DEFAULT_FALLBACK_DOMAIN = "registro-leopoldina.vercel.app";
+
+/**
+ * Resolve a URL base absoluta da aplicação respeitando variáveis de ambiente,
+ * o contexto do cliente/browser ou o fallback institucional.
+ */
+export function getBaseAppUrl(origin?: string): string {
+  return (
+    origin?.replace(/\/+$/, "") ||
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
+    process.env.APP_URL?.replace(/\/+$/, "") ||
+    (typeof window !== "undefined" && window.location?.origin ? window.location.origin : "") ||
+    `https://${DEFAULT_FALLBACK_DOMAIN}`
+  );
+}
+
 /**
  * Normaliza e resolve a URL canônica de validação pública da ata.
  */
 export function getAtaValidationUrl(verificationCode: string, origin?: string): string {
   const cleanCode = (verificationCode || "").trim().toUpperCase();
-  const base =
-    origin?.replace(/\/+$/, "") ||
-    (typeof window !== "undefined" ? window.location.origin : "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
-    process.env.APP_URL?.replace(/\/+$/, "") ||
-    "https://registro-leopoldina.vercel.app";
-
+  const base = getBaseAppUrl(origin);
   return `${base}/validar/ata/${encodeURIComponent(cleanCode)}`;
 }
 
@@ -62,17 +72,14 @@ export function getAtaValidationUrl(verificationCode: string, origin?: string): 
  */
 export function getRequestOrigin(headersObj?: { get(name: string): string | null }): string {
   if (!headersObj) {
-    return (
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
-      process.env.APP_URL?.replace(/\/+$/, "") ||
-      "https://registro-leopoldina.vercel.app"
-    );
+    return getBaseAppUrl();
   }
 
   const host =
     headersObj.get("x-forwarded-host") ||
     headersObj.get("host") ||
-    "registro-leopoldina.vercel.app";
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/^https?:\/\//, "") ||
+    DEFAULT_FALLBACK_DOMAIN;
 
   const proto =
     headersObj.get("x-forwarded-proto") ||

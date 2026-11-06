@@ -62,6 +62,15 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **Guia de Alta Escala**: Diretrizes completas de transição da Escola Piloto para redes de centenas de escolas documentadas em [`docs/GUIA_ESCALABILIDADE.md`](docs/GUIA_ESCALABILIDADE.md).
 - Suíte automatizada consolidada em **232 testes em 40 suítes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
+### Fase 6: Desacoplamento de Scrapers & Duas Edições no Paraná (Novembro/2026)
+- **`JUR-09`**: Arquitetura de Duas Edições da Plataforma no Paraná ([`src/lib/platformEditions.ts`](src/lib/platformEditions.ts)):
+  1. `PILOTO_INTEGRADA`: Recursos completos SEED-PR (Power BI, SERP Celepar, tokens de extensão);
+  2. `INSTITUCIONAL_ESSENCIAL`: Foco juridicamente viável para SEMECs municipais (Busca Ativa WhatsApp, Livro de Atas Lei nº 14.063/2020 e Faltas via CSV/SERE), ocultando scrapers governamentais.
+- **`JUR-10`**: Herança de Governança Multi-Tenant: Superadmin define a versão no cadastro da SEMEC (`EducationNetwork`); quando gestores municipais (`GESTAO_SECRETARIA`) adicionam escolas, elas herdam automaticamente a versão definida pelo Superadmin.
+- **`JUR-11`**: Blindagem de Defesa em Profundidade: `/api/frequencia/sync` e `/api/serp/sync` retornam expressamente `403 Forbidden` quando a escola de destino estiver na edição `INSTITUCIONAL_ESSENCIAL`.
+- **`JUR-12`**: Interface Adaptativa: painel de `/faltas`, `/alunos/[id]` (Prontuário) e `/alunos/[id]/dossie` adaptam dinamicamente botões e termos textuais.
+- Suíte automatizada consolidada em **250 testes em 42 suítes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+
 ---
 
 ## 🛡️ 2. As 7 Regras de Ouro Inegociáveis
@@ -109,7 +118,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **100% da suíte Vitest deve passar (200+ testes em 36+ suítes, incluindo `adversarialQa.test.ts`)**.
+  1. Execute `npm test` — **100% da suíte Vitest deve passar (250+ testes em 42+ suítes, incluindo `adversarialQa.test.ts` e `platformEditions.test.ts`)**.
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -122,6 +131,16 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
   NODE_ENV="development"
   ```
 - O provider `"escola-dev-auth"` em [`src/lib/auth.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/auth.ts) permite login imediato com e-mails `@escola.pr.gov.br` pré-cadastrados, bloqueado automaticamente em produção (`NODE_ENV === "production"`).
+
+### Regra 8: Duas Versões da Plataforma no Paraná & Herança de Governança
+- A plataforma opera sob duas edições oficiais no Paraná ([`src/lib/platformEditions.ts`](src/lib/platformEditions.ts)):
+  1. **`PILOTO_INTEGRADA`**: Recursos completos SEED-PR (Power BI, SERP Celepar, tokens de extensão);
+  2. **`INSTITUCIONAL_ESSENCIAL`**: Versão padrão para novas escolas e SEMECs focada naquilo que é juridicamente viável e autônomo (Busca Ativa WhatsApp via `wa.me` ou companion, Livro Oficial de Atas sob a Lei nº 14.063/2020, Gestão de Faltas via CSV/SERE e Dossiê ECA), ocultando botões e menções a scrapers governamentais.
+- **Inviolabilidade da Escola Piloto:** O INEP `41042730` e o id `default-leopoldina` operam permanentemente em `PILOTO_INTEGRADA`. Tentativas de alteração via `PUT /api/schools/[id]` retornam expressamente `403 Forbidden`.
+- **Herança de Políticas (Superadmin ➔ SEMEC ➔ Escolas):**
+  - O `SUPERADMIN` define a versão no cadastro da SEMEC (`EducationNetwork`) ou de escolas individuais no painel `/admin/escolas`.
+  - Quando os gestores da SEMEC (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
+- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.
 
 ---
 

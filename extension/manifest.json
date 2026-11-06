@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Sincronizador Leopoldina (Power BI & SERP)",
+  "name": "Sincronizador Rede Ativa (Power BI & SERP)",
   "version": "1.5.0",
   "description": "Extrai dados de frequência do Power BI, fichas SERP e gerencia a confirmação automática de envio do WhatsApp Web para a Busca Ativa.",
   "icons": {
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Sincronizador Leopoldina"
+    "default_title": "Sincronizador Rede Ativa"
   },
   "permissions": [
     "storage",

@@ -8,6 +8,7 @@ import SigningPinModal from "./SigningPinModal";
 import { calculateBusinessDaysDiff } from "@/lib/signingPin";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
+import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
 import {
   Sparkles,
   Mic,
@@ -153,7 +154,7 @@ export default function AtaEditorModal({
   // Carrega chave Gemini salva no navegador e checa chave no servidor
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("leopoldina_gemini_api_key");
+      const saved = getStoredPreference("gemini_api_key");
       if (saved) setGeminiApiKey(saved);
     } catch (e) {}
 
@@ -168,7 +169,7 @@ export default function AtaEditorModal({
   const handleSaveGeminiKey = (val: string) => {
     setGeminiApiKey(val);
     try {
-      localStorage.setItem("leopoldina_gemini_api_key", val.trim());
+      setStoredPreference("gemini_api_key", val.trim());
     } catch (e) {}
   };
 
@@ -441,7 +442,7 @@ export default function AtaEditorModal({
 
       const savedKey =
         geminiApiKey.trim() ||
-        (typeof window !== "undefined" ? localStorage.getItem("leopoldina_gemini_api_key")?.trim() : "") ||
+        (typeof window !== "undefined" ? getStoredPreference("gemini_api_key")?.trim() : "") ||
         "";
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -1007,9 +1008,10 @@ export default function AtaEditorModal({
             </a>
 
             {finalizedAta.agreementsSummary && (() => {
+              const schoolHeader = finalizedAta.school?.name || existingMinute?.school?.name || "Rede Ativa";
               const waUrl = buildWhatsAppDispatchUrl(
                 "",
-                `*Colégio Estadual Leopoldina B. Pedroso*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
+                `*${schoolHeader}*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
               );
               return (
                 <a
@@ -2505,7 +2507,7 @@ export default function AtaEditorModal({
                           {(() => {
                             const waUrl = buildWhatsAppDispatchUrl(
                               "",
-                              `Olá, ${qrModalInfo.name}! Segue o link oficial para ciência e assinatura digital do atendimento pedagógico no Colégio Leopoldina: ${qrModalInfo.url}`
+                              `Olá, ${qrModalInfo.name}! Segue o link oficial para ciência e assinatura digital do atendimento pedagógico: ${qrModalInfo.url}`
                             );
                             return (
                               <a

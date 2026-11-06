@@ -53,6 +53,11 @@ interface Props {
   initialAttendances: any[];
   initialSnapshots: any[];
   initialMinutes?: any[];
+  currentSchool?: {
+    id?: string;
+    name?: string;
+    edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
+  };
   currentUser: {
     name: string;
     email: string;
@@ -69,8 +74,10 @@ export default function ProntuarioClient({
   initialAttendances,
   initialSnapshots,
   initialMinutes = [],
+  currentSchool,
   isAdmin,
 }: Props) {
+  const isIntegrated = currentSchool?.edition ? currentSchool.edition === "PILOTO_INTEGRADA" : true;
   const [student, setStudent] = useState<any>(initialStudent);
   const [contacts, setContacts] = useState<any[]>(initialContacts);
   const [justifications, setJustifications] = useState<any[]>(initialJustifications);
@@ -466,7 +473,7 @@ export default function ProntuarioClient({
               }`}
             >
               <span className="text-[10px] font-bold uppercase tracking-wider block opacity-75">
-                Frequência Geral (Power BI)
+                {isIntegrated ? "Frequência Geral (Power BI)" : "Frequência Escolar Geral"}
               </span>
               <span className="text-2xl font-black">
                 {lowAtt.attendancePercent.toFixed(1)}%
@@ -480,7 +487,7 @@ export default function ProntuarioClient({
           ) : (
             <div className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-right">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-                Frequência Power BI
+                {isIntegrated ? "Frequência Power BI" : "Frequência Escolar"}
               </span>
               <span className="text-xs font-semibold text-slate-600">
                 Sem registro de alerta
@@ -612,7 +619,7 @@ export default function ProntuarioClient({
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
                 <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                  Evolução Semanal de Frequência (Série Histórica Power BI)
+                  {isIntegrated ? "Evolução Semanal de Frequência (Série Histórica Power BI)" : "Evolução Semanal de Frequência Escolar"}
                 </h2>
                 <p className="text-xs text-slate-500">
                   Linha vermelha tracejada indica o limite mínimo legal da LDB (75% de presença).
@@ -706,17 +713,17 @@ export default function ProntuarioClient({
           {lowAtt && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-3 text-xs">
               <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                Medidas Adotadas & Registro SERP / Rede de Proteção
+                {isIntegrated ? "Medidas Adotadas & Registro SERP / Rede de Proteção" : "Medidas Adotadas & Rede de Proteção Social"}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="text-slate-500 block">Protocolo SERP:</span>
+                  <span className="text-slate-500 block">{isIntegrated ? "Protocolo SERP:" : "Protocolo de Proteção:"}</span>
                   <strong className="font-mono text-slate-900">
                     {lowAtt.serpProtocol || "Não informado"}
                   </strong>
                 </div>
                 <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="text-slate-500 block">Situação SERP:</span>
+                  <span className="text-slate-500 block">{isIntegrated ? "Situação SERP:" : "Situação / Acompanhamento:"}</span>
                   <strong className="text-slate-900">
                     {lowAtt.serpStatus || "Em monitoramento escolar"}
                   </strong>

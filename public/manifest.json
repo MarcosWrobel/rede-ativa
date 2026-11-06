@@ -1,7 +1,7 @@
 {
-  "name": "Busca Ativa & Comunicação Escolar — Colégio Leopoldina",
-  "short_name": "Busca Ativa",
-  "description": "Sistema de busca ativa escolar, comunicação institucional e controle de frequência — Colégio Estadual Leopoldina B. Pedroso",
+  "name": "Rede Ativa — Busca Ativa & Atas Digitais",
+  "short_name": "Rede Ativa",
+  "description": "Plataforma SaaS de busca ativa escolar, comunicação institucional e livro digital de atas com fé pública.",
   "start_url": "/busca-ativa",
   "scope": "/",
   "display": "standalone",

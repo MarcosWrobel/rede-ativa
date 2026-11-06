@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth, requireAdmin, isBootstrapAdminEmail } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ const createSchoolSchema = z
     phone: z.string().optional().nullable(),
     email: z.string().optional().nullable(),
     logoUrl: z.string().optional().nullable(),
+    edition: z.enum(["PILOTO_INTEGRADA", "INSTITUCIONAL_ESSENCIAL"]).optional(),
     settings: z.record(z.string(), z.any()).optional().nullable(),
   })
   .transform((d) => {
@@ -33,6 +35,7 @@ const createSchoolSchema = z
       email: rawEmail,
       phone: rawPhone,
       state: (d.state || "PR").trim().toUpperCase(),
+      edition: d.edition,
       settings: d.settings || null,
     };
   })
@@ -103,6 +106,7 @@ export async function GET() {
       const { syncTokenHash, userBySchools, ...safe } = s;
       return {
         ...safe,
+        edition: resolveSchoolEdition(s),
         hasSyncToken: safe.hasSyncToken ?? Boolean(syncTokenHash),
       };
     });
@@ -158,7 +162,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 0. Proteção Inviolável da Escola Piloto Fundadora Leopoldina (INEP 41042730)
+    // 0. Proteção Inviolável da Escola Piloto Fundadora (INEP 41042730)
     if (data.inepCode === "41042730") {
       return NextResponse.json(
         { error: "O código INEP 41042730 pertence à Unidade Piloto Fundadora e não pode ser recriado." },
@@ -203,7 +207,33 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Cria a nova escola no banco de dados
+    // 3. Resolve a Edição da Plataforma (Piloto Integrada vs Institucional Essencial)
+    // Herança: se não especificada, herda da SEMEC/Rede; se for a escola sede fundadora, é sempre PILOTO_INTEGRADA.
+    let effectiveEdition = data.edition || (data.settings as any)?.edition;
+    if (data.inepCode === "41042730") {
+      effectiveEdition = "PILOTO_INTEGRADA";
+    } else if (!effectiveEdition && networkId) {
+      try {
+        const sibling = await prisma.school.findFirst({
+          where: { networkId, active: true },
+          select: { settingsJson: true },
+        });
+        if (sibling?.settingsJson) {
+          const parsed = JSON.parse(sibling.settingsJson);
+          if (parsed.edition) {
+            effectiveEdition = parsed.edition;
+          }
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    }
+
+    const mergedSettings = effectiveEdition
+      ? { ...(data.settings || {}), edition: effectiveEdition }
+      : data.settings || null;
+
+    // 4. Cria a nova escola no banco de dados
     const createdSchool = await prisma.school.create({
       data: {
         inepCode: data.inepCode,
@@ -216,7 +246,7 @@ export async function POST(req: Request) {
         phone: data.phone?.trim() || null,
         email: data.email?.trim() || null,
         logoUrl: data.logoUrl?.trim() || null,
-        settingsJson: data.settings ? JSON.stringify(data.settings) : null,
+        settingsJson: mergedSettings ? JSON.stringify(mergedSettings) : null,
         active: true,
       },
     });

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
 import { 
   Send, 
   History, 
@@ -59,8 +60,8 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
 
   // Load user preference for sidebar state
   useEffect(() => {
-    const saved = localStorage.getItem("leopoldina_sidebar_collapsed");
-    if (saved !== null) {
+    const saved = getStoredPreference("sidebar_collapsed");
+    if (saved !== "") {
       setCollapsed(saved === "true");
     }
   }, []);
@@ -84,7 +85,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
   const toggleCollapsed = () => {
     const nextState = !collapsed;
     setCollapsed(nextState);
-    localStorage.setItem("leopoldina_sidebar_collapsed", String(nextState));
+    setStoredPreference("sidebar_collapsed", String(nextState));
   };
 
   const userEmail = (currentUser?.email || "").toLowerCase().trim();
@@ -303,7 +304,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
             <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 flex-shrink-0 shadow-sm border border-slate-700 group-hover:scale-105 transition">
               <img
                 src={currentSchool?.logoUrl || "/logo.svg"}
-                alt={currentSchool?.name || "Colégio Estadual Leopoldina"}
+                alt={currentSchool?.name || "Rede Ativa"}
                 className="w-full h-full object-contain"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).src = "/logo.svg";
@@ -313,7 +314,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
             {(!collapsed || mobileOpen) && (
               <div className="transition-opacity duration-200 min-w-0">
                 <span className="font-bold text-white text-sm leading-tight block truncate">
-                  {currentSchool?.shortName || currentSchool?.name?.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "") || "Leopoldina"}
+                  {currentSchool?.shortName || currentSchool?.name?.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "") || "Rede Ativa"}
                 </span>
                 <span className="text-[10px] text-sky-400 font-semibold tracking-wider uppercase block truncate">
                   {currentSchool?.network === "MUNICIPAL" ? "SEMEC" : "SEED-PR"} • Busca Ativa

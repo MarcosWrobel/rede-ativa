@@ -31,6 +31,7 @@ interface Props {
     city: string;
     nre: string;
     inepCode?: string;
+    edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
   };
   emittedBy: {
     name: string;
@@ -50,6 +51,7 @@ export default function DossieClient({
   emittedBy,
   emittedAtIso,
 }: Props) {
+  const isIntegrated = school?.edition ? school.edition === "PILOTO_INTEGRADA" : true;
   const lowAtt = student.lowAttendanceRecord;
   const detailMetrics = parseEnrollmentDetailMetrics(lowAtt?.enrollmentDetail);
   const cgm = student.cgm || detailMetrics.cgm || "Não informado";
@@ -223,10 +225,10 @@ export default function DossieClient({
         <header className="border-b-2 border-slate-900 pb-4 flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
-              Governo do Estado do Paraná • SEED-PR • {school?.nre ? `NRE ${school.nre}` : "NRE Ponta Grossa"} {school?.inepCode ? `• INEP: ${school.inepCode}` : ""}
+              Governo do Estado do Paraná • SEED-PR • {school?.nre ? `NRE ${school.nre}` : "NRE Regional"} {school?.inepCode ? `• INEP: ${school.inepCode}` : ""}
             </div>
             <h2 className="text-lg font-black uppercase tracking-tight text-slate-900">
-              {school?.name || "Colégio Estadual Leopoldina B. Pedroso"}
+              {school?.name || "Instituição de Ensino"}
             </h2>
             <div className="text-xs font-bold text-slate-800 pt-1">
               DOSSIÊ INDIVIDUAL DE BUSCA ATIVA ESCOLAR E ACOMPANHAMENTO DE FREQUÊNCIA
@@ -308,10 +310,12 @@ export default function DossieClient({
           )}
         </section>
 
-        {/* 3. Quadro de Frequência Escolar e Rede de Proteção (SERP) */}
+        {/* 3. Quadro de Frequência Escolar e Rede de Proteção */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            2. Indicadores Oficiais de Frequência Escolar (BI / SEED-PR) e SERP
+            {isIntegrated
+              ? "2. Indicadores Oficiais de Frequência Escolar (BI / SEED-PR) e SERP"
+              : "2. Indicadores Oficiais de Frequência Escolar e Rede de Proteção"}
           </h3>
 
           {lowAtt ? (
@@ -337,14 +341,14 @@ export default function DossieClient({
                   <strong className="font-mono">{detailMetrics.semanaAnterior || "—"}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px] uppercase">Status SERP</span>
+                  <span className="text-slate-500 block text-[10px] uppercase">{isIntegrated ? "Status SERP" : "Situação na Rede"}</span>
                   <strong>{lowAtt.serpStatus || "Acompanhamento Escolar"}</strong>
                 </div>
               </div>
 
               {lowAtt.actionsTaken && (
                 <div className="pt-2 border-t border-slate-200">
-                  <strong>Síntese SERP / Medidas Registradas:</strong> {lowAtt.actionsTaken}
+                  <strong>{isIntegrated ? "Síntese SERP / Medidas Registradas:" : "Síntese de Medidas Registradas:"}</strong> {lowAtt.actionsTaken}
                 </div>
               )}
 

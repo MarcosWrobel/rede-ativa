@@ -52,7 +52,7 @@ flowchart TD
     end
 
     subgraph CoreLibs ["Dominio, Seguranca, Criptografia e IA (src/lib/*)"]
-        AuthLib["auth.ts + roles.ts + permissions.ts + tenantGuard.ts"]
+        AuthLib["auth.ts + roles.ts + permissions.ts + tenantGuard.ts + platformEditions.ts"]
         CryptoLib["ataCrypto.ts + signingPin.ts + messageCrypto.ts + escolaGoogleVerify.ts"]
         ParserLib["sereParser.ts + studentMatcher.ts + csvSanitizer.ts"]
         PrivacyAI["aiPseudonymizer.ts + nreAtaFormatter.ts + predictiveAnalytics.ts"]
@@ -117,7 +117,7 @@ flowchart TD
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `jspdf`, `qrcode`** | `^0.18.5` / `^1.9.1` / `^4.2.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão de Dossiês A4 e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.5.0` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta e confirmação automática de envio WhatsApp, empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-leopoldina.zip`. |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **37 suítes / 215 testes automatizados** (~2,6s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), auditoria jurídico-pericial V2 (`securityAndLegalAuditV2.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **42 suítes / 250 testes automatizados** (~3,3s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), auditoria jurídico-pericial V2, RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
 
 ---
 
@@ -157,6 +157,13 @@ Definida em [`src/lib/roles.ts`](../src/lib/roles.ts) e [`src/lib/permissions.ts
 6. **Isolamento de Auditoria & Sanitização CSV:**
    - `logAudit(...)` exige `schoolId` na raiz do objeto em operações escolares, e `/auditoria` filtra estritamente pelo tenant ativo.
    - Exportações CSV aplicam [`sanitizeCsvField(...)`](../src/lib/csvSanitizer.ts) (prefixando `=`, `+`, `-`, `@`, `\t`, `\r` com `'`) combinado ao escape RFC 4180 (`""`).
+7. **Duas Versões da Plataforma no Paraná & Herança de Políticas ([`src/lib/platformEditions.ts`](../src/lib/platformEditions.ts)):**
+   - A plataforma opera sob duas edições oficiais:
+     - `PILOTO_INTEGRADA`: Versão completa com automações assistidas de frequência do Power BI (*Presente na Escola*), portal SERP da Celepar (*Rede de Proteção*) e gestão de tokens da Extensão Chrome MV3.
+     - `INSTITUCIONAL_ESSENCIAL`: Versão padrão para novas escolas e SEMECs focada naquilo que é juridicamente viável e autônomo (Busca Ativa WhatsApp via `wa.me` ou companion, Livro Oficial de Atas sob a Lei nº 14.063/2020, Gestão de Faltas via CSV/SERE e Dossiê ECA), ocultando botões e menções a scrapers governamentais.
+   - **Inviolabilidade da Sede Piloto:** O INEP `41042730` e o id `default-leopoldina` operam permanentemente em `PILOTO_INTEGRADA`. Tentativas de rebaixar a edição retornam expressamente `403 Forbidden`.
+   - **Herança Hierárquica:** O `SUPERADMIN` define a versão no cadastro da SEMEC (`EducationNetwork`); quando gestores municipais (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
+   - **Blindagem Dupla de Backend:** `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.
 
 ### 3.4 Fé Pública, Perícia Forense e Conformidade Legal (Lei 14.063/2020, LGPD e ECA)
 

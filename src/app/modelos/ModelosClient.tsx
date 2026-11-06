@@ -23,6 +23,7 @@ import {
   Key
 } from "lucide-react";
 import { formatMessage, SchoolShift } from "@/lib/messageFormatter";
+import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
 
 interface Props {
   initialTemplates: any[];
@@ -58,7 +59,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("leopoldina_gemini_api_key");
+      const saved = getStoredPreference("gemini_api_key");
       if (saved) setCustomApiKey(saved);
     } catch (e) {}
   }, []);
@@ -66,7 +67,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const handleSaveCustomKey = (key: string) => {
     setCustomApiKey(key);
     try {
-      localStorage.setItem("leopoldina_gemini_api_key", key.trim());
+      setStoredPreference("gemini_api_key", key.trim());
     } catch (e) {}
   };
 
@@ -110,7 +111,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setFormTitle("");
     setFormSegment("TODOS");
     setFormPrefix("{saudacao}\nPrezados responsáveis, informamos que o(a) aluno(a)");
-    setFormSuffix("Atenciosamente,\nEquipe Pedagógica — Colégio Leopoldina");
+    setFormSuffix("Atenciosamente,\nEquipe Pedagógica");
     setFormIsAbsence(false);
     setFormError("");
     setAiPrompt("");
@@ -275,7 +276,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
 
   const simulatedMessage = formatMessage(formPrefix, formSuffix, {
     student: sampleStudent,
-    pedagogaName: "Pedagoga Leopoldina",
+    pedagogaName: "Equipe Pedagógica",
     overrideShift: previewShift,
   });
 

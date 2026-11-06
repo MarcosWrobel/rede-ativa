@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 
     if (!targetSchool && (schoolId === "default-leopoldina" || schoolId === "41042730")) {
       targetSchool = await prisma.school.findFirst({
-        where: { OR: [{ inepCode: "41042730" }, { name: { contains: "Leopoldina", mode: "insensitive" } }] },
+        where: { inepCode: "41042730" },
         select: { id: true, name: true, inepCode: true, city: true, network: true, active: true },
       });
     }

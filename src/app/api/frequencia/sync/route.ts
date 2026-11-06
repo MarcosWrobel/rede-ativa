@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     const session = await auth();
     let authMethod: "SESSION" | "TOKEN" = "TOKEN";
     let userName = "Extensão Power BI (API)";
-    let userEmail = "sistema@leopoldina.pr.gov.br";
+    let userEmail = process.env.SYSTEM_SYNC_EMAIL || "sistema@redeativa.com.br";
     let userId: string | undefined = undefined;
     let targetSchoolId: string | undefined = undefined;
 
@@ -106,6 +106,17 @@ export async function POST(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(targetSchoolId);
+
+    // Trava de Edição: Escolas na versão Institucional Essencial não utilizam raspagem de dados
+    if (currentSchool.edition === "INSTITUCIONAL_ESSENCIAL") {
+      return NextResponse.json(
+        {
+          error:
+            "A sincronização via extensão de raspagem de Power BI não está autorizada para esta instituição escolar (Edição Institucional Essencial). Utilize a importação de frequência por arquivo ou consulte a administração.",
+        },
+        { status: 403, headers: corsHeaders }
+      );
+    }
 
     const rawBody = await req.json();
     const parsedBody = frequenciaSyncSchema.safeParse(rawBody);

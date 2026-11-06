@@ -140,7 +140,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               try {
-                var theme = localStorage.getItem('leopoldina_theme');
+                var theme = localStorage.getItem('redeativa_theme') || localStorage.getItem('leopoldina_theme');
                 if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
                   document.documentElement.classList.add('dark');
                 } else {

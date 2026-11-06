@@ -40,7 +40,7 @@
         transition: all 0.2s ease;
       ">
         <span style="font-size: 18px;">🎓</span>
-        <span>Busca Ativa Leopoldina</span>
+        <span>Busca Ativa • Rede Ativa</span>
         <span id="leo-count-badge" style="
           background: #10b981;
           color: #042f2e;
@@ -69,7 +69,7 @@
             <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px;">
               <span>🎓</span> Busca Ativa & Frequência
             </div>
-            <div style="font-size: 11px; color: #94a3b8;">Colégio Leopoldina B. Pedroso</div>
+            <div style="font-size: 11px; color: #94a3b8;">Rede Ativa SaaS</div>
           </div>
           <button id="leo-close-btn" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer; padding: 4px;">&times;</button>
         </div>
@@ -820,7 +820,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Frequencia_Leopoldina_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `Frequencia_RedeAtiva_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

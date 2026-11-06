@@ -195,12 +195,12 @@ export default async function DashboardPage() {
       <div className="bg-gradient-to-r from-sky-800 to-sky-600 rounded-2xl p-6 sm:p-8 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-start sm:items-center space-x-4">
           <div className="w-16 h-16 rounded-2xl bg-white p-1.5 shadow-md flex-shrink-0 hidden sm:flex items-center justify-center">
-            <img src="/logo.svg" alt="Colégio Leopoldina" className="w-full h-full object-contain" />
+            <img src={currentSchool?.logoUrl || "/logo.svg"} alt={currentSchool?.name || "Rede Ativa"} className="w-full h-full object-contain" />
           </div>
           <div>
             <div className="inline-flex items-center space-x-2 bg-white/10 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-xs mb-2 border border-white/20">
               <School className="w-3.5 h-3.5" />
-              <span>{currentSchool?.name || "Colégio Estadual Leopoldina B. Pedroso"}</span>
+              <span>{currentSchool?.name || "Rede Ativa"}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               Olá, {session?.user?.name || "Equipe Pedagógica"}!

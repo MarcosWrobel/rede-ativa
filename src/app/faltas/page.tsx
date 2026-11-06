@@ -233,6 +233,7 @@ export default async function FaltasPage() {
       lowAttendance={validLowAttendance}
       classGroups={classGroups}
       templates={templates}
+      currentSchool={currentSchool}
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",

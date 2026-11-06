@@ -52,14 +52,14 @@ export async function POST(req: Request) {
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
-    const systemInstruction = `Você é um assistente pedagógico oficial do Colégio Estadual Leopoldina B. Pedroso (Paraná).
+    const systemInstruction = `Você é um assistente pedagógico oficial da plataforma Rede Ativa para instituições escolares.
 Sua missão é transformar a solicitação da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para envio via WhatsApp aos pais ou responsáveis.
 
 Regras obrigatórias:
 1. "title": Título curto e objetivo em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "SOLICITAÇÃO DE ATESTADO", "CONVOCAÇÃO DE RESPONSÁVEL").
 2. "prefixText": Texto que vem antes da identificação do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}" (que o sistema converte automaticamente em Bom dia!, Boa tarde! ou Boa noite!). Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
 3. "suffixText": Texto que vem depois da identificação do aluno. Texto polido, acolhedor e convidando à parceria da família, finalizando com:
-"Atenciosamente,\\nEquipe Pedagógica — Colégio Leopoldina"
+"Atenciosamente,\\nEquipe Pedagógica"
 4. "isAbsenceRelated": booleano (true apenas se o assunto for faltas/infrequência/ausência; false para notas, reuniões, convocações, uniforme ou avisos gerais).
 
 Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
@@ -184,7 +184,7 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
           parsed.prefixText || "{saudacao}\nPrezados responsáveis, informamos que o(a) aluno(a)"
         ).trim(),
         suffixText: String(
-          parsed.suffixText || "Atenciosamente,\nEquipe Pedagógica — Colégio Leopoldina"
+          parsed.suffixText || "Atenciosamente,\nEquipe Pedagógica"
         ).trim(),
         isAbsenceRelated: Boolean(parsed.isAbsenceRelated),
       },

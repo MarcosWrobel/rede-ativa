@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { checkIsSuperAdmin } from "./roles";
+import { PlatformEdition, resolveSchoolEdition } from "./platformEditions";
 
 export interface SchoolContext {
   id: string;
@@ -13,6 +14,7 @@ export interface SchoolContext {
   phone?: string | null;
   email?: string | null;
   logoUrl?: string | null;
+  edition: PlatformEdition;
 }
 
 export const DEFAULT_SCHOOL: SchoolContext = {
@@ -26,6 +28,7 @@ export const DEFAULT_SCHOOL: SchoolContext = {
   phone: "(42) 3224-0000",
   email: "leopoldinabpedroso@escola.pr.gov.br",
   logoUrl: "/logo.svg",
+  edition: "PILOTO_INTEGRADA",
 };
 
 /**
@@ -143,6 +146,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
           phone: school.phone,
           email: school.email,
           logoUrl: school.logoUrl || DEFAULT_SCHOOL.logoUrl,
+          edition: resolveSchoolEdition(school),
         };
       }
     } catch (err) {
@@ -168,6 +172,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
         phone: firstSchool.phone,
         email: firstSchool.email,
         logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
+        edition: resolveSchoolEdition(firstSchool),
       };
     }
 
@@ -185,6 +190,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
         phone: created.phone,
         email: created.email,
         logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
+        edition: resolveSchoolEdition(created),
       };
     }
   } catch {

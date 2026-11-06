@@ -83,7 +83,7 @@ export async function POST(req: Request) {
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
-    const systemInstruction = `Você é um especialista da Equipe Pedagógica do Colégio Estadual Leopoldina B. Pedroso (SEED-PR).
+    const systemInstruction = `Você é um especialista da Equipe Pedagógica e de Busca Ativa da Rede Ativa integrada à instituição de ensino.
 Sua tarefa é ler a mensagem informal recebida via WhatsApp de um pai, mãe ou responsável legal e transformá-la em um registro administrativo formal, impessoal e objetivo (adequado para compor ata escolar, ficha SERP e Dossiê do Conselho Tutelar), além de classificar a causa da ausência.
 
 Regras:

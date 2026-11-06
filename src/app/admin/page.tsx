@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { checkIsSuperAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
+import { resolveSchoolEdition } from "@/lib/platformEditions";
 import AdminClient from "./AdminClient";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,7 @@ export default async function AdminPage() {
         where: { active: true },
         include: {
           _count: { select: { schools: true, managers: true } },
+          schools: { select: { inepCode: true, settingsJson: true }, take: 1 },
         },
         orderBy: { name: "asc" },
       }),
@@ -85,6 +87,9 @@ export default async function AdminPage() {
       type: n.type,
       schoolsCount: n._count.schools,
       managersCount: n._count.managers,
+      edition: n.schools[0]
+        ? resolveSchoolEdition(n.schools[0])
+        : "INSTITUCIONAL_ESSENCIAL",
     }));
 
     schools = schoolsList.map((s) => ({
@@ -97,6 +102,7 @@ export default async function AdminPage() {
       studentsCount: s._count.students,
       classesCount: s._count.classGroups,
       logoUrl: s.logoUrl,
+      edition: resolveSchoolEdition(s),
     }));
 
     auditLogs = recentAudit.map((a) => ({

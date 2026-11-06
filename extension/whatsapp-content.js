@@ -237,13 +237,13 @@
         if (res && res.activeDispatch) {
           activeDispatch = res.activeDispatch;
           createOrUpdateBanner(
-            `⚡ Busca Ativa Leopoldina: <strong>${activeDispatch.studentName || "Aluno"}</strong> (Monitorado)`,
+            `⚡ Busca Ativa • Rede Ativa: <strong>${activeDispatch.studentName || "Aluno"}</strong> (Monitorado)`,
             "info"
           );
         } else {
           // Se não há despacho ativo registrado, exibe indicador básico se for URL de envio
           if (window.location.href.includes("/send")) {
-            createOrUpdateBanner("⚡ Busca Ativa Leopoldina — Envio Monitorado", "info");
+            createOrUpdateBanner("⚡ Busca Ativa • Rede Ativa — Envio Monitorado", "info");
           }
         }
       });

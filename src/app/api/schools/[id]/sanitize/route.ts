@@ -40,12 +40,13 @@ export async function POST(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
-    // Proteção atômica inviolável da escola sede fundadora Leopoldina (INEP 41042730)
-    if (target.inepCode === "41042730" || target.name.toLowerCase().includes("leopoldina")) {
+    // Proteção atômica inviolável da escola sede fundadora (INEP 41042730)
+    const isPilotSchool = target.inepCode === "41042730" || target.id === "default-leopoldina";
+    if (isPilotSchool) {
       return NextResponse.json(
         {
           error:
-            "O Colégio Estadual Leopoldina B. Pedroso (INEP 41042730) é a Unidade Piloto Fundadora de produção e não pode ser higienizado ou resetado.",
+            "A Unidade Piloto Fundadora (INEP 41042730) é a escola sede de produção e não pode ser higienizada ou resetada.",
         },
         { status: 403 }
       );

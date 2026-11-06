@@ -65,6 +65,11 @@ interface Props {
   lowAttendance: any[];
   classGroups: any[];
   templates?: any[];
+  currentSchool?: {
+    id?: string;
+    name?: string;
+    edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
+  };
   currentUser?: {
     name: string;
     email: string;
@@ -77,9 +82,11 @@ export default function FaltasClient({
   lowAttendance, 
   classGroups,
   templates = [],
+  currentSchool,
   currentUser = { name: "Equipe Pedagógica", email: "", isAdmin: false }
 }: Props) {
   const router = useRouter();
+  const isIntegrated = currentSchool?.edition ? currentSchool.edition === "PILOTO_INTEGRADA" : true;
   const [activeTab, setActiveTab] = useState<"serp" | "ranking">("serp");
   
   // Filtros Avançados
@@ -248,8 +255,9 @@ export default function FaltasClient({
     } else {
       setSelectedTemplateId("");
       const fallbackFreq = attendanceInfo?.percent ? ` (Frequência atual: ${attendanceInfo.percent}%)` : "";
+      const schoolPrefix = (student as any)?.school?.name ? `do(a) ${(student as any).school.name}` : "da instituição de ensino";
       setComposedMessage(
-        `Olá! Entramos em contato do Colégio Estadual Leopoldina B. Pedroso referente à frequência do(a) aluno(a) ${student.name} (${student.classGroup.name})${fallbackFreq}. Solicitamos retorno para alinharmos a situação escolar.`
+        `Olá! Entramos em contato ${schoolPrefix} referente à frequência do(a) aluno(a) ${student.name} (${student.classGroup.name})${fallbackFreq}. Solicitamos retorno para alinharmos a situação escolar.`
       );
     }
 
@@ -366,7 +374,10 @@ export default function FaltasClient({
   useEffect(() => {
     const handleExtensionConfirmation = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;
-      if (event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED") {
+      if (
+        event.data.type === "REDEATIVA_WHATSAPP_CONFIRMED" ||
+        event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED"
+      ) {
         const { outcome, logId } = event.data;
         if (messageSuccessInfo && (!logId || messageSuccessInfo.logId === logId)) {
           const targetStatus: DeliveryStatus =
@@ -728,7 +739,7 @@ export default function FaltasClient({
                 Painel de Frequência & Busca Ativa Escolar
               </h1>
               <p className="text-xs text-slate-500">
-                Colégio Estadual Leopoldina B. Pedroso • Dados Oficiais Integrados com Power BI (SEED-PR)
+                Rede Ativa • Gestão Integrada de Busca Ativa & Frequência Escolar
               </p>
             </div>
           </div>
@@ -737,54 +748,56 @@ export default function FaltasClient({
         <div className="flex flex-wrap items-center gap-2">
           {/* Botão de Download da Extensão */}
           <a
-            href="/extensao-leopoldina.zip"
-            download="extensao-leopoldina.zip"
-            title="Baixar instalador da Extensão Chrome para outros computadores"
+            href="/extensao-rede-ativa.zip"
+            download="extensao-rede-ativa.zip"
+            title="Baixar instalador da Extensão Sincronizadora para o navegador Chrome"
             className="px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
           >
             <Download className="w-4 h-4 text-purple-600" />
             <span>Baixar Extensão (.ZIP)</span>
           </a>
 
-          {/* Botão Autenticado para Copiar Chave da Extensão (Restrito a ADMIN) */}
-          <button
-            type="button"
-            onClick={handleCopyExtensionToken}
-            title={currentUser?.isAdmin ? "Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome" : "Acesso restrito a Administradores da Escola"}
-            className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition cursor-pointer ${
-              copyTokenStatus === "copied"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                : copyTokenStatus === "unauthorized"
-                ? "border-rose-300 bg-rose-50 text-rose-800"
-                : copyTokenStatus === "missing"
-                ? "border-amber-300 bg-amber-50 text-amber-800"
-                : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
-            }`}
-          >
-            {copyTokenStatus === "copied" ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span>Chave Copiada!</span>
-              </>
-            ) : copyTokenStatus === "unauthorized" ? (
-              <>
-                <ShieldAlert className="w-4 h-4 text-rose-600" />
-                <span>Apenas Administradores</span>
-              </>
-            ) : copyTokenStatus === "missing" ? (
-              <>
-                <AlertTriangle className="w-4 h-4 text-amber-600" />
-                <span>Defina SYNC_API_TOKEN</span>
-              </>
-            ) : (
-              <>
-                <Key className="w-4 h-4 text-slate-500" />
-                <span>Chave da Extensão</span>
-              </>
-            )}
-          </button>
+          {/* Botão Autenticado para Copiar Chave da Extensão (Disponível apenas na Versão Piloto Integrada) */}
+          {isIntegrated && (
+            <button
+              type="button"
+              onClick={handleCopyExtensionToken}
+              title={currentUser?.isAdmin ? "Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome" : "Acesso restrito a Administradores da Escola"}
+              className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition cursor-pointer ${
+                copyTokenStatus === "copied"
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : copyTokenStatus === "unauthorized"
+                  ? "border-rose-300 bg-rose-50 text-rose-800"
+                  : copyTokenStatus === "missing"
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+              }`}
+            >
+              {copyTokenStatus === "copied" ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>Chave Copiada!</span>
+                </>
+              ) : copyTokenStatus === "unauthorized" ? (
+                <>
+                  <ShieldAlert className="w-4 h-4 text-rose-600" />
+                  <span>Apenas Administradores</span>
+                </>
+              ) : copyTokenStatus === "missing" ? (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span>Defina SYNC_API_TOKEN</span>
+                </>
+              ) : (
+                <>
+                  <Key className="w-4 h-4 text-slate-500" />
+                  <span>Chave da Extensão</span>
+                </>
+              )}
+            </button>
+          )}
 
-          {/* Botão de Importação Power BI */}
+          {/* Botão de Importação de Frequência */}
           <button
             type="button"
             onClick={() => {
@@ -795,7 +808,7 @@ export default function FaltasClient({
             className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center space-x-1.5 shadow-xs transition"
           >
             <UploadCloud className="w-4 h-4" />
-            <span>Sincronizar Power BI</span>
+            <span>{isIntegrated ? "Sincronizar Power BI" : "Importar Frequência"}</span>
           </button>
 
           {/* Lançamento Rápido de Atestados */}
@@ -1618,10 +1631,10 @@ export default function FaltasClient({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">
-                    Importar Frequência Escolar do Power BI
+                    {isIntegrated ? "Importar Frequência Escolar do Power BI" : "Importar Frequência Escolar (CSV / Planilha)"}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Atualize os percentuais oficiais para a equipe pedagógica
+                    {isIntegrated ? "Atualize os percentuais oficiais para a equipe pedagógica" : "Atualize os percentuais de presença dos estudantes para a busca ativa"}
                   </p>
                 </div>
               </div>
@@ -1676,7 +1689,7 @@ export default function FaltasClient({
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center space-x-1.5">
                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                    <span>Opção 1: Enviar arquivo .CSV (Baixado pela Extensão)</span>
+                    <span>{isIntegrated ? "Opção 1: Enviar arquivo .CSV (Baixado pela Extensão)" : "Opção 1: Enviar arquivo .CSV de frequência"}</span>
                   </label>
                   <input
                     type="file"
@@ -1695,7 +1708,9 @@ export default function FaltasClient({
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
                     <span>Opção 2: Colar Lista JSON</span>
-                    <span className="text-[11px] font-normal text-slate-400">Clique em "Copiar JSON" na extensão</span>
+                    <span className="text-[11px] font-normal text-slate-400">
+                      {isIntegrated ? 'Clique em "Copiar JSON" na extensão' : 'Cole a lista JSON de estudantes e frequências'}
+                    </span>
                   </label>
                   <textarea
                     rows={4}
@@ -1704,7 +1719,11 @@ export default function FaltasClient({
                       setImportText(e.target.value);
                       processInputData(e.target.value);
                     }}
-                    placeholder="Cole aqui o JSON gerado pelo botão 'Copiar JSON' da extensão..."
+                    placeholder={
+                      isIntegrated
+                        ? "Cole aqui o JSON gerado pelo botão 'Copiar JSON' da extensão..."
+                        : 'Cole aqui o JSON no formato: [{"cgm": "...", "nome": "...", "frequencia": "85%"}]'
+                    }
                     className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
                   />
                 </div>

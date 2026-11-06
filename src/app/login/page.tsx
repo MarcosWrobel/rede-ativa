@@ -23,7 +23,7 @@ export default async function LoginPage({
     },
     NotAuthorizedTeam: {
       title: "E-mail Não Autorizado na Equipe",
-      body: "Sua conta @escola.pr.gov.br ainda não consta na lista de equipe autorizada do Colégio Leopoldina. Solicite a liberação à Administração na aba Equipe & Acessos.",
+      body: "Sua conta institucional ainda não consta na lista de equipe autorizada desta unidade escolar. Solicite a liberação à Direção ou Coordenação na aba Equipe & Acessos.",
     },
     AccountInactive: {
       title: "Acesso Revogado / Inativo",
@@ -48,10 +48,10 @@ export default async function LoginPage({
         {/* Header Institucional */}
         <div className="bg-gradient-to-r from-sky-800 to-sky-700 p-8 text-white text-center">
           <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 p-2 shadow-lg border border-white/40">
-            <img src="/logo.svg" alt="Colégio Estadual Leopoldina" className="w-full h-full object-contain" />
+            <img src="/logo.svg" alt="Rede Ativa" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Colégio Estadual Leopoldina</h1>
-          <p className="text-sky-100 text-sm mt-1">Sistema de Busca Ativa & Comunicação Escolar</p>
+          <h1 className="text-2xl font-bold tracking-tight">Rede Ativa</h1>
+          <p className="text-sky-100 text-sm mt-1">Busca Ativa & Atas Digitais com Fé Pública</p>
         </div>
 
         <div className="p-8 space-y-5">

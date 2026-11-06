@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Printer, ArrowLeft, ShieldCheck, Download } from "lucide-react";
 import AtaQrCode from "@/components/ata/AtaQrCode";
-import { getAtaValidationUrl } from "@/lib/qrCode";
+import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
 
 interface Props {
   minute: any;
@@ -58,7 +58,7 @@ export default function PrintPageClient({
     if (typeof window !== "undefined" && window.location.origin) {
       return window.location.origin;
     }
-    return initialOrigin || "https://registro-leopoldina.vercel.app";
+    return initialOrigin || getBaseAppUrl();
   });
 
   useEffect(() => {

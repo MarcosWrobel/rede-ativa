@@ -49,6 +49,7 @@ export interface SchoolItem {
   phone: string | null;
   email: string | null;
   logoUrl: string | null;
+  edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
   settings?: Record<string, any>;
   hasSyncToken: boolean;
   lastSyncAt?: string | null;
@@ -95,6 +96,7 @@ export default function AdminEscolasClient({
     phone: "",
     email: "",
     logoUrl: "",
+    edition: "INSTITUCIONAL_ESSENCIAL" as "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL",
     criticalAbsenceThreshold: 5,
     emergencyContactPhone: "",
   });
@@ -106,6 +108,10 @@ export default function AdminEscolasClient({
 
   const handleOpenEditModal = (school: SchoolItem) => {
     setEditingSchool(school);
+    const resolvedEd =
+      school.edition ||
+      school.settings?.edition ||
+      (school.inep === "41042730" ? "PILOTO_INTEGRADA" : "INSTITUCIONAL_ESSENCIAL");
     setEditFormData({
       name: school.name,
       shortName: school.shortName || "",
@@ -117,6 +123,7 @@ export default function AdminEscolasClient({
       phone: school.phone || "",
       email: school.email || "",
       logoUrl: school.logoUrl || "",
+      edition: resolvedEd as "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL",
       criticalAbsenceThreshold: school.settings?.criticalAbsenceThreshold || 5,
       emergencyContactPhone: school.settings?.emergencyContactPhone || "",
     });
@@ -154,7 +161,7 @@ export default function AdminEscolasClient({
     setFeedback(null);
 
     try {
-      const isLeopoldina = editingSchool.inep === "41042730" || editingSchool.name.toLowerCase().includes("leopoldina");
+      const isFoundingPilot = editingSchool.inep === "41042730" || editingSchool.id === "default-leopoldina";
 
       const payload: any = {
         name: editFormData.name.trim(),
@@ -166,13 +173,15 @@ export default function AdminEscolasClient({
         phone: editFormData.phone.trim() || null,
         email: editFormData.email.trim() || null,
         logoUrl: editFormData.logoUrl.trim() || null,
+        edition: editFormData.edition,
         settings: {
           criticalAbsenceThreshold: Number(editFormData.criticalAbsenceThreshold) || 5,
           emergencyContactPhone: editFormData.emergencyContactPhone.trim() || null,
+          edition: editFormData.edition,
         },
       };
 
-      if (!isLeopoldina && editFormData.inep.trim()) {
+      if (!isFoundingPilot && editFormData.inep.trim()) {
         payload.inepCode = editFormData.inep.trim();
       }
 
@@ -230,8 +239,8 @@ export default function AdminEscolasClient({
   };
 
   const handleDeleteSchool = async (school: SchoolItem) => {
-    if (school.inep === "41042730" || school.name.toLowerCase().includes("leopoldina")) {
-      alert("O Colégio Estadual Leopoldina B. Pedroso é a escola sede e não pode ser excluído.");
+    if (school.inep === "41042730" || school.id === "default-leopoldina") {
+      alert("A Unidade Piloto Fundadora (INEP 41042730) é a escola sede da plataforma e não pode ser excluída.");
       return;
     }
 
@@ -306,6 +315,7 @@ export default function AdminEscolasClient({
     email: "",
     address: "",
     logoUrl: "",
+    edition: "INSTITUCIONAL_ESSENCIAL" as "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL",
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -348,6 +358,10 @@ export default function AdminEscolasClient({
         phone: formData.phone.trim() || null,
         email: formData.email.trim() || null,
         logoUrl: formData.logoUrl || null,
+        edition: formData.edition,
+        settings: {
+          edition: formData.edition,
+        },
       };
 
       const res = await fetch("/api/schools", {
@@ -403,6 +417,7 @@ export default function AdminEscolasClient({
         email: "",
         address: "",
         logoUrl: "",
+        edition: "INSTITUCIONAL_ESSENCIAL",
       });
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message || "Falha ao registrar instituição." });
@@ -570,15 +585,31 @@ export default function AdminEscolasClient({
                     </div>
                   </div>
 
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      isMunicipal
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
-                        : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                    }`}
-                  >
-                    {isMunicipal ? "SEMEC" : "SEED-PR"}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isMunicipal
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                          : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                      }`}
+                    >
+                      {isMunicipal ? "SEMEC" : "SEED-PR"}
+                    </span>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        s.edition === "PILOTO_INTEGRADA" || s.inep === "41042730"
+                          ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                      }`}
+                      title={
+                        s.edition === "PILOTO_INTEGRADA" || s.inep === "41042730"
+                          ? "Versão 1: Piloto Integrada (Power BI e SERP ativos)"
+                          : "Versão 2: Institucional Essencial (Conformidade segura sem scrapers)"
+                      }
+                    >
+                      {s.edition === "PILOTO_INTEGRADA" || s.inep === "41042730" ? "Piloto Integrada" : "Institucional"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Counts / Stats */}
@@ -839,6 +870,28 @@ export default function AdminEscolasClient({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Versão da Plataforma *
+                  </label>
+                  <select
+                    name="edition"
+                    value={formData.edition}
+                    onChange={handleInputChange}
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-semibold"
+                  >
+                    <option value="INSTITUCIONAL_ESSENCIAL">Versão 2: Institucional Essencial (Conformidade Segura / Sem Scrapers)</option>
+                    <option value="PILOTO_INTEGRADA">Versão 1: Piloto Integrada (SEED-PR / Power BI / SERP)</option>
+                  </select>
+                  <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {formData.edition === "PILOTO_INTEGRADA"
+                      ? "Habilita scrapers de Power BI, SERP e chave de extensão."
+                      : "Oculta scrapers governamentais e opera com importação por arquivo aberto."}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     Município / UF *
                   </label>
                   <div className="grid grid-cols-3 gap-2">
@@ -1004,7 +1057,7 @@ export default function AdminEscolasClient({
                   <input
                     type="text"
                     name="inep"
-                    disabled={editingSchool.inep === "41042730" || editingSchool.name.toLowerCase().includes("leopoldina")}
+                    disabled={editingSchool.inep === "41042730" || editingSchool.id === "default-leopoldina"}
                     value={editFormData.inep}
                     onChange={handleEditInputChange}
                     className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
@@ -1030,6 +1083,35 @@ export default function AdminEscolasClient({
                     <option value="ESTADUAL">Estadual (SEED-PR)</option>
                     <option value="PRIVADA">Privada / Particular</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Versão da Plataforma *
+                  </label>
+                  <select
+                    name="edition"
+                    disabled={editingSchool.inep === "41042730" || editingSchool.id === "default-leopoldina"}
+                    value={editFormData.edition}
+                    onChange={handleEditInputChange}
+                    className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <option value="INSTITUCIONAL_ESSENCIAL">Versão 2: Institucional Essencial (Conformidade Segura / Sem Scrapers)</option>
+                    <option value="PILOTO_INTEGRADA">Versão 1: Piloto Integrada (SEED-PR / Power BI / SERP)</option>
+                  </select>
+                  {editingSchool.inep === "41042730" ? (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 block font-medium">
+                      A Escola Piloto Fundadora opera permanentemente na Edição Piloto Integrada.
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 block">
+                      {editFormData.edition === "PILOTO_INTEGRADA"
+                        ? "Habilita scrapers de Power BI, SERP e chave de extensão."
+                        : "Oculta scrapers governamentais e opera com importação por arquivo aberto."}
+                    </span>
+                  )}
                 </div>
               </div>
 

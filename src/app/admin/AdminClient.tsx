@@ -38,6 +38,7 @@ interface AdminClientProps {
     city: string;
     state: string;
     type: string;
+    edition?: string;
     schoolsCount: number;
     managersCount: number;
   }>;
@@ -47,6 +48,7 @@ interface AdminClientProps {
     inepCode: string;
     city: string;
     network: string;
+    edition?: string;
     networkName?: string | null;
     studentsCount: number;
     classesCount: number;
@@ -86,8 +88,8 @@ export default function AdminClient({
   );
 
   const handleDeleteSchool = async (school: (typeof schools)[0]) => {
-    if (school.inepCode === "41042730" || school.name.toLowerCase().includes("leopoldina")) {
-      alert("O Colégio Estadual Leopoldina B. Pedroso é a escola sede e não pode ser excluído.");
+    if (school.inepCode === "41042730" || school.id === "default-leopoldina") {
+      alert("A Unidade Piloto Fundadora (INEP 41042730) é a escola sede da plataforma e não pode ser excluída.");
       return;
     }
 
@@ -311,9 +313,18 @@ export default function AdminClient({
                       {net.city} - {net.state}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                        {net.type}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                          {net.type}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          net.edition === "PILOTO_INTEGRADA"
+                            ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+                            : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        }`}>
+                          {net.edition === "PILOTO_INTEGRADA" ? "Piloto Integrada" : "Institucional"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-center font-bold text-slate-800 dark:text-slate-200">
                       {net.schoolsCount}

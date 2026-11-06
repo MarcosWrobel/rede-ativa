@@ -85,8 +85,8 @@ export default function OnboardingClient({
   const [errorMsg, setErrorMsg] = useState("");
   const [switchingTenant, setSwitchingTenant] = useState(false);
 
-  // Validação de INEP da escola piloto
-  const isInepLeopoldina = formData.inep.trim() === "41042730";
+  // Validação de INEP da escola piloto fundadora
+  const isPilotInep = formData.inep.trim() === "41042730";
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -110,9 +110,9 @@ export default function OnboardingClient({
   // Avançar do Passo 1 para o 2
   const handleNextFromStep1 = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isInepLeopoldina) {
+    if (isPilotInep) {
       setErrorMsg(
-        "O código INEP 41042730 pertence à Unidade Piloto Fundadora (Colégio Estadual Leopoldina B. Pedroso) e não pode ser cadastrado novamente."
+        "O código INEP 41042730 pertence à Unidade Piloto Fundadora e não pode ser cadastrado novamente."
       );
       return;
     }
@@ -361,11 +361,11 @@ export default function OnboardingClient({
               </p>
             </div>
 
-            {isInepLeopoldina && (
+            {isPilotInep && (
               <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs text-rose-800 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>
-                  O código INEP <strong>41042730</strong> é reservado à Unidade Piloto Fundadora (Colégio Estadual Leopoldina B. Pedroso). Utilize o código INEP exclusivo da nova instituição.
+                  O código INEP <strong>41042730</strong> é reservado à Unidade Piloto Fundadora da plataforma. Utilize o código INEP exclusivo da nova instituição.
                 </span>
               </div>
             )}
@@ -495,7 +495,7 @@ export default function OnboardingClient({
             <div className="flex justify-end pt-4 border-t border-slate-100">
               <button
                 type="submit"
-                disabled={isInepLeopoldina}
+                disabled={isPilotInep}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
               >
                 <span>Avançar para Identidade Visual</span>

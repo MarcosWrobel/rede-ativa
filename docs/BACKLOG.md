@@ -135,6 +135,21 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ---
 
+## Épico 13 — Desacoplamento de Scrapers & Duas Versões no Paraná (Sprint 15) — ✅ Concluído
+
+> Base legal e regulatória: Marco Civil da Internet (Lei nº 12.965/2014), LGPD (Lei nº 13.709/2018), ECA (Lei nº 8.069/1990) e termos de uso de portais estaduais (SEED-PR / Celepar).
+
+- [x] **`JUR-09`** `[P0 | Esforço: M]` **Modelagem de Edições e Inviolabilidade Piloto (`platformEditions.ts`)**  
+  Tipagem estrita (`PILOTO_INTEGRADA` | `INSTITUCIONAL_ESSENCIAL`), resolução contextual sem bloatware armazenada em `School.settingsJson`, e trava inviolável estrita por INEP (`41042730`) que impede rebaixamento da Escola Piloto Leopoldina.
+- [x] **`JUR-10`** `[P0 | Esforço: M]` **Bloqueio de Backend em Roteadores de Scraping Governamental**  
+  Retorno explícito `403 Forbidden` nos endpoints de sincronização automatizada ([`POST /api/frequencia/sync`](../src/app/api/frequencia/sync/route.ts) e [`POST /api/serp/sync`](../src/app/api/serp/sync/route.ts)) quando acionados por escolas na edição `INSTITUCIONAL_ESSENCIAL`.
+- [x] **`JUR-11`** `[P1 | Esforço: M]` **Herança Automática de Governança por Rede Municipal (SEMEC)**  
+  Configuração de edição pelo Superadmin no diretório de escolas ([`AdminEscolasClient.tsx`](../src/app/admin/escolas/AdminEscolasClient.tsx)) e herança automática da versão da rede quando novos estabelecimentos são criados por gestores de secretaria ([`/api/schools`](../src/app/api/schools/route.ts)).
+- [x] **`JUR-12`** `[P1 | Esforço: M]` **Adaptação Dinâmica do Frontend & Neutralidade de Nomenclaturas Governamentais**  
+  Ocultação de gatilhos de sincronização de Power BI e tokens de extensão em `/faltas`, e substituição de termos proprietários de governo por nomenclaturas administrativas neutras em `/alunos/[id]` (Prontuário) e [`/alunos/[id]/dossie`](../src/app/alunos/[id]/dossie/DossieClient.tsx). Coberto por 9 testes unitários em [`platformEditions.test.ts`](../src/lib/__tests__/platformEditions.test.ts) (**250 testes em 42 suítes**).
+
+---
+
 ## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Não-Essencial no Momento)
 
 > **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM).  
@@ -171,4 +186,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 12** | Selo Pericial de Mensagens/Dossiê, Onboarding & Preditiva | Épico 10 | ✅ Concluído |
 | **Sprint 13** | Perícia Grafotécnica Vetorial, PIN PBKDF2 & Extemporânea | Épico 11 | ✅ Concluído |
 | **Sprint 14** | CI GitHub Actions, Rate-Limiter, PDF/A-1b & Storage Multi-Driver | Épico 12 | ✅ Concluído |
+| **Sprint 15** | Duas Versões PR, Desacoplamento de Scrapers & Herança SEMEC | Épico 13 | ✅ Concluído |
 | **Futuro** | Observabilidade APM, Filas Assíncronas & Refatoração DDD | Expansão | ⏳ Planejado sob Demanda |

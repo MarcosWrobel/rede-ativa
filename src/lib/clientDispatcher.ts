@@ -1,17 +1,23 @@
 import { WA_ME_REUSABLE_WINDOW_NAME } from "./whatsappProvider";
 
-export const WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
+export const WHATSAPP_DISPATCH_STORAGE_KEY = "redeativa_whatsapp_dispatch_mode";
+export const LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
 export type WhatsAppDispatchMode = "extension" | "native";
 
 declare global {
   interface Window {
+    __REDEATIVA_EXTENSION_ACTIVE__?: boolean;
     __LEOPOLDINA_EXTENSION_ACTIVE__?: boolean;
   }
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("message", (event) => {
-    if (event.source === window && event.data?.type === "LEOPOLDINA_EXTENSION_READY") {
+    if (
+      event.source === window &&
+      (event.data?.type === "REDEATIVA_EXTENSION_READY" || event.data?.type === "LEOPOLDINA_EXTENSION_READY")
+    ) {
+      window.__REDEATIVA_EXTENSION_ACTIVE__ = true;
       window.__LEOPOLDINA_EXTENSION_ACTIVE__ = true;
     }
   });
@@ -21,13 +27,17 @@ if (typeof window !== "undefined") {
  * Lê a preferência do usuário armazenada no navegador (padrão: "extension").
  */
 export function getWhatsAppDispatchPreference(): WhatsAppDispatchMode {
-  if (typeof window === "undefined") return "extension";
-  try {
-    const saved = localStorage.getItem(WHATSAPP_DISPATCH_STORAGE_KEY);
-    return saved === "native" ? "native" : "extension";
-  } catch {
-    return "extension";
+  if (typeof window !== "undefined") {
+    try {
+      const saved =
+        localStorage.getItem(WHATSAPP_DISPATCH_STORAGE_KEY) ||
+        localStorage.getItem(LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY);
+      return saved === "native" ? "native" : "extension";
+    } catch {
+      return "extension";
+    }
   }
+  return "extension";
 }
 
 /**
@@ -38,6 +48,9 @@ export function setWhatsAppDispatchPreference(mode: WhatsAppDispatchMode): void 
   try {
     localStorage.setItem(WHATSAPP_DISPATCH_STORAGE_KEY, mode);
     window.dispatchEvent(
+      new CustomEvent("redeativa_whatsapp_preference_changed", { detail: mode })
+    );
+    window.dispatchEvent(
       new CustomEvent("leopoldina_whatsapp_preference_changed", { detail: mode })
     );
   } catch (err) {
@@ -46,12 +59,14 @@ export function setWhatsAppDispatchPreference(mode: WhatsAppDispatchMode): void 
 }
 
 /**
- * Verifica se a Extensão Leopoldina está carregada no navegador do usuário.
+ * Verifica se a Extensão Sincronizadora está carregada no navegador do usuário.
  */
 export function isExtensionActive(): boolean {
   if (typeof window === "undefined") return false;
   return Boolean(
-    window.__LEOPOLDINA_EXTENSION_ACTIVE__ ||
+    window.__REDEATIVA_EXTENSION_ACTIVE__ ||
+      window.__LEOPOLDINA_EXTENSION_ACTIVE__ ||
+      document.documentElement.dataset.redeativaExtension === "true" ||
       document.documentElement.dataset.leopoldinaExtension === "true"
   );
 }

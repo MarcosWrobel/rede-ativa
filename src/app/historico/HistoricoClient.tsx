@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { isBootstrapAdminEmail } from "@/lib/roles";
 import ModalDialog from "@/components/ModalDialog";
+import { getStoredPreference } from "@/lib/storageKeys";
 import {
   DELIVERY_STATUS_LABELS,
   REPLY_CATEGORY_LABELS,
@@ -286,7 +287,7 @@ export default function HistoricoClient({
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       try {
-        const savedKey = localStorage.getItem("leopoldina_gemini_api_key");
+        const savedKey = getStoredPreference("gemini_api_key");
         if (savedKey && savedKey.trim().length > 10) {
           headers["x-gemini-key"] = savedKey.trim();
         }

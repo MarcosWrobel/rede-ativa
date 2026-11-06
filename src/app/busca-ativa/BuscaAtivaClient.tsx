@@ -605,11 +605,14 @@ export default function BuscaAtivaClient({
     setQueueError("");
   };
 
-  // Escuta confirmações automáticas vindas da Extensão Leopoldina (whatsapp-content.js)
+  // Escuta confirmações automáticas vindas da Extensão Sincronizadora (whatsapp-content.js)
   useEffect(() => {
     const handleExtensionConfirmation = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;
-      if (event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED") {
+      if (
+        event.data.type === "REDEATIVA_WHATSAPP_CONFIRMED" ||
+        event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED"
+      ) {
         const { outcome, logId, studentName } = event.data;
         const targetStatus: DeliveryStatus =
           outcome === "FAILED_NO_WHATSAPP" ? "FAILED_NO_WHATSAPP" : "SENT";

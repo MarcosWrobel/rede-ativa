@@ -205,7 +205,7 @@ export default function MobileSignClient({
         publicKey: {
           challenge,
           rp: {
-            name: "Colégio Estadual Leopoldina B. Pedroso",
+            name: schoolName || "Rede Ativa",
             id: window.location.hostname,
           },
           user: {

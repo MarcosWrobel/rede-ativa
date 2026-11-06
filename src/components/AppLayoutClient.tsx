@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import TopHeader from "./TopHeader";
 import ElevationBanner from "./ElevationBanner";
+import { getStoredPreference } from "@/lib/storageKeys";
 
 interface AppLayoutClientProps {
   children: React.ReactNode;
@@ -31,13 +32,13 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("leopoldina_sidebar_collapsed");
-    if (saved !== null) {
+    const saved = getStoredPreference("sidebar_collapsed");
+    if (saved !== "") {
       setCollapsed(saved === "true");
     }
 
     const handleStorageChange = () => {
-      const current = localStorage.getItem("leopoldina_sidebar_collapsed");
+      const current = getStoredPreference("sidebar_collapsed");
       setCollapsed(current === "true");
     };
 
@@ -89,7 +90,7 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
         </main>
 
         <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-6 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden transition-colors">
-          {currentSchool?.name || "Colégio Estadual Leopoldina B. Pedroso"} — Sistema de Busca Ativa & Comunicação Escolar 2026. Acesso institucional seguro.
+          {currentSchool?.name || "Rede Ativa"} — Sistema de Busca Ativa & Comunicação Escolar. Acesso institucional seguro.
         </footer>
       </div>
     </div>

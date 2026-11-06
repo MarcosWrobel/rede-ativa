@@ -80,7 +80,7 @@
         user-select: none;
       ">
         <span style="font-size: 18px;">🛡️</span>
-        <span>SERP Leopoldina</span>
+        <span>SERP • Rede Ativa</span>
         <span id="leo-serp-badge" style="
           background: #5b21b6;
           padding: 2px 8px;
@@ -114,7 +114,7 @@
               <span>🛡️</span> SERP • Rede de Proteção
             </div>
             <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">
-              Colégio Estadual Leopoldina B. Pedroso
+              Rede Ativa SaaS
             </div>
           </div>
           <button id="leo-serp-close-btn" style="
@@ -782,7 +782,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Fichas_SERP_Leopoldina_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `Fichas_SERP_RedeAtiva_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     addLog('Arquivo CSV gerado e baixado.');
     setStatus('Planilha de Fichas SERP gerada e baixada!', '#10b981');

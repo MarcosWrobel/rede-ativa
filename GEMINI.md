@@ -11,6 +11,7 @@ Consulte [`AI_CONTEXT.md`](file:///home/marcoswrobel/Documents/Registro/AI_CONTE
 - O **Colégio Estadual Leopoldina B. Pedroso** (INEP `41042730`) é a Unidade Piloto Fundadora da plataforma e contém 689 estudantes reais.
 - **NUNCA** gere código, scripts ou rotinas que excluam, resetem ou alterem inadvertidamente a escola sede ou seus registros históricos.
 - Os endpoints `DELETE /api/schools/[id]` e `POST /api/schools/[id]/sanitize` possuem proteções atômicas contra a exclusão do INEP `41042730`. Nunca contorne ou desative essas proteções.
+- **Identificação Estrita por INEP (Sem String Matching):** A verificação de proteção da Unidade Piloto **DEVE** ser baseada estritamente no código MEC/INEP (`inepCode === "41042730"`) ou no identificador técnico legado (`id === "default-leopoldina"`). **NUNCA** utilize checagens de substring no nome da escola (`.toLowerCase().includes("leopoldina")`) para travas de negócio ou RBAC, preservando a neutralidade do núcleo de código.
 - **Tolerância a Dados Legados Restrita à Sede:** Qualquer filtro de retrocompatibilidade com registros legados (`schoolId: null` ou `"default-leopoldina"`) **DEVE** ser estritamente condicionado à comprovação de que a sessão ativa pertence à Escola Piloto Fundadora (`inepCode === "41042730"`). Nunca inclua `schoolId: null` ou `"default-leopoldina"` em cláusulas `OR` para outras escolas nem execute *auto-healing* de `schoolId` a partir de sessões externas.
 
 ---
@@ -62,6 +63,26 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes passem (200+ testes em 36+ suítes Vitest, incluindo `adversarialQa.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (250+ testes em 42+ suítes Vitest, incluindo `adversarialQa.test.ts` e `platformEditions.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
+
+---
+
+## 8. Neutralidade da Marca Rede Ativa, Domínio Dinâmico & Armazenamento Local
+- **Marca Neutra SaaS:** A interface pública, componentes visuais, telas de login e templates do sistema adotam a identidade institucional neutra **Rede Ativa SaaS**. Nomes de escolas específicas nunca devem constar como valores estáticos na interface — sempre renderize o nome dinâmico da instituição ativa via `currentSchool?.name` com fallback neutro (`"Rede Ativa"` ou `"Instituição de Ensino"`).
+- **Resolução Dinâmica de Domínio:** **NUNCA** insira domínios hardcoded (como `registro-leopoldina.vercel.app`) em funções de validação, QR Codes, Dossiês ou mensagens. Utilize sempre `getBaseAppUrl()` ou `getRequestOrigin()` de `src/lib/qrCode.ts`, que prioriza `NEXT_PUBLIC_APP_URL` / `APP_URL`, permitindo apontamento instantâneo para domínio próprio personalizado (`app.redeativa.com.br`) sem quebrar documentos já lavrados e impressos.
+- **Padrão Dual-Read / Single-Write em LocalStorage:** Ao persistir preferências no cliente (tema, chave Gemini, modo de despacho de WhatsApp), utilize obrigatoriamente as funções utilitárias de `src/lib/storageKeys.ts`. A leitura deve verificar a chave neutra (`redeativa_*`) com fallback silencioso para a chave legada (`leopoldina_*`), e a escrita deve persistir exclusivamente na chave neutra, prevenindo perda de configurações para usuárias já ativas.
+- **Princípio do Zero Bloatware:** Não crie tabelas, colunas adicionais no banco ou bibliotecas pesadas quando a necessidade puder ser atendida por tipagem TypeScript estrita, helpers leves e variáveis de ambiente.
+
+---
+
+## 9. Duas Versões da Plataforma no Paraná & Herança de Governança
+- A plataforma opera sob duas edições oficiais no Paraná (`src/lib/platformEditions.ts`):
+  1. **`PILOTO_INTEGRADA`**: Versão completa com automações assistidas de frequência do Power BI (*Presente na Escola*), portal SERP da Celepar (*Rede de Proteção*) e gestão de tokens da Extensão Chrome MV3.
+  2. **`INSTITUCIONAL_ESSENCIAL`**: Versão padrão para novas escolas e SEMECs focada naquilo que é juridicamente viável e autônomo (Busca Ativa WhatsApp via `wa.me` ou companion, Livro Oficial de Atas sob a Lei nº 14.063/2020, Gestão de Faltas via CSV/SERE e Dossiê ECA), ocultando botões e menções a scrapers governamentais.
+- **Inviolabilidade da Escola Piloto:** O INEP `41042730` e o id `default-leopoldina` operam permanentemente em `PILOTO_INTEGRADA`. Tentativas de alteração via `PUT /api/schools/[id]` retornam expressamente `403 Forbidden`.
+- **Herança de Políticas (Superadmin ➔ SEMEC ➔ Escolas):**
+  - O `SUPERADMIN` define a versão atribuída no cadastro da SEMEC (`EducationNetwork`) ou de escolas individuais no painel `/admin/escolas`.
+  - Quando os gestores da SEMEC (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
+- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.

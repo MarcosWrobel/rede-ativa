@@ -283,7 +283,7 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
                 required
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder="Ex: Colégio Estadual Leopoldina B. Pedroso"
+                placeholder="Ex: Escola Municipal Cecília Meireles"
                 className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
               />
             </div>
@@ -297,7 +297,7 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
                 name="shortName"
                 value={formData.shortName}
                 onChange={handleInputChange}
-                placeholder="Ex: C.E. Leopoldina ou Leopoldina"
+                placeholder="Ex: E.M. Cecília Meireles"
                 className="w-full text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </div>

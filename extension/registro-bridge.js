@@ -9,25 +9,28 @@
   try {
     // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação
     if (document.documentElement) {
+      document.documentElement.dataset.redeativaExtension = "true";
+      document.documentElement.dataset.redeativaExtensionVersion = "1.5.0";
       document.documentElement.dataset.leopoldinaExtension = "true";
       document.documentElement.dataset.leopoldinaExtensionVersion = "1.5.0";
     }
 
     // 2. Anúncio via postMessage para listeners ativos
-    window.postMessage(
-      {
-        type: "LEOPOLDINA_EXTENSION_READY",
-        version: "1.5.0",
-        capabilities: ["WHATSAPP_DISPATCH", "WHATSAPP_AUTO_CONFIRMATION", "SERE_SYNC", "SERP_SCRAPER"],
-      },
-      "*"
-    );
+    const readyPayload = {
+      version: "1.5.0",
+      capabilities: ["WHATSAPP_DISPATCH", "WHATSAPP_AUTO_CONFIRMATION", "SERE_SYNC", "SERP_SCRAPER"],
+    };
+    window.postMessage({ type: "REDEATIVA_EXTENSION_READY", ...readyPayload }, "*");
+    window.postMessage({ type: "LEOPOLDINA_EXTENSION_READY", ...readyPayload }, "*");
 
     // 3. Escuta eventos de despacho emitidos pela aplicação Registro
     window.addEventListener("message", (event) => {
       if (event.source !== window || !event.data) return;
 
-      if (event.data.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && event.data.url) {
+      if (
+        (event.data.type === "REDEATIVA_DISPATCH_WHATSAPP" || event.data.type === "LEOPOLDINA_DISPATCH_WHATSAPP") &&
+        event.data.url
+      ) {
         // Validação defensiva prévia da URL antes de encaminhar ao service worker
         try {
           const parsed = new URL(event.data.url);
@@ -80,18 +83,19 @@
 
     // 4. Escuta mensagens vindas do Background Service Worker e repassa à página web
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY") {
-        window.postMessage(
-          {
-            type: "LEOPOLDINA_WHATSAPP_CONFIRMED",
-            outcome: message.outcome, // "SENT" | "FAILED_NO_WHATSAPP"
-            logId: message.logId,
-            phone: message.phone,
-            studentName: message.studentName,
-            timestamp: message.timestamp,
-          },
-          "*"
-        );
+      if (
+        message?.type === "REDEATIVA_WHATSAPP_DISPATCH_OUTCOME_RELAY" ||
+        message?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY"
+      ) {
+        const confirmPayload = {
+          outcome: message.outcome, // "SENT" | "FAILED_NO_WHATSAPP"
+          logId: message.logId,
+          phone: message.phone,
+          studentName: message.studentName,
+          timestamp: message.timestamp,
+        };
+        window.postMessage({ type: "REDEATIVA_WHATSAPP_CONFIRMED", ...confirmPayload }, "*");
+        window.postMessage({ type: "LEOPOLDINA_WHATSAPP_CONFIRMED", ...confirmPayload }, "*");
       }
     });
   } catch (err) {

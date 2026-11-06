@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import AtaQrCode from "@/components/ata/AtaQrCode";
-import { getAtaValidationUrl } from "@/lib/qrCode";
+import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
 
 function getCategoryConfig(category?: string) {
   switch (category) {
@@ -121,7 +121,7 @@ export default function AtasClient({
     if (typeof window !== "undefined" && window.location.origin) {
       return window.location.origin;
     }
-    return "https://registro-leopoldina.vercel.app";
+    return getBaseAppUrl();
   });
 
   useEffect(() => {

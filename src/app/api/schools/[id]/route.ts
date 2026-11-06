@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSchoolAdmin, requireSuperAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ const updateSchoolSchema = z.object({
   phone: z.string().optional().nullable(),
   email: z.string().email("E-mail institucional inválido").optional().nullable(),
   logoUrl: z.string().optional().nullable(),
+  edition: z.enum(["PILOTO_INTEGRADA", "INSTITUCIONAL_ESSENCIAL"]).optional(),
   settingsJson: z.string().optional().nullable(),
   settings: z.record(z.string(), z.any()).optional().nullable(),
 });
@@ -67,6 +69,7 @@ export async function GET(
       success: true,
       school: {
         ...safeSchool,
+        edition: resolveSchoolEdition(school),
         hasSyncToken: Boolean(syncTokenHash),
       },
     });
@@ -103,14 +106,17 @@ export async function PUT(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
-    // Proteção absoluta da escola sede Colégio Leopoldina contra alteração de INEP
-    if (
-      (currentSchoolRecord.inepCode === "41042730" || currentSchoolRecord.name.toLowerCase().includes("leopoldina")) &&
-      data.inepCode &&
-      data.inepCode !== "41042730"
-    ) {
+    // Proteção absoluta da escola sede fundadora contra alteração de INEP ou edição
+    const isPilotSchool = currentSchoolRecord.inepCode === "41042730" || id === "default-leopoldina";
+    if (isPilotSchool && data.inepCode && data.inepCode !== "41042730") {
       return NextResponse.json(
-        { error: "O código INEP do Colégio Estadual Leopoldina B. Pedroso (41042730) é a escola sede fundadora e não pode ser alterado." },
+        { error: "O código INEP da Unidade Piloto Fundadora (41042730) é a escola sede e não pode ser alterado." },
+        { status: 403 }
+      );
+    }
+    if (isPilotSchool && data.edition && data.edition !== "PILOTO_INTEGRADA") {
+      return NextResponse.json(
+        { error: "A Unidade Piloto Fundadora (41042730) opera permanentemente na Edição Piloto Integrada." },
         { status: 403 }
       );
     }
@@ -132,10 +138,31 @@ export async function PUT(
     }
 
     let finalSettingsJson: string | undefined = undefined;
-    if (data.settings !== undefined) {
-      finalSettingsJson = data.settings ? JSON.stringify(data.settings) : null as any;
-    } else if (data.settingsJson !== undefined) {
-      finalSettingsJson = data.settingsJson || null as any;
+    if (data.settings !== undefined || data.settingsJson !== undefined || data.edition !== undefined) {
+      let currentSettingsObj: Record<string, any> = {};
+      try {
+        const existingSchool = await prisma.school.findUnique({
+          where: { id },
+          select: { settingsJson: true },
+        });
+        if (existingSchool?.settingsJson) {
+          currentSettingsObj = JSON.parse(existingSchool.settingsJson);
+        }
+      } catch {}
+
+      if (data.settings !== undefined) {
+        currentSettingsObj = { ...currentSettingsObj, ...(data.settings || {}) };
+      } else if (data.settingsJson !== undefined && data.settingsJson) {
+        try {
+          currentSettingsObj = { ...currentSettingsObj, ...JSON.parse(data.settingsJson) };
+        } catch {}
+      }
+
+      if (data.edition) {
+        currentSettingsObj.edition = data.edition;
+      }
+
+      finalSettingsJson = JSON.stringify(currentSettingsObj);
     }
 
     const updated = await prisma.school.update({
@@ -215,10 +242,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
-    // Proteção absoluta da escola sede Colégio Leopoldina
-    if (target.inepCode === "41042730" || target.name.toLowerCase().includes("leopoldina")) {
+    // Proteção absoluta da escola sede fundadora
+    const isPilotSchool = target.inepCode === "41042730" || target.id === "default-leopoldina";
+    if (isPilotSchool) {
       return NextResponse.json(
-        { error: "O Colégio Estadual Leopoldina B. Pedroso é a escola sede da plataforma e não pode ser excluído." },
+        { error: "A Unidade Piloto Fundadora (INEP 41042730) é a escola sede da plataforma e não pode ser excluída." },
         { status: 403 }
       );
     }

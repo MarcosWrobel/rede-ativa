@@ -54,6 +54,6 @@ export default proxy;
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|logo\\.svg|extensao-leopoldina\\.zip|manifest\\.json|icon-.*\\.png).*)",
+    "/((?!_next/static|_next/image|favicon.ico|logo\\.svg|extensao-rede-ativa\\.zip|extensao-leopoldina\\.zip|manifest\\.json|icon-.*\\.png).*)",
   ],
 };

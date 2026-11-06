@@ -201,13 +201,13 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
     });
 
     it("Proteção da Escola Sede e Higienização de Banco", () => {
-      // Invariante de proteção da escola base (Leopoldina - INEP 41042730)
-      const LEOPOLDINA_INEP = "41042730";
-      const isProtectedSchool = (inep: string, name: string) =>
-        inep === LEOPOLDINA_INEP || name.toLowerCase().includes("leopoldina");
+      // Invariante de proteção da escola base (INEP 41042730)
+      const PILOT_INEP = "41042730";
+      const isProtectedSchool = (inep: string, id?: string) =>
+        inep === PILOT_INEP || id === "default-leopoldina";
 
-      expect(isProtectedSchool("41042730", "Colégio Estadual Leopoldina B. Pedroso")).toBe(true);
-      expect(isProtectedSchool("99999999", "Escola Municipal Teste")).toBe(false);
+      expect(isProtectedSchool("41042730", "default-leopoldina")).toBe(true);
+      expect(isProtectedSchool("99999999", "escola-municipal-teste")).toBe(false);
 
       // Apenas SuperAdmin tem autorização para disparar exclusão ou sanitização
       expect(checkIsSuperAdmin(superAdminSession)).toBe(true);
@@ -256,29 +256,29 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
     it("Robustecimento da Gestão de Escolas: Proteção do INEP da escola sede na edição", () => {
       // Validador de alteração cadastral de escolas (PUT /api/schools/[id])
       const validateSchoolUpdate = (
-        targetSchool: { inepCode: string; name: string },
+        targetSchool: { inepCode: string; name: string; id?: string },
         newInep?: string
       ) => {
-        const isLeopoldina =
+        const isPilotSchool =
           targetSchool.inepCode === "41042730" ||
-          targetSchool.name.toLowerCase().includes("leopoldina");
-        if (isLeopoldina && newInep && newInep !== "41042730") {
+          targetSchool.id === "default-leopoldina";
+        if (isPilotSchool && newInep && newInep !== "41042730") {
           return {
             allowed: false,
-            error: "O código INEP do Colégio Estadual Leopoldina B. Pedroso (41042730) é a escola sede fundadora e não pode ser alterado.",
+            error: "O código INEP da Unidade Piloto Fundadora (41042730) é a escola sede e não pode ser alterado.",
           };
         }
         return { allowed: true };
       };
 
-      // 1. Tentar alterar o INEP da Leopoldina para outro valor deve ser barrado
-      const leopoldina = { inepCode: "41042730", name: "Colégio Estadual Leopoldina B. Pedroso" };
-      expect(validateSchoolUpdate(leopoldina, "99999999").allowed).toBe(false);
-      expect(validateSchoolUpdate(leopoldina, "99999999").error).toContain("escola sede fundadora");
+      // 1. Tentar alterar o INEP da Piloto para outro valor deve ser barrado
+      const piloto = { inepCode: "41042730", name: "Colégio Estadual Leopoldina B. Pedroso", id: "default-leopoldina" };
+      expect(validateSchoolUpdate(piloto, "99999999").allowed).toBe(false);
+      expect(validateSchoolUpdate(piloto, "99999999").error).toContain("escola sede");
 
-      // 2. Manter o mesmo INEP da Leopoldina ou atualizar outros campos é permitido
-      expect(validateSchoolUpdate(leopoldina, "41042730").allowed).toBe(true);
-      expect(validateSchoolUpdate(leopoldina, undefined).allowed).toBe(true);
+      // 2. Manter o mesmo INEP da Piloto ou atualizar outros campos é permitido
+      expect(validateSchoolUpdate(piloto, "41042730").allowed).toBe(true);
+      expect(validateSchoolUpdate(piloto, undefined).allowed).toBe(true);
 
       // 3. Outras escolas podem ter seu INEP atualizado livremente
       const escolaMunicipal = { inepCode: "12345678", name: "Escola Municipal Teste" };
