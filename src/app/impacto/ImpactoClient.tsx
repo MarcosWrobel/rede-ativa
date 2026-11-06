@@ -373,11 +373,11 @@ export default function ImpactoClient() {
               <img src="/logo.svg" alt="Rede Ativa - Busca Ativa & Livro de Atas" className="h-10 w-auto object-contain" />
             </div>
             <div className="hidden md:flex flex-col">
-              <span className="text-[10px] uppercase font-extrabold tracking-widest text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80 self-start">
-                SaaS Educacional Oficial
+              <span className="text-[10px] uppercase font-extrabold tracking-widest text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 self-start">
+                Rede Ativa SaaS
               </span>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Plataforma de Infrequência, Busca Ativa & Fé Pública
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                Plataforma Integrada de Busca Ativa & Atas Digitais
               </p>
             </div>
           </Link>
@@ -457,23 +457,23 @@ export default function ImpactoClient() {
             <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
             <div className="text-center sm:text-left">
               <span className="text-[11px] uppercase font-extrabold tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 inline-block">
-                SaaS Educacional Oficial
+                Rede Ativa SaaS
               </span>
-              <p className="text-xs text-slate-500 mt-1 font-medium">
-                Tecnologia de Busca Ativa & Fé Pública
+              <p className="text-xs text-slate-600 mt-1 font-semibold">
+                Plataforma Integrada de Busca Ativa & Atas Digitais
               </p>
             </div>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.15] max-w-4xl mx-auto">
-            Da Sobrecarga Burocrática à{" "}
+            Busca ativa e atas de atendimento conectadas:{" "}
             <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 bg-clip-text text-transparent">
-              Segurança Jurídica Plena
+              todo o histórico com respaldo jurídico real
             </span>
           </h1>
 
           <p className="mt-6 text-base sm:text-lg lg:text-xl text-slate-600 max-w-3xl mx-auto leading-relaxed">
-            A plataforma de gestão escolar criada para equipes pedagógicas e secretarias de educação: busca ativa humanizada via WhatsApp com proteção de privacidade, livro oficial de atas com fé pública e geração instantânea de dossiês para o Conselho Tutelar.
+            Unifique os acionamentos às famílias e a lavratura de atas pedagógicas. Cada contato, deliberação e encaminhamento registrado de forma consistente e segura para instrução de esclarecimentos legais.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -484,14 +484,14 @@ export default function ImpactoClient() {
               className="px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2.5 transition-all transform hover:-translate-y-0.5"
             >
               <IconPhone className="w-4 h-4" />
-              Solicitar Demonstração no WhatsApp
+              Agendar demonstração no WhatsApp
             </a>
             <a
               href="#calculadora"
               className="px-6 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm border border-slate-200 shadow-xs flex items-center gap-2 transition-all"
             >
               <IconClock className="w-4 h-4 text-emerald-600" />
-              Simular Gráfico de Horas na Escola
+              Simular redução de horas
             </a>
           </div>
 
@@ -513,7 +513,7 @@ export default function ImpactoClient() {
               </div>
               <div>
                 <p className="text-xs font-bold text-slate-900 leading-tight">ECA Art. 56</p>
-                <p className="text-[11px] text-slate-500">Comunicação e Infrequência</p>
+                <p className="text-[11px] text-slate-500">Rastreabilidade de Infrequência</p>
               </div>
             </div>
 
@@ -523,7 +523,7 @@ export default function ImpactoClient() {
               </div>
               <div>
                 <p className="text-xs font-bold text-slate-900 leading-tight">LGPD & ECA 143</p>
-                <p className="text-[11px] text-slate-500">Anonimização e Blindagem</p>
+                <p className="text-[11px] text-slate-500">Proteção de Dados do Menor</p>
               </div>
             </div>
 
@@ -533,7 +533,7 @@ export default function ImpactoClient() {
               </div>
               <div>
                 <p className="text-xs font-bold text-slate-900 leading-tight">ISO 19005-1</p>
-                <p className="text-[11px] text-slate-500">Padrão Arquivístico PDF/A-1b</p>
+                <p className="text-[11px] text-slate-500">Arquivo Permanente PDF/A-1b</p>
               </div>
             </div>
           </div>
@@ -705,7 +705,7 @@ export default function ImpactoClient() {
                       }`}
                     >
                       <IconEye className="w-3 h-3" />
-                      Modo Exposto Tradicional
+                      WhatsApp Web aberto
                     </button>
                   </div>
                 </div>
@@ -842,7 +842,7 @@ export default function ImpactoClient() {
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                           </svg>
-                          <span>Disparando com Hash de Auditoria...</span>
+                          <span>Registrando envio...</span>
                         </>
                       ) : (
                         <>
@@ -949,10 +949,10 @@ export default function ImpactoClient() {
                       {serverPinVerified ? (
                         <>
                           <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
-                          PIN Válido (Fé Pública)
+                          PIN Autenticado
                         </>
                       ) : (
-                        "Autenticar PIN de Servidora"
+                        "Autenticar PIN"
                       )}
                     </button>
                   </div>
@@ -988,7 +988,7 @@ export default function ImpactoClient() {
                       }`}
                     ></span>
                     <span className="text-xs font-bold text-slate-800">
-                      {ataFinalized ? "LAVRADA COM FÉ PÚBLICA (IMUTÁVEL)" : "STATUS: MINUTA EM ANDAMENTO"}
+                      {ataFinalized ? "LAVRADA E ASSINADA (IMUTÁVEL)" : "STATUS: MINUTA EM ANDAMENTO"}
                     </span>
                   </div>
                   <span className="text-[10px] font-mono text-slate-500">
@@ -1160,7 +1160,7 @@ export default function ImpactoClient() {
                       ) : (
                         <>
                           <IconDocument className="w-3.5 h-3.5" />
-                          <span>Gerar Dossiê Oficial em PDF</span>
+                          <span>Gerar Dossiê em PDF</span>
                         </>
                       )}
                     </button>
