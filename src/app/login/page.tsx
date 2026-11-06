@@ -46,8 +46,8 @@ export default async function LoginPage({
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-100">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         {/* Card do Logo */}
-        <div className="pt-8 pb-2 flex justify-center">
-          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-md border border-slate-200/80">
+        <div className="pt-8 pb-2 px-6 flex justify-center">
+          <div className="w-64 sm:w-72 h-20 sm:h-22 bg-white rounded-2xl flex items-center justify-center px-5 py-3 shadow-sm border border-slate-200/90">
             <img src="/logo.svg" alt="Rede Ativa" className="w-full h-full object-contain" />
           </div>
         </div>
