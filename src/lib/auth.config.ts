@@ -12,6 +12,15 @@ for (const key of ["NEXTAUTH_URL", "AUTH_URL"]) {
     process.env[key] = val;
   }
 }
+
+// Se NEXTAUTH_URL ou AUTH_URL apontar para o domínio legado .vercel.app, neutraliza a trava
+// para que o Auth.js v5 derive dinamicamente a origem da requisição via trustHost: true,
+// suportando perfeitamente o novo domínio próprio (redeativa.app.br / www.redeativa.app.br).
+for (const key of ["NEXTAUTH_URL", "AUTH_URL"]) {
+  if (process.env[key] && process.env[key]!.includes(".vercel.app")) {
+    delete process.env[key];
+  }
+}
 for (const key of ["AUTH_SECRET", "NEXTAUTH_SECRET"]) {
   if (process.env[key]) {
     let val = process.env[key]!.trim();

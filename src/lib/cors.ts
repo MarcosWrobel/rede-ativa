@@ -14,6 +14,14 @@ function isTrustedSyncOrigin(origin: string | null): boolean {
       if (host === "redeprotecao.seed.pr.gov.br" || host.endsWith(".redeprotecao.seed.pr.gov.br")) {
         return true;
       }
+      if (
+        host === "redeativa.app.br" ||
+        host === "www.redeativa.app.br" ||
+        host.endsWith(".redeativa.app.br") ||
+        host.endsWith(".vercel.app")
+      ) {
+        return true;
+      }
     }
 
     const appUrlStr = process.env.NEXTAUTH_URL || process.env.AUTH_URL;
