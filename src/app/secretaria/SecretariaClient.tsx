@@ -275,7 +275,7 @@ export default function SecretariaClient({
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-xs rounded-full text-xs font-semibold tracking-wide text-sky-200 border border-white/10">
                 <Landmark className="w-3.5 h-3.5" />
-                <span>Secretaria Municipal de Educação & Cultura (SEMEC)</span>
+                <span>Secretaria Municipal de Educação</span>
               </div>
 
               {availableCities.length > 1 && (
@@ -298,10 +298,6 @@ export default function SecretariaClient({
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               Rede Municipal de Ensino — {city}
             </h1>
-            <p className="text-sm text-sky-200/90 max-w-2xl leading-relaxed">
-              Painel executivo com comparativo de frequência, monitoramento de evasão
-              e alerta de defasagem de dados das unidades municipais.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -310,7 +306,7 @@ export default function SecretariaClient({
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-bold rounded-xl shadow-lg transition transform active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-emerald-100" />
-              <span>Wizard de Auto-Onboarding</span>
+              <span>Cadastrar Rede</span>
             </Link>
             <button
               type="button"
@@ -326,7 +322,7 @@ export default function SecretariaClient({
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl border border-white/20 transition"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>Painel SuperAdmin</span>
+                <span>Administração</span>
               </Link>
             )}
           </div>

@@ -210,12 +210,8 @@ export default function EquipeClient({
 
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center space-x-2">
             <UserCheck className="w-6 h-6 text-sky-600 dark:text-sky-400" />
-            <span>Equipe Autorizada & Controle de Papéis</span>
+            <span>Equipe e Acessos</span>
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Gestão de acessos hierárquicos para servidores institucionais de{" "}
-            <strong className="text-slate-800 dark:text-slate-200">{currentSchool.name}</strong>.
-          </p>
         </div>
 
         {/* SuperAdmin View Mode Toggle */}
@@ -261,21 +257,18 @@ export default function EquipeClient({
             Direção / Gestão
           </div>
           <div className="text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">{stats.managers}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Gestores SEMEC e Diretores</div>
         </div>
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">
             Equipe Pedagógica
           </div>
           <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{stats.pedagogas}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Acesso operacional</div>
         </div>
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">
             Administradores
           </div>
           <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{stats.admins}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Acesso geral / SaaS</div>
         </div>
       </div>
 

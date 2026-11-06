@@ -69,121 +69,121 @@ export default async function DashboardPage() {
   const sections = [
     {
       title: "1. Busca Ativa & Frequência",
-      desc: "Identificação de infrequência, disparos via WhatsApp e acompanhamento de retornos",
+      desc: "Monitoramento de faltas, contatos com a família e retorno de justificativas",
       cards: [
         {
-          title: "Painel de Frequência & Alertas",
-          desc: "Alunos em risco crítico (<75%), alertas de queda abrupta e protocolos do SERP/Celepar.",
+          title: "Frequência e Alertas",
+          desc: "Estudantes em risco crítico (<75%), alertas de queda abrupta e protocolos do SERP.",
           href: "/faltas",
           icon: AlertTriangle,
           color: "bg-amber-50 text-amber-700 border-amber-200",
-          btnText: "Monitorar Faltas",
+          btnText: "Acessar",
         },
         {
-          title: "Enviar Mensagem",
-          desc: "Envio individual ou Fila Assistida por Turma com salto automático de atestados.",
+          title: "Busca Ativa",
+          desc: "Envio de mensagens individual ou fila assistida por turma com salto de atestados.",
           href: "/busca-ativa",
           icon: Send,
           color: "bg-sky-50 text-sky-700 border-sky-200",
-          btnText: "Iniciar Envios",
+          btnText: "Acessar",
         },
         {
-          title: "Histórico & Retornos",
-          desc: "Controle de mensagens enviadas, confirmação de entrega e triagem de justificativas com IA.",
+          title: "Histórico de Contatos",
+          desc: "Registro de mensagens enviadas, confirmação de entrega e triagem de justificativas.",
           href: "/historico",
           icon: History,
           color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-          btnText: "Ver Histórico",
+          btnText: "Acessar",
         },
       ],
     },
     {
       title: "2. Registro Pedagógico & Documentação",
-      desc: "Gestão cadastral, atestados ágeis, livro oficial de atas e acompanhamento de combinados",
+      desc: "Base de estudantes, atestados médicos, livro oficial de atas e encaminhamentos",
       cards: [
         {
-          title: "Alunos e Turmas",
-          desc: "Base cadastral completa, importação em lote SERE (.xls/.pdf), Prontuário 360º e Dossiê A4.",
+          title: "Estudantes e Turmas",
+          desc: "Enturmação, importação SERE, prontuário individual e emissão de dossiê.",
           href: "/alunos",
           icon: Users,
           color: "bg-blue-50 text-blue-700 border-blue-200",
-          btnText: "Gerenciar Alunos",
+          btnText: "Acessar",
         },
         {
-          title: "Painel de Atestados",
-          desc: "Lançamento ágil de atestados médicos com cálculo automático, atalhos de dias e tabela filtrável.",
+          title: "Atestados e Justificativas",
+          desc: "Lançamento de atestados médicos, controle de vigência e cálculo de retorno.",
           href: "/atestados",
           icon: Stethoscope,
           color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-          btnText: "Lançar Atestados",
+          btnText: "Acessar",
         },
         {
-          title: "Livro de Atas Digital",
-          desc: "Lavratura bimodal com IA Gemini, assinaturas digitais @escola/biometria e Livro Anual.",
+          title: "Livro de Atas",
+          desc: "Lavratura de atas pedagógicas com fé pública, termos aditivos e livro anual.",
           href: "/atas",
           icon: BookOpenCheck,
           color: "bg-indigo-50 text-indigo-700 border-indigo-200",
-          btnText: "Acessar Livro de Atas",
+          btnText: "Acessar",
         },
         {
-          title: "Combinados & Encaminhamentos",
-          desc: "Acompanhamento de prazos, cobrança de compromissos pedagógicos e baixa com notas de devolutiva.",
+          title: "Encaminhamentos e Prazos",
+          desc: "Acompanhamento de prazos da Rede de Proteção, retornos da família e compromissos.",
           href: "/encaminhamentos",
           icon: ListTodo,
           color: "bg-violet-50 text-violet-700 border-violet-200",
-          btnText: "Acompanhar Prazos",
+          btnText: "Acessar",
         },
       ],
     },
     {
       title: "3. Diagnóstico & Gestão",
-      desc: "Visão estratégica, diagnósticos semanais automatizados e relatórios para a direção",
+      desc: "Diagnósticos semanais de infrequência e relatórios consolidados",
       cards: [
         {
           title: "Boletim Semanal",
-          desc: "Diagnóstico executivo automatizado (Vercel Cron) para reuniões pedagógicas e direção.",
+          desc: "Diagnóstico executivo semanal para a equipe pedagógica e equipe gestora.",
           href: "/boletim",
           icon: FileSpreadsheet,
           color: "bg-teal-50 text-teal-700 border-teal-200",
-          btnText: "Ver Boletim",
+          btnText: "Acessar",
         },
         {
-          title: "Relatórios & Estatísticas",
-          desc: "Gráficos de ocorrências por trimestre, produtividade pedagógica e causas de ausência.",
+          title: "Relatórios",
+          desc: "Indicadores de infrequência por turma, causas de ausência e contatos realizados.",
           href: "/relatorios",
           icon: BarChart3,
           color: "bg-purple-50 text-purple-700 border-purple-200",
-          btnText: "Ver Relatórios",
+          btnText: "Acessar",
         },
       ],
     },
     {
       title: "4. Sistema & Governança",
-      desc: "Padronização institucional de comunicados, controle de acessos e auditoria",
+      desc: "Modelos institucionais de comunicado, permissões de acesso e auditoria",
       cards: [
         {
-          title: "Modelos de Mensagem",
-          desc: "Padronização de comunicados institucionais por turno e assistente de redação Gemini IA.",
+          title: "Modelos",
+          desc: "Textos institucionais de comunicado organizados por turno e motivo.",
           href: "/modelos",
           icon: FileText,
           color: "bg-cyan-50 text-cyan-700 border-cyan-200",
-          btnText: "Gerenciar Modelos",
+          btnText: "Acessar",
         },
         {
-          title: "Equipe & Acessos",
-          desc: "Autorização de servidores institucionais (@escola.pr.gov.br) e controle de perfis.",
+          title: "Equipe",
+          desc: "Gestão de acessos da equipe escolar e permissões por perfil.",
           href: "/equipe",
           icon: UserCheck,
           color: "bg-rose-50 text-rose-700 border-rose-200",
-          btnText: "Gerenciar Equipe",
+          btnText: "Acessar",
         },
         {
-          title: "Trilha de Auditoria",
-          desc: "Registro imutável de ações, IPs de origem e conformidade LGPD para todos os atos.",
+          title: "Auditoria",
+          desc: "Registro de operações, acessos e integridade de dados.",
           href: "/auditoria",
           icon: ShieldCheck,
           color: "bg-slate-50 text-slate-700 border-slate-200",
-          btnText: "Ver Auditoria",
+          btnText: "Acessar",
         },
       ],
     },
@@ -203,11 +203,8 @@ export default async function DashboardPage() {
               <span>{currentSchool?.name || "Rede Ativa"}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Olá, {session?.user?.name || "Equipe Pedagógica"}!
+              Visão Geral
             </h1>
-            <p className="text-sky-100 text-sm mt-1 max-w-xl">
-              Painel centralizado de Busca Ativa, Registro Pedagógico e Livro de Atas Digital com fé pública.
-            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -216,7 +213,7 @@ export default async function DashboardPage() {
             className="inline-flex items-center space-x-2 bg-white text-sky-800 hover:bg-sky-50 font-bold px-4 py-2.5 rounded-xl shadow-sm transition whitespace-nowrap text-xs"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>Disparo WhatsApp</span>
+            <span>Busca Ativa</span>
           </Link>
           <Link
             href="/atas"
@@ -233,7 +230,6 @@ export default async function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total de Estudantes</div>
           <div className="text-2xl font-black text-slate-900 mt-1">{totalStudents}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Cadastrados e ativos</div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagens Enviadas</div>
@@ -241,14 +237,13 @@ export default async function DashboardPage() {
           <div className="text-xs text-slate-500 mt-0.5">{totalReplied} retornos confirmados</div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Infrequência & Risco</div>
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Infrequência e Risco</div>
           <div className="text-2xl font-black text-amber-600 mt-1">{lowAttendanceCount}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Alunos em acompanhamento SERP</div>
+          <div className="text-xs text-slate-500 mt-0.5">Estudantes monitorados</div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Atas Lavradas no Livro</div>
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Atas Lavradas</div>
           <div className="text-2xl font-black text-indigo-600 mt-1">{totalMinutes}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Com fé pública e Hash SHA-256</div>
         </div>
       </div>
 
@@ -302,7 +297,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
             <Clock className="w-4 h-4 text-sky-600" />
-            <span>Últimos Envios Registrados</span>
+            <span>Últimos Contatos</span>
           </h2>
           <Link href="/historico" className="text-xs font-bold text-sky-600 hover:text-sky-800">
             Ver todos ({totalLogs}) &rarr;
@@ -313,7 +308,7 @@ export default async function DashboardPage() {
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 bg-slate-50 uppercase font-semibold">
               <tr>
-                <th className="px-4 py-2.5 rounded-l-lg">Aluno</th>
+                <th className="px-4 py-2.5 rounded-l-lg">Estudante</th>
                 <th className="px-4 py-2.5">Turma</th>
                 <th className="px-4 py-2.5">Motivo</th>
                 <th className="px-4 py-2.5">Pedagoga</th>

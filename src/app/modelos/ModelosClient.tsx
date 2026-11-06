@@ -287,11 +287,8 @@ export default function ModelosClient({ initialTemplates }: Props) {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <FileText className="w-6 h-6 text-sky-600" />
-            <span>Modelos de Mensagem Padronizados</span>
+            <span>Modelos de Mensagem</span>
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Modelos inteligentes com suporte a criação via <strong>Inteligência Artificial (Google Gemini)</strong> e adaptação automática por período.
-          </p>
         </div>
 
         <button
@@ -300,7 +297,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
           className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
         >
           <Sparkles className="w-4 h-4 text-amber-300" />
-          <span>Criar Novo Modelo (com IA)</span>
+          <span>Novo Modelo</span>
         </button>
       </div>
 
@@ -308,9 +305,9 @@ export default function ModelosClient({ initialTemplates }: Props) {
       <div className="bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-xl p-4 text-xs text-slate-800 flex items-start space-x-3 shadow-2xs">
         <Sparkles className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <p className="font-bold text-slate-900">Novo: Criador Inteligente de Modelos com IA</p>
+          <p className="font-bold text-slate-900">Assistente de Redação com IA</p>
           <p className="text-slate-600 leading-relaxed">
-            Ao criar um modelo, você pode simplesmente descrever em linguagem comum o que deseja avisar (ex: <em>&ldquo;reunião de pais quinta às 18h30&rdquo;</em>). A IA do <strong>Google Gemini</strong> redige a mensagem com linguagem pedagógica acolhedora e formatação pronta para o WhatsApp.
+            Descreva o objetivo do comunicado para redigir o modelo automaticamente com linguagem acolhedora para o WhatsApp.
           </p>
         </div>
       </div>

@@ -248,13 +248,12 @@ export default function AlunosClient({
       {/* Title & Action buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
+          <h1 aria-label="Prontuário 360º de Alunos" className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <Users className="w-6 h-6 text-sky-600" />
-            <span>Cadastro & Prontuário 360º de Alunos</span>
+            <span>Estudantes e Turmas</span>
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {students.length} alunos ativos em {classGroupList.length} turmas. Clique no nome ou em{" "}
-            <strong>Prontuário</strong> para gerenciar múltiplos contatos, atestados, atas presenciais e emitir o Dossiê PDF.
+          <p className="text-xs text-slate-500 mt-1">
+            {students.length} estudantes ativos em {classGroupList.length} turmas.
           </p>
         </div>
 
@@ -265,7 +264,7 @@ export default function AlunosClient({
             className="inline-flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Importar Lote (SERE)</span>
+            <span>Importar SERE</span>
           </button>
 
           <button
@@ -274,7 +273,7 @@ export default function AlunosClient({
             className="inline-flex items-center space-x-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
-            <span>Cadastrar Novo Aluno</span>
+            <span>Novo Estudante</span>
           </button>
         </div>
       </div>
@@ -286,7 +285,7 @@ export default function AlunosClient({
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar por nome, CGM, responsável ou fone..."
+              placeholder="Buscar por estudante, CGM, responsável ou telefone..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -508,7 +507,7 @@ export default function AlunosClient({
       <ModalDialog
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingStudent ? "Editar Dados do Aluno" : "Cadastrar Novo Aluno"}
+        title={editingStudent ? "Editar Estudante" : "Novo Estudante"}
       >
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           {formError && (
@@ -520,7 +519,7 @@ export default function AlunosClient({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
               <label className="font-semibold text-slate-700 block mb-1">
-                Nome Completo do Aluno (em maiúsculas):
+                Nome Completo:
               </label>
               <input
                 type="text"
@@ -605,7 +604,7 @@ export default function AlunosClient({
 
           <div>
             <label className="font-semibold text-slate-700 block mb-1">
-              Nome do Responsável:
+              Responsável Legal:
             </label>
             <input
               type="text"
@@ -618,7 +617,7 @@ export default function AlunosClient({
 
           <div>
             <label className="font-semibold text-slate-700 block mb-1">
-              Telefone de Contato (com DDD, somente dígitos):
+              Telefone (com DDD):
             </label>
             <input
               type="tel"

@@ -169,12 +169,9 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
               <Building2 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                Identidade & Dados da Escola
+              <h1 aria-label="Identidade & Dados da Escola" className="text-2xl font-bold text-slate-900 dark:text-white">
+                Dados da Escola
               </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Gerencie o nome institucional, brasão oficial, rede de ensino e credenciais de integração
-              </p>
             </div>
           </div>
         </div>
@@ -213,7 +210,7 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
           <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2 mb-4">
             <ImageIcon className="w-4 h-4 text-sky-600" />
-            <span>Brasão & Identidade Visual</span>
+            <span>Brasão e Logotipo</span>
           </h2>
 
           <div className="flex flex-col sm:flex-row items-center gap-6">

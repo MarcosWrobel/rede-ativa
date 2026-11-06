@@ -112,12 +112,9 @@ export default function RelatoriosClient({ initialSummary }: Props) {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <BarChart3 className="w-6 h-6 text-purple-600" />
-            <span>Relatórios Gerenciais de Ocorrências & Comunicação</span>
+            <span>Relatórios e Indicadores</span>
             {isLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-600 print:hidden" />}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Indicadores consolidados via banco de dados para equipe pedagógica, direção e órgãos de proteção.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 print:hidden">
@@ -145,7 +142,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
             className="inline-flex items-center space-x-1.5 px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 shadow-2xs transition"
           >
             <Printer className="w-4 h-4 text-slate-500" />
-            <span>Imprimir Relatório</span>
+            <span>Imprimir</span>
           </button>
         </div>
       </div>
