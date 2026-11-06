@@ -45,16 +45,14 @@ export default async function LoginPage({
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-100">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-        {/* Header Institucional */}
-        <div className="bg-gradient-to-r from-sky-800 to-sky-700 p-8 text-white text-center">
-          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 p-2 shadow-lg border border-white/40">
+        {/* Card do Logo */}
+        <div className="pt-8 pb-2 flex justify-center">
+          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-md border border-slate-200/80">
             <img src="/logo.svg" alt="Rede Ativa" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Rede Ativa</h1>
-          <p className="text-sky-100 text-sm mt-1">Busca Ativa & Atas Digitais com Fé Pública</p>
         </div>
 
-        <div className="p-8 space-y-5">
+        <div className="p-8 pt-4 space-y-5">
           {activeError && (
             <div
               role="alert"
