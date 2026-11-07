@@ -33,6 +33,18 @@ export default async function LoginPage({
       title: "Erro Temporário de Autenticação",
       body: "Não foi possível validar sua conta no momento. Tente novamente em instantes.",
     },
+    Configuration: {
+      title: "Divergência de Configuração",
+      body: "Houve uma divergência nas chaves OAuth ou no endereço cadastrado no Google Cloud. Consulte os logs da Vercel ou o administrador.",
+    },
+    OAuthCallbackError: {
+      title: "Falha na Validação do Provedor",
+      body: "O Google não concluiu a troca de credenciais de acesso. Tente novamente.",
+    },
+    AccessDenied: {
+      title: "Acesso Não Permitido",
+      body: "A permissão de acesso foi negada ou a conta selecionada não está autorizada.",
+    },
   };
 
   const activeError = errorCode

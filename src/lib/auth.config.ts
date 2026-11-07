@@ -68,7 +68,7 @@ export const authConfig: NextAuthConfig = {
     Google({
       clientId: (process.env.GOOGLE_CLIENT_ID || "").replace(/^["']|["']$/g, "").trim(),
       clientSecret: (process.env.GOOGLE_CLIENT_SECRET || "").replace(/^["']|["']$/g, "").trim(),
-      checks: ["state"],
+      checks: ["pkce"],
       authorization: {
         params: {
           prompt: "select_account",
@@ -78,6 +78,19 @@ export const authConfig: NextAuthConfig = {
       },
     }),
   ],
+  logger: {
+    error(error) {
+      console.error("[AUTH_CRITICAL_LOGGER_ERROR]", {
+        name: (error as any)?.name,
+        message: (error as any)?.message,
+        stack: (error as any)?.stack,
+        cause: (error as any)?.cause,
+      });
+    },
+    warn(code) {
+      console.warn("[AUTH_LOGGER_WARN]", code);
+    },
+  },
   callbacks: {
     async session({ session, token }) {
       if (session.user) {
@@ -104,6 +117,7 @@ export const authConfig: NextAuthConfig = {
   },
   pages: {
     signIn: "/login",
+    error: "/login",
   },
   session: {
     strategy: "jwt",
