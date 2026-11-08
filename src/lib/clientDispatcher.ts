@@ -125,3 +125,98 @@ export function dispatchWhatsAppToBrowser(
   window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME);
   return { dispatchedVia: "WINDOW_OPEN" };
 }
+
+export interface ExtractWhatsAppReplyResult {
+  success: boolean;
+  logId?: string;
+  rawText?: string;
+  domTimestamp?: string | null;
+  activeChatTitle?: string | null;
+  error?: string;
+  message?: string;
+}
+
+/**
+ * Solicita à Extensão Chrome MV3 a extração em modo estritamente Read-Only
+ * da última mensagem de retorno recebida na conversa aberta do WhatsApp Web.
+ */
+export function extractWhatsAppReplyViaExtension(
+  logId: string,
+  phone?: string,
+  timeoutMs = 8000
+): Promise<ExtractWhatsAppReplyResult> {
+  if (typeof window === "undefined") {
+    return Promise.resolve({
+      success: false,
+      error: "SSR_ENVIRONMENT",
+      message: "Execução indisponível no servidor.",
+    });
+  }
+
+  return new Promise<ExtractWhatsAppReplyResult>((resolve) => {
+    let isSettled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      window.removeEventListener("message", handleMessage as EventListener);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (isSettled) return;
+
+      // Validação de origem rigorosa contra spoofing
+      if (window.location?.origin && event.origin !== window.location.origin) {
+        return;
+      }
+
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+
+      if (
+        (data.type === "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" ||
+          data.type === "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED") &&
+        data.logId === logId
+      ) {
+        isSettled = true;
+        cleanup();
+        resolve({
+          success: Boolean(data.success),
+          logId: data.logId,
+          rawText: data.rawText,
+          domTimestamp: data.domTimestamp ?? null,
+          activeChatTitle: data.activeChatTitle ?? null,
+          error: data.error,
+          message: data.message,
+        });
+      }
+    };
+
+    window.addEventListener("message", handleMessage as EventListener);
+
+    timer = setTimeout(() => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
+      resolve({
+        success: false,
+        error: "EXTENSION_TIMEOUT",
+        message:
+          "A extensão não respondeu a tempo. Verifique se ela está ativa ou cole o texto manualmente.",
+      });
+    }, timeoutMs);
+
+    const targetOrigin = window.location?.origin || "*";
+    window.postMessage(
+      {
+        type: "REDEATIVA_EXTRACT_WHATSAPP_REPLY",
+        logId,
+        phone,
+      },
+      targetOrigin
+    );
+  });
+}

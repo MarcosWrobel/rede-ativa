@@ -137,4 +137,95 @@ describe("Arcabouço Jurídico & Criptografia de Mensagens (JUR-02 / JUR-01)", (
     });
     expect(modifiedSeal).not.toBe(dossierSeal1);
   });
+
+  it("preserva 100% da retrocompatibilidade de hash quando guardianReplied for false ou ausente", () => {
+    const legacyHash = computeMessageContentHash(basePayload);
+
+    const hashFalse = computeMessageContentHash({
+      ...basePayload,
+      guardianReplied: false,
+    });
+
+    const hashUndefined = computeMessageContentHash({
+      ...basePayload,
+      guardianReplied: undefined,
+    });
+
+    // Se guardianReplied for false, notas e categorias legadas não alteram o hash canônico
+    const hashFalseWithNotes = computeMessageContentHash({
+      ...basePayload,
+      guardianReplied: false,
+      replyNotes: "Tentativa ignorada",
+      replyCategory: "SAUDE",
+      repliedAt: "2026-11-05T14:00:00.000Z",
+    });
+
+    expect(hashFalse).toBe(legacyHash);
+    expect(hashUndefined).toBe(legacyHash);
+    expect(hashFalseWithNotes).toBe(legacyHash);
+  });
+
+  it("calcula hash SHA-256 canônico determinístico quando guardianReplied for true", () => {
+    const replyPayload = {
+      ...basePayload,
+      guardianReplied: true,
+      replyNotes: "Mãe informou que estudante teve consulta médica.",
+      replyCategory: "SAUDE",
+      repliedAt: "2026-11-05T14:30:00.000Z",
+    };
+
+    const hash1 = computeMessageContentHash(replyPayload);
+    const hash2 = computeMessageContentHash({
+      ...replyPayload,
+      repliedAt: new Date("2026-11-05T14:30:00.000Z"),
+    });
+
+    expect(hash1).toHaveLength(64);
+    expect(hash1).toBe(hash2);
+
+    // Normalização de espaços nas anotações e categoria
+    const hashWithWhitespace = computeMessageContentHash({
+      ...replyPayload,
+      replyNotes: "  Mãe informou que estudante teve consulta médica.  ",
+      replyCategory: " SAUDE ",
+    });
+    expect(hashWithWhitespace).toBe(hash1);
+  });
+
+  it("produz efeito avalanche no hash com retorno se replyNotes, replyCategory ou repliedAt mudar", () => {
+    const baseReplyPayload = {
+      ...basePayload,
+      guardianReplied: true,
+      replyNotes: "Mãe informou consulta médica",
+      replyCategory: "SAUDE",
+      repliedAt: "2026-11-05T14:30:00.000Z",
+    };
+
+    const originalReplyHash = computeMessageContentHash(baseReplyPayload);
+    const legacyHash = computeMessageContentHash(basePayload);
+
+    // Hash com retorno difere do hash sem retorno
+    expect(originalReplyHash).not.toBe(legacyHash);
+
+    // Adulteração de replyNotes
+    const tamperedNotesHash = computeMessageContentHash({
+      ...baseReplyPayload,
+      replyNotes: "Mãe informou trabalho no sítio",
+    });
+    expect(tamperedNotesHash).not.toBe(originalReplyHash);
+
+    // Adulteração de replyCategory
+    const tamperedCategoryHash = computeMessageContentHash({
+      ...baseReplyPayload,
+      replyCategory: "TRABALHO",
+    });
+    expect(tamperedCategoryHash).not.toBe(originalReplyHash);
+
+    // Adulteração de repliedAt
+    const tamperedRepliedAtHash = computeMessageContentHash({
+      ...baseReplyPayload,
+      repliedAt: "2026-11-05T15:00:00.000Z",
+    });
+    expect(tamperedRepliedAtHash).not.toBe(originalReplyHash);
+  });
 });

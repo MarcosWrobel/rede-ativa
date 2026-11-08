@@ -2,11 +2,32 @@
  * Content Script Bridge — Sincronizador Leopoldina (Manifest V3)
  * Injetado na aplicação web Registro (local ou em nuvem).
  * Conecta eventos de postMessage da página web ao Background Service Worker da extensão
- * e repassa confirmações de envio de WhatsApp em tempo real.
+ * e repassa confirmações de envio de WhatsApp e extração de retornos em tempo real.
  */
 
 (function () {
   try {
+    function isTrustedSyncOrigin(origin) {
+      if (!origin || typeof origin !== "string") return false;
+      try {
+        const parsed = new URL(origin);
+        const { protocol, hostname } = parsed;
+        if (protocol === "http:") {
+          return hostname === "localhost" || hostname === "127.0.0.1";
+        }
+        if (protocol === "https:") {
+          return (
+            hostname === "redeativa.app.br" ||
+            hostname.endsWith(".redeativa.app.br") ||
+            hostname.endsWith(".vercel.app")
+          );
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
+
     // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação
     if (document.documentElement) {
       document.documentElement.dataset.redeativaExtension = "true";
@@ -18,25 +39,80 @@
     // 2. Anúncio via postMessage para listeners ativos
     const readyPayload = {
       version: "1.5.0",
-      capabilities: ["WHATSAPP_DISPATCH", "WHATSAPP_AUTO_CONFIRMATION", "SERE_SYNC", "SERP_SCRAPER"],
+      capabilities: [
+        "WHATSAPP_DISPATCH",
+        "WHATSAPP_AUTO_CONFIRMATION",
+        "WHATSAPP_REPLY_EXTRACTION",
+        "SERE_SYNC",
+        "SERP_SCRAPER",
+      ],
     };
-    window.postMessage({ type: "REDEATIVA_EXTENSION_READY", ...readyPayload }, "*");
-    window.postMessage({ type: "LEOPOLDINA_EXTENSION_READY", ...readyPayload }, "*");
+    const targetOrigin = window.location.origin || "*";
+    window.postMessage({ type: "REDEATIVA_EXTENSION_READY", ...readyPayload }, targetOrigin);
+    window.postMessage({ type: "LEOPOLDINA_EXTENSION_READY", ...readyPayload }, targetOrigin);
 
-    // 3. Escuta eventos de despacho emitidos pela aplicação Registro
+    // 3. Escuta eventos emitidos pela aplicação Registro
     window.addEventListener("message", (event) => {
       if (event.source !== window || !event.data) return;
+      if (!isTrustedSyncOrigin(event.origin)) return;
 
+      const data = event.data;
+
+      // 3.1 Extração de retorno do WhatsApp Web
       if (
-        (event.data.type === "REDEATIVA_DISPATCH_WHATSAPP" || event.data.type === "LEOPOLDINA_DISPATCH_WHATSAPP") &&
-        event.data.url
+        data.type === "REDEATIVA_EXTRACT_WHATSAPP_REPLY" ||
+        data.type === "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY"
+      ) {
+        chrome.runtime.sendMessage(
+          {
+            type: "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY",
+            logId: data.logId,
+            phone: data.phone,
+          },
+          (response) => {
+            const currentOrigin = window.location.origin;
+            if (chrome.runtime.lastError) {
+              const errPayload = {
+                type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+                logId: data.logId,
+                success: false,
+                error: "EXTENSION_ERROR",
+                message: chrome.runtime.lastError.message,
+              };
+              window.postMessage(errPayload, currentOrigin);
+              window.postMessage(
+                { ...errPayload, type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED" },
+                currentOrigin
+              );
+              return;
+            }
+
+            const replyPayload = {
+              type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+              logId: data.logId,
+              ...(response || {}),
+            };
+            window.postMessage(replyPayload, currentOrigin);
+            window.postMessage(
+              { ...replyPayload, type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED" },
+              currentOrigin
+            );
+          }
+        );
+        return;
+      }
+
+      // 3.2 Despacho de mensagem do WhatsApp
+      if (
+        (data.type === "REDEATIVA_DISPATCH_WHATSAPP" || data.type === "LEOPOLDINA_DISPATCH_WHATSAPP") &&
+        data.url
       ) {
         // Validação defensiva prévia da URL antes de encaminhar ao service worker
         try {
-          const parsed = new URL(event.data.url);
+          const parsed = new URL(data.url);
           const host = parsed.hostname.toLowerCase();
           if (parsed.protocol !== "https:" || (host !== "web.whatsapp.com" && host !== "wa.me" && host !== "api.whatsapp.com")) {
-            console.warn("[Sincronizador Leopoldina] URL ignorada por segurança:", event.data.url);
+            console.warn("[Sincronizador Leopoldina] URL ignorada por segurança:", data.url);
             return;
           }
         } catch {
@@ -52,12 +128,12 @@
           chrome.runtime.sendMessage(
             {
               type: "LEOPOLDINA_DISPATCH_WHATSAPP",
-              url: event.data.url,
-              logId: event.data.logId || null,
-              studentId: event.data.studentId || null,
-              studentName: event.data.studentName || null,
-              phone: event.data.phone || null,
-              autoSend: event.data.autoSend,
+              url: data.url,
+              logId: data.logId || null,
+              studentId: data.studentId || null,
+              studentName: data.studentName || null,
+              phone: data.phone || null,
+              autoSend: data.autoSend,
             },
             (response) => {
               if (chrome.runtime.lastError) {
@@ -73,7 +149,7 @@
                   type: "LEOPOLDINA_DISPATCH_WHATSAPP_ACK",
                   response,
                 },
-                "*"
+                window.location.origin
               );
             }
           );
@@ -94,8 +170,9 @@
           studentName: message.studentName,
           timestamp: message.timestamp,
         };
-        window.postMessage({ type: "REDEATIVA_WHATSAPP_CONFIRMED", ...confirmPayload }, "*");
-        window.postMessage({ type: "LEOPOLDINA_WHATSAPP_CONFIRMED", ...confirmPayload }, "*");
+        const currentOrigin = window.location.origin;
+        window.postMessage({ type: "REDEATIVA_WHATSAPP_CONFIRMED", ...confirmPayload }, currentOrigin);
+        window.postMessage({ type: "LEOPOLDINA_WHATSAPP_CONFIRMED", ...confirmPayload }, currentOrigin);
       }
     });
   } catch (err) {

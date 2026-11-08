@@ -4,6 +4,7 @@
  * 1. Monitorar e confirmar automaticamente o envio de mensagens da Busca Ativa.
  * 2. Detectar diálogos nativos de número inválido ou sem conta no WhatsApp.
  * 3. Notificar a extensão e a plataforma Registro em tempo real para avanço da fila.
+ * 4. Extrair de forma assistida e estritamente Read-Only o último retorno recebido.
  */
 
 (function () {
@@ -225,6 +226,106 @@
       subtree: true,
     });
   }
+
+  // Listener para extração assistida de retorno (Modo Estritamente Read-Only)
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE") {
+      try {
+        const incomingMessages = document.querySelectorAll("div.message-in");
+        if (!incomingMessages || incomingMessages.length === 0) {
+          sendResponse({
+            success: false,
+            error: "NO_INCOMING_MESSAGE",
+            message: "Nenhuma mensagem recebida foi localizada na conversa aberta do WhatsApp Web.",
+          });
+          return false;
+        }
+
+        const lastMessageEl = incomingMessages[incomingMessages.length - 1];
+
+        // 1. Extração do texto da mensagem na ordem estrita de prioridade
+        let extractedText = "";
+        const selectors = [
+          ".selectable-text span",
+          ".selectable-text",
+          "div.copyable-text",
+          "span._ao3e",
+          'span[dir="ltr"]',
+        ];
+
+        for (const selector of selectors) {
+          const el = lastMessageEl.querySelector(selector);
+          if (el) {
+            const txt = (el.innerText || el.textContent || "").trim();
+            if (txt.length > 0) {
+              extractedText = txt;
+              break;
+            }
+          }
+        }
+
+        // Fallback defensivo se seletores específicos não encontrarem o nó
+        if (!extractedText) {
+          extractedText = (lastMessageEl.innerText || lastMessageEl.textContent || "").trim();
+        }
+
+        if (!extractedText) {
+          sendResponse({
+            success: false,
+            error: "EMPTY_TEXT",
+            message: "A última mensagem recebida não possui texto legível.",
+          });
+          return false;
+        }
+
+        // 2. Extração do metadado de data/hora (domTimestamp)
+        let domTimestamp = null;
+        const copyableEl = lastMessageEl.querySelector("div.copyable-text");
+        if (copyableEl && copyableEl.getAttribute("data-pre-plain-text")) {
+          domTimestamp = copyableEl.getAttribute("data-pre-plain-text").trim();
+        } else {
+          const timeSpans = lastMessageEl.querySelectorAll("span");
+          for (let i = timeSpans.length - 1; i >= 0; i--) {
+            const text = (timeSpans[i].innerText || timeSpans[i].textContent || "").trim();
+            if (/\d{1,2}:\d{2}/.test(text)) {
+              domTimestamp = text;
+              break;
+            }
+          }
+          if (!domTimestamp && timeSpans.length > 0) {
+            const lastSpanText = (timeSpans[timeSpans.length - 1].innerText || "").trim();
+            if (lastSpanText) domTimestamp = lastSpanText;
+          }
+        }
+
+        // 3. Extração do título do chat aberto no cabeçalho
+        let activeChatTitle = null;
+        const headerTitleEl =
+          document.querySelector("header span[title]") ||
+          document.querySelector("header div[role='button'] span[title]") ||
+          document.querySelector("#main header span[title]");
+        if (headerTitleEl) {
+          activeChatTitle = headerTitleEl.getAttribute("title") || headerTitleEl.innerText || null;
+        }
+
+        sendResponse({
+          success: true,
+          logId: message.logId,
+          phone: message.phone,
+          rawText: extractedText.trim(),
+          domTimestamp,
+          activeChatTitle,
+        });
+      } catch (err) {
+        sendResponse({
+          success: false,
+          error: "EXTRACTION_EXCEPTION",
+          message: err?.message || "Erro inesperado ao extrair mensagem do WhatsApp Web.",
+        });
+      }
+      return false; // Resposta síncrona
+    }
+  });
 
   // Inicializa o script e busca o contexto atual
   async function init() {

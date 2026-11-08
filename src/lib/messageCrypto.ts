@@ -8,6 +8,10 @@ export interface MessageCanonicalPayload {
   messageContent: string;
   sentByName: string;
   sentAt: string | Date;
+  guardianReplied?: boolean;
+  replyNotes?: string | null;
+  replyCategory?: string | null;
+  repliedAt?: string | Date | null;
 }
 
 /**
@@ -20,7 +24,7 @@ export function computeMessageContentHash(payload: MessageCanonicalPayload): str
       ? payload.sentAt.toISOString()
       : new Date(payload.sentAt).toISOString();
 
-  const normalized = {
+  const normalized: Record<string, any> = {
     studentId: (payload.studentId || "").trim(),
     schoolId: (payload.schoolId || "").trim(),
     phoneUsed: (payload.phoneUsed || "").replace(/\D/g, ""),
@@ -29,6 +33,24 @@ export function computeMessageContentHash(payload: MessageCanonicalPayload): str
     sentByName: (payload.sentByName || "").trim().toLowerCase(),
     sentAt: sentAtIso,
   };
+
+  if (payload.guardianReplied === true) {
+    let repliedAtIso = "";
+    if (payload.repliedAt) {
+      const d =
+        payload.repliedAt instanceof Date
+          ? payload.repliedAt
+          : new Date(payload.repliedAt);
+      if (!isNaN(d.getTime())) {
+        repliedAtIso = d.toISOString();
+      }
+    }
+
+    normalized.guardianReplied = true;
+    normalized.replyNotes = (payload.replyNotes ?? "").trim();
+    normalized.replyCategory = (payload.replyCategory ?? "").trim();
+    normalized.repliedAt = repliedAtIso;
+  }
 
   const canonicalJson = JSON.stringify(normalized);
   return crypto.createHash("sha256").update(canonicalJson, "utf8").digest("hex");
