@@ -117,7 +117,7 @@ flowchart TD
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `jspdf`, `qrcode`** | `^0.18.5` / `^1.9.1` / `^4.2.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão de Dossiês A4 e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.5.0` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta e confirmação automática de envio WhatsApp, empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-leopoldina.zip`. |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **51 suítes / 344 testes automatizados aprovados (100% verdes)** (~3,9s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), testes de modal e integração WhatsApp (`whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`), tokens de sincronização da extensão (`schoolSyncToken.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), auditoria de segurança e estabilidade V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **51 suítes / 345 testes automatizados aprovados (100% verdes)** (~4,0s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), testes de modal e integração WhatsApp (`whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`), tokens de sincronização da extensão (`schoolSyncToken.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), auditoria de segurança e estabilidade V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
 
 ---
 
@@ -345,7 +345,7 @@ erDiagram
 
 A integridade arquitetural é validada continuamente via **Vitest (`npm test`)** e compilação estrita **Next.js 16 + Turbopack (`npm run build`)**:
 
-- **Volume Atual:** **51 suítes / 344 testes automatizados aprovados (100% verdes)**.
+- **Volume Atual:** **51 suítes / 345 testes automatizados aprovados (100% verdes)**.
 - **Pilares de Cobertura:**
   - **Segurança Adversarial Multi-Tenant, V3 & Mensageria:** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `messageReplySecurity.test.ts`, `schoolSyncToken.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`.
   - **Conformidade Jurídica, PIN & Perícia Forense:** `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.

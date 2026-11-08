@@ -26,10 +26,10 @@
   let topBarContainer = null;
   let statusBanner = null;
   let captureActionBtn = null;
-  let headerCaptureBtn = null;
 
-  // Atualiza a aparência de todos os botões de captura conforme haja seleção de texto ou status
+  // Atualiza a aparência do botão de captura único da barra superior
   function syncCaptureButtonsState(customLabel = null, customBg = null) {
+    if (!captureActionBtn) return;
     const sel = (window.getSelection()?.toString() || "").trim();
     const hasSelection = sel.length > 2;
 
@@ -37,18 +37,18 @@
     const bg = customBg || (hasSelection ? "#4f46e5" : "#059669");
     const border = hasSelection ? "#818cf8" : "#34d399";
 
-    for (const btn of [captureActionBtn, headerCaptureBtn]) {
-      if (!btn) continue;
-      btn.innerHTML = label;
-      btn.style.background = bg;
-      btn.style.borderColor = border;
-    }
+    captureActionBtn.innerHTML = label;
+    captureActionBtn.style.background = bg;
+    captureActionBtn.style.borderColor = border;
   }
 
-  // 1. Garante a barra flutuante no topo direito da janela (com z-index máximo)
+  // 1. Garante a barra flutuante oficial no topo direito da janela (Single Source of Truth)
   function ensureTopBar() {
     const rootTarget = document.body || document.documentElement;
     if (!rootTarget) return;
+
+    // Limpa eventuais botões legados ou duplicados no header
+    document.getElementById("leopoldina-wa-header-capture-btn")?.remove();
 
     const existingBar = document.getElementById("leopoldina-wa-topbar");
     if (existingBar && topBarContainer === existingBar) {
@@ -123,59 +123,8 @@
     rootTarget.appendChild(topBarContainer);
   }
 
-  // 2. Injeta TAMBÉM um botão nativo diretamente dentro do cabeçalho da conversa aberta (#main header)
-  function ensureChatHeaderButton() {
-    const mainHeader = document.querySelector("#main header");
-    if (!mainHeader) return;
-
-    const existingHeaderBtn = document.getElementById("leopoldina-wa-header-capture-btn");
-    if (existingHeaderBtn && mainHeader.contains(existingHeaderBtn)) {
-      headerCaptureBtn = existingHeaderBtn;
-      return;
-    }
-    if (existingHeaderBtn) {
-      existingHeaderBtn.remove();
-    }
-
-    headerCaptureBtn = document.createElement("button");
-    headerCaptureBtn.id = "leopoldina-wa-header-capture-btn";
-    headerCaptureBtn.type = "button";
-    headerCaptureBtn.title =
-      "Capturar resposta desta conversa (ou texto selecionado) e enviar ao Rede Ativa";
-    headerCaptureBtn.style.cssText = `
-      background: #059669;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 5px 10px;
-      margin: 0 8px;
-      border-radius: 999px;
-      border: 1px solid #34d399;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      white-space: nowrap;
-      flex-shrink: 0;
-      z-index: 100;
-    `;
-    headerCaptureBtn.innerHTML = "📥 Capturar Retorno";
-
-    headerCaptureBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleHumanCaptureButtonClick();
-    });
-
-    mainHeader.appendChild(headerCaptureBtn);
-    syncCaptureButtonsState();
-  }
-
   function createOrUpdateBanner(text, type = "info") {
     ensureTopBar();
-    ensureChatHeaderButton();
     if (!statusBanner) return;
 
     let bg = "#0f172a";
@@ -480,7 +429,6 @@
 
     domObserver = new MutationObserver(() => {
       ensureTopBar();
-      ensureChatHeaderButton();
 
       if (hasReportedOutcome) return;
 
@@ -723,7 +671,6 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "LEOPOLDINA_PING") {
       ensureTopBar();
-      ensureChatHeaderButton();
       sendResponse({ pong: true });
       return false;
     }
@@ -731,9 +678,6 @@
     if (message?.type === "LEOPOLDINA_PREPARE_SCREENSHOT") {
       if (topBarContainer) {
         topBarContainer.style.visibility = message.hide ? "hidden" : "visible";
-      }
-      if (headerCaptureBtn) {
-        headerCaptureBtn.style.visibility = message.hide ? "hidden" : "visible";
       }
       sendResponse({ ok: true });
       return false;
@@ -812,14 +756,12 @@
   async function init() {
     try {
       ensureTopBar();
-      ensureChatHeaderButton();
       setupSendListeners();
       observeChatDOM();
 
-      // Heartbeat contínuo a cada 1s para garantir que tanto a barra flutuante quanto o botão no #main header permaneçam visíveis após trocas de conversa
+      // Heartbeat contínuo a cada 1s para garantir que a barra flutuante oficial permaneça visível após trocas de conversa
       uiHeartbeatTimer = setInterval(() => {
         ensureTopBar();
-        ensureChatHeaderButton();
       }, 1000);
 
       chrome.runtime.sendMessage({ type: "LEOPOLDINA_GET_ACTIVE_DISPATCH" }, (res) => {

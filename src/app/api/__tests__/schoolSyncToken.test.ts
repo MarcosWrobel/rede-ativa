@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { GET, POST } from "../schools/[id]/sync-token/route";
+import { encryptSyncToken, decryptSyncToken } from "@/lib/syncToken";
 
 const mockSchool = {
   id: "school-123",
   name: "Escola de Teste",
   syncTokenHash: "hash-existente-123",
+  settingsJson: null as string | null,
   updatedAt: new Date("2026-11-06T10:00:00.000Z"),
 };
 
@@ -109,10 +111,32 @@ describe("API /api/schools/[id]/sync-token (Geração e Consulta de Token de Ext
     expect(lastUpdateData.syncTokenHash).toBeDefined();
     expect(lastUpdateData.syncTokenHash).not.toBe(body.syncToken);
 
+    // Verifica que settingsJson armazena o token criptografado para recuperação autorizada
+    expect(lastUpdateData.settingsJson).toBeDefined();
+    const parsedSettings = JSON.parse(lastUpdateData.settingsJson);
+    expect(parsedSettings.syncTokenEncrypted).toBeDefined();
+    expect(decryptSyncToken(parsedSettings.syncTokenEncrypted)).toBe(body.syncToken);
+
     // Verifica registro em auditoria com schoolId raiz
     expect(mockAuditLogs.length).toBe(1);
     expect(mockAuditLogs[0].schoolId).toBe("school-123");
     expect(mockAuditLogs[0].entityType).toBe("SchoolSyncToken");
     expect(mockAuditLogs[0].details.action).toBe("ROTATE_SYNC_TOKEN");
+  });
+
+  it("GET retorna o token decifrado quando disponível em settingsJson", async () => {
+    const rawSecret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    mockSchool.settingsJson = JSON.stringify({
+      syncTokenEncrypted: encryptSyncToken(rawSecret),
+    });
+
+    const req = new Request("http://localhost/api/schools/school-123/sync-token", { method: "GET" });
+    const res = await GET(req, { params: Promise.resolve({ id: "school-123" }) });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.configured).toBe(true);
+    expect(body.syncToken).toBe(rawSecret);
+    expect(body.rawToken).toBe(rawSecret);
   });
 });

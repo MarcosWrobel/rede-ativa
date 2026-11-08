@@ -125,15 +125,34 @@ export default function FaltasClient({
 
   const handleCopyExtensionToken = async () => {
     try {
-      const res = await fetch("/api/sync-config");
-      if (res.status === 403) {
-        setCopyTokenStatus("unauthorized");
-        setTimeout(() => setCopyTokenStatus("idle"), 4500);
-        return;
+      // 1. Tenta buscar a chave exclusiva da escola ativa
+      let token: string | null = null;
+      if (currentSchool?.id) {
+        try {
+          const schoolRes = await fetch(`/api/schools/${currentSchool.id}/sync-token`);
+          if (schoolRes.ok) {
+            const schoolData = await schoolRes.json();
+            token = schoolData.rawToken || schoolData.syncToken || null;
+          }
+        } catch {}
       }
-      const data = await res.json();
-      if (res.ok && data.configured && data.syncToken) {
-        await navigator.clipboard.writeText(data.syncToken);
+
+      // 2. Fallback para token global caso a rota da escola não retorne o token direto
+      if (!token) {
+        const res = await fetch("/api/sync-config");
+        if (res.status === 403) {
+          setCopyTokenStatus("unauthorized");
+          setTimeout(() => setCopyTokenStatus("idle"), 4500);
+          return;
+        }
+        const data = await res.json();
+        if (res.ok && data.configured && data.syncToken) {
+          token = data.syncToken;
+        }
+      }
+
+      if (token) {
+        await navigator.clipboard.writeText(token);
         setCopyTokenStatus("copied");
         setTimeout(() => setCopyTokenStatus("idle"), 3000);
       } else {
@@ -754,12 +773,12 @@ export default function FaltasClient({
             <span>Baixar Extensão</span>
           </a>
 
-          {/* Botão Autenticado para Copiar Chave da Extensão (Disponível apenas na Versão Piloto Integrada) */}
-          {isIntegrated && (
+          {/* Botão Autenticado para Copiar Chave da Extensão (Disponível para Administradores de qualquer edição escolar) */}
+          {Boolean(currentUser?.isAdmin) && (
             <button
               type="button"
               onClick={handleCopyExtensionToken}
-              title={currentUser?.isAdmin ? "Copiar chave secreta de sincronização para colar nas configurações da Extensão Chrome" : "Acesso restrito a Administradores da Escola"}
+              title="Copiar chave de sincronização para colar nas configurações da Extensão Chrome"
               className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition cursor-pointer ${
                 copyTokenStatus === "copied"
                   ? "border-emerald-300 bg-emerald-50 text-emerald-700"

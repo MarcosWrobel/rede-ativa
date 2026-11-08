@@ -57,7 +57,9 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
   const [hasToken, setHasToken] = useState(school.hasSyncToken);
   const [tokenCreatedAt, setTokenCreatedAt] = useState(school.syncTokenCreatedAt);
   const [newGeneratedToken, setNewGeneratedToken] = useState<string | null>(null);
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
+  const [fetchingToken, setFetchingToken] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -162,6 +164,40 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
     navigator.clipboard.writeText(text);
     setCopiedToken(true);
     setTimeout(() => setCopiedToken(false), 2500);
+  };
+
+  const handleCopyActiveToken = async () => {
+    const tokenToCopy = newGeneratedToken || revealedToken;
+    if (tokenToCopy) {
+      copyToClipboard(tokenToCopy);
+      return;
+    }
+
+    setFetchingToken(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch(`/api/schools/${school.id}/sync-token`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao obter chave de sincronização.");
+      }
+
+      const token = data.rawToken || data.syncToken;
+      if (token) {
+        setRevealedToken(token);
+        copyToClipboard(token);
+        setSuccessMessage("Chave de sincronização copiada para a área de transferência!");
+      } else {
+        setErrorMessage(
+          "Esta instituição possui uma chave legada em vigor. Clique em 'Rotacionar Chave de Sincronização' abaixo para gerar uma nova chave protegida e copiá-la."
+        );
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "Falha ao copiar chave da extensão.");
+    } finally {
+      setFetchingToken(false);
+    }
   };
 
   return (
@@ -466,25 +502,25 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
           A extensão do Google Chrome sincroniza as faltas do RCO / SERE diretamente para este servidor. Cada escola possui seu próprio token criptográfico, garantindo total isolamento de dados entre colégios estaduais e escolas municipais.
         </p>
 
-        {/* Display New Token if generated */}
-        {newGeneratedToken && (
+        {/* Exibe o token se recém gerado ou revelado para cópia */}
+        {(newGeneratedToken || revealedToken) && (
           <div className="p-4 bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-500 rounded-xl space-y-3">
             <div className="flex items-center space-x-2 text-emerald-800 dark:text-emerald-200 text-xs font-bold">
               <Shield className="w-4 h-4 text-emerald-600" />
-              <span>Chave Gerada com Sucesso! Copie agora — ela não será exibida novamente:</span>
+              <span>Chave de Sincronização Pronta para Uso — Cole nas configurações da extensão Chrome:</span>
             </div>
 
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 readOnly
-                value={newGeneratedToken}
+                value={newGeneratedToken || revealedToken || ""}
                 className="flex-1 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-900 dark:text-emerald-100 select-all"
               />
               <button
                 type="button"
-                onClick={() => copyToClipboard(newGeneratedToken)}
-                className="inline-flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+                onClick={() => copyToClipboard(newGeneratedToken || revealedToken || "")}
+                className="inline-flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition cursor-pointer"
               >
                 {copiedToken ? (
                   <>
@@ -509,24 +545,52 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
             )}
           </div>
 
-          <button
-            type="button"
-            disabled={generatingToken}
-            onClick={handleGenerateSyncToken}
-            className="inline-flex items-center space-x-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 transition disabled:opacity-50"
-          >
-            {generatingToken ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Gerando Chave...</span>
-              </>
-            ) : (
-              <>
-                <Key className="w-4 h-4" />
-                <span>{hasToken ? "Rotacionar Chave de Sincronização" : "Gerar Nova Chave"}</span>
-              </>
+          <div className="flex flex-wrap items-center gap-2">
+            {hasToken && (
+              <button
+                type="button"
+                disabled={fetchingToken}
+                onClick={handleCopyActiveToken}
+                className="inline-flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer"
+              >
+                {copiedToken ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Chave Copiada!</span>
+                  </>
+                ) : fetchingToken ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Buscando Chave...</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>Copiar Chave da Extensão</span>
+                  </>
+                )}
+              </button>
             )}
-          </button>
+
+            <button
+              type="button"
+              disabled={generatingToken}
+              onClick={handleGenerateSyncToken}
+              className="inline-flex items-center space-x-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 transition disabled:opacity-50 cursor-pointer"
+            >
+              {generatingToken ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Gerando Chave...</span>
+                </>
+              ) : (
+                <>
+                  <Key className="w-4 h-4" />
+                  <span>{hasToken ? "Rotacionar Chave de Sincronização" : "Gerar Nova Chave"}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

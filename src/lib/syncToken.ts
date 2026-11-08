@@ -1,6 +1,52 @@
 import crypto from "crypto";
 
 const SYNC_HASH_PREFIX = "sha256:";
+const ENCRYPTION_ALGO = "aes-256-gcm";
+
+function getEncryptionKey(): Buffer {
+  const secret =
+    process.env.NEXTAUTH_SECRET ||
+    process.env.AUTH_SECRET ||
+    "rede-ativa-saas-sync-token-secret-fallback";
+  return crypto.createHash("sha256").update(secret, "utf8").digest();
+}
+
+/**
+ * Criptografa o token de sincronização com AES-256-GCM para permitir
+ * recuperação segura e cópia pelo gestor autenticado em múltiplas máquinas.
+ */
+export function encryptSyncToken(rawToken: string): string {
+  if (!rawToken || typeof rawToken !== "string") return "";
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGO, key, iv);
+  let encrypted = cipher.update(rawToken.trim(), "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag().toString("hex");
+  return `aes256gcm:${iv.toString("hex")}:${authTag}:${encrypted}`;
+}
+
+/**
+ * Descriptografa o token de sincronização da escola previamente cifrado com AES-256-GCM.
+ */
+export function decryptSyncToken(cipherText?: string | null): string | null {
+  if (!cipherText || !cipherText.startsWith("aes256gcm:")) return null;
+  const parts = cipherText.split(":");
+  if (parts.length !== 4) return null;
+  const [, ivHex, authTagHex, encryptedHex] = parts;
+  try {
+    const key = getEncryptionKey();
+    const iv = Buffer.from(ivHex, "hex");
+    const authTag = Buffer.from(authTagHex, "hex");
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGO, key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Gera digest SHA-256 irreversível para armazenamento seguro de tokens de sincronização de escolas.
