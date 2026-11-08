@@ -49,6 +49,20 @@ export function sanitizeCredentialValue(val: string | undefined): string | undef
 }
 
 /**
+ * Garante que apenas URLs estáticas ou relativas leves sejam serializadas no JWT.
+ * Rejeita categoricamente data URIs / base64 e URLs maiores que 255 caracteres
+ * para prevenir estouro do limite de 14 KB de headers da Vercel e fracionamento de cookies.
+ */
+export function sanitizeJwtLogoUrl(url?: string | null): string | null {
+  if (!url) return null;
+  const trimmed = String(url).trim();
+  if (!trimmed || trimmed.startsWith("data:") || trimmed.length > 255) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
  * Canoniciza uma URL para uso em AUTH_URL / NEXTAUTH_URL.
  * - Higieniza valores com aspas, export ou pontos e vírgulas.
  * - Neutraliza domínios legados/preview (.vercel.app) retornando undefined para que

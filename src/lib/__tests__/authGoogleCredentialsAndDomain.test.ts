@@ -5,6 +5,7 @@ import {
   resolveGoogleCredentials,
   resolveAuthSecret,
   authConfig,
+  sanitizeJwtLogoUrl,
 } from "../auth.config";
 import {
   shouldRedirectApexToCanonical,
@@ -205,6 +206,41 @@ describe("AUTH-04: Preservação e Canonicização de AUTH_URL", () => {
     expect(canonicalizeAuthUrl("")).toBeUndefined();
     expect(canonicalizeAuthUrl("   ")).toBeUndefined();
     expect(canonicalizeAuthUrl("null")).toBeUndefined();
+  });
+});
+
+describe("AUTH-05: Sanitização de Imagens e Logos no Token JWT", () => {
+  it("sanitizeJwtLogoUrl rejeita categoricamente data URIs / base64", () => {
+    const base64Svg = "data:image/svg+xml;base64," + "A".repeat(500);
+    expect(sanitizeJwtLogoUrl(base64Svg)).toBeNull();
+
+    const base64Png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA";
+    expect(sanitizeJwtLogoUrl(base64Png)).toBeNull();
+  });
+
+  it("sanitizeJwtLogoUrl rejeita strings maiores que 255 caracteres", () => {
+    const longUrl = "https://cdn.example.com/" + "a".repeat(240);
+    expect(longUrl.length).toBeGreaterThan(255);
+    expect(sanitizeJwtLogoUrl(longUrl)).toBeNull();
+
+    // Simula o payload de 1.14 MB da escola Leopoldina
+    const giantPayload = "data:image/svg+xml;base64," + "X".repeat(1138000);
+    expect(sanitizeJwtLogoUrl(giantPayload)).toBeNull();
+  });
+
+  it("sanitizeJwtLogoUrl retorna null para valores nulos, vazios ou indefinidos", () => {
+    expect(sanitizeJwtLogoUrl(undefined)).toBeNull();
+    expect(sanitizeJwtLogoUrl(null)).toBeNull();
+    expect(sanitizeJwtLogoUrl("")).toBeNull();
+    expect(sanitizeJwtLogoUrl("   ")).toBeNull();
+  });
+
+  it("sanitizeJwtLogoUrl preserva URLs relativas ou remotas compactas e faz trim", () => {
+    expect(sanitizeJwtLogoUrl("/logo.svg")).toBe("/logo.svg");
+    expect(sanitizeJwtLogoUrl("  /brasao-tibagi.png  ")).toBe("/brasao-tibagi.png");
+    expect(sanitizeJwtLogoUrl("https://storage.googleapis.com/escola/logo.png")).toBe(
+      "https://storage.googleapis.com/escola/logo.png"
+    );
   });
 });
 

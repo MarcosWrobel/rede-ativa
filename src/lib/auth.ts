@@ -2,8 +2,10 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
-import { authConfig } from "./auth.config";
+import { authConfig, sanitizeJwtLogoUrl } from "./auth.config";
 import { isBootstrapAdminEmail } from "./roles";
+
+export { sanitizeJwtLogoUrl } from "./auth.config";
 
 const isDevAuthEnabled =
   process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_AUTH === "true";
@@ -181,6 +183,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.checkedAt = Date.now();
       }
 
+      // Higienização defensiva de tokens pré-existentes ou atributos que possam carregar base64
+      if (typeof token.picture === "string" && (token.picture.startsWith("data:") || token.picture.length > 255)) {
+        delete token.picture;
+      }
+      if (Array.isArray(token.userSchools)) {
+        token.userSchools = (token.userSchools as any[]).map((s) => ({
+          ...s,
+          logoUrl: sanitizeJwtLogoUrl(s.logoUrl),
+        }));
+      }
+      if (Array.isArray(token.userNetworks)) {
+        token.userNetworks = (token.userNetworks as any[]).map((n) => ({
+          ...n,
+          logoUrl: sanitizeJwtLogoUrl(n.logoUrl),
+        }));
+      }
+
       const lastChecked = Number(token.checkedAt || 0);
       const needsRefresh = !token.userId || !token.userSchools || Date.now() - lastChecked > SESSION_REVALIDATE_MS;
 
@@ -238,7 +257,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               inepCode: s.school.inepCode,
               city: s.school.city,
               network: (s.school as any).network || "ESTADUAL",
-              logoUrl: s.school.logoUrl || null,
+              logoUrl: sanitizeJwtLogoUrl(s.school.logoUrl),
             }));
             token.userSchools = mappedSchools;
 
@@ -249,7 +268,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               shortName: n.network.shortName,
               city: n.network.city,
               type: n.network.type,
-              logoUrl: n.network.logoUrl || null,
+              logoUrl: sanitizeJwtLogoUrl(n.network.logoUrl),
             }));
             token.userNetworks = mappedNetworks;
 
