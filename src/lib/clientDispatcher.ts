@@ -143,8 +143,12 @@ export interface ExtractWhatsAppReplyResult {
 export function extractWhatsAppReplyViaExtension(
   logId: string,
   phone?: string,
+  studentNameOrTimeout?: string | number,
   timeoutMs = 15000
 ): Promise<ExtractWhatsAppReplyResult> {
+  const studentName = typeof studentNameOrTimeout === "string" ? studentNameOrTimeout : undefined;
+  const effectiveTimeoutMs = typeof studentNameOrTimeout === "number" ? studentNameOrTimeout : timeoutMs;
+
   if (typeof window === "undefined") {
     return Promise.resolve({
       success: false,
@@ -212,7 +216,7 @@ export function extractWhatsAppReplyViaExtension(
         message:
           "A extensão não respondeu a tempo. Verifique se ela está ativa ou cole o texto manualmente.",
       });
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
 
     const targetOrigin = window.location?.origin || "*";
     window.postMessage(
@@ -220,6 +224,7 @@ export function extractWhatsAppReplyViaExtension(
         type: "REDEATIVA_EXTRACT_WHATSAPP_REPLY",
         logId,
         phone,
+        studentName,
       },
       targetOrigin
     );

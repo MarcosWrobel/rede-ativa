@@ -607,13 +607,19 @@ export default function BuscaAtivaClient({
 
   // Escuta confirmações automáticas vindas da Extensão Sincronizadora (whatsapp-content.js)
   useEffect(() => {
+    let lastProcessedKey = "";
+
     const handleExtensionConfirmation = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;
       if (
         event.data.type === "REDEATIVA_WHATSAPP_CONFIRMED" ||
         event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED"
       ) {
-        const { outcome, logId, studentName } = event.data;
+        const { outcome, logId, studentName, timestamp } = event.data;
+        const dedupeKey = `${logId || "nolog"}_${outcome}_${timestamp || ""}`;
+        if (lastProcessedKey === dedupeKey) return;
+        lastProcessedKey = dedupeKey;
+
         const targetStatus: DeliveryStatus =
           outcome === "FAILED_NO_WHATSAPP" ? "FAILED_NO_WHATSAPP" : "SENT";
 

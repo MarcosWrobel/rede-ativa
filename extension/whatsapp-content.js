@@ -211,7 +211,9 @@
             if (!hasReportedOutcome) {
               console.log("[Leopoldina WA] Disparo assistido automático executado.");
               try {
-                sendBtn.closest("button")?.click() || sendBtn.click();
+                // Seleção estrita do botão para evitar duplo clique acidental
+                const targetBtn = sendBtn.closest("button") || sendBtn;
+                targetBtn.click();
               } catch (err) {
                 console.warn("[Leopoldina WA] Falha ao clicar no botão:", err);
               }
@@ -251,75 +253,87 @@
     return { fullDigits, ddd, last8, last9 };
   }
 
-  // Verifica se o chat atualmente ativo em #main corresponde ao número alvo (tolerância ao 9º dígito)
-  function isCurrentChatMatchingPhone(targetPhone) {
-    if (!targetPhone) return true; // Fallback legado se nenhum telefone foi informado
-    const canonical = canonicalizeBrazilPhone(targetPhone);
-    if (!canonical.last8) return true;
-
+  // Verifica se o chat atualmente ativo em #main corresponde ao número ou estudante alvo
+  function isCurrentChatMatchingPhone(targetPhone, targetStudentName) {
     const mainEl = document.querySelector("#main");
     if (!mainEl) return false;
 
-    // 1. Inspeciona elementos com [data-id*="@c.us"] dentro de #main
-    const elementsWithJid = mainEl.querySelectorAll('[data-id*="@c.us"]');
-    if (elementsWithJid && elementsWithJid.length > 0) {
-      for (const el of elementsWithJid) {
-        const dataId = el.getAttribute("data-id") || "";
-        const match = dataId.match(/(?:false|true)_(\d+)@c\.us/) || dataId.match(/(\d+)@c\.us/);
-        if (match && match[1]) {
-          const jidCanon = canonicalizeBrazilPhone(match[1]);
-          if (
-            (!canonical.ddd || !jidCanon.ddd || jidCanon.ddd === canonical.ddd) &&
-            (jidCanon.last8 === canonical.last8 || (canonical.last9 && jidCanon.last9 === canonical.last9))
-          ) {
-            return true;
+    // Se nem telefone nem nome foram passados, assume o chat atualmente aberto
+    if (!targetPhone && !targetStudentName) return true;
+
+    const canonical = canonicalizeBrazilPhone(targetPhone);
+
+    // 1. Inspeciona balões de mensagem com data-id (@c.us ou @s.whatsapp.net) dentro de #main
+    if (canonical.last8) {
+      const elementsWithJid = mainEl.querySelectorAll('[data-id*="@c.us"], [data-id*="@s.whatsapp.net"]');
+      if (elementsWithJid && elementsWithJid.length > 0) {
+        for (const el of elementsWithJid) {
+          const dataId = el.getAttribute("data-id") || "";
+          const match =
+            dataId.match(/(?:false|true)_(\d+)@(?:c\.us|s\.whatsapp\.net)/) ||
+            dataId.match(/(\d+)@(?:c\.us|s\.whatsapp\.net)/);
+          if (match && match[1]) {
+            const jidCanon = canonicalizeBrazilPhone(match[1]);
+            if (
+              (!canonical.ddd || !jidCanon.ddd || jidCanon.ddd === canonical.ddd) &&
+              (jidCanon.last8 === canonical.last8 || (canonical.last9 && jidCanon.last9 === canonical.last9))
+            ) {
+              return true;
+            }
           }
         }
       }
-      // Se encontrou balões com JID no #main e nenhum casou, é outro chat
-      return false;
     }
 
-    // 2. Se não há balões com data-id (chat vazio/recente), inspeciona o cabeçalho #main header
+    // 2. Inspeciona o cabeçalho #main header (telefone ou nome do estudante/responsável)
     const headerEl = mainEl.querySelector("header");
     if (headerEl) {
-      const titleAttr = headerEl.querySelector("[title]")?.getAttribute("title") || "";
-      const headerText = (headerEl.innerText || "") + " " + titleAttr;
+      const titleAttr = (headerEl.querySelector("[title]")?.getAttribute("title") || "").toLowerCase();
+      const headerText = ((headerEl.innerText || "") + " " + titleAttr).toLowerCase();
       const cleanDigits = headerText.replace(/\D/g, "");
+
+      // 2.1 Confere dígitos do telefone no cabeçalho
+      if (canonical.last8) {
+        if (
+          cleanDigits.includes(canonical.last8) ||
+          (canonical.last9 && cleanDigits.includes(canonical.last9)) ||
+          headerText.includes(canonical.last8)
+        ) {
+          return true;
+        }
+      }
+
+      // 2.2 Confere nome do estudante no cabeçalho (quando salvo nos contatos)
+      if (targetStudentName && typeof targetStudentName === "string") {
+        const studentTokens = targetStudentName
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((t) => t.length >= 3 && !["dos", "das", "da", "do", "de"].includes(t));
+        if (studentTokens.length > 0 && studentTokens.some((token) => headerText.includes(token))) {
+          return true;
+        }
+      }
+    }
+
+    // 3. Inspeciona a URL ativa na barra de endereços
+    const currentUrl = window.location.href || "";
+    if (canonical.last8) {
       if (
-        (canonical.last8 && cleanDigits.includes(canonical.last8)) ||
-        (canonical.last9 && cleanDigits.includes(canonical.last9)) ||
-        (canonical.last8 && headerText.includes(canonical.last8))
+        currentUrl.includes(canonical.last8) ||
+        (canonical.fullDigits && currentUrl.includes(canonical.fullDigits))
       ) {
         return true;
       }
     }
 
-    // 3. Inspeciona se a URL ativa da página contém os dígitos do telefone
-    const currentUrl = window.location.href || "";
-    if (
-      (canonical.last8 && currentUrl.includes(canonical.last8)) ||
-      (canonical.fullDigits && currentUrl.includes(canonical.fullDigits))
-    ) {
+    // 4. Se #main está montado e possui balões de mensagem recebida recentes,
+    // considera o chat ativo como válido para a extração assistida
+    const hasIncoming = mainEl.querySelector("div.message-in, div[data-id*='false_']");
+    if (hasIncoming) {
       return true;
     }
 
     return false;
-  }
-
-  // Navega até a conversa via roteamento interno SPA do WhatsApp Web sem recarregar a página
-  function navigateSpaToPhone(fullDigits) {
-    const url = `https://web.whatsapp.com/send/?phone=${fullDigits}`;
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.style.display = "none";
-    document.body.appendChild(anchor);
-    anchor.click();
-    setTimeout(() => {
-      try {
-        anchor.remove();
-      } catch {}
-    }, 150);
   }
 
   // Detecta diálogos modais de número inválido ou sem conta no WhatsApp Web
@@ -348,42 +362,17 @@
     return false;
   }
 
-  // Aguarda reativamente o chat estar montado e pronto ou detecta número inválido
-  function waitForChatReadyOrInvalid(targetPhone, timeoutMs = 10000) {
-    const startTime = Date.now();
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        // 1. Detecção de número inválido / sem WhatsApp
-        if (isInvalidNumberModalPresent()) {
-          clearInterval(interval);
-          resolve({ status: "NUMBER_NOT_ON_WHATSAPP" });
-          return;
-        }
-
-        // 2. Confirmação do chat alvo ativo
-        const mainEl = document.querySelector("#main");
-        if (mainEl && isCurrentChatMatchingPhone(targetPhone)) {
-          clearInterval(interval);
-          setTimeout(() => {
-            resolve({ status: "READY" });
-          }, 200);
-          return;
-        }
-
-        // 3. Timeout
-        if (Date.now() - startTime >= timeoutMs) {
-          clearInterval(interval);
-          resolve({ status: "TIMEOUT" });
-        }
-      }, 250);
-    });
-  }
-
   // Listener para extração assistida de retorno (Modo Estritamente Read-Only)
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // 0. Resposta a Ping de integridade de script
+    if (message?.type === "LEOPOLDINA_PING") {
+      sendResponse({ pong: true });
+      return false;
+    }
+
     // 1. Verificação instantânea do chat aberto (Etapa 1 da Arquitetura)
     if (message?.type === "LEOPOLDINA_VERIFY_ACTIVE_CHAT") {
-      const isTargetChat = isCurrentChatMatchingPhone(message.phone);
+      const isTargetChat = isCurrentChatMatchingPhone(message.phone, message.studentName);
       let activeChatTitle = null;
       const headerTitleEl =
         document.querySelector("#main header span[title]") ||
@@ -400,21 +389,33 @@
       return false;
     }
 
-    // 2. Extração da última mensagem recebida
+    // 2. Extração da última mensagem recebida (Modo Leitura sem F5)
     if (message?.type === "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE") {
       (async () => {
         try {
           const targetPhone = message.phone;
+          const targetStudentName = message.studentName;
 
-          // Se telefone foi informado e não estamos no chat dele, navega via SPA
-          if (targetPhone && !isCurrentChatMatchingPhone(targetPhone)) {
-            const canonical = canonicalizeBrazilPhone(targetPhone);
-            if (canonical.fullDigits) {
-              console.log("[Leopoldina WA] Navegando SPA para conversa:", canonical.fullDigits);
-              navigateSpaToPhone(canonical.fullDigits);
-              const waitRes = await waitForChatReadyOrInvalid(targetPhone, 10000);
+          // Se modal de número inválido estiver presente
+          if (isInvalidNumberModalPresent()) {
+            sendResponse({
+              success: false,
+              logId: message.logId,
+              phone: targetPhone,
+              error: "NUMBER_NOT_ON_WHATSAPP",
+              message: "Este número de telefone não possui conta ativa no WhatsApp.",
+            });
+            return;
+          }
 
-              if (waitRes.status === "NUMBER_NOT_ON_WHATSAPP") {
+          // Aguarda até 3 segundos se o container #main ainda estiver sendo montado
+          let mainEl = document.querySelector("#main");
+          if (!mainEl) {
+            const startWait = Date.now();
+            while (!mainEl && Date.now() - startWait < 3000) {
+              await new Promise((r) => setTimeout(r, 200));
+              mainEl = document.querySelector("#main");
+              if (isInvalidNumberModalPresent()) {
                 sendResponse({
                   success: false,
                   logId: message.logId,
@@ -424,22 +425,20 @@
                 });
                 return;
               }
-
-              if (waitRes.status === "TIMEOUT" || !isCurrentChatMatchingPhone(targetPhone)) {
-                sendResponse({
-                  success: false,
-                  logId: message.logId,
-                  phone: targetPhone,
-                  error: "CHAT_OPEN_TIMEOUT",
-                  message: "Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web.",
-                });
-                return;
-              }
             }
           }
 
-          // Uma vez confirmado no chat correto (ou sem filtro de telefone)
-          const mainEl = document.querySelector("#main");
+          if (!mainEl) {
+            sendResponse({
+              success: false,
+              logId: message.logId,
+              phone: targetPhone,
+              error: "NO_CHAT_OPEN",
+              message: "Nenhuma conversa está aberta no WhatsApp Web. Abra a conversa da família antes de extrair.",
+            });
+            return;
+          }
+
           let activeChatTitle = null;
           const headerTitleEl =
             document.querySelector("#main header span[title]") ||
@@ -450,14 +449,15 @@
             activeChatTitle = (headerTitleEl.getAttribute("title") || headerTitleEl.innerText || "").trim() || null;
           }
 
-          // Aguarda breve renderização se os balões de mensagem ainda estiverem montando
-          let incomingMessages = (mainEl || document).querySelectorAll(
+          // Localiza mensagens recebidas (.message-in)
+          let incomingMessages = mainEl.querySelectorAll(
             "div.message-in, div[data-id*='false_'], div[role='row'] div[class*='message-in']"
           );
 
           if (!incomingMessages || incomingMessages.length === 0) {
-            await new Promise((r) => setTimeout(r, 600));
-            incomingMessages = (mainEl || document).querySelectorAll(
+            // Breve espera defensiva para montagem de nós assíncronos
+            await new Promise((r) => setTimeout(r, 500));
+            incomingMessages = mainEl.querySelectorAll(
               "div.message-in, div[data-id*='false_'], div[role='row'] div[class*='message-in']"
             );
           }
@@ -500,7 +500,7 @@
             }
           }
 
-          // Fallback defensivo se seletores específicos não encontrarem o nó
+          // Fallback defensivo
           if (!extractedText) {
             extractedText = (lastMessageEl.innerText || lastMessageEl.textContent || "").trim();
           }
@@ -516,6 +516,48 @@
             });
             return;
           }
+
+          // 2. Extração do metadado de data/hora (domTimestamp)
+          let domTimestamp = null;
+          const copyableEl = lastMessageEl.querySelector("div.copyable-text");
+          if (copyableEl && copyableEl.getAttribute("data-pre-plain-text")) {
+            domTimestamp = copyableEl.getAttribute("data-pre-plain-text").trim();
+          } else {
+            const timeSpans = lastMessageEl.querySelectorAll("span");
+            for (let i = timeSpans.length - 1; i >= 0; i--) {
+              const text = (timeSpans[i].innerText || timeSpans[i].textContent || "").trim();
+              if (/\d{1,2}:\d{2}/.test(text)) {
+                domTimestamp = text;
+                break;
+              }
+            }
+            if (!domTimestamp && timeSpans.length > 0) {
+              const lastSpanText = (timeSpans[timeSpans.length - 1].innerText || "").trim();
+              if (lastSpanText) domTimestamp = lastSpanText;
+            }
+          }
+
+          sendResponse({
+            success: true,
+            logId: message.logId,
+            phone: targetPhone,
+            rawText: extractedText.trim(),
+            domTimestamp,
+            activeChatTitle,
+          });
+        } catch (err) {
+          sendResponse({
+            success: false,
+            logId: message.logId,
+            phone: message?.phone,
+            error: "EXTRACTION_EXCEPTION",
+            message: err?.message || "Erro inesperado ao extrair mensagem do WhatsApp Web.",
+          });
+        }
+      })();
+      return true; // Resposta assíncrona garantida no MV3
+    }
+  });
 
           // 2. Extração do metadado de data/hora (domTimestamp)
           let domTimestamp = null;

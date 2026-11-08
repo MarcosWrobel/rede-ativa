@@ -77,6 +77,7 @@
             type: "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY",
             logId: data.logId,
             phone: data.phone,
+            studentName: data.studentName,
           },
           (response) => {
             const currentOrigin = window.location.origin;

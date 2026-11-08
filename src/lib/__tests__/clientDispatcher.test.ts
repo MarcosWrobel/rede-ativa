@@ -131,15 +131,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
   });
 
   describe("extractWhatsAppReplyViaExtension (Fluxo Assistido de Retorno MV3)", () => {
-    it("dispara postMessage REDEATIVA_EXTRACT_WHATSAPP_REPLY com logId e phone", () => {
+    it("dispara postMessage REDEATIVA_EXTRACT_WHATSAPP_REPLY com logId, phone e studentName", () => {
       const postMessageSpy = vi.spyOn(globalThis.window, "postMessage");
-      extractWhatsAppReplyViaExtension("log_test_123", "5542988887777");
+      extractWhatsAppReplyViaExtension("log_test_123", "5542988887777", "Lucas Gabriel");
 
       expect(postMessageSpy).toHaveBeenCalledWith(
         {
           type: "REDEATIVA_EXTRACT_WHATSAPP_REPLY",
           logId: "log_test_123",
           phone: "5542988887777",
+          studentName: "Lucas Gabriel",
         },
         "http://localhost:3000"
       );

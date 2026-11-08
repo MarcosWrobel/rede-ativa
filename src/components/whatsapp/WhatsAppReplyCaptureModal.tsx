@@ -137,7 +137,7 @@ export default function WhatsAppReplyCaptureModal({
   };
 
   const handleExtractFromExtension = useCallback(
-    async (logId: string, phoneUsed: string) => {
+    async (logId: string, phoneUsed: string, targetStudentName?: string) => {
       setIsExtracting(true);
       setExtractionNotice({
         type: "info",
@@ -152,7 +152,7 @@ export default function WhatsAppReplyCaptureModal({
       }, 3500);
 
       try {
-        const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed);
+        const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed, targetStudentName);
         clearTimeout(progressTimer);
 
         if (res.success && res.rawText) {
@@ -237,7 +237,7 @@ export default function WhatsAppReplyCaptureModal({
     setMarkedInvalidSuccess(false);
 
     if (isExtensionActive()) {
-      void handleExtractFromExtension(messageLog.id, messageLog.phoneUsed);
+      void handleExtractFromExtension(messageLog.id, messageLog.phoneUsed, resolvedStudentName);
     } else {
       setExtractionNotice({
         type: "info",
@@ -245,7 +245,7 @@ export default function WhatsAppReplyCaptureModal({
           "Extensão não conectada no momento. Cole a mensagem recebida manualmente abaixo.",
       });
     }
-  }, [isOpen, messageLog, handleExtractFromExtension]);
+  }, [isOpen, messageLog, resolvedStudentName, handleExtractFromExtension]);
 
   const handleManualExtractionClick = () => {
     if (!messageLog) return;
@@ -259,7 +259,7 @@ export default function WhatsAppReplyCaptureModal({
       return;
     }
 
-    void handleExtractFromExtension(messageLog.id, messageLog.phoneUsed);
+    void handleExtractFromExtension(messageLog.id, messageLog.phoneUsed, resolvedStudentName);
   };
 
   const handleAiClassify = async () => {
