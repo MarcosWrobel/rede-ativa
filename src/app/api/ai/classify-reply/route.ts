@@ -15,6 +15,11 @@ export const dynamic = "force-dynamic";
 const CLASSIFICATION_JSON_SCHEMA = {
   type: "object",
   properties: {
+    extractedRawReply: {
+      type: "string",
+      description:
+        "Transcrição literal (OCR) das últimas mensagens recebidas da família/responsável na tela do WhatsApp Web (balões à esquerda). Ignore mensagens enviadas pela escola (balões à direita).",
+    },
     formalSummary: {
       type: "string",
       description:
@@ -46,6 +51,16 @@ const CLASSIFICATION_JSON_SCHEMA = {
   required: ["formalSummary", "category", "requiresMedicalCertificate", "suggestedFollowUp"],
 };
 
+function parseDataUrlImage(dataUrl?: string | null): { mimeType: string; data: string } | null {
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1],
+    data: match[2],
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
@@ -61,7 +76,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const { rawReply, studentName, reasonTitle } = parsed.data;
+    const { rawReply, screenshotDataUrl, studentName, reasonTitle } = parsed.data;
+    const parsedImage = parseDataUrlImage(screenshotDataUrl);
 
     const headerKey = req.headers.get("x-gemini-key")?.trim();
     const apiKey =
@@ -70,13 +86,25 @@ export async function POST(req: Request) {
       process.env.GOOGLE_API_KEY ||
       process.env.GOOGLE_GENAI_API_KEY;
 
-    // Fallback determinístico imediato caso a chave Gemini não esteja configurada
+    // Fallback determinístico caso a chave Gemini não esteja configurada
     if (!apiKey) {
+      if (!rawReply || rawReply.trim().length < 2) {
+        return NextResponse.json(
+          {
+            error:
+              "Para leitura automática de imagem (OCR), configure a chave da API Gemini nas configurações ou selecione/cole o texto da conversa.",
+          },
+          { status: 422 }
+        );
+      }
       const heuristic = classifyGuardianReplyHeuristic(rawReply);
       return NextResponse.json({
         success: true,
         usedFallback: true,
-        classification: heuristic,
+        classification: {
+          ...heuristic,
+          extractedRawReply: rawReply,
+        },
       });
     }
 
@@ -84,17 +112,22 @@ export async function POST(req: Request) {
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
     const systemInstruction = `Você é um especialista da Equipe Pedagógica e de Busca Ativa da Rede Ativa integrada à instituição de ensino.
-Sua tarefa é ler a mensagem informal recebida via WhatsApp de um pai, mãe ou responsável legal e transformá-la em um registro administrativo formal, impessoal e objetivo (adequado para compor ata escolar, ficha SERP e Dossiê do Conselho Tutelar), além de classificar a causa da ausência.
+Sua tarefa é ler a resposta recebida via WhatsApp de um pai, mãe ou responsável legal (seja por texto ou fazendo OCR da imagem da janela do WhatsApp Web) e transformá-la em um registro administrativo formal, impessoal e objetivo (adequado para compor ata escolar, ficha SERP e Dossiê do Conselho Tutelar), além de classificar a causa da ausência.
 
 Regras:
-1. Não invente fatos que não estejam na mensagem original.
-2. Escreva "formalSummary" em terceira pessoa (ex.: "Responsável informou via WhatsApp que...").
-3. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
+1. Se uma imagem do WhatsApp Web for fornecida, extraia em "extractedRawReply" APENAS o texto das últimas mensagens RECEBIDAS do responsável (balões alinhados à esquerda), ignorando o texto padrão enviado pela escola (balões alinhados à direita).
+2. Não invente fatos que não estejam na mensagem original.
+3. Escreva "formalSummary" em terceira pessoa (ex.: "Responsável informou via WhatsApp que...").
+4. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
 
     const pseudonymizer = createAiPseudonymizer(studentName ? [studentName] : [], []);
-    const maskedReply = pseudonymizer.maskText(rawReply);
+    const maskedReply = rawReply ? pseudonymizer.maskText(rawReply) : "";
 
-    const inputPrompt = `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
+    const textPrompt = parsedImage
+      ? `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
+Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
+${maskedReply ? `Texto auxiliar capturado do DOM:\n"""\n${maskedReply}\n"""\n` : ""}Analise a captura de tela da conversa do WhatsApp Web em anexo, extraia via OCR a resposta recebida da família (balões à esquerda) em "extractedRawReply" e gere a classificação e síntese formal.`
+      : `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
 Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
 Mensagem recebida do responsável via WhatsApp:
 """
@@ -106,27 +139,71 @@ ${maskedReply}
 
     for (const model of modelsToTry) {
       try {
-        const interaction: any = await ai.interactions.create(
-          {
+        // Quando há imagem (OCR Multimodal), prioriza generateContent com inlineData ou interactions multimodal
+        if (parsedImage && (ai as any).models?.generateContent) {
+          const response: any = await (ai as any).models.generateContent({
             model,
-            input: inputPrompt,
-            system_instruction: systemInstruction,
-            response_format: CLASSIFICATION_JSON_SCHEMA as any,
-          },
-          {
-            retries: { strategy: "none" },
-            timeout_ms: 14000,
-          } as any
-        );
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: textPrompt },
+                  {
+                    inlineData: {
+                      mimeType: parsedImage.mimeType,
+                      data: parsedImage.data,
+                    },
+                  },
+                ],
+              },
+            ],
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema: CLASSIFICATION_JSON_SCHEMA as any,
+            } as any,
+          });
+          const candidateText = response?.text || null;
+          if (candidateText) {
+            rawJsonText = candidateText;
+            break;
+          }
+        }
 
-        const candidateText =
-          interaction?.output_text ||
-          interaction?.outputs?.find((o: any) => o?.type === "text")?.text ||
-          null;
+        if (typeof (ai as any).interactions?.create === "function") {
+          const interactionInput = parsedImage
+            ? [
+                { type: "text", text: textPrompt },
+                {
+                  type: "image",
+                  mime_type: parsedImage.mimeType,
+                  data: parsedImage.data,
+                },
+              ]
+            : textPrompt;
 
-        if (candidateText) {
-          rawJsonText = candidateText;
-          break;
+          const interaction: any = await (ai as any).interactions.create(
+            {
+              model,
+              input: interactionInput,
+              system_instruction: systemInstruction,
+              response_format: CLASSIFICATION_JSON_SCHEMA as any,
+            },
+            {
+              retries: { strategy: "none" },
+              timeout_ms: 18000,
+            } as any
+          );
+
+          const candidateText =
+            interaction?.output_text ||
+            interaction?.outputs?.find((o: any) => o?.type === "text")?.text ||
+            null;
+
+          if (candidateText) {
+            rawJsonText = candidateText;
+            break;
+          }
         }
       } catch (err: any) {
         console.warn(`[GEMINI classify-reply] Modelo ${model} indisponível:`, err?.message || err);
@@ -134,12 +211,21 @@ ${maskedReply}
     }
 
     if (!rawJsonText) {
-      const heuristic = classifyGuardianReplyHeuristic(rawReply);
-      return NextResponse.json({
-        success: true,
-        usedFallback: true,
-        classification: heuristic,
-      });
+      if (rawReply && rawReply.trim().length >= 3) {
+        const heuristic = classifyGuardianReplyHeuristic(rawReply);
+        return NextResponse.json({
+          success: true,
+          usedFallback: true,
+          classification: {
+            ...heuristic,
+            extractedRawReply: rawReply,
+          },
+        });
+      }
+      return NextResponse.json(
+        { error: "Não foi possível extrair texto da imagem da conversa no momento." },
+        { status: 422 }
+      );
     }
 
     try {
@@ -153,13 +239,21 @@ ${maskedReply}
       const catCheck = replyCategoryEnum.safeParse(aiObj.category);
       const validCategory: ReplyCategory = catCheck.success ? catCheck.data : "OUTROS";
 
-      const rawFormalSummary = String(aiObj.formalSummary || "").trim() || classifyGuardianReplyHeuristic(rawReply).formalSummary;
-      const rawFollowUp = String(aiObj.suggestedFollowUp || "").trim() || "Acompanhar assiduidade nos próximos dias letivos.";
+      const extractedRaw = String(aiObj.extractedRawReply || rawReply || "").trim();
+      const fallbackBase = extractedRaw || rawReply || "Retorno verificado via WhatsApp.";
+      const rawFormalSummary =
+        String(aiObj.formalSummary || "").trim() ||
+        classifyGuardianReplyHeuristic(fallbackBase).formalSummary;
+      const rawFollowUp =
+        String(aiObj.suggestedFollowUp || "").trim() ||
+        "Acompanhar assiduidade nos próximos dias letivos.";
 
       return NextResponse.json({
         success: true,
         usedFallback: false,
+        usedOcr: Boolean(parsedImage),
         classification: {
+          extractedRawReply: pseudonymizer.unmaskText(extractedRaw),
           formalSummary: pseudonymizer.unmaskText(rawFormalSummary),
           category: validCategory,
           requiresMedicalCertificate: Boolean(aiObj.requiresMedicalCertificate),
@@ -167,11 +261,14 @@ ${maskedReply}
         },
       });
     } catch {
-      const heuristic = classifyGuardianReplyHeuristic(rawReply);
+      const heuristic = classifyGuardianReplyHeuristic(rawReply || "Retorno via WhatsApp");
       return NextResponse.json({
         success: true,
         usedFallback: true,
-        classification: heuristic,
+        classification: {
+          ...heuristic,
+          extractedRawReply: rawReply || "",
+        },
       });
     }
   } catch (error: any) {

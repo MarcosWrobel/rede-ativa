@@ -60,6 +60,16 @@ export interface WhatsAppReplyCaptureModalProps {
   onSuccess: (updatedLog: any) => void;
 }
 
+export function isPhoneCompatible(phoneA?: string | null, phoneB?: string | null): boolean {
+  if (!phoneA || !phoneB) return true;
+  const digitsA = String(phoneA).replace(/\D/g, "");
+  const digitsB = String(phoneB).replace(/\D/g, "");
+  if (!digitsA || !digitsB) return true;
+  const tailA = digitsA.slice(-8);
+  const tailB = digitsB.slice(-8);
+  return tailA === tailB || digitsA.includes(tailB) || digitsB.includes(tailA);
+}
+
 export default function WhatsAppReplyCaptureModal({
   isOpen,
   onClose,
@@ -76,8 +86,10 @@ export default function WhatsAppReplyCaptureModal({
     messageLog?.replyNotes || ""
   );
   const [extractedByExtension, setExtractedByExtension] = useState<boolean>(false);
+  const [extractedAtIso, setExtractedAtIso] = useState<string | null>(null);
   const [domTimestamp, setDomTimestamp] = useState<string | null>(null);
   const [activeChatTitle, setActiveChatTitle] = useState<string | null>(null);
+  const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
 
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionNotice, setExtractionNotice] = useState<{
@@ -136,77 +148,178 @@ export default function WhatsAppReplyCaptureModal({
     }
   };
 
+  const runAiClassifyAndOcr = useCallback(
+    async (textToClassify: string, screenshotDataUrl?: string | null) => {
+      const trimmed = textToClassify.trim();
+      if (trimmed.length < 3 && !screenshotDataUrl) {
+        setAiError(
+          "Cole ou digite ao menos uma frase informada pelo responsável ou capture a tela da conversa."
+        );
+        return;
+      }
+
+      setIsClassifyingAi(true);
+      setAiError(null);
+
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        const savedKey = getStoredPreference("gemini_api_key");
+        if (savedKey && savedKey.trim().length > 10) {
+          headers["x-gemini-key"] = savedKey.trim();
+        }
+
+        const res = await fetch("/api/ai/classify-reply", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            rawReply: trimmed,
+            screenshotDataUrl: screenshotDataUrl || undefined,
+            studentName: resolvedStudentName,
+            reasonTitle: messageLog?.reasonTitle || "Busca Ativa Escolar",
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Falha ao classificar retorno com IA.");
+        }
+
+        if (data.classification) {
+          if (data.classification.extractedRawReply && !trimmed) {
+            setRawReply(data.classification.extractedRawReply);
+            setExtractedByExtension(true);
+            setExtractedAtIso(new Date().toISOString());
+            setExtractionNotice({
+              type: "success",
+              message: "Mensagem lida da tela (OCR) e sintetizada com sucesso.",
+            });
+          }
+          if (data.classification.category) {
+            setReplyCategory(data.classification.category);
+          }
+          if (data.classification.formalSummary) {
+            setReplyNotes(data.classification.formalSummary);
+          }
+          setAiTip({
+            suggestedFollowUp: data.classification.suggestedFollowUp,
+            requiresMedicalCertificate: Boolean(
+              data.classification.requiresMedicalCertificate
+            ),
+          });
+        }
+      } catch (err: unknown) {
+        const errorMsg =
+          err instanceof Error
+            ? err.message
+            : "Erro ao consultar serviço de inteligência pedagógica.";
+        setAiError(errorMsg);
+      } finally {
+        setIsClassifyingAi(false);
+      }
+    },
+    [resolvedStudentName, messageLog?.reasonTitle]
+  );
+
+  const applyExtractionPayload = useCallback(
+    async (res: {
+      success?: boolean;
+      rawText?: string;
+      selectionUsed?: boolean;
+      domTimestamp?: string | null;
+      activeChatTitle?: string | null;
+      screenshotDataUrl?: string | null;
+      error?: string;
+      message?: string;
+    }, phoneUsed: string) => {
+      if (res.screenshotDataUrl) {
+        setCapturedScreenshot(res.screenshotDataUrl);
+      }
+
+      if (res.rawText && res.rawText.trim().length > 0) {
+        const cleanedText = res.rawText.trim();
+        setRawReply(cleanedText);
+        setExtractedByExtension(true);
+        setExtractedAtIso(new Date().toISOString());
+        setDomTimestamp(res.domTimestamp || null);
+        setActiveChatTitle(res.activeChatTitle || null);
+        setNumberNotOnWhatsApp(false);
+        setExtractionNotice({
+          type: "success",
+          message: res.selectionUsed
+            ? "Texto selecionado no WhatsApp Web capturado com sucesso."
+            : `Resposta extraída da conversa${res.activeChatTitle ? ` (${res.activeChatTitle})` : ""}.`,
+        });
+        return;
+      }
+
+      if (res.error === "NUMBER_NOT_ON_WHATSAPP") {
+        setExtractedByExtension(false);
+        setExtractedAtIso(null);
+        setNumberNotOnWhatsApp(true);
+        setExtractionNotice({
+          type: "error",
+          message: `O número ${phoneUsed} não possui conta ativa no WhatsApp.`,
+        });
+        return;
+      }
+
+      // Se o DOM não retornou texto mas capturamos a imagem da tela (captureVisibleTab), acionamos o OCR Multimodal!
+      if (res.screenshotDataUrl) {
+        setActiveChatTitle(res.activeChatTitle || null);
+        setDomTimestamp(res.domTimestamp || null);
+        setExtractionNotice({
+          type: "info",
+          message: "Imagem da conversa capturada. Extraindo mensagens via leitura visual (OCR)...",
+        });
+        await runAiClassifyAndOcr("", res.screenshotDataUrl);
+        return;
+      }
+
+      if (res.error === "NO_INCOMING_MESSAGE") {
+        setExtractedByExtension(false);
+        setExtractedAtIso(null);
+        setNumberNotOnWhatsApp(false);
+        setActiveChatTitle(res.activeChatTitle || null);
+        const chatLabel = res.activeChatTitle || phoneUsed;
+        setExtractionNotice({
+          type: "info",
+          message: `Conversa localizada (${chatLabel}), sem resposta da família até o momento.`,
+        });
+      } else {
+        setExtractedByExtension(false);
+        setExtractedAtIso(null);
+        setNumberNotOnWhatsApp(false);
+        setExtractionNotice({
+          type: "warn",
+          message:
+            res.message ||
+            "Nenhuma resposta detectada. No WhatsApp Web, clique em '📥 Capturar Retorno' ou cole o texto abaixo.",
+        });
+      }
+    },
+    [runAiClassifyAndOcr]
+  );
+
   const handleExtractFromExtension = useCallback(
     async (logId: string, phoneUsed: string, targetStudentName?: string) => {
       setIsExtracting(true);
       setExtractionNotice({
         type: "info",
-        message: `Localizando conversa do número ${phoneUsed} no WhatsApp Web e buscando última resposta...`,
+        message: `Capturando mensagens e tela da conversa (${phoneUsed}) no WhatsApp Web...`,
       });
-
-      const progressTimer = setTimeout(() => {
-        setExtractionNotice({
-          type: "info",
-          message: `Aguardando carregamento da conversa no WhatsApp Web (${phoneUsed})...`,
-        });
-      }, 3500);
 
       try {
         const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed, targetStudentName);
-        clearTimeout(progressTimer);
-
-        if (res.success && res.rawText) {
-          setRawReply(res.rawText);
-          setExtractedByExtension(true);
-          setDomTimestamp(res.domTimestamp || null);
-          setActiveChatTitle(res.activeChatTitle || null);
-          setNumberNotOnWhatsApp(false);
-          setExtractionNotice({
-            type: "success",
-            message: `Resposta extraída com sucesso da conversa${res.activeChatTitle ? ` (${res.activeChatTitle})` : ""}.`,
-          });
-        } else if (res.error === "NUMBER_NOT_ON_WHATSAPP") {
-          setExtractedByExtension(false);
-          setNumberNotOnWhatsApp(true);
-          setExtractionNotice({
-            type: "error",
-            message: `O número ${phoneUsed} não possui conta ativa no WhatsApp.`,
-          });
-        } else if (res.error === "NO_INCOMING_MESSAGE") {
-          setExtractedByExtension(false);
-          setNumberNotOnWhatsApp(false);
-          setActiveChatTitle(res.activeChatTitle || null);
-          const chatLabel = res.activeChatTitle || phoneUsed;
-          setExtractionNotice({
-            type: "info",
-            message: `Conversa localizada no WhatsApp Web (${chatLabel}), porém a família ainda não enviou mensagem de resposta.`,
-          });
-        } else if (res.error === "CHAT_OPEN_TIMEOUT" || res.error === "EXTENSION_TIMEOUT") {
-          setExtractedByExtension(false);
-          setNumberNotOnWhatsApp(false);
-          setExtractionNotice({
-            type: "warn",
-            message:
-              res.message ||
-              "Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web. Abra pelo link e cole o texto manualmente.",
-          });
-        } else {
-          setExtractedByExtension(false);
-          setNumberNotOnWhatsApp(false);
-          setExtractionNotice({
-            type: "warn",
-            message:
-              res.message ||
-              "Nenhuma resposta recente detectada na aba aberta do WhatsApp Web. Cole o texto abaixo.",
-          });
-        }
+        await applyExtractionPayload(res, phoneUsed);
       } catch (err: unknown) {
-        clearTimeout(progressTimer);
         const errorMsg =
           err instanceof Error
             ? err.message
             : "Falha na comunicação com a extensão.";
         setExtractedByExtension(false);
+        setExtractedAtIso(null);
         setNumberNotOnWhatsApp(false);
         setExtractionNotice({
           type: "warn",
@@ -216,9 +329,10 @@ export default function WhatsAppReplyCaptureModal({
         setIsExtracting(false);
       }
     },
-    []
+    [applyExtractionPayload]
   );
 
+  // Inicializa o estado ao abrir o modal, recupera capturas recentes e escuta o botão "📥 Capturar Retorno" do WhatsApp Web
   useEffect(() => {
     if (!isOpen || !messageLog) {
       return;
@@ -228,24 +342,87 @@ export default function WhatsAppReplyCaptureModal({
     setReplyCategory((messageLog.replyCategory as ReplyCategory) || "");
     setReplyNotes(messageLog.replyNotes || "");
     setExtractedByExtension(false);
+    setExtractedAtIso(null);
     setDomTimestamp(null);
     setActiveChatTitle(null);
+    setCapturedScreenshot(null);
     setAiTip(null);
     setAiError(null);
     setSaveError(null);
     setNumberNotOnWhatsApp(false);
     setMarkedInvalidSuccess(false);
 
-    if (isExtensionActive()) {
-      void handleExtractFromExtension(messageLog.id, messageLog.phoneUsed, resolvedStudentName);
-    } else {
-      setExtractionNotice({
-        type: "info",
-        message:
-          "Extensão não conectada no momento. Cole a mensagem recebida manualmente abaixo.",
-      });
+    // Recupera retorno recente em cache caso a usuária tenha capturado no WhatsApp Web antes de abrir o modal
+    let autoRecovered = false;
+    try {
+      const globalCached = typeof window !== "undefined" ? (window as any).__REDEATIVA_LAST_PUSHED_REPLY__ : null;
+      const sessionCachedStr = typeof window !== "undefined" ? sessionStorage.getItem("redeativa_last_pushed_reply") : null;
+      const cached = globalCached || (sessionCachedStr ? JSON.parse(sessionCachedStr) : null);
+
+      if (cached && (cached.rawText?.trim() || cached.screenshotDataUrl)) {
+        const receivedAt = cached.receivedAt || 0;
+        const isFresh = Date.now() - receivedAt < 10 * 60 * 1000; // Últimos 10 minutos
+        const matchesLogOrPhone =
+          (cached.logId && cached.logId === messageLog.id) ||
+          isPhoneCompatible(cached.phone, messageLog.phoneUsed);
+
+        if (isFresh && matchesLogOrPhone) {
+          void applyExtractionPayload(cached, messageLog.phoneUsed);
+          autoRecovered = true;
+        }
+      }
+    } catch {}
+
+    if (!autoRecovered) {
+      if (isExtensionActive()) {
+        setExtractionNotice({
+          type: "info",
+          message:
+            "Com a conversa aberta no WhatsApp Web, clique em 'Extrair resposta' acima (ou no botão '📥 Capturar Retorno' direto no WhatsApp).",
+        });
+      } else {
+        setExtractionNotice({
+          type: "info",
+          message:
+            "Cole a mensagem recebida abaixo ou utilize a extensão para capturar da janela do WhatsApp Web.",
+        });
+      }
     }
-  }, [isOpen, messageLog, resolvedStudentName, handleExtractFromExtension]);
+
+    // Consulta a extensão via bridge para verificar se há captura recente no storage local
+    try {
+      window.postMessage(
+        {
+          type: "REDEATIVA_GET_LAST_CAPTURED_REPLY",
+          logId: messageLog.id,
+          phone: messageLog.phoneUsed,
+        },
+        "*"
+      );
+    } catch {}
+
+    const handlePushedCapture = (event: MessageEvent) => {
+      if (event.source !== window || !event.data) return;
+      const data = event.data;
+      if (
+        (data.type === "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" ||
+          data.type === "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED") &&
+        data.pushedFromWhatsApp
+      ) {
+        const matchesLogOrPhone =
+          !data.phone ||
+          (data.logId && data.logId === messageLog.id) ||
+          isPhoneCompatible(data.phone, messageLog.phoneUsed);
+
+        if (matchesLogOrPhone) {
+          void applyExtractionPayload(data, messageLog.phoneUsed);
+        }
+      }
+    };
+
+    window.addEventListener("message", handlePushedCapture);
+    return () => window.removeEventListener("message", handlePushedCapture);
+  }, [isOpen, messageLog, applyExtractionPayload]);
 
   const handleManualExtractionClick = () => {
     if (!messageLog) return;
@@ -254,7 +431,7 @@ export default function WhatsAppReplyCaptureModal({
       setExtractionNotice({
         type: "warn",
         message:
-          "Extensão Sincronizadora não detectada neste navegador. Ative a extensão no Chrome ou abra o WhatsApp Web para colar o texto manualmente.",
+          "Extensão Sincronizadora não detectada neste navegador. Ative a extensão no Chrome ou cole o texto manualmente.",
       });
       return;
     }
@@ -263,64 +440,7 @@ export default function WhatsAppReplyCaptureModal({
   };
 
   const handleAiClassify = async () => {
-    const trimmed = rawReply.trim();
-    if (trimmed.length < 3) {
-      setAiError(
-        "Cole ou digite ao menos uma frase informada pelo responsável para classificar."
-      );
-      return;
-    }
-
-    setIsClassifyingAi(true);
-    setAiError(null);
-
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      const savedKey = getStoredPreference("gemini_api_key");
-      if (savedKey && savedKey.trim().length > 10) {
-        headers["x-gemini-key"] = savedKey.trim();
-      }
-
-      const res = await fetch("/api/ai/classify-reply", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          rawReply: trimmed,
-          studentName: resolvedStudentName,
-          reasonTitle: messageLog?.reasonTitle || "Busca Ativa Escolar",
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Falha ao classificar retorno com IA.");
-      }
-
-      if (data.classification) {
-        if (data.classification.category) {
-          setReplyCategory(data.classification.category);
-        }
-        if (data.classification.formalSummary) {
-          setReplyNotes(data.classification.formalSummary);
-        }
-        setAiTip({
-          suggestedFollowUp: data.classification.suggestedFollowUp,
-          requiresMedicalCertificate: Boolean(
-            data.classification.requiresMedicalCertificate
-          ),
-        });
-      }
-    } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : "Erro ao consultar serviço de inteligência pedagógica.";
-      setAiError(errorMsg);
-    } finally {
-      setIsClassifyingAi(false);
-    }
+    await runAiClassifyAndOcr(rawReply, capturedScreenshot);
   };
 
   const handleConfirmAndSeal = async () => {
@@ -336,6 +456,8 @@ export default function WhatsAppReplyCaptureModal({
         replyCategory: replyCategory || null,
         replyNotes: replyNotes.trim() || null,
         rawReply: rawReply.trim() || undefined,
+        extractedAt:
+          extractedByExtension && extractedAtIso ? extractedAtIso : undefined,
         sourceMethod: extractedByExtension ? "EXTENSION_ASSISTED" : "MANUAL",
       };
 
@@ -413,9 +535,12 @@ export default function WhatsAppReplyCaptureModal({
         {/* SEÇÃO 2: Captura Assistida via Extensão + Fallback Manual */}
         <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="font-extrabold text-slate-900 dark:text-white flex items-center space-x-1.5">
+            <label
+              aria-label="Texto Bruto Recebido (WhatsApp Web):"
+              className="font-extrabold text-slate-900 dark:text-white flex items-center space-x-1.5"
+            >
               <Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Texto Bruto Recebido (WhatsApp Web):</span>
+              <span>Mensagem recebida (WhatsApp Web):</span>
             </label>
 
             <div className="flex flex-wrap items-center gap-1.5">
@@ -427,29 +552,31 @@ export default function WhatsAppReplyCaptureModal({
                 }
                 target="_blank"
                 rel="noopener noreferrer"
+                aria-label="Abrir Conversa"
                 className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 font-semibold transition"
                 title="Abrir a conversa deste aluno no WhatsApp Web"
               >
                 <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                <span>Abrir Conversa</span>
+                <span>Abrir conversa</span>
               </a>
 
               <button
                 type="button"
                 onClick={handleManualExtractionClick}
                 disabled={isExtracting}
+                aria-label="Extrair da Aba do WhatsApp Web"
                 className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-semibold transition cursor-pointer disabled:opacity-50"
-                title="Ler a última mensagem da aba aberta do WhatsApp Web"
+                title="Capturar texto selecionado, mensagens da conversa ou imagem da tela (OCR) do WhatsApp Web"
               >
                 {isExtracting ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Buscando conversa e resposta...</span>
+                    <span>Buscando resposta...</span>
                   </>
                 ) : (
                   <>
                     <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Extrair da Aba do WhatsApp Web</span>
+                    <span>Extrair resposta</span>
                   </>
                 )}
               </button>
@@ -508,14 +635,16 @@ export default function WhatsAppReplyCaptureModal({
                     <span>Abrir WhatsApp</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                  <a
-                    href="/extensao-rede-ativa.zip"
-                    download
-                    className="font-bold underline text-emerald-800 dark:text-emerald-300 hover:text-emerald-950 flex items-center space-x-1"
-                  >
-                    <span>Baixar Extensão</span>
-                    <Download className="w-3 h-3" />
-                  </a>
+                  {!isExtensionActive() && (
+                    <a
+                      href="/extensao-rede-ativa.zip"
+                      download
+                      className="font-bold underline text-emerald-800 dark:text-emerald-300 hover:text-emerald-950 flex items-center space-x-1"
+                    >
+                      <span>Baixar extensão</span>
+                      <Download className="w-3 h-3" />
+                    </a>
+                  )}
                 </div>
               )}
             </div>
@@ -557,7 +686,6 @@ export default function WhatsAppReplyCaptureModal({
             value={rawReply}
             onChange={(e) => {
               setRawReply(e.target.value);
-              // Se a usuária alterar manualmente, mantemos flexibilidade
             }}
             placeholder='Cole aqui a resposta recebida ou clique no botão acima para extrair da aba ativa (ex: "Bom dia, o aluno teve febre alta e foi ao médico...")'
             className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-emerald-500 font-sans"
@@ -567,26 +695,30 @@ export default function WhatsAppReplyCaptureModal({
         {/* SEÇÃO 3: Classificação Pedagógica Assistida com IA */}
         <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-extrabold text-purple-950 dark:text-purple-200 flex items-center space-x-1.5">
+            <span
+              aria-label="Classificação e Síntese Formal (Human-in-the-Loop):"
+              className="font-extrabold text-purple-950 dark:text-purple-200 flex items-center space-x-1.5"
+            >
               <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-              <span>Classificação e Síntese Formal (Human-in-the-Loop):</span>
+              <span>Classificação e síntese formal:</span>
             </span>
 
             <button
               type="button"
-              disabled={isClassifyingAi || !rawReply.trim()}
+              disabled={isClassifyingAi || (!rawReply.trim() && !capturedScreenshot)}
               onClick={handleAiClassify}
+              aria-label="Sugerir Classificação e Síntese com IA"
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 dark:bg-purple-700 dark:hover:bg-purple-600 disabled:opacity-50 text-white font-bold transition shadow-2xs cursor-pointer"
             >
               {isClassifyingAi ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Sintetizando com IA...</span>
+                  <span>Sintetizando...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Sugerir Classificação e Síntese com IA</span>
+                  <span>Classificar com IA</span>
                 </>
               )}
             </button>
@@ -670,17 +802,18 @@ export default function WhatsAppReplyCaptureModal({
               type="button"
               onClick={handleConfirmAndSeal}
               disabled={isSaving}
+              aria-label="Confirmar e Selar Retorno (SHA-256)"
               className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer"
             >
               {isSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Selando retorno...</span>
+                  <span>Registrando...</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  <span>Confirmar e Selar Retorno (SHA-256)</span>
+                  <span>Registrar retorno</span>
                 </>
               )}
             </button>

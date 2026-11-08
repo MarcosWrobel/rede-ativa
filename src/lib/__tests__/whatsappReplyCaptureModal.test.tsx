@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import WhatsAppReplyCaptureModal from "@/components/whatsapp/WhatsAppReplyCaptureModal";
+import WhatsAppReplyCaptureModal, {
+  isPhoneCompatible,
+} from "@/components/whatsapp/WhatsAppReplyCaptureModal";
 
 describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
   const mockLog = {
@@ -145,5 +147,28 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
 
     expect(html).toContain("Extrair da Aba do WhatsApp Web");
     expect(html).toContain("Cole aqui a resposta recebida ou clique no botão acima para extrair da aba ativa");
+  });
+
+  describe("isPhoneCompatible (Tolerância de formato e DDI)", () => {
+    it("reconhece compatibilidade entre formato limpo e formato com DDI 55", () => {
+      expect(isPhoneCompatible("5542999998888", "42999998888")).toBe(true);
+      expect(isPhoneCompatible("42999998888", "5542999998888")).toBe(true);
+    });
+
+    it("reconhece compatibilidade com máscaras, parênteses e traços", () => {
+      expect(isPhoneCompatible("+55 (42) 99999-8888", "42999998888")).toBe(true);
+      expect(isPhoneCompatible("42 9999-8888", "(42) 9999-8888")).toBe(true);
+    });
+
+    it("rejeita telefones comprovadamente distintos", () => {
+      expect(isPhoneCompatible("42999998888", "41888887777")).toBe(false);
+      expect(isPhoneCompatible("5541911112222", "5542999998888")).toBe(false);
+    });
+
+    it("permite fallback permissivo quando um dos parâmetros for nulo ou vazio", () => {
+      expect(isPhoneCompatible(null, "42999998888")).toBe(true);
+      expect(isPhoneCompatible("42999998888", undefined)).toBe(true);
+      expect(isPhoneCompatible("", "")).toBe(true);
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { POST } from "../messages/reply/route";
+import { POST as classifyPost } from "../ai/classify-reply/route";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
 
 // ============================================================================
@@ -121,6 +122,7 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
       student: {
         id: "student-a1",
         name: "Lucas Gabriel Rocha da Silva",
+        guardianName: "Sônia Regina Rocha",
         schoolId: "escola-a",
       },
     };
@@ -286,7 +288,8 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
     });
 
     const studentRealName = "Lucas Gabriel Rocha da Silva";
-    const rawReplyMessage = `Bom dia, o ${studentRealName} estava com febre alta e foi diagnosticado com dengue ontem.`;
+    const guardianRealName = "Sônia Regina Rocha";
+    const rawReplyMessage = `Bom dia, sou a ${guardianRealName}. O ${studentRealName} estava com febre alta e foi diagnosticado com dengue ontem.`;
 
     const req = new Request("http://localhost:3000/api/messages/reply", {
       method: "POST",
@@ -306,14 +309,53 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
     expect(mockInteractionsCreate).toHaveBeenCalledTimes(1);
     const passedCall = mockInteractionsCreate.mock.calls[0][0];
 
-    // O nome real do menor NÃO pode ter sido enviado à API do Gemini
+    // O nome real do menor e da responsável NÃO podem ter sido enviados à API do Gemini
     expect(passedCall.input).not.toContain(studentRealName);
+    expect(passedCall.input).not.toContain(guardianRealName);
     expect(passedCall.input).toContain("[ESTUDANTE_1]");
+    expect(passedCall.input).toContain("[RESPONSAVEL_1]");
 
     // No entanto, o texto final gravado no prontuário deve ser restaurado via unmaskText
     const updated = mockMessageLogs["msg-escola-a"];
     expect(updated.replyCategory).toBe("SAUDE");
     expect(updated.replyNotes).toContain(studentRealName);
     expect(updated.replyNotes).not.toContain("[ESTUDANTE_1]");
+  });
+
+  it("5. [OCR MULTIMODAL] /api/ai/classify-reply aceita screenshotDataUrl sem rawReply e extrai texto + sintese via Gemini Vision", async () => {
+    process.env.GEMINI_API_KEY = "test-fake-gemini-key";
+
+    mockGenerateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        extractedRawReply: "Bom dia! Ele perdeu o ônibus escolar hoje devido à chuva forte.",
+        formalSummary: "Responsável informou que o estudante [ESTUDANTE_1] ausentou-se por falha no transporte escolar devido a chuva intensa.",
+        category: "TRANSPORTE",
+        requiresMedicalCertificate: false,
+        suggestedFollowUp: "Registrar ocorrência de transporte e acompanhar frequência.",
+      }),
+    });
+
+    const req = new Request("http://localhost:3000/api/ai/classify-reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rawReply: "",
+        screenshotDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/",
+        studentName: "Lucas Gabriel Rocha da Silva",
+        reasonTitle: "Faltas Consecutivas",
+      }),
+    });
+
+    const res = await classifyPost(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.usedOcr).toBe(true);
+    expect(body.classification.extractedRawReply).toBe(
+      "Bom dia! Ele perdeu o ônibus escolar hoje devido à chuva forte."
+    );
+    expect(body.classification.category).toBe("TRANSPORTE");
+    expect(body.classification.formalSummary).toContain("Lucas Gabriel Rocha da Silva");
   });
 });

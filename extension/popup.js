@@ -57,9 +57,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (toggleWhatsAppAutoSend) {
-      toggleWhatsAppAutoSend.checked = Boolean(res.opt_whatsapp_auto_send);
+      toggleWhatsAppAutoSend.checked = res.opt_whatsapp_auto_send !== false; // default true
       toggleWhatsAppAutoSend.addEventListener('change', () => {
         chrome.storage.local.set({ opt_whatsapp_auto_send: toggleWhatsAppAutoSend.checked });
+      });
+    }
+
+    const btnWaCapture = document.getElementById('btn-popup-wa-capture');
+    if (btnWaCapture) {
+      btnWaCapture.addEventListener('click', async () => {
+        statusEl.textContent = 'Capturando conversa aberta do WhatsApp Web...';
+        statusEl.style.color = '#059669';
+        const waTabs = await chrome.tabs.query({ url: '*://web.whatsapp.com/*' });
+        if (!waTabs || waTabs.length === 0) {
+          statusEl.textContent = 'Nenhuma janela do WhatsApp Web aberta!';
+          statusEl.style.color = '#ef4444';
+          return;
+        }
+        const targetWaTab = waTabs.find((t) => t.active) || waTabs[0];
+        try {
+          await chrome.tabs.sendMessage(targetWaTab.id, {
+            type: 'LEOPOLDINA_TRIGGER_HUMAN_CAPTURE',
+          });
+          statusEl.textContent = 'Retorno e captura de tela enviados à plataforma!';
+          statusEl.style.color = '#10b981';
+        } catch {
+          statusEl.textContent = 'Recarregue a janela do WhatsApp Web e tente novamente.';
+          statusEl.style.color = '#ef4444';
+        }
       });
     }
 

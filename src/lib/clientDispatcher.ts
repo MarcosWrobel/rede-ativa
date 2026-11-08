@@ -130,8 +130,10 @@ export interface ExtractWhatsAppReplyResult {
   success: boolean;
   logId?: string;
   rawText?: string;
+  selectionUsed?: boolean;
   domTimestamp?: string | null;
   activeChatTitle?: string | null;
+  screenshotDataUrl?: string | null;
   error?: string;
   message?: string;
 }
@@ -196,8 +198,10 @@ export function extractWhatsAppReplyViaExtension(
           success: Boolean(data.success),
           logId: data.logId,
           rawText: data.rawText,
+          selectionUsed: Boolean(data.selectionUsed),
           domTimestamp: data.domTimestamp ?? null,
           activeChatTitle: data.activeChatTitle ?? null,
+          screenshotDataUrl: data.screenshotDataUrl ?? null,
           error: data.error,
           message: data.message,
         });

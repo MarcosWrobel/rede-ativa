@@ -158,14 +158,22 @@ export const messageReplySchema = z.object({
   classifyWithAi: z.boolean().optional().default(false),
 });
 
-export const aiClassifyReplySchema = z.object({
-  rawReply: z
-    .string()
-    .trim()
-    .min(3, "Cole ou digite ao menos uma frase informada pelo responsável para classificar."),
-  studentName: z.string().trim().optional().nullable(),
-  reasonTitle: z.string().trim().optional().nullable(),
-});
+export const aiClassifyReplySchema = z
+  .object({
+    rawReply: z.string().trim().optional().default(""),
+    screenshotDataUrl: z.string().max(6_000_000).optional().nullable(),
+    studentName: z.string().trim().optional().nullable(),
+    reasonTitle: z.string().trim().optional().nullable(),
+  })
+  .refine(
+    (d) =>
+      d.rawReply.length >= 3 ||
+      Boolean(d.screenshotDataUrl && d.screenshotDataUrl.startsWith("data:image/")),
+    {
+      message:
+        "Cole ou digite ao menos uma frase informada pelo responsável para classificar.",
+    }
+  );
 
 export const frequenciaSyncItemSchema = z.object({
   cgm: z.union([z.string(), z.number()]).optional().nullable(),

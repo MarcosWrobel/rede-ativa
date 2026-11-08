@@ -41,13 +41,18 @@ const CLASSIFICATION_JSON_SCHEMA = {
 async function classifyReplyWithFallback({
   rawText,
   studentName,
+  guardianName,
   reasonTitle,
 }: {
   rawText: string;
   studentName?: string;
+  guardianName?: string | null;
   reasonTitle?: string;
 }): Promise<{ formalSummary: string; category: ReplyCategory }> {
-  const pseudonymizer = createAiPseudonymizer(studentName ? [studentName] : [], []);
+  const pseudonymizer = createAiPseudonymizer(
+    studentName ? [studentName] : [],
+    guardianName ? [guardianName] : []
+  );
   const maskedText = pseudonymizer.maskText(rawText);
 
   const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^["']|["']$/g, "").trim();
@@ -204,6 +209,7 @@ export async function POST(req: Request) {
         const classification = await classifyReplyWithFallback({
           rawText: baseText,
           studentName: previous.student?.name,
+          guardianName: previous.student?.guardianName,
           reasonTitle: previous.reasonTitle,
         });
 

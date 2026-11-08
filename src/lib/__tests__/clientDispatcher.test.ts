@@ -283,6 +283,29 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
       expect(result.message).toBe("Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web.");
     });
 
+    it("repassa screenshotDataUrl (captureVisibleTab para OCR) e selectionUsed no retorno da extensão", async () => {
+      const promise = extractWhatsAppReplyViaExtension("log_ocr_1", "5542999990000", "Maria Clara");
+
+      messageListeners.forEach((listener) =>
+        listener({
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            logId: "log_ocr_1",
+            success: true,
+            rawText: "A aluna teve consulta médica hoje cedo.",
+            selectionUsed: true,
+            screenshotDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/",
+          },
+        })
+      );
+
+      const result = await promise;
+      expect(result.success).toBe(true);
+      expect(result.selectionUsed).toBe(true);
+      expect(result.screenshotDataUrl).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/");
+    });
+
     it("ignora mensagens com logId diferente ou de origem não confiável", async () => {
       vi.useFakeTimers();
       const promise = extractWhatsAppReplyViaExtension("log_real", "5542999999999", 5000);

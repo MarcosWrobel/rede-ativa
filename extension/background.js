@@ -1,14 +1,24 @@
 /**
- * Background Service Worker — Sincronizador Leopoldina (Manifest V3)
+ * Background Service Worker — Sincronizador Rede Ativa (Manifest V3)
  * 1. Abre o WhatsApp Web em Janela Dedicada Compacta (tipo 'popup' minimalista)
  *    posicionada no canto direito da tela, reutilizando a mesma janela durante todo o fluxo.
- * 2. Gerencia o contexto de despacho da Busca Ativa (aluno, telefone, logId).
- * 3. Faz o relay bidirecional de eventos de confirmação do WhatsApp Web para a plataforma Registro.
- * 4. Faz a ponte de extração assistida de retornos do WhatsApp Web para a aplicação.
+ * 2. Gerencia o contexto de despacho da Busca Ativa (aluno, telefone, logId) com Auto-Send ativo por padrão.
+ * 3. Faz o relay bidirecional de eventos de confirmação do WhatsApp Web para a plataforma.
+ * 4. Faz a ponte de extração de retornos (Texto Selecionado / DOM + Captura Visual OCR via captureVisibleTab).
  */
 
 const POPUP_WIDTH = 480;
 const POPUP_HEIGHT = 760;
+
+const PLATFORM_TARGET_URLS = [
+  "https://*.vercel.app/*",
+  "https://redeativa.app.br/*",
+  "https://*.redeativa.app.br/*",
+  "https://redeativa.com.br/*",
+  "https://*.redeativa.com.br/*",
+  "http://localhost/*",
+  "http://127.0.0.1/*",
+];
 
 function isAllowedWhatsAppUrl(urlStr) {
   try {
@@ -64,10 +74,162 @@ async function getPopupCoordinates() {
       top = Math.max(0, (currentWin.top || 0) + 30);
     }
   } catch (e) {
-    console.warn("[Sincronizador Leopoldina] Geometria da janela não obtida, usando padrão:", e);
+    console.warn("[Sincronizador Rede Ativa] Geometria da janela não obtida, usando padrão:", e);
   }
   return { left, top };
 }
+
+/**
+ * Captura um screenshot JPEG rápido da janela visível do WhatsApp Web para OCR Multimodal.
+ */
+async function captureWhatsAppTabScreenshot(windowId, tabId) {
+  try {
+    if (tabId) {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: true });
+        await new Promise((r) => setTimeout(r, 60));
+      } catch {}
+    }
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(windowId || null, {
+      format: "jpeg",
+      quality: 85,
+    });
+
+    if (tabId) {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: false });
+      } catch {}
+    }
+
+    return typeof dataUrl === "string" && dataUrl.startsWith("data:image/") ? dataUrl : null;
+  } catch (err) {
+    if (tabId) {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: false });
+      } catch {}
+    }
+    console.warn("[Background] Não foi possível capturar screenshot da aba:", err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Localiza todas as abas abertas da plataforma Rede Ativa (seja em localhost:3000,
+ * localhost:3001, rede local ou domínios em nuvem Vercel/oficial).
+ * Elimina a limitação da API chrome.tabs.query com portas não-padrão (ex.: localhost:3001).
+ */
+async function queryPlatformTabs() {
+  try {
+    const allTabs = await chrome.tabs.query({});
+    return allTabs.filter((tab) => {
+      if (!tab?.id || !tab.url || typeof tab.url !== "string") return false;
+      try {
+        const parsed = new URL(tab.url);
+        const host = parsed.hostname.toLowerCase();
+        const protocol = parsed.protocol;
+        if (protocol === "http:" || protocol === "https:") {
+          // Descarte de domínios externos e governamentais
+          if (
+            host === "web.whatsapp.com" ||
+            host === "wa.me" ||
+            host === "api.whatsapp.com" ||
+            host === "app.powerbi.com" ||
+            host.includes("seed.pr.gov.br")
+          ) {
+            return false;
+          }
+          // Aceita localhost em qualquer porta, IPs de LAN e domínios da aplicação
+          if (
+            host === "localhost" ||
+            host === "127.0.0.1" ||
+            host === "0.0.0.0" ||
+            host.startsWith("192.168.") ||
+            host.startsWith("10.") ||
+            host.endsWith(".local") ||
+            host.endsWith(".vercel.app") ||
+            host === "redeativa.app.br" ||
+            host.endsWith(".redeativa.app.br") ||
+            host === "redeativa.com.br" ||
+            host.endsWith(".redeativa.com.br")
+          ) {
+            return true;
+          }
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    });
+  } catch (err) {
+    console.warn("[Background] Falha ao consultar abas da plataforma:", err);
+    return [];
+  }
+}
+
+/**
+ * Retransmite um retorno capturado no WhatsApp Web para todas as abas abertas da plataforma.
+ */
+async function relayCapturedReplyToPlatformTabs(payload) {
+  const tabs = await queryPlatformTabs();
+  let relayedCount = 0;
+  for (const tab of tabs) {
+    if (tab.id) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          type: "LEOPOLDINA_WHATSAPP_REPLY_PUSH_RELAY",
+          ...payload,
+        });
+        relayedCount++;
+      } catch {}
+    }
+  }
+  return relayedCount;
+}
+
+/**
+ * Garante que todas as abas abertas do WhatsApp Web tenham o content script mais recente injetado,
+ * mesmo sem precisar dar F5 manual após atualizar ou recarregar a extensão.
+ */
+async function ensureContentScriptInOpenWhatsAppTabs() {
+  try {
+    const waTabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
+    for (const tab of waTabs) {
+      if (!tab.id) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["whatsapp-content.js"],
+        });
+      } catch (e) {
+        console.warn("[Background] Aviso ao injetar script na aba WhatsApp:", tab.id, e?.message || e);
+      }
+    }
+  } catch (err) {
+    console.warn("[Background] Falha ao varrer abas do WhatsApp:", err);
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensureContentScriptInOpenWhatsAppTabs();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  ensureContentScriptInOpenWhatsAppTabs();
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && tab?.url && tab.url.includes("web.whatsapp.com")) {
+    chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PING" }).catch(() => {
+      chrome.scripting
+        .executeScript({
+          target: { tabId },
+          files: ["whatsapp-content.js"],
+        })
+        .catch(() => {});
+    });
+  }
+});
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // 1. Despacho de WhatsApp da aplicação Registro para a janela dedicada
@@ -79,19 +241,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     (async () => {
       try {
-        // Armazena contexto no storage com expiração
+        // Por padrão, o Auto-Send assistido fica ATIVO (a menos que explicitamente desativado em opt_whatsapp_auto_send === false)
         const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
-        const autoSendPref = Boolean(storageRes?.opt_whatsapp_auto_send);
+        const autoSendPref = storageRes?.opt_whatsapp_auto_send !== false;
+
+        const dispatchPayload = {
+          logId: request.logId || null,
+          studentId: request.studentId || null,
+          studentName: request.studentName || null,
+          phone: request.phone || null,
+          autoSend: request.autoSend !== undefined ? Boolean(request.autoSend) : autoSendPref,
+          dispatchedAt: Date.now(),
+        };
 
         await chrome.storage.local.set({
-          leopoldina_active_dispatch: {
-            logId: request.logId || null,
-            studentId: request.studentId || null,
-            studentName: request.studentName || null,
-            phone: request.phone || null,
-            autoSend: request.autoSend !== undefined ? Boolean(request.autoSend) : autoSendPref,
-            dispatchedAt: Date.now(),
-          },
+          leopoldina_active_dispatch: dispatchPayload,
         });
 
         const result = await handleWhatsAppDispatch(request.url);
@@ -100,24 +264,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: err?.message || String(err) });
       }
     })();
-    return true; // Mantém o canal aberto para resposta assíncrona
+    return true;
   }
 
   // 2. Consulta de contexto ativo feita pelo content script do WhatsApp Web
   if (request?.type === "LEOPOLDINA_GET_ACTIVE_DISPATCH") {
     (async () => {
       try {
-        const data = await chrome.storage.local.get(["leopoldina_active_dispatch"]);
+        const data = await chrome.storage.local.get(["leopoldina_active_dispatch", "opt_whatsapp_auto_send"]);
         const dispatch = data?.leopoldina_active_dispatch;
+        const autoSendPref = data?.opt_whatsapp_auto_send !== false;
 
         // Se o despacho tiver menos de 5 minutos, considera ativo
         if (dispatch && Date.now() - dispatch.dispatchedAt < 300000) {
-          sendResponse({ activeDispatch: dispatch });
+          sendResponse({
+            activeDispatch: {
+              ...dispatch,
+              autoSend: dispatch.autoSend !== undefined ? Boolean(dispatch.autoSend) : autoSendPref,
+            },
+          });
         } else {
-          sendResponse({ activeDispatch: null });
+          sendResponse({ activeDispatch: null, autoSendDefault: autoSendPref });
         }
       } catch (err) {
-        sendResponse({ activeDispatch: null });
+        sendResponse({ activeDispatch: null, autoSendDefault: true });
       }
     })();
     return true;
@@ -127,18 +297,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME") {
     (async () => {
       try {
-        console.log("[Sincronizador Leopoldina] Resultado de envio recebido:", request.outcome, request.logId);
+        console.log("[Sincronizador Rede Ativa] Resultado de envio recebido:", request.outcome, request.logId);
 
-        // Notifica todas as abas abertas da aplicação Registro
-        const targetUrls = [
-          "https://*.vercel.app/*",
-          "https://redeativa.app.br/*",
-          "https://*.redeativa.app.br/*",
-          "http://localhost/*",
-          "http://127.0.0.1/*",
-        ];
-
-        const tabs = await chrome.tabs.query({ url: targetUrls });
+        const tabs = await queryPlatformTabs();
         for (const tab of tabs) {
           if (tab.id) {
             chrome.tabs.sendMessage(tab.id, {
@@ -162,7 +323,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 4. Extração assistida do último retorno recebido no WhatsApp Web (Read-Only)
+  // 4. Push ativo disparado pelo botão humano dentro do WhatsApp Web ("📥 Capturar Retorno")
+  if (request?.type === "LEOPOLDINA_PUSH_CAPTURED_REPLY") {
+    (async () => {
+      try {
+        const senderTabId = sender?.tab?.id || request.tabId || null;
+        const senderWinId = sender?.tab?.windowId || request.windowId || null;
+
+        const storageData = await chrome.storage.local.get(["leopoldina_active_dispatch"]);
+        const activeDispatch = storageData?.leopoldina_active_dispatch || null;
+
+        const screenshotDataUrl = await captureWhatsAppTabScreenshot(senderWinId, senderTabId);
+
+        const finalPayload = {
+          success: Boolean(request.rawText?.trim() || screenshotDataUrl),
+          logId: request.logId || activeDispatch?.logId || null,
+          phone: request.phone || activeDispatch?.phone || null,
+          studentName: request.studentName || activeDispatch?.studentName || null,
+          rawText: request.rawText || "",
+          selectionUsed: Boolean(request.selectionUsed),
+          domTimestamp: request.domTimestamp || null,
+          activeChatTitle: request.activeChatTitle || null,
+          screenshotDataUrl,
+          capturedAt: new Date().toISOString(),
+        };
+
+        await chrome.storage.local.set({
+          leopoldina_last_captured_reply: finalPayload,
+        });
+
+        const relayedCount = await relayCapturedReplyToPlatformTabs(finalPayload);
+        sendResponse({
+          success: Boolean(request.rawText?.trim() || screenshotDataUrl),
+          relayedCount,
+          hasText: Boolean(request.rawText?.trim()),
+          hasScreenshot: Boolean(screenshotDataUrl),
+        });
+      } catch (err) {
+        sendResponse({
+          success: false,
+          error: err?.message || "Falha ao enviar captura para a plataforma.",
+        });
+      }
+    })();
+    return true;
+  }
+
+  // 5. Extração assistida solicitada pela plataforma (Botão "Extrair resposta" / "Ler Tela OCR" no Modal)
   if (request?.type === "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY") {
     (async () => {
       try {
@@ -200,7 +407,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
           }
 
-          // Aguarda a aba carregar completamente e o content script inicializar
           await waitForTabLoad(createdTab.id, 10000);
           await new Promise((r) => setTimeout(r, 800));
 
@@ -210,9 +416,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
               logId: request.logId,
               phone: request.phone,
+              studentName: request.studentName,
             });
           } catch (firstCommErr) {
-            console.warn("[Background] Tentando injeção sob demanda na nova janela:", createdTab.id, firstCommErr);
             try {
               await chrome.scripting.executeScript({
                 target: { tabId: createdTab.id },
@@ -222,9 +428,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
                 logId: request.logId,
                 phone: request.phone,
+                studentName: request.studentName,
               });
             } catch (injectErr) {
-              console.error("[Background] Falha ao injetar script na nova janela:", injectErr);
               sendResponse({
                 success: false,
                 error: "TAB_COMMUNICATION_ERROR",
@@ -234,13 +440,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
 
-          sendResponse(
-            replyResult || {
-              success: false,
-              error: "EMPTY_RESPONSE",
-              message: "Resposta vazia da aba do WhatsApp Web.",
-            }
-          );
+          const screenshotDataUrl = await captureWhatsAppTabScreenshot(newWindow.id, createdTab.id);
+
+          sendResponse({
+            ...(replyResult || {
+              success: Boolean(screenshotDataUrl),
+              logId: request.logId,
+            }),
+            screenshotDataUrl: screenshotDataUrl || null,
+          });
           return;
         }
 
@@ -269,7 +477,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        // Traz a aba e janela do WhatsApp para o foco imediato SEM NUNCA RECARREGAR (Zero F5)
+        // Traz a aba e janela do WhatsApp para o foco imediato SEM RECARREGAR (Zero F5)
         if (targetTab.windowId) {
           try {
             await chrome.windows.update(targetTab.windowId, { focused: true });
@@ -281,7 +489,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } catch {}
         }
 
-        // Solicita extração direta ao content script da aba ativa
+        // Breve pausa para garantir renderização da janela focada antes do screenshot
+        await new Promise((r) => setTimeout(r, 150));
+
+        // Solicita extração ao content script da aba ativa
         let replyResult = null;
         try {
           replyResult = await chrome.tabs.sendMessage(targetTab.id, {
@@ -291,8 +502,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             studentName: request.studentName,
           });
         } catch (commErr) {
-          console.warn("[Background] Falha inicial ao comunicar com aba aberta do WhatsApp Web, tentando injeção sob demanda:", targetTab.id);
-
           try {
             await chrome.scripting.executeScript({
               target: { tabId: targetTab.id },
@@ -305,15 +514,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               studentName: request.studentName,
             });
           } catch (injectErr) {
-            console.error("[Background] Falha ao restabelecer comunicação com aba:", injectErr);
-            sendResponse({
-              success: false,
-              error: "TAB_COMMUNICATION_ERROR",
-              message:
-                "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp Web (F5) e tente novamente.",
-            });
-            return;
+            console.warn("[Background] Content script indisponível, tentando captura visual pura:", injectErr);
           }
+        }
+
+        // Captura screenshot da aba visível do WhatsApp Web para OCR no servidor caso necessário
+        const screenshotDataUrl = await captureWhatsAppTabScreenshot(targetTab.windowId, targetTab.id);
+
+        if (replyResult && (replyResult.success || replyResult.error === "NUMBER_NOT_ON_WHATSAPP" || replyResult.error === "CHAT_MISMATCH")) {
+          sendResponse({
+            ...replyResult,
+            screenshotDataUrl: screenshotDataUrl || null,
+          });
+          return;
+        }
+
+        if (screenshotDataUrl) {
+          sendResponse({
+            ...(replyResult || {}),
+            success: Boolean(replyResult?.rawText),
+            logId: request.logId,
+            phone: request.phone,
+            screenshotDataUrl,
+            error: replyResult?.error || "DOM_EMPTY_WITH_SCREENSHOT",
+            message:
+              replyResult?.message ||
+              "Imagem da conversa capturada para leitura inteligente (OCR).",
+          });
+          return;
         }
 
         sendResponse(
@@ -329,7 +557,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: "TAB_COMMUNICATION_ERROR",
           message:
             err?.message ||
-            "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue o WhatsApp Web e tente novamente.",
+            "Não foi possível comunicar com a aba do WhatsApp Web.",
         });
       }
     })();
@@ -344,20 +572,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  */
 async function handleWhatsAppDispatch(targetUrl) {
   try {
-    // 1. Procura se já temos qualquer aba/janela do WhatsApp Web aberta
     const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
 
     if (tabs && tabs.length > 0) {
       const existingTab = tabs[0];
       const windowId = existingTab.windowId;
 
-      // Atualiza o chat na aba/janela já existente
       await chrome.tabs.update(existingTab.id, {
         url: targetUrl,
         active: true,
       });
 
-      // Traz a janela dedicada para o primeiro plano imediato
       if (windowId) {
         await chrome.windows.update(windowId, { focused: true });
       }
@@ -369,13 +594,11 @@ async function handleWhatsAppDispatch(targetUrl) {
       };
     }
 
-    // 2. Se nenhuma estiver aberta, calcula a posição ideal no lado direito da tela
     const { left, top } = await getPopupCoordinates();
 
-    // 3. Cria a Janela Dedicada Compacta (Popup Minimalista nativo do Chrome)
     const newWindow = await chrome.windows.create({
       url: targetUrl,
-      type: "popup", // Sem barra de abas, sem favoritos e sem omnibox
+      type: "popup",
       width: POPUP_WIDTH,
       height: POPUP_HEIGHT,
       left,
@@ -389,7 +612,7 @@ async function handleWhatsAppDispatch(targetUrl) {
       tabId: newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0].id : null,
     };
   } catch (error) {
-    console.error("[Sincronizador Leopoldina] Erro ao despachar WhatsApp:", error);
+    console.error("[Sincronizador Rede Ativa] Erro ao despachar WhatsApp:", error);
     throw error;
   }
 }

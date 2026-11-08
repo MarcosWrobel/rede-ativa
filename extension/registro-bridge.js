@@ -164,6 +164,32 @@
             }
           );
         });
+        return;
+      }
+
+      // 3.3 Consulta ao último retorno capturado no storage local da extensão
+      if (
+        data.type === "REDEATIVA_GET_LAST_CAPTURED_REPLY" ||
+        data.type === "LEOPOLDINA_GET_LAST_CAPTURED_REPLY"
+      ) {
+        chrome.storage.local.get(["leopoldina_last_captured_reply"], (result) => {
+          const stored = result?.leopoldina_last_captured_reply;
+          if (stored && (stored.rawText || stored.screenshotDataUrl)) {
+            const currentOrigin = window.location.origin;
+            const replyMsg = {
+              type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+              pushedFromWhatsApp: true,
+              fromStorageCache: true,
+              ...stored,
+            };
+            window.postMessage(replyMsg, currentOrigin);
+            window.postMessage(
+              { ...replyMsg, type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED" },
+              currentOrigin
+            );
+          }
+        });
+        return;
       }
     });
 
@@ -183,6 +209,38 @@
         const currentOrigin = window.location.origin;
         window.postMessage({ type: "REDEATIVA_WHATSAPP_CONFIRMED", ...confirmPayload }, currentOrigin);
         window.postMessage({ type: "LEOPOLDINA_WHATSAPP_CONFIRMED", ...confirmPayload }, currentOrigin);
+      }
+
+      if (message?.type === "LEOPOLDINA_WHATSAPP_REPLY_PUSH_RELAY") {
+        const currentOrigin = window.location.origin;
+        const pushedPayload = {
+          type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+          pushedFromWhatsApp: true,
+          success: Boolean(message.success),
+          logId: message.logId || null,
+          phone: message.phone || null,
+          studentName: message.studentName || null,
+          rawText: message.rawText || "",
+          selectionUsed: Boolean(message.selectionUsed),
+          domTimestamp: message.domTimestamp || null,
+          activeChatTitle: message.activeChatTitle || null,
+          screenshotDataUrl: message.screenshotDataUrl || null,
+          receivedAt: Date.now(),
+        };
+
+        // Cache local imediato para resiliência caso a modal ainda não esteja aberta
+        try {
+          sessionStorage.setItem("redeativa_last_pushed_reply", JSON.stringify(pushedPayload));
+        } catch {}
+        try {
+          window.__REDEATIVA_LAST_PUSHED_REPLY__ = pushedPayload;
+        } catch {}
+
+        window.postMessage(pushedPayload, currentOrigin);
+        window.postMessage(
+          { ...pushedPayload, type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED" },
+          currentOrigin
+        );
       }
     });
   } catch (err) {
