@@ -56,7 +56,16 @@ export function sanitizeCredentialValue(val: string | undefined): string | undef
 export function sanitizeJwtLogoUrl(url?: string | null): string | null {
   if (!url) return null;
   const trimmed = String(url).trim();
-  if (!trimmed || trimmed.startsWith("data:") || trimmed.length > 255) {
+  const lower = trimmed.toLowerCase();
+  if (
+    !trimmed ||
+    lower === "null" ||
+    lower === "undefined" ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("javascript:") ||
+    trimmed.length > 255
+  ) {
     return null;
   }
   return trimmed;

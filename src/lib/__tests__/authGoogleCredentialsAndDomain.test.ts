@@ -210,12 +210,26 @@ describe("AUTH-04: Preservação e Canonicização de AUTH_URL", () => {
 });
 
 describe("AUTH-05: Sanitização de Imagens e Logos no Token JWT", () => {
-  it("sanitizeJwtLogoUrl rejeita categoricamente data URIs / base64", () => {
+  it("sanitizeJwtLogoUrl rejeita categoricamente data URIs / base64 (case-insensitive)", () => {
     const base64Svg = "data:image/svg+xml;base64," + "A".repeat(500);
     expect(sanitizeJwtLogoUrl(base64Svg)).toBeNull();
 
     const base64Png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA";
     expect(sanitizeJwtLogoUrl(base64Png)).toBeNull();
+
+    // Testa data URIs em maiúsculas ou mistas
+    const upperData = "DATA:IMAGE/PNG;BASE64,iVBORw0KGgoAAAANSUhEUgAA";
+    expect(sanitizeJwtLogoUrl(upperData)).toBeNull();
+
+    const mixedData = "Data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    expect(sanitizeJwtLogoUrl(mixedData)).toBeNull();
+  });
+
+  it("sanitizeJwtLogoUrl rejeita esquemas inseguros (javascript:, blob:)", () => {
+    expect(sanitizeJwtLogoUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeJwtLogoUrl("JAVASCRIPT:void(0)")).toBeNull();
+    expect(sanitizeJwtLogoUrl("blob:https://example.com/uuid")).toBeNull();
+    expect(sanitizeJwtLogoUrl("BLOB:null/uuid")).toBeNull();
   });
 
   it("sanitizeJwtLogoUrl rejeita strings maiores que 255 caracteres", () => {
@@ -228,11 +242,14 @@ describe("AUTH-05: Sanitização de Imagens e Logos no Token JWT", () => {
     expect(sanitizeJwtLogoUrl(giantPayload)).toBeNull();
   });
 
-  it("sanitizeJwtLogoUrl retorna null para valores nulos, vazios ou indefinidos", () => {
+  it("sanitizeJwtLogoUrl retorna null para valores nulos, vazios ou indefinidos e literais", () => {
     expect(sanitizeJwtLogoUrl(undefined)).toBeNull();
     expect(sanitizeJwtLogoUrl(null)).toBeNull();
     expect(sanitizeJwtLogoUrl("")).toBeNull();
     expect(sanitizeJwtLogoUrl("   ")).toBeNull();
+    expect(sanitizeJwtLogoUrl("null")).toBeNull();
+    expect(sanitizeJwtLogoUrl("undefined")).toBeNull();
+    expect(sanitizeJwtLogoUrl("  NULL  ")).toBeNull();
   });
 
   it("sanitizeJwtLogoUrl preserva URLs relativas ou remotas compactas e faz trim", () => {

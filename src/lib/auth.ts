@@ -160,6 +160,47 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       const email = ((user?.email || token?.email || "") as string).toLowerCase().trim();
       const isRootAdmin = isBootstrapAdminEmail(email);
 
+      // Higienização defensiva preventiva imediata:
+      // Remove URLs base64/data/blob e pruna atributos não autorizados de tokens existentes ou recebidos
+      if (
+        typeof token.picture === "string" &&
+        (token.picture.toLowerCase().startsWith("data:") ||
+          token.picture.toLowerCase().startsWith("blob:") ||
+          token.picture.length > 255)
+      ) {
+        delete token.picture;
+      }
+      if (
+        typeof (token as any).image === "string" &&
+        ((token as any).image.toLowerCase().startsWith("data:") ||
+          (token as any).image.toLowerCase().startsWith("blob:") ||
+          (token as any).image.length > 255)
+      ) {
+        delete (token as any).image;
+      }
+      if (Array.isArray(token.userSchools)) {
+        token.userSchools = (token.userSchools as any[]).map((s) => ({
+          schoolId: String(s.schoolId || ""),
+          role: s.role || "PEDAGOGA",
+          name: s.name || "",
+          inepCode: s.inepCode || "",
+          city: s.city || "",
+          network: s.network || "ESTADUAL",
+          logoUrl: sanitizeJwtLogoUrl(s.logoUrl),
+        }));
+      }
+      if (Array.isArray(token.userNetworks)) {
+        token.userNetworks = (token.userNetworks as any[]).map((n) => ({
+          networkId: String(n.networkId || ""),
+          role: n.role || "GESTAO_SECRETARIA",
+          name: n.name || "",
+          shortName: n.shortName || "",
+          city: n.city || "",
+          type: n.type || "MUNICIPAL",
+          logoUrl: sanitizeJwtLogoUrl(n.logoUrl),
+        }));
+      }
+
       // Trata requisição explícita de alternância de instituição ativa
       if (trigger === "update" && session?.activeSchoolId) {
         const targetSchoolId = String(session.activeSchoolId);
@@ -181,23 +222,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.active = isRootAdmin ? true : (user as any).active !== false;
         token.schoolId = (user as any).schoolId;
         token.checkedAt = Date.now();
-      }
-
-      // Higienização defensiva de tokens pré-existentes ou atributos que possam carregar base64
-      if (typeof token.picture === "string" && (token.picture.startsWith("data:") || token.picture.length > 255)) {
-        delete token.picture;
-      }
-      if (Array.isArray(token.userSchools)) {
-        token.userSchools = (token.userSchools as any[]).map((s) => ({
-          ...s,
-          logoUrl: sanitizeJwtLogoUrl(s.logoUrl),
-        }));
-      }
-      if (Array.isArray(token.userNetworks)) {
-        token.userNetworks = (token.userNetworks as any[]).map((n) => ({
-          ...n,
-          logoUrl: sanitizeJwtLogoUrl(n.logoUrl),
-        }));
       }
 
       const lastChecked = Number(token.checkedAt || 0);
