@@ -559,48 +559,6 @@
     }
   });
 
-          // 2. Extração do metadado de data/hora (domTimestamp)
-          let domTimestamp = null;
-          const copyableEl = lastMessageEl.querySelector("div.copyable-text");
-          if (copyableEl && copyableEl.getAttribute("data-pre-plain-text")) {
-            domTimestamp = copyableEl.getAttribute("data-pre-plain-text").trim();
-          } else {
-            const timeSpans = lastMessageEl.querySelectorAll("span");
-            for (let i = timeSpans.length - 1; i >= 0; i--) {
-              const text = (timeSpans[i].innerText || timeSpans[i].textContent || "").trim();
-              if (/\d{1,2}:\d{2}/.test(text)) {
-                domTimestamp = text;
-                break;
-              }
-            }
-            if (!domTimestamp && timeSpans.length > 0) {
-              const lastSpanText = (timeSpans[timeSpans.length - 1].innerText || "").trim();
-              if (lastSpanText) domTimestamp = lastSpanText;
-            }
-          }
-
-          sendResponse({
-            success: true,
-            logId: message.logId,
-            phone: targetPhone,
-            rawText: extractedText.trim(),
-            domTimestamp,
-            activeChatTitle,
-          });
-        } catch (err) {
-          sendResponse({
-            success: false,
-            logId: message.logId,
-            phone: message?.phone,
-            error: "EXTRACTION_EXCEPTION",
-            message: err?.message || "Erro inesperado ao extrair mensagem do WhatsApp Web.",
-          });
-        }
-      })();
-      return true; // Resposta assíncrona garantida no MV3
-    }
-  });
-
   // Inicializa o script e busca o contexto atual
   async function init() {
     try {

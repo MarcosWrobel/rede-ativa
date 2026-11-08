@@ -315,15 +315,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
           }
         }
-            sendResponse({
-              success: false,
-              error: "TAB_COMMUNICATION_ERROR",
-              message:
-                "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp Web (F5) e tente novamente.",
-            });
-            return;
-          }
-        }
 
         sendResponse(
           replyResult || {
