@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as createAtaDraft } from "@/app/api/atas/route";
 import { POST as finalizeAta } from "@/app/api/atas/[id]/finalize/route";
 import { PATCH as updateAtaDraft } from "@/app/api/atas/[id]/route";
+import { POST as generateSignToken } from "@/app/api/atas/[id]/sign-token/route";
 import { generateLocalAtaMinuta } from "@/lib/nreAtaFormatter";
 import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 import { generateAtaPdfA1b } from "@/lib/ataPdfArchive";
@@ -124,6 +125,25 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async ({ where }: any) => {
         const m = db.minutes.find((item) => item.id === where.minuteId);
         return m?.participants || [];
+      }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const m of db.minutes) {
+          if (!where?.minuteId || m.id === where.minuteId) {
+            const p = m.participants?.find((part: any) => !where?.id || part.id === where.id);
+            if (p) return p;
+          }
+        }
+        return null;
+      }),
+      update: vi.fn(async ({ where, data }: any) => {
+        for (const m of db.minutes) {
+          const p = m.participants?.find((part: any) => part.id === where.id);
+          if (p) {
+            Object.assign(p, data);
+            return p;
+          }
+        }
+        return { id: where.id, ...data };
       }),
       deleteMany: vi.fn(async ({ where }: any) => {
         const m = db.minutes.find((item) => item.id === where.minuteId);
@@ -470,5 +490,56 @@ describe("Atas de Orientação Docente / Equipe Escolar (ORIENTACAO_DOCENTE)", (
 
     const unmasked = pseudonymizer.unmaskText(masked);
     expect(unmasked).toBe(rawText);
+  });
+
+  it("9. permite gerar token de assinatura móvel (QR Code) para docente em ata sem estudantes vinculados", async () => {
+    // 1. Cria rascunho de ata de orientação docente com 0 estudantes e 1 docente
+    const createReq = new Request("http://localhost:3000/api/atas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: "ORIENTACAO_DOCENTE",
+        subject: "Orientação sobre Lançamento de Notas e Frequência",
+        summary: "Docente foi orientado formalmente quanto aos prazos do RCO.",
+        studentIds: [],
+        participants: [
+          {
+            role: "PROFESSOR",
+            name: "Professor José Luiz Mercer",
+            documentType: "RG",
+            documentNumber: "1055012235",
+            expectedEmail: "jose.mercer@escola.pr.gov.br",
+          },
+        ],
+      }),
+    });
+
+    const createRes = await createAtaDraft(createReq);
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json();
+    const minuteId = createBody.minute.id;
+    const teacherPart = createBody.minute.participants[0];
+    expect(teacherPart.id).toBeDefined();
+
+    // 2. Dispara geração de token de assinatura remota (QR Code)
+    const signTokenReq = new Request(`http://localhost:3000/api/atas/${minuteId}/sign-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        participantId: teacherPart.id,
+        expiresInMinutes: 20,
+      }),
+    });
+
+    const signTokenRes = await generateSignToken(signTokenReq, {
+      params: Promise.resolve({ id: minuteId }),
+    });
+
+    expect(signTokenRes.status).toBe(200);
+    const signTokenBody = await signTokenRes.json();
+    expect(signTokenBody.success).toBe(true);
+    expect(signTokenBody.token).toBeDefined();
+    expect(signTokenBody.signUrl).toContain(`/assinar/ata/${signTokenBody.token}`);
+    expect(signTokenBody.participantName).toBe("Professor José Luiz Mercer");
   });
 });

@@ -162,7 +162,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`MSG-01`** `[P0 | Esforço: P]` **Atomicidade Probatória na Mensageria & Validação Zod Estrita (`P-07` / `P-08`)**  
   Persistência obrigatória do `MessageLog` no banco antes de acionar gateways externos de rede, e restrição de `initialDeliveryStatus` aos estados válidos de despacho em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e [`src/app/api/messages/send/route.ts`](../src/app/api/messages/send/route.ts).
 - [x] **`PERF-06`** `[P1 | Esforço: P]` **Remoção de Índices Redundantes no Prisma Schema (`D-04`)**  
-  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts). Suíte global expandida para **310 testes em 47 suítes**.
+  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts). Suíte global expandida para **311 testes em 47 suítes**.
 
 ---
 

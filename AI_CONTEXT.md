@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 310 testes em 47 suítes, incluindo adversarialQa.test.ts, securityAndStabilityAuditV3.test.ts e teacherAtas.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 311 testes em 47 suítes, incluindo adversarialQa.test.ts, securityAndStabilityAuditV3.test.ts e teacherAtas.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -76,7 +76,7 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`DATA-01`**: Proteção Cadastral contra Sobrescrita de Homônimos SERE (`Q-01`): desambiguação estrita exigindo CGM em `studentMatcher.ts`, clamp matemático de percentuais (`Q-02`) e blindagem de dispensas manuais no sync de amparos (`Q-03`).
 - **`MSG-01`**: Atomicidade Probatória na Mensageria (`P-07` / `P-08`): persistência do `MessageLog` com hash SHA-256 no PostgreSQL prévia ao acionamento do gateway externo e validação Zod estrita de status inicial.
 - **`PERF-06`**: Otimização do Schema Prisma (`D-04`): remoção de 3 diretivas `@@index` redundantes sobre campos já `@unique`.
-- Suíte automatizada consolidada em **47 suítes / 310 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+- Suíte automatizada consolidada em **47 suítes / 311 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
 ---
 
@@ -231,7 +231,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 47 suítes / 310 testes)
+# Executar suíte completa de testes (Vitest — 47 suítes / 311 testes)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

@@ -815,8 +815,15 @@ export default function AtaEditorModal({
   // Gerar QR Code ou Link remoto para participante assinar
   const handleGenerateMobileSign = async (index: number, durationMinutes = signDurationOption) => {
     setFinalizeError(null);
-    if (selectedStudentIds.length === 0) {
-      setFinalizeError("Vincule pelo menos um estudante antes de gerar o link de assinatura.");
+    const currentLocal = participants[index];
+    if (!currentLocal?.name?.trim()) {
+      setFinalizeError("Informe o nome do participante antes de gerar o link de assinatura.");
+      return;
+    }
+
+    const hasParticipant = participants.some((p) => p && p.name && p.name.trim().length > 0);
+    if (selectedStudentIds.length === 0 && !hasParticipant) {
+      setFinalizeError("Vincule pelo menos um estudante ou adicione um(a) professor(a)/participante antes de gerar o link de assinatura.");
       return;
     }
 
@@ -2126,16 +2133,32 @@ export default function AtaEditorModal({
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Estudante(s) e Pauta:
+                    {ataScope === "TEACHERS" ? "Docente(s) e Pauta:" : "Estudante(s) e Pauta:"}
                   </span>
                   <p className="font-extrabold text-sm text-slate-900">
-                    {subject || "Sem assunto"} •{" "}
-                    <span className="text-sky-700 font-semibold">
-                      {availableStudents
-                        .filter((s) => selectedStudentIds.includes(s.id))
-                        .map((s) => s.name)
-                        .join(", ")}
-                    </span>
+                    {subject || "Sem assunto"}
+                    {selectedStudentIds.length > 0 ? (
+                      <>
+                        {" "}•{" "}
+                        <span className="text-sky-700 font-semibold">
+                          {availableStudents
+                            .filter((s) => selectedStudentIds.includes(s.id))
+                            .map((s) => s.name)
+                            .join(", ")}
+                        </span>
+                      </>
+                    ) : participants.filter((p) => p.role === "PROFESSOR").length > 0 ? (
+                      <>
+                        {" "}•{" "}
+                        <span className="text-sky-700 font-semibold">
+                          {participants
+                            .filter((p) => p.role === "PROFESSOR")
+                            .map((p) => p.name)
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      </>
+                    ) : null}
                   </p>
                 </div>
               </div>
@@ -2452,15 +2475,17 @@ export default function AtaEditorModal({
                       </label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <button
-                        type="button"
-                        onClick={handleAddSelectedStudentsAsParticipants}
-                        className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs transition"
-                        title="Adiciona automaticamente os estudantes selecionados para assinarem a ata"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>+ Estudantes da Pauta</span>
-                      </button>
+                      {selectedStudentIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAddSelectedStudentsAsParticipants}
+                          className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs transition"
+                          title="Adiciona automaticamente os estudantes selecionados para assinarem a ata"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span>+ Estudantes da Pauta</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() =>
@@ -2771,6 +2796,8 @@ export default function AtaEditorModal({
                         <p className="text-[11px] text-sky-700">
                           {qrModalInfo.participantRole === "ESTUDANTE"
                             ? "O estudante pode assinar em 1 clique conectando sua conta @escola.pr.gov.br ou na tela do celular."
+                            : qrModalInfo.participantRole === "PROFESSOR"
+                            ? "O(A) docente pode assinar em 1 clique conectando sua conta institucional @escola.pr.gov.br ou na tela do celular."
                             : "Aguardando assinatura em tempo real..."}
                         </p>
                       </div>
@@ -2935,7 +2962,7 @@ export default function AtaEditorModal({
                   className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 font-bold text-slate-700 text-xs transition flex items-center space-x-1.5 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Voltar aos Estudantes</span>
+                  <span>{ataScope === "TEACHERS" ? "Voltar aos Docentes & Pauta" : "Voltar aos Estudantes"}</span>
                 </button>
                 <button
                   type="button"

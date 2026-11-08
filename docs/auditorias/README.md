@@ -11,4 +11,4 @@ Este diretório preserva os **relatórios de auditoria point-in-time (snapshots 
 | **07/11/2026 (V3)** | [`2026-11-07_AUDITORIA_SEGURANCA_ESTABILIDADE_V3.md`](./2026-11-07_AUDITORIA_SEGURANCA_ESTABILIDADE_V3.md) | Auditoria Técnica, de Segurança e Estabilidade V3 (Pré-Expansão): eliminação de timing attacks (`crypto.timingSafeEqual`), proteção de homônimos SERE, persistência prioritária de mensageria, contenção de vazamento de erro 500 e otimização de índices D-04. | **46 suítes / 302 testes** |
 
 > [!NOTE]
-> Para consultar o **estado arquitetural vigente e unificado** do sistema (21 models Prisma, 28 páginas SSR, 49 Route Handlers, 47 suítes e 310 testes), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).
+> Para consultar o **estado arquitetural vigente e unificado** do sistema (21 models Prisma, 28 páginas SSR, 49 Route Handlers, 47 suítes e 311 testes), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).
