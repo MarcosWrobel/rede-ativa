@@ -18,7 +18,7 @@ export async function GET(
 
     const school = await prisma.school.findUnique({
       where: { id },
-      select: { id: true, name: true, syncTokenHash: true },
+      select: { id: true, name: true, syncTokenHash: true, updatedAt: true },
     });
 
     if (!school) {
@@ -29,6 +29,7 @@ export async function GET(
       configured: Boolean(school.syncTokenHash),
       schoolId: school.id,
       schoolName: school.name,
+      syncTokenCreatedAt: school.syncTokenHash ? school.updatedAt.toISOString() : null,
     });
   } catch (error: any) {
     console.error("[GET /api/schools/[id]/sync-token] Erro:", error);
@@ -49,9 +50,13 @@ export async function POST(
     const rawToken = crypto.randomBytes(32).toString("hex");
     const tokenDigest = hashSchoolSyncToken(rawToken);
 
-    await prisma.school.update({
+    const updatedSchool = await prisma.school.update({
       where: { id },
       data: { syncTokenHash: tokenDigest },
+      select: {
+        id: true,
+        updatedAt: true,
+      },
     });
 
     await logAudit({
@@ -68,9 +73,17 @@ export async function POST(
       req,
     });
 
+    const syncTokenCreatedAt = updatedSchool.updatedAt.toISOString();
+
     return NextResponse.json({
       success: true,
       syncToken: rawToken,
+      rawToken: rawToken,
+      school: {
+        id: updatedSchool.id,
+        syncTokenCreatedAt,
+      },
+      syncTokenCreatedAt,
       message: "Nova chave de sincronização gerada com sucesso. Copie e insira na Extensão Chrome.",
     });
   } catch (error: any) {

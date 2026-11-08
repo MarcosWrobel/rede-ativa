@@ -142,9 +142,14 @@ export default function EscolaSettingsClient({ school }: { school: SchoolData })
         throw new Error(data.error || "Erro ao gerar chave de sincronização.");
       }
 
-      setNewGeneratedToken(data.rawToken);
+      const generatedToken = data.rawToken || data.syncToken;
+      setNewGeneratedToken(generatedToken);
       setHasToken(true);
-      setTokenCreatedAt(data.school.syncTokenCreatedAt);
+      const createdAt =
+        data.school?.syncTokenCreatedAt ||
+        data.syncTokenCreatedAt ||
+        new Date().toISOString();
+      setTokenCreatedAt(createdAt);
       setSuccessMessage("Nova chave de sincronização gerada com sucesso! Copie-a abaixo antes de sair desta página.");
     } catch (err: any) {
       setErrorMessage(err.message || "Falha ao gerar chave da extensão.");
