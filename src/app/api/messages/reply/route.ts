@@ -2,9 +2,154 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
-import { formatZodError, messageReplySchema } from "@/lib/schemas";
+import { formatZodError, messageReplySchema, replyCategoryEnum } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { computeMessageContentHash } from "@/lib/messageCrypto";
+import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
+import {
+  classifyGuardianReplyHeuristic,
+  type ReplyCategory,
+} from "@/lib/whatsappProvider";
+import { GoogleGenAI } from "@google/genai";
+
+const CLASSIFICATION_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    formalSummary: {
+      type: "string",
+      description:
+        "Síntese formal, impessoal e objetiva em norma culta para registro em prontuário escolar e dossiê do Conselho Tutelar/SERP.",
+    },
+    category: {
+      type: "string",
+      enum: [
+        "SAUDE",
+        "TRANSPORTE",
+        "TRABALHO",
+        "VIAGEM_FAMILIAR",
+        "VULNERABILIDADE",
+        "SEM_JUSTIFICATIVA",
+        "OUTROS",
+      ],
+      description: "Categoria pedagógica predominante da justificativa apresentada pela família.",
+    },
+  },
+  required: ["formalSummary", "category"],
+};
+
+async function classifyReplyWithFallback({
+  rawText,
+  studentName,
+  reasonTitle,
+}: {
+  rawText: string;
+  studentName?: string;
+  reasonTitle?: string;
+}): Promise<{ formalSummary: string; category: ReplyCategory }> {
+  const pseudonymizer = createAiPseudonymizer(studentName ? [studentName] : [], []);
+  const maskedText = pseudonymizer.maskText(rawText);
+
+  const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^["']|["']$/g, "").trim();
+
+  if (apiKey) {
+    const systemInstruction = `Você é um especialista da Equipe Pedagógica e de Busca Ativa da Rede Ativa integrada à instituição de ensino.
+Sua tarefa é ler a mensagem informal recebida via WhatsApp de um pai, mãe ou responsável legal e transformá-la em um registro administrativo formal, impessoal e objetivo (adequado para compor ata escolar, ficha SERP e Dossiê do Conselho Tutelar), além de classificar a causa da ausência.
+
+Regras:
+1. Não invente fatos que não estejam na mensagem original.
+2. Escreva "formalSummary" em terceira pessoa (ex.: "Responsável informou via WhatsApp que...").
+3. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
+
+    const inputPrompt = `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
+Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
+Mensagem recebida do responsável via WhatsApp:
+"""
+${maskedText}
+"""`;
+
+    const modelsToTry = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+
+    for (const model of modelsToTry) {
+      let timer: NodeJS.Timeout | null = null;
+      try {
+        const abortController = new AbortController();
+        timer = setTimeout(() => abortController.abort(), 14000);
+
+        const ai = new GoogleGenAI({ apiKey });
+        let rawJsonText: string | null = null;
+
+        try {
+          if (typeof (ai as any).interactions?.create === "function") {
+            const interaction: any = await (ai as any).interactions.create(
+              {
+                model,
+                input: inputPrompt,
+                system_instruction: systemInstruction,
+                response_format: CLASSIFICATION_JSON_SCHEMA as any,
+              },
+              {
+                signal: abortController.signal,
+                timeout_ms: 14000,
+              } as any
+            );
+            rawJsonText =
+              interaction?.output_text ||
+              interaction?.outputs?.find((o: any) => o?.type === "text")?.text ||
+              null;
+          }
+        } catch {
+          // Fallback para models.generateContent se interactions não responder
+        }
+
+        if (!rawJsonText && ai.models?.generateContent) {
+          const response: any = await ai.models.generateContent({
+            model,
+            contents: inputPrompt,
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema: CLASSIFICATION_JSON_SCHEMA as any,
+              abortSignal: abortController.signal,
+            } as any,
+          });
+          rawJsonText = response?.text || null;
+        }
+
+        if (rawJsonText) {
+          const cleaned = rawJsonText
+            .replace(/^```json\s*/i, "")
+            .replace(/^```\s*/i, "")
+            .replace(/```$/i, "")
+            .trim();
+          const parsed = JSON.parse(cleaned);
+          const catCheck = replyCategoryEnum.safeParse(parsed.category);
+          const validCat: ReplyCategory = catCheck.success ? catCheck.data : "OUTROS";
+          const rawSummary = String(parsed.formalSummary || "").trim();
+          if (rawSummary) {
+            return {
+              formalSummary: pseudonymizer.unmaskText(rawSummary),
+              category: validCat,
+            };
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[GEMINI classify reply] Modelo ${model} falhou:`, err?.message || err);
+      } finally {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
+    }
+  }
+
+  // Fallback determinístico caso Gemini não esteja configurado, falhe ou dê timeout
+  const heuristic = classifyGuardianReplyHeuristic(rawText);
+  return {
+    formalSummary: pseudonymizer.unmaskText(heuristic.formalSummary),
+    category: heuristic.category,
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +161,16 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
-    const { logId, guardianReplied, replyNotes, replyCategory } = parsed.data;
+    const {
+      logId,
+      guardianReplied,
+      replyNotes,
+      replyCategory,
+      rawReply,
+      extractedAt,
+      sourceMethod = "MANUAL",
+      classifyWithAi = false,
+    } = parsed.data;
 
     const previous = await prisma.messageLog.findUnique({
       where: { id: logId },
@@ -28,12 +182,69 @@ export async function POST(req: Request) {
     }
 
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
+    if (!assertTenantOwnership(previous.student?.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
+
+    let finalReplyNotes: string | null =
+      replyNotes !== undefined ? replyNotes : previous.replyNotes;
+    let finalReplyCategory: string | null =
+      replyCategory !== undefined ? replyCategory : previous.replyCategory;
+    let finalRepliedAt: Date | null = null;
+
+    if (guardianReplied === true) {
+      const baseText = (rawReply || replyNotes || "").trim();
+      const shouldClassify =
+        (classifyWithAi === true || (!replyNotes && Boolean(rawReply))) && Boolean(baseText);
+
+      if (shouldClassify) {
+        const classification = await classifyReplyWithFallback({
+          rawText: baseText,
+          studentName: previous.student?.name,
+          reasonTitle: previous.reasonTitle,
+        });
+
+        if (!replyCategory || classifyWithAi) {
+          finalReplyCategory = classification.category;
+        }
+        if (!replyNotes || classifyWithAi) {
+          finalReplyNotes = classification.formalSummary;
+        }
+      }
+
+      if (extractedAt) {
+        const parsedExtracted =
+          extractedAt instanceof Date ? extractedAt : new Date(extractedAt);
+        if (!isNaN(parsedExtracted.getTime())) {
+          finalRepliedAt = parsedExtracted;
+        } else {
+          finalRepliedAt = new Date();
+        }
+      } else {
+        finalRepliedAt = new Date();
+      }
+    } else {
+      finalReplyNotes = null;
+      finalReplyCategory = null;
+      finalRepliedAt = null;
+    }
+
+    const newContentHash = computeMessageContentHash({
+      studentId: previous.studentId,
+      schoolId: previous.student?.schoolId,
+      phoneUsed: previous.phoneUsed,
+      reasonTitle: previous.reasonTitle,
+      messageContent: previous.messageContent,
+      sentByName: previous.sentByName,
+      sentAt: previous.sentAt,
+      guardianReplied: Boolean(guardianReplied),
+      replyNotes: finalReplyNotes,
+      replyCategory: finalReplyCategory,
+      repliedAt: finalRepliedAt,
+    });
 
     const shouldUpgradeDelivery =
       Boolean(guardianReplied) &&
@@ -43,14 +254,13 @@ export async function POST(req: Request) {
       where: { id: logId },
       data: {
         guardianReplied: Boolean(guardianReplied),
-        replyNotes: replyNotes !== undefined ? replyNotes : previous.replyNotes,
-        replyCategory: Boolean(guardianReplied)
-          ? replyCategory !== undefined
-            ? replyCategory
-            : previous.replyCategory
+        replyNotes: finalReplyNotes,
+        replyCategory: finalReplyCategory,
+        repliedAt: finalRepliedAt,
+        repliedByUserId: Boolean(guardianReplied)
+          ? authCheck.session?.user?.id || authCheck.userId || null
           : null,
-        repliedAt: Boolean(guardianReplied) ? new Date() : null,
-        repliedByUserId: Boolean(guardianReplied) ? authCheck.userId || null : null,
+        contentHash: newContentHash,
         ...(shouldUpgradeDelivery
           ? { deliveryStatus: "READ", deliveryUpdatedAt: new Date() }
           : {}),
@@ -62,11 +272,11 @@ export async function POST(req: Request) {
       entityType: "MessageLog",
       entityId: logId,
       details: {
-        studentName: previous.student.name,
         previousReplied: previous.guardianReplied,
         newReplied: Boolean(guardianReplied),
+        sourceMethod,
         replyCategory: updated.replyCategory,
-        notes: replyNotes,
+        contentHash: newContentHash,
       },
       user: {
         id: authCheck.userId,
@@ -80,6 +290,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, updated });
   } catch (error: any) {
     console.error("Erro ao registrar retorno:", error);
-    return NextResponse.json({ error: "Erro interno ao registrar resposta do responsável" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro interno ao registrar resposta do responsável" },
+      { status: 500 }
+    );
   }
 }

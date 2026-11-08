@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { isBootstrapAdminEmail } from "@/lib/roles";
 import ModalDialog from "@/components/ModalDialog";
+import WhatsAppReplyCaptureModal from "@/components/whatsapp/WhatsAppReplyCaptureModal";
 import { getStoredPreference } from "@/lib/storageKeys";
 import {
   DELIVERY_STATUS_LABELS,
@@ -72,19 +73,8 @@ export default function HistoricoClient({
   const pageSize = 30;
   const [refreshTick, setRefreshTick] = useState(0);
 
-  // Note + AI Triage modal state (AUT-03)
+  // Modal de captura e selagem de retorno do WhatsApp (Extensão + IA + Manual)
   const [activeModalLog, setActiveModalLog] = useState<any>(null);
-  const [rawPasteText, setRawPasteText] = useState("");
-  const [noteText, setNoteText] = useState("");
-  const [noteCategory, setNoteCategory] = useState<ReplyCategory | "">("");
-  const [aiTip, setAiTip] = useState<{
-    suggestedFollowUp: string;
-    requiresMedicalCertificate: boolean;
-    usedFallback: boolean;
-  } | null>(null);
-  const [isClassifyingAi, setIsClassifyingAi] = useState(false);
-  const [aiClassifyError, setAiClassifyError] = useState("");
-  const [isUpdating, setIsUpdating] = useState(false);
 
   // Admin: Edit modal state
   const [activeEditLog, setActiveEditLog] = useState<any>(null);
@@ -264,103 +254,6 @@ export default function HistoricoClient({
 
   const handleOpenNoteModal = (log: any) => {
     setActiveModalLog(log);
-    setRawPasteText("");
-    setNoteText(log.replyNotes || "");
-    setNoteCategory((log.replyCategory as ReplyCategory) || "");
-    setAiTip(null);
-    setAiClassifyError("");
-  };
-
-  // AUT-03: Formalizar & Classificar retorno colado do WhatsApp com IA Gemini
-  const handleAiClassifyReply = async () => {
-    const sourceText = rawPasteText.trim() || noteText.trim();
-    if (sourceText.length < 3) {
-      setAiClassifyError(
-        "Cole a mensagem do responsável ou digite um rascunho acima para classificar."
-      );
-      return;
-    }
-
-    setIsClassifyingAi(true);
-    setAiClassifyError("");
-
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      try {
-        const savedKey = getStoredPreference("gemini_api_key");
-        if (savedKey && savedKey.trim().length > 10) {
-          headers["x-gemini-key"] = savedKey.trim();
-        }
-      } catch {}
-
-      const res = await fetch("/api/ai/classify-reply", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          rawReply: sourceText,
-          studentName: activeModalLog?.student?.name || "",
-          reasonTitle: activeModalLog?.reasonTitle || "",
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Erro ao classificar retorno.");
-      }
-
-      if (data.classification) {
-        setNoteText(data.classification.formalSummary);
-        setNoteCategory(data.classification.category);
-        setAiTip({
-          suggestedFollowUp: data.classification.suggestedFollowUp,
-          requiresMedicalCertificate: Boolean(data.classification.requiresMedicalCertificate),
-          usedFallback: Boolean(data.usedFallback),
-        });
-      }
-    } catch (err: any) {
-      setAiClassifyError(err.message || "Falha ao processar com IA.");
-    } finally {
-      setIsClassifyingAi(false);
-    }
-  };
-
-  // Save notes + category
-  const handleSaveNotes = async () => {
-    if (!activeModalLog) return;
-    setIsUpdating(true);
-    try {
-      const res = await fetch("/api/messages/reply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          logId: activeModalLog.id,
-          guardianReplied: true,
-          replyNotes: noteText,
-          replyCategory: noteCategory || null,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLogs((prev) =>
-          prev.map((item) =>
-            item.id === activeModalLog.id
-              ? {
-                  ...item,
-                  guardianReplied: true,
-                  replyNotes: noteText,
-                  replyCategory: noteCategory || null,
-                  deliveryStatus: data.updated?.deliveryStatus || item.deliveryStatus,
-                }
-              : item
-          )
-        );
-        setActiveModalLog(null);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsUpdating(false);
-    }
   };
 
   // Open Edit Modal (Admin)
@@ -866,131 +759,32 @@ export default function HistoricoClient({
         </div>
       </div>
 
-      {/* Modal Nativo <dialog> de Retorno + Triagem IA Gemini (AUT-03) */}
-      <ModalDialog
-        open={Boolean(activeModalLog)}
+      {/* Modal Assistido de Captura de Retorno do WhatsApp (Extensão + Manual + IA + SHA-256) */}
+      <WhatsAppReplyCaptureModal
+        isOpen={Boolean(activeModalLog)}
         onClose={() => setActiveModalLog(null)}
-        title="Registrar Retorno do Responsável"
-        subtitle={
-          activeModalLog
-            ? `${activeModalLog.student.name} (${activeModalLog.student.classGroup.name}) • ${activeModalLog.reasonTitle}`
-            : undefined
-        }
-      >
-        <div className="space-y-4 text-xs">
-          {/* Bloco Opcional de Triagem / Formalização com IA Gemini */}
-          <div className="p-3.5 rounded-xl bg-purple-50/70 border border-purple-200 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <label className="font-extrabold text-purple-950 flex items-center space-x-1.5">
-                <Sparkles className="w-4 h-4 text-purple-600" />
-                <span>Colar mensagem recebida no WhatsApp (Opcional — IA Gemini):</span>
-              </label>
-            </div>
-
-            <textarea
-              rows={2}
-              value={rawPasteText}
-              onChange={(e) => setRawPasteText(e.target.value)}
-              placeholder='Ex: "Oi professora, o João tá com febre desde ontem, levei ele no postinho hoje cedo e segunda mando o atestado"'
-              className="w-full p-2.5 border border-purple-200 rounded-lg bg-white text-xs"
-            />
-
-            {aiClassifyError && (
-              <p className="text-rose-700 font-semibold text-[11px]">{aiClassifyError}</p>
-            )}
-
-            <button
-              type="button"
-              disabled={isClassifyingAi}
-              onClick={handleAiClassifyReply}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold transition shadow-2xs cursor-pointer"
-            >
-              {isClassifyingAi ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Classificando e formalizando...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Formalizar & Classificar com IA</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {aiTip && (
-            <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-950 space-y-1.5">
-              <div className="font-bold">
-                Encaminhamento sugerido: <span className="font-normal">{aiTip.suggestedFollowUp}</span>
-              </div>
-              {aiTip.requiresMedicalCertificate && activeModalLog && (
-                <div className="pt-1 flex items-center justify-between gap-2 border-t border-sky-200/70">
-                  <span className="inline-flex items-center space-x-1 text-emerald-800 font-bold">
-                    <Stethoscope className="w-3.5 h-3.5" />
-                    <span>Relato menciona atendimento de saúde / atestado.</span>
-                  </span>
-                  <Link
-                    href={`/alunos/${activeModalLog.student.id}`}
-                    className="font-extrabold text-sky-700 underline hover:text-sky-900"
-                  >
-                    Abrir Prontuário 360º →
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div>
-            <label className="font-bold text-slate-700 block mb-1">
-              Categoria da Justificativa / Motivo da Ausência:
-            </label>
-            <select
-              value={noteCategory}
-              onChange={(e) => setNoteCategory(e.target.value as ReplyCategory | "")}
-              className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white font-semibold"
-            >
-              <option value="">-- Selecione uma categoria (opcional) --</option>
-              {REPLY_CATEGORY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="font-bold text-slate-700 block mb-1">
-              Registro Formal para Histórico e Dossiê SERP/Conselho Tutelar:
-            </label>
-            <textarea
-              rows={4}
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Ex: Responsável informou via WhatsApp que o(a) estudante passou por atendimento médico e apresentará atestado..."
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-slate-50 focus:bg-white leading-relaxed"
-            />
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setActiveModalLog(null)}
-              className="px-4 py-2 rounded-lg border border-slate-300 font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveNotes}
-              disabled={isUpdating}
-              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs cursor-pointer"
-            >
-              {isUpdating ? "Salvando..." : "Salvar Retorno Classificado"}
-            </button>
-          </div>
-        </div>
-      </ModalDialog>
+        messageLog={activeModalLog}
+        studentName={activeModalLog?.student?.name}
+        classNameLabel={activeModalLog?.student?.classGroup?.name}
+        onSuccess={(updatedLog) => {
+          setLogs((prev) =>
+            prev.map((item) =>
+              item.id === updatedLog.id
+                ? {
+                    ...item,
+                    ...updatedLog,
+                    guardianReplied: updatedLog.guardianReplied,
+                    replyNotes: updatedLog.replyNotes,
+                    replyCategory: updatedLog.replyCategory,
+                    contentHash: updatedLog.contentHash,
+                    deliveryStatus: updatedLog.deliveryStatus || item.deliveryStatus,
+                  }
+                : item
+            )
+          );
+          setActiveModalLog(null);
+        }}
+      />
 
       {/* Admin: Edit Modal */}
       {activeEditLog && (

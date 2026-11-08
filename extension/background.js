@@ -4,6 +4,7 @@
  *    posicionada no canto direito da tela, reutilizando a mesma janela durante todo o fluxo.
  * 2. Gerencia o contexto de despacho da Busca Ativa (aluno, telefone, logId).
  * 3. Faz o relay bidirecional de eventos de confirmação do WhatsApp Web para a plataforma Registro.
+ * 4. Faz a ponte de extração assistida de retornos do WhatsApp Web para a aplicação.
  */
 
 const POPUP_WIDTH = 480;
@@ -108,6 +109,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
       } catch (err) {
         sendResponse({ success: false, error: err?.message });
+      }
+    })();
+    return true;
+  }
+
+  // 4. Extração assistida do último retorno recebido no WhatsApp Web (Read-Only)
+  if (request?.type === "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
+        if (!tabs || tabs.length === 0) {
+          sendResponse({
+            success: false,
+            error: "WHATSAPP_TAB_NOT_FOUND",
+            message: "Abra o WhatsApp Web antes de capturar o retorno.",
+          });
+          return;
+        }
+
+        // Prioriza a janela compacta dedicada se existir (tipo popup) ou a aba ativa
+        let targetTab = null;
+        for (const tab of tabs) {
+          try {
+            const win = await chrome.windows.get(tab.windowId);
+            if (win && win.type === "popup") {
+              targetTab = tab;
+              break;
+            }
+          } catch {}
+        }
+
+        if (!targetTab) {
+          targetTab = tabs.find((t) => t.active) || tabs[0];
+        }
+
+        if (!targetTab || !targetTab.id) {
+          sendResponse({
+            success: false,
+            error: "WHATSAPP_TAB_NOT_FOUND",
+            message: "Abra o WhatsApp Web antes de capturar o retorno.",
+          });
+          return;
+        }
+
+        const replyResult = await chrome.tabs.sendMessage(targetTab.id, {
+          type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+          logId: request.logId,
+          phone: request.phone,
+        });
+
+        sendResponse(
+          replyResult || {
+            success: false,
+            error: "EMPTY_RESPONSE",
+            message: "Resposta vazia da aba do WhatsApp Web.",
+          }
+        );
+      } catch (err) {
+        sendResponse({
+          success: false,
+          error: "TAB_COMMUNICATION_ERROR",
+          message:
+            err?.message ||
+            "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue o WhatsApp Web e tente novamente.",
+        });
       }
     })();
     return true;

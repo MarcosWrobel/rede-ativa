@@ -151,7 +151,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ---
 
-## Épico 14 — Auditoria Técnica, de Segurança e Estabilidade V3 (Sprint 16 — Pré-Expansão) — ✅ Concluído
+## Auditoria Técnica, de Segurança e Estabilidade V3 (Hardening V3 — Pré-Expansão) — ✅ Concluído
 
 - [x] **`SEC-09`** `[P0 | Esforço: P]` **Comparação Criptográfica em Tempo Constante nos Webhooks & Cron (`H-06` / `H-07`)**  
   Eliminação de timing attacks via `safeCompareStrings` (`crypto.timingSafeEqual` sobre digests SHA-256 de tamanho uniforme) em [`src/app/api/webhooks/whatsapp/route.ts`](../src/app/api/webhooks/whatsapp/route.ts) e [`src/app/api/cron/weekly-digest/route.ts`](../src/app/api/cron/weekly-digest/route.ts).
@@ -162,7 +162,18 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`MSG-01`** `[P0 | Esforço: P]` **Atomicidade Probatória na Mensageria & Validação Zod Estrita (`P-07` / `P-08`)**  
   Persistência obrigatória do `MessageLog` no banco antes de acionar gateways externos de rede, e restrição de `initialDeliveryStatus` aos estados válidos de despacho em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e [`src/app/api/messages/send/route.ts`](../src/app/api/messages/send/route.ts).
 - [x] **`PERF-06`** `[P1 | Esforço: P]` **Remoção de Índices Redundantes no Prisma Schema (`D-04`)**  
-  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts). Suíte global expandida para **311 testes em 47 suítes**.
+  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts).
+
+---
+
+## Épico 14 — Fluxo Assistido de Retorno do WhatsApp Web & Selagem Probatória Bipartida (Sprint 16) — ✅ Concluído
+
+- [x] **`AUT-05`** `[P1 | Esforço: M]` **Criptografia Canônica Bipartida de Retorno (`messageCrypto.ts` & `POST /api/messages/reply`)**  
+  Extensão do motor criptográfico canônico `computeMessageContentHash` com **Regra Bipartida**: cálculo determinístico cobrindo as 7 chaves originais de despacho (`studentId`, `schoolId`, `phoneUsed`, `reasonTitle`, `messageContent`, `sentByName`, `sentAt`) e inclusão das 4 chaves condicionais quando `guardianReplied === true` (`guardianReplied`, `replyNotes`, `replyCategory`, `repliedAt`). Endpoint protegido contra IDOR (`assertTenantOwnership`), atualização transacional para status `READ`, trilha de auditoria com `schoolId` raiz e carimbo legível `formatMessageSeal` (`SHA-256: 4f8a2b...9e1c7d`).
+- [x] **`AUT-06`** `[P1 | Esforço: M]` **Extração Assistida Read-Only no WhatsApp Web via Extensão MV3 (`whatsapp-content.js` & `clientDispatcher.ts`)**  
+  Mecanismo estritamente *read-only* na extensão Chrome Manifest V3 para capturar o último balão de mensagem recebida (`div.message-in`) na conversa ativa do WhatsApp Web, extraindo `rawText`, `domTimestamp` e `activeChatTitle`. Canal de comunicação seguro via `window.postMessage` com checagem de origem autorizada, cancelamento automático de listeners e timeout resiliente de 8 segundos no dispatcher cliente.
+- [x] **`AUT-07`** `[P1 | Esforço: M]` **Modal Human-in-the-Loop de Revisão, Triagem IA e Selagem SHA-256 (`WhatsAppReplyCaptureModal.tsx`)**  
+  Interface modular acessível baseada em `<dialog>` nativo com suporte integral a tema escuro, esteira guiada de 4 etapas (captura assistida/manual, triagem por IA Google Gemini com pseudonimizador LGPD/ECA e fallback heurístico, revisão de notas pedagógicas e selagem criptográfica final) e atualização reativa em tempo real na Linha do Tempo do Prontuário 360º (`ProntuarioClient.tsx`) e na tabela do Histórico (`HistoricoClient.tsx`). Coberto por 50 suítes e 330 testes Vitest aprovados.
 
 ---
 
@@ -203,4 +214,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 13** | Perícia Grafotécnica Vetorial, PIN PBKDF2 & Extemporânea | Épico 11 | ✅ Concluído |
 | **Sprint 14** | CI GitHub Actions, Rate-Limiter, PDF/A-1b & Storage Multi-Driver | Épico 12 | ✅ Concluído |
 | **Sprint 15** | Duas Versões PR, Desacoplamento de Scrapers & Herança SEMEC | Épico 13 | ✅ Concluído |
+| **Sprint 16** | Fluxo Assistido WhatsApp Web & Selagem Bipartida | Épico 14 | ✅ Concluído |
 | **Futuro** | Observabilidade APM, Filas Assíncronas & Refatoração DDD | Expansão | ⏳ Planejado sob Demanda |

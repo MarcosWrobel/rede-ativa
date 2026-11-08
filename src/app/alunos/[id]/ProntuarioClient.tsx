@@ -31,6 +31,7 @@ import {
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import ModalDialog from "@/components/ModalDialog";
+import WhatsAppReplyCaptureModal from "@/components/whatsapp/WhatsAppReplyCaptureModal";
 import {
   KINSHIP_LABELS,
   JUSTIFICATION_TYPE_LABELS,
@@ -53,12 +54,13 @@ interface Props {
   initialAttendances: any[];
   initialSnapshots: any[];
   initialMinutes?: any[];
+  initialTab?: TabKey;
   currentSchool?: {
     id?: string;
     name?: string;
     edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
   };
-  currentUser: {
+  currentUser?: {
     name: string;
     email: string;
   };
@@ -74,6 +76,7 @@ export default function ProntuarioClient({
   initialAttendances,
   initialSnapshots,
   initialMinutes = [],
+  initialTab = "overview",
   currentSchool,
   isAdmin,
 }: Props) {
@@ -83,7 +86,7 @@ export default function ProntuarioClient({
   const [justifications, setJustifications] = useState<any[]>(initialJustifications);
   const [attendances, setAttendances] = useState<any[]>(initialAttendances);
   const [minutes, setMinutes] = useState<any[]>(initialMinutes);
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [isAtaEditorOpen, setIsAtaEditorOpen] = useState(false);
   const [editingMinute, setEditingMinute] = useState<any | null>(null);
   const [scanningMinute, setScanningMinute] = useState<any | null>(null);
@@ -125,6 +128,24 @@ export default function ProntuarioClient({
   });
   const [attError, setAttError] = useState("");
   const [isSavingAtt, setIsSavingAtt] = useState(false);
+
+  // Modal: Captura de Retorno WhatsApp
+  const [activeReplyModalLog, setActiveReplyModalLog] = useState<any | null>(null);
+
+  const handleReplySuccess = (updatedLog: any) => {
+    setStudent((prev: any) => {
+      if (!prev) return prev;
+      const currentLogs = prev.messageLogs || [];
+      const nextLogs = currentLogs.map((item: any) =>
+        item.id === updatedLog.id ? { ...item, ...updatedLog } : item
+      );
+      return {
+        ...prev,
+        messageLogs: nextLogs,
+      };
+    });
+    setActiveReplyModalLog(null);
+  };
 
   const lowAtt = student.lowAttendanceRecord;
   const detailMetrics = useMemo(
@@ -1308,16 +1329,36 @@ export default function ProntuarioClient({
                         ) : null}
                       </div>
 
-                      {log.guardianReplied ? (
-                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Família Retornou</span>
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-600 font-semibold text-[11px]">
-                          Sem Retorno
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {log.guardianReplied ? (
+                          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Família Retornou</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-600 font-semibold text-[11px]">
+                            Sem Retorno
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveReplyModalLog(log)}
+                          className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                            log.guardianReplied
+                              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300"
+                              : "bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-300"
+                          }`}
+                          title={
+                            log.guardianReplied
+                              ? "Editar retorno da família"
+                              : "Capturar retorno via WhatsApp Web ou manual"
+                          }
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>{log.guardianReplied ? "Editar Retorno" : "Capturar Retorno"}</span>
+                        </button>
+                      </div>
                     </div>
 
                     {(log.replyCategory || log.replyNotes) && (
@@ -1341,6 +1382,16 @@ export default function ProntuarioClient({
           </div>
         </div>
       )}
+
+      {/* MODAL 0: Captura de Retorno do WhatsApp */}
+      <WhatsAppReplyCaptureModal
+        isOpen={Boolean(activeReplyModalLog)}
+        onClose={() => setActiveReplyModalLog(null)}
+        messageLog={activeReplyModalLog}
+        studentName={student.name}
+        classNameLabel={student.classGroup?.name}
+        onSuccess={handleReplySuccess}
+      />
 
       {/* MODAL 1: Adicionar Contato Familiar */}
       <ModalDialog

@@ -150,8 +150,12 @@ export const messageDeliveryStatusUpdateSchema = z.object({
 export const messageReplySchema = z.object({
   logId: z.string().trim().min(1, "ID do registro é obrigatório"),
   guardianReplied: z.boolean(),
-  replyNotes: z.string().optional().nullable(),
+  replyNotes: z.string().max(4000).optional().nullable(),
   replyCategory: replyCategoryEnum.optional().nullable(),
+  rawReply: z.string().max(6000).optional().nullable(),
+  extractedAt: z.union([z.string(), z.date()]).optional().nullable(),
+  sourceMethod: z.enum(["MANUAL", "EXTENSION_ASSISTED"]).optional().default("MANUAL"),
+  classifyWithAi: z.boolean().optional().default(false),
 });
 
 export const aiClassifyReplySchema = z.object({
