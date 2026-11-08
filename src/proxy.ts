@@ -8,11 +8,26 @@ import {
   PUBLIC_PREFIXES,
   SELF_AUTH_API_PREFIXES,
   ADMIN_PAGE_PREFIXES,
+  shouldRedirectApexToCanonical,
+  CANONICAL_PRODUCTION_HOST,
 } from "@/lib/proxyConstants";
 
 const { auth: proxyAuth } = NextAuth(authConfig);
 
 export async function proxy(req: NextRequest) {
+  // 0. Redirecionamento canônico de apex (redeativa.app.br) para www.redeativa.app.br
+  // Garante integridade de cookies de sessão/OAuth e paridade com redirecionamentos da Vercel
+  const host =
+    req.headers.get("x-forwarded-host") ||
+    req.headers.get("host");
+
+  if (shouldRedirectApexToCanonical(host)) {
+    const url = req.nextUrl.clone();
+    url.host = CANONICAL_PRODUCTION_HOST;
+    url.protocol = "https:";
+    return NextResponse.redirect(url, { status: 308 });
+  }
+
   const { pathname } = req.nextUrl;
 
   // 1. Libera página de login, validação pública e endpoints com autenticação própria

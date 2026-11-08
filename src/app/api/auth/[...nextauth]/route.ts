@@ -1,10 +1,14 @@
 import { handlers } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 export async function GET(req: NextRequest) {
   try {
     return await handlers.GET(req);
   } catch (error: any) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
     const errorDetails = {
       name: error?.name,
       message: error?.message,
@@ -16,6 +20,12 @@ export async function GET(req: NextRequest) {
       forwardedHost: req.headers.get("x-forwarded-host"),
     };
     console.error("[CRITICAL_AUTH_CALLBACK_ERROR]", errorDetails, error?.stack);
+
+    const acceptsHtml = req.headers.get("accept")?.includes("text/html");
+    if (acceptsHtml) {
+      const loginUrl = new URL("/login?error=Configuration", req.url);
+      return NextResponse.redirect(loginUrl);
+    }
 
     return NextResponse.json(
       {
@@ -33,6 +43,9 @@ export async function POST(req: NextRequest) {
   try {
     return await handlers.POST(req);
   } catch (error: any) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
     console.error("[CRITICAL_AUTH_POST_ERROR]", error);
     return NextResponse.json(
       {
