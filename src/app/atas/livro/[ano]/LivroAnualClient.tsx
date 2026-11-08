@@ -155,7 +155,9 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
                   </td>
                   <td className="py-2">{new Date(m.attendedAt).toLocaleDateString("pt-BR")}</td>
                   <td className="py-2 font-medium">
-                    {m.students?.map((s: any) => s.studentNameSnapshot).join(", ")}
+                    {m.students?.length > 0
+                      ? m.students.map((s: any) => s.studentNameSnapshot).join(", ")
+                      : m.participants?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR").map((p: any) => p.name).join(", ") || "Orientação Docente"}
                   </td>
                   <td className="py-2 text-slate-700">{m.subject}</td>
                   <td className="py-2">
@@ -185,7 +187,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               </div>
 
               <p className="font-sans text-xs font-bold text-slate-800">
-                Pauta: {m.subject} • Estudantes: {m.students?.map((s: any) => s.studentNameSnapshot).join(", ")}
+                Pauta: {m.subject} • {m.students?.length > 0 ? `Estudantes: ${m.students.map((s: any) => s.studentNameSnapshot).join(", ")}` : `Docentes/Servidores: ${m.participants?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR").map((p: any) => p.name).join(", ") || "Equipe Escolar"}`}
               </p>
 
               <p className="text-sm leading-relaxed whitespace-pre-line text-justify">

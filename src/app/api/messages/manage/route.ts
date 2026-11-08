@@ -136,7 +136,7 @@ export async function PUT(req: Request) {
     return NextResponse.json({ success: true, updated });
   } catch (error: any) {
     console.error("Erro ao atualizar histórico:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao atualizar histórico de mensagens" }, { status: 500 });
   }
 }
 
@@ -205,6 +205,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: true, deletedId: id });
   } catch (error: any) {
     console.error("Erro ao excluir do histórico:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao excluir registro de mensagem" }, { status: 500 });
   }
 }

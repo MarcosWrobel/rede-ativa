@@ -20,6 +20,7 @@ out/
 *.xlsx
 scripts/extracted_data.json
 scripts/*_data.json
+storage/
 
 # System / logs
 .DS_Store

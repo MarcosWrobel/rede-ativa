@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 200+ testes em 36+ suítes, incluindo adversarialQa.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 310 testes em 47 suítes, incluindo adversarialQa.test.ts, securityAndStabilityAuditV3.test.ts e teacherAtas.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -69,7 +69,14 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`JUR-10`**: Herança de Governança Multi-Tenant: Superadmin define a versão no cadastro da SEMEC (`EducationNetwork`); quando gestores municipais (`GESTAO_SECRETARIA`) adicionam escolas, elas herdam automaticamente a versão definida pelo Superadmin.
 - **`JUR-11`**: Blindagem de Defesa em Profundidade: `/api/frequencia/sync` e `/api/serp/sync` retornam expressamente `403 Forbidden` quando a escola de destino estiver na edição `INSTITUCIONAL_ESSENCIAL`.
 - **`JUR-12`**: Interface Adaptativa: painel de `/faltas`, `/alunos/[id]` (Prontuário) e `/alunos/[id]/dossie` adaptam dinamicamente botões e termos textuais.
-- Suíte automatizada consolidada em **250 testes em 42 suítes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+
+### Fase 7: Auditoria de Segurança, Estabilidade V3 & Hardening Pré-Expansão (Novembro/2026)
+- **`SEC-09`**: Comparação Criptográfica em Tempo Constante (`safeCompareStrings` via `crypto.timingSafeEqual` sobre digests SHA-256 uniformes) eliminando timing attacks nos webhooks WhatsApp e cron semanal.
+- **`SEC-10`**: Contenção Absoluta de Vazamento de Exceções (`H-11`): sanitizadas 100% das respostas HTTP 500 em todos os Route Handlers sob `src/app/api/**`, e resolução dinâmica de `BOOTSTRAP_ADMIN_EMAIL` (`H-10`) via `process.env.ADMIN_EMAIL`.
+- **`DATA-01`**: Proteção Cadastral contra Sobrescrita de Homônimos SERE (`Q-01`): desambiguação estrita exigindo CGM em `studentMatcher.ts`, clamp matemático de percentuais (`Q-02`) e blindagem de dispensas manuais no sync de amparos (`Q-03`).
+- **`MSG-01`**: Atomicidade Probatória na Mensageria (`P-07` / `P-08`): persistência do `MessageLog` com hash SHA-256 no PostgreSQL prévia ao acionamento do gateway externo e validação Zod estrita de status inicial.
+- **`PERF-06`**: Otimização do Schema Prisma (`D-04`): remoção de 3 diretivas `@@index` redundantes sobre campos já `@unique`.
+- Suíte automatizada consolidada em **47 suítes / 310 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
 ---
 
@@ -205,7 +212,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   └── __tests__/              # Suítes unitárias, SSR e regressão multi-tenant (Vitest)
 │   └── proxy.ts                    # Middleware de borda (Next.js 16 Proxy)
 ├── prisma/
-│   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (20 models)
+│   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (21 models)
 ├── extension/                      # Extensão Chrome MV3 (v1.5.0) — Power BI, SERP e WhatsApp
 ├── scripts/                        # Scripts ativos (package_extension.cjs, vercel_db_push.cjs, seed.cjs)
 │   └── legacy/                     # Utilitários históricos arquivados
@@ -224,7 +231,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 37 suítes / 215 testes)
+# Executar suíte completa de testes (Vitest — 47 suítes / 310 testes)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

@@ -68,8 +68,9 @@ export async function POST(
 
     return NextResponse.json(created, { status: 201 });
   } catch (error: any) {
+    console.error("Erro ao registrar atestado/justificativa:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao registrar atestado/justificativa." },
+      { error: "Erro ao registrar atestado/justificativa." },
       { status: 500 }
     );
   }
@@ -124,8 +125,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Erro ao excluir atestado:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao excluir atestado." },
+      { error: "Erro ao excluir atestado." },
       { status: 500 }
     );
   }

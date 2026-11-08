@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { classifyGuardianReplyHeuristic } from "@/lib/whatsappProvider";
+import { safeCompareStrings } from "@/lib/syncToken";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,11 @@ export async function POST(req: Request) {
     const customSecretHeader = req.headers.get("x-webhook-secret") || "";
     const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
 
-    if (bearerToken !== configuredSecret && customSecretHeader !== configuredSecret) {
+    const isAuthorized =
+      safeCompareStrings(bearerToken, configuredSecret) ||
+      safeCompareStrings(customSecretHeader, configuredSecret);
+
+    if (!isAuthorized) {
       return NextResponse.json({ error: "Assinatura de webhook inválida" }, { status: 401 });
     }
 
@@ -41,16 +46,71 @@ export async function POST(req: Request) {
       return NextResponse.json({ ignored: true, reason: "Telefone ausente ou inválido" });
     }
 
-    // Localiza o acionamento mais recente para este telefone (últimos 14 dias)
+    // Identificadores explícitos opcionais no payload do webhook/gateway (H-06)
+    const explicitLogId =
+      typeof payload?.logId === "string"
+        ? payload.logId.trim()
+        : typeof payload?.messageLogId === "string"
+        ? payload.messageLogId.trim()
+        : typeof payload?.messageId === "string"
+        ? payload.messageId.trim()
+        : null;
+    const explicitSchoolId = typeof payload?.schoolId === "string" ? payload.schoolId.trim() : null;
+    const explicitStudentId = typeof payload?.studentId === "string" ? payload.studentId.trim() : null;
+    const explicitCgm = typeof payload?.cgm === "string" ? payload.cgm.trim() : null;
+    const incomingText = String(payload?.text || payload?.message || payload?.body || "").trim();
+
+    // Localiza o acionamento recente para este telefone (últimos 14 dias)
+    // Utiliza sufixo de 10 dígitos (DDD + número) para evitar colisão entre DDDs diferentes
     const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-    const targetLog = await prisma.messageLog.findFirst({
-      where: {
-        phoneUsed: { endsWith: digits.slice(-8) },
-        sentAt: { gte: cutoff },
-      },
-      orderBy: { sentAt: "desc" },
-      include: { student: true },
-    });
+    const phoneSuffix = digits.length >= 10 ? digits.slice(-10) : digits;
+
+    let targetLog: any = null;
+
+    // 1. Busca prioritária por ID direto de MessageLog se fornecido pelo webhook/gateway
+    if (explicitLogId) {
+      targetLog = await prisma.messageLog.findUnique({
+        where: { id: explicitLogId },
+        include: { student: true },
+      });
+      if (targetLog && explicitSchoolId && targetLog.student.schoolId !== explicitSchoolId) {
+        targetLog = null;
+      }
+    }
+
+    // 2. Se não encontrou por ID direto, busca pelos logs recentes do telefone com escopo
+    if (!targetLog) {
+      const candidateLogs = await prisma.messageLog.findMany({
+        where: {
+          phoneUsed: { endsWith: phoneSuffix },
+          sentAt: { gte: cutoff },
+          ...(explicitSchoolId ? { student: { schoolId: explicitSchoolId } } : {}),
+          ...(explicitStudentId ? { studentId: explicitStudentId } : {}),
+          ...(explicitCgm ? { student: { cgm: explicitCgm } } : {}),
+        },
+        orderBy: { sentAt: "desc" },
+        include: { student: true },
+        take: 10,
+      });
+
+      if (candidateLogs.length > 0) {
+        // Desambiguação de irmãos: se houver texto e múltiplos logs, tenta casar pelo primeiro nome do estudante
+        if (incomingText && candidateLogs.length > 1) {
+          const matchedByName = candidateLogs.find((l) => {
+            const firstName = l.student.name.split(" ")[0].toLowerCase();
+            return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
+          });
+          if (matchedByName) {
+            targetLog = matchedByName;
+          }
+        }
+
+        // Prioriza o envio mais recente ainda pendente de resposta do responsável
+        if (!targetLog) {
+          targetLog = candidateLogs.find((l) => !l.guardianReplied) || candidateLogs[0];
+        }
+      }
+    }
 
     if (!targetLog) {
       return NextResponse.json({ ignored: true, reason: "Nenhum envio recente vinculado ao número" });
@@ -72,7 +132,6 @@ export async function POST(req: Request) {
     }
 
     // 2. Mensagem de retorno recebida do responsável
-    const incomingText = String(payload?.text || payload?.message || payload?.body || "").trim();
     if (!incomingText) {
       return NextResponse.json({ ignored: true, reason: "Sem conteúdo textual" });
     }
@@ -114,6 +173,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("Erro no webhook WhatsApp:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao processar webhook" }, { status: 500 });
   }
 }

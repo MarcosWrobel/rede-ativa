@@ -141,6 +141,7 @@ export function generateLocalAtaMinuta({
   category,
   studentNames,
   guardianNames,
+  teacherNames = [],
   attendedAt,
 }: {
   rawNotes: string;
@@ -148,10 +149,13 @@ export function generateLocalAtaMinuta({
   category: string;
   studentNames: string[];
   guardianNames: string[];
+  teacherNames?: string[];
   attendedAt?: string | Date;
 }) {
+  const isDocentMeeting = category === "ORIENTACAO_DOCENTE" || studentNames.length === 0;
   const studentsStr = studentNames.length > 0 ? studentNames.join(" e ") : "o(a) estudante";
   const guardiansStr = guardianNames.length > 0 ? guardianNames.join(", ") : "o(a) responsável legal";
+  const teachersStr = teacherNames.length > 0 ? teacherNames.join(", ") : "o(a) docente";
   const dateInfo = formatAtaDateExtenso(attendedAt);
 
   // Se já havia um texto prévio, limpa quebras e reaproveita aplicando sanitização
@@ -166,6 +170,22 @@ export function generateLocalAtaMinuta({
     const finalSummary = hasClosing
       ? cleanExisting
       : `${cleanExisting.replace(/\.?$/, ".")} Nada mais havendo a constar, a presente ata foi lida e conferida por todos os presentes, que apuseram sua ciência e assinatura.`;
+
+    if (isDocentMeeting) {
+      return {
+        formalSubject: "Orientação Técnico-Pedagógica — Docente",
+        formalSummary: finalSummary,
+        agreementsSummary:
+          "O(a)(s) docente(s) e a equipe pedagógica acordaram o cumprimento das orientações e prazos pedagógicos estabelecidos.",
+        actionItems: [
+          {
+            description: "Cumprir prazos de registros pedagógicos e alinhamentos acordados",
+            responsible: "DOCENTE",
+            suggestedDaysToComplete: 5,
+          },
+        ],
+      };
+    }
 
     return {
       formalSubject: `Atendimento Pedagógico — ${category.replace(/_/g, " ")}`,
@@ -183,6 +203,24 @@ export function generateLocalAtaMinuta({
   }
 
   const cleanNotes = sanitizeAndCorrectPedagogicalNotes(rawNotes || "");
+
+  if (isDocentMeeting) {
+    const formalSummary = `${dateInfo.dataExtensoCompleta}, nas dependências deste estabelecimento de ensino, reuniu-se a Equipe Pedagógica/Direção com ${teachersStr}, para fins de orientação técnico-pedagógica referente a(o) ${category.toLowerCase().replace(/_/g, " ")}. Pela equipe pedagógica foram pontuados os seguintes aspectos: ${cleanNotes} O(A)(s) docente(s) tomou(aram) ciência das orientações escolares, apresentou(aram) seus esclarecimentos e comprometeu-se(ram) a atender aos alinhamentos e prazos pedagógicos estabelecidos nesta data. Nada mais havendo a constar, a presente ata foi lida e conferida por todos os presentes, que apuseram sua ciência e assinatura.`;
+
+    return {
+      formalSubject: "Orientação Técnico-Pedagógica — Docente",
+      formalSummary,
+      agreementsSummary:
+        "O(a)(s) docente(s) e a equipe pedagógica acordaram o cumprimento das orientações e prazos pedagógicos estabelecidos.",
+      actionItems: [
+        {
+          description: "Cumprir prazos de registros pedagógicos e alinhamentos acordados",
+          responsible: "DOCENTE",
+          suggestedDaysToComplete: 5,
+        },
+      ],
+    };
+  }
 
   const formalSummary = `${dateInfo.dataExtensoCompleta}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento com a presença de ${guardiansStr}, referente a(o) ${studentsStr}, para tratar de assuntos pertinentes a(o) ${category.toLowerCase().replace(/_/g, " ")}. Pela equipe pedagógica foram pontuados os seguintes aspectos: ${cleanNotes} O(A) responsável tomou ciência das orientações escolares, apresentou seus esclarecimentos e comprometeu-se a acompanhar a rotina e as recomendações pedagógicas estabelecidas nesta data. Nada mais havendo a constar, a presente ata foi lida e conferida por todos os presentes, que apuseram sua ciência e assinatura.`;
 

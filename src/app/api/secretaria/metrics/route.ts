@@ -229,6 +229,6 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("[GET /api/secretaria/metrics] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao consultar métricas da secretaria" }, { status: 500 });
   }
 }

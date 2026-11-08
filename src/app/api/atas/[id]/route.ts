@@ -51,7 +51,7 @@ const updateMinuteDraftSchema = z.object({
   rawNotes: z.string().optional().nullable(),
   summary: z.string().optional(),
   agreementsSummary: z.string().optional().nullable(),
-  studentIds: z.array(z.string()).min(1, "Vincule pelo menos um estudante").optional(),
+  studentIds: z.array(z.string()).optional(),
   participants: z
     .array(
       z.object({
@@ -168,7 +168,7 @@ export async function GET(
     return NextResponse.json({ success: true, minute: safeMinute });
   } catch (error: any) {
     console.error("[GET /api/atas/[id]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao consultar ata" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao consultar ata" }, { status: 500 });
   }
 }
 
@@ -220,29 +220,47 @@ export async function PATCH(
     const ip = extractClientIp(req);
 
     // Se informou studentIds, atualiza vínculos garantindo isolamento multi-tenant
-    if (data.studentIds) {
-      const studentsDb = await prisma.student.findMany({
-        where: { id: { in: data.studentIds }, schoolId: existing.schoolId },
-        include: { classGroup: true },
-      });
+    if (data.studentIds !== undefined) {
+      const uniqueStudentIds = Array.from(new Set(data.studentIds));
 
-      if (studentsDb.length !== data.studentIds.length) {
-        return NextResponse.json(
-          { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
-          { status: 400 }
-        );
+      if (uniqueStudentIds.length === 0) {
+        // Se ficou com 0 estudantes, verifica se a ata terá ao menos 1 participante
+        const participantsCount = data.participants !== undefined
+          ? data.participants.length
+          : await prisma.pedagogicalMinuteParticipant.count({ where: { minuteId: id } });
+
+        if (participantsCount === 0) {
+          return NextResponse.json(
+            { error: "A ata deve possuir ao menos um estudante vinculado ou participante docente/servidor registrado." },
+            { status: 400 }
+          );
+        }
+
+        await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+      } else {
+        const studentsDb = await prisma.student.findMany({
+          where: { id: { in: uniqueStudentIds }, schoolId: existing.schoolId },
+          include: { classGroup: true },
+        });
+
+        if (studentsDb.length !== uniqueStudentIds.length) {
+          return NextResponse.json(
+            { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
+            { status: 400 }
+          );
+        }
+
+        await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+        await prisma.pedagogicalMinuteStudent.createMany({
+          data: studentsDb.map((s) => ({
+            minuteId: id,
+            studentId: s.id,
+            studentNameSnapshot: s.name,
+            classNameSnapshot: s.classGroup?.name || null,
+            cgmSnapshot: s.cgm || null,
+          })),
+        });
       }
-
-      await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-      await prisma.pedagogicalMinuteStudent.createMany({
-        data: studentsDb.map((s) => ({
-          minuteId: id,
-          studentId: s.id,
-          studentNameSnapshot: s.name,
-          classNameSnapshot: s.classGroup?.name || null,
-          cgmSnapshot: s.cgm || null,
-        })),
-      });
     }
 
     // Se informou participants, preserva id, mobileSignToken e assinaturas mobile recém-coletadas
@@ -388,7 +406,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, minute: updated });
   } catch (error: any) {
     console.error("[PATCH /api/atas/[id]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao atualizar rascunho" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao atualizar rascunho" }, { status: 500 });
   }
 }
 
@@ -460,6 +478,6 @@ export async function DELETE(
     });
   } catch (error: any) {
     console.error("[DELETE /api/atas/[id]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao descartar rascunho" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao descartar ou remover ata" }, { status: 500 });
   }
 }

@@ -131,7 +131,7 @@ export async function GET(
   } catch (error: any) {
     console.error("[GET /api/atas/[id]/pdfa] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno ao gerar certidão arquivística PDF/A-1b" },
+      { error: "Erro interno ao gerar certidão arquivística PDF/A-1b" },
       { status: 500 }
     );
   }

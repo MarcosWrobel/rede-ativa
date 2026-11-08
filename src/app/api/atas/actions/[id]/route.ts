@@ -85,6 +85,6 @@ export async function PATCH(
     });
   } catch (error: any) {
     console.error("[PATCH /api/atas/actions/[id]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao atualizar encaminhamento" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao atualizar encaminhamento" }, { status: 500 });
   }
 }

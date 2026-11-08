@@ -265,6 +265,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ação não suportada." }, { status: 400 });
   } catch (error: any) {
     console.error("[POST /api/user/signing-pin] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao processar PIN." }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao processar PIN." }, { status: 500 });
   }
 }

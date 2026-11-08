@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     console.error("Erro ao agregar relatórios:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao calcular indicadores." },
+      { error: "Erro ao calcular indicadores." },
       { status: 500 }
     );
   }

@@ -472,7 +472,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("[students/import] Erro ao importar lote do SERE:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno ao processar o lote de alunos." },
+      { error: "Erro interno ao processar o lote de alunos." },
       { status: 500 }
     );
   }

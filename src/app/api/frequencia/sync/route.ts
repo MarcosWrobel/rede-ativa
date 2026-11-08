@@ -13,16 +13,13 @@ import {
 } from "@/lib/studentMatcher";
 import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
 import { getCurrentSchool } from "@/lib/currentSchool";
-import { findSchoolBySyncToken } from "@/lib/syncToken";
+import { findSchoolBySyncToken, safeCompareStrings } from "@/lib/syncToken";
 import { checkRateLimit, resetRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
 
 function verifySyncToken(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  return safeCompareStrings(provided, expected);
 }
 
 export async function OPTIONS(req: Request) {
@@ -204,13 +201,19 @@ export async function POST(req: Request) {
       if (!studentId && rawName) {
         const studentByName = nameMap.get(rawName);
         if (studentByName) {
-          studentId = studentByName.id;
+          if (studentByName.isHomonym) {
+            // Proteção contra sobrescrita e contaminação cadastral de homônimos na mesma instituição (Q-01)
+            // Se o aluno for homônimo, o pareamento exige CGM explícito no lote para desambiguação
+            console.warn(`[frequencia/sync] Pareamento por nome ignorado para homônimo sem CGM correspondente: ${rawName}`);
+          } else {
+            studentId = studentByName.id;
 
-          if (!studentByName.hasCgm && cgmClean && !usedCgms.has(cgmClean)) {
-            pendingCgmUpdates.set(studentId, cgmClean);
-            usedCgms.add(cgmClean);
-            cgmMap.set(cgmClean, studentId);
-            studentByName.hasCgm = true;
+            if (!studentByName.hasCgm && cgmClean && !usedCgms.has(cgmClean)) {
+              pendingCgmUpdates.set(studentId, cgmClean);
+              usedCgms.add(cgmClean);
+              cgmMap.set(cgmClean, studentId);
+              studentByName.hasCgm = true;
+            }
           }
         }
       }
@@ -407,6 +410,7 @@ export async function POST(req: Request) {
         where: {
           studentId: { in: studentIdsWithAmparo },
           type: "DISPENSA_LEGAL",
+          notes: { contains: "Power BI" }, // Preserva dispensas manuais lançadas pela equipe da escola (Q-03)
         },
         select: {
           id: true,
@@ -497,7 +501,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("Erro na sincronização de frequência:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno do servidor." },
+      { error: "Erro interno durante a sincronização de frequência." },
       { status: 500, headers: corsHeaders }
     );
   }

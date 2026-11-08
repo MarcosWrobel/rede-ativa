@@ -43,7 +43,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(students);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao listar estudantes:", error);
+    return NextResponse.json({ error: "Erro ao listar estudantes." }, { status: 500 });
   }
 }
 
@@ -143,7 +144,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(student);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao cadastrar estudante:", error);
+    return NextResponse.json({ error: "Erro ao cadastrar estudante." }, { status: 500 });
   }
 }
 
@@ -253,7 +255,8 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(student);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao atualizar estudante:", error);
+    return NextResponse.json({ error: "Erro ao atualizar estudante." }, { status: 500 });
   }
 }
 
@@ -301,6 +304,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao inativar estudante:", error);
+    return NextResponse.json({ error: "Erro ao inativar estudante." }, { status: 500 });
   }
 }

@@ -155,7 +155,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     console.error("[GET /api/atas/actions/alerts] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao consultar alertas de encaminhamentos" },
+      { error: "Erro ao consultar alertas de encaminhamentos" },
       { status: 500 }
     );
   }

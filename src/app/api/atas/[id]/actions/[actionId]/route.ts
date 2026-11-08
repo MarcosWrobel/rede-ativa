@@ -73,6 +73,6 @@ export async function PATCH(
     return NextResponse.json({ success: true, actionItem: updated });
   } catch (error: any) {
     console.error("[PATCH /api/atas/[id]/actions/[actionId]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao atualizar encaminhamento" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao atualizar encaminhamento" }, { status: 500 });
   }
 }

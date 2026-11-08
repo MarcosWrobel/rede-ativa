@@ -117,6 +117,12 @@ export const deliveryStatusEnum = z.enum([
   "FAILED_NO_WHATSAPP",
 ]);
 
+export const initialDeliveryStatusEnum = z.enum([
+  "LINK_OPENED",
+  "SENT",
+  "FAILED_NO_WHATSAPP",
+]);
+
 export const replyCategoryEnum = z.enum([
   "SAUDE",
   "TRANSPORTE",
@@ -133,7 +139,7 @@ export const messageSendSchema = z.object({
   reasonTitle: z.string().trim().min(1, "Motivo é obrigatório"),
   messageContent: z.string().trim().min(2, "Conteúdo da mensagem é obrigatório"),
   customPhone: z.string().optional().nullable(),
-  initialDeliveryStatus: deliveryStatusEnum.optional(),
+  initialDeliveryStatus: initialDeliveryStatusEnum.optional(),
 });
 
 export const messageDeliveryStatusUpdateSchema = z.object({

@@ -1,4 +1,6 @@
-export const BOOTSTRAP_ADMIN_EMAIL = "marcos.wrobel@escola.pr.gov.br";
+export const BOOTSTRAP_ADMIN_EMAIL =
+  (typeof process !== "undefined" && process.env?.ADMIN_EMAIL?.trim().toLowerCase()) ||
+  "marcos.wrobel@escola.pr.gov.br";
 
 export type RoleLevel =
   | "SUPERADMIN"          // Nível 1: Plataforma SaaS global (Marcos Wrobel)
@@ -65,8 +67,9 @@ export function isBootstrapAdminEmail(email?: string | null): boolean {
       ? process.env.ADMIN_EMAIL.toLowerCase().trim()
       : "";
   return (
-    normalized === BOOTSTRAP_ADMIN_EMAIL ||
-    (Boolean(envAdmin) && normalized === envAdmin)
+    normalized === BOOTSTRAP_ADMIN_EMAIL.toLowerCase().trim() ||
+    (Boolean(envAdmin) && normalized === envAdmin) ||
+    normalized === "marcos.wrobel@escola.pr.gov.br"
   );
 }
 

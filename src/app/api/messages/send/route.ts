@@ -58,13 +58,6 @@ export async function POST(req: Request) {
 
     const sentByName = authCheck.userName;
     const userAgent = req.headers.get("user-agent") || undefined;
-    const dispatch = await dispatchWhatsAppMessage({
-      phoneDigits: digits,
-      messageText: messageContent,
-      userAgent,
-    });
-
-    const resolvedStatus = initialDeliveryStatus || dispatch.initialStatus;
     const sentAt = new Date();
 
     // 1. Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
@@ -78,7 +71,9 @@ export async function POST(req: Request) {
       sentAt,
     });
 
-    // 2. Create message log with deliveryStatus (AUT-01) and contentHash (JUR-02)
+    // 2. Persistência atômica garantida antes de acionar qualquer gateway de rede externa (P-07)
+    // Impede o envio de mensagens a famílias sem lastro persistido no sistema
+    const initialStatus = initialDeliveryStatus || "LINK_OPENED";
     const log = await prisma.messageLog.create({
       data: {
         studentId: student.id,
@@ -88,14 +83,32 @@ export async function POST(req: Request) {
         phoneUsed: digits,
         sentByUserId: authCheck.userId || null,
         sentByName,
-        deliveryStatus: resolvedStatus,
+        deliveryStatus: initialStatus,
         deliveryUpdatedAt: new Date(),
         sentAt,
         contentHash,
       },
     });
 
-    // 3. Create Audit Log
+    // 3. Despacho no gateway / construção de URL otimizada wa.me
+    const dispatch = await dispatchWhatsAppMessage({
+      phoneDigits: digits,
+      messageText: messageContent,
+      userAgent,
+    });
+
+    const finalStatus = initialDeliveryStatus || dispatch.initialStatus;
+    if (finalStatus !== initialStatus) {
+      await prisma.messageLog.update({
+        where: { id: log.id },
+        data: {
+          deliveryStatus: finalStatus,
+          deliveryUpdatedAt: new Date(),
+        },
+      });
+    }
+
+    // 4. Trilha de Auditoria com schoolId raiz
     await logAudit({
       action: "SEND_MESSAGE",
       entityType: "MessageLog",
@@ -105,7 +118,7 @@ export async function POST(req: Request) {
         turma: student.classGroup.name,
         reason: reasonTitle,
         phone: digits,
-        deliveryStatus: resolvedStatus,
+        deliveryStatus: finalStatus,
         providerMode: dispatch.mode,
         contentHash,
         messageSnippet: messageContent.slice(0, 100),
@@ -123,12 +136,12 @@ export async function POST(req: Request) {
       success: true,
       logId: log.id,
       whatsappUrl: dispatch.whatsappUrl,
-      deliveryStatus: resolvedStatus,
+      deliveryStatus: finalStatus,
       providerMode: dispatch.mode,
       contentHash,
     });
   } catch (error: any) {
     console.error("Erro ao enviar mensagem:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao registrar envio de mensagem" }, { status: 500 });
   }
 }

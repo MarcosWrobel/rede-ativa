@@ -32,7 +32,7 @@ flowchart TD
     subgraph VERCEL ["Camada de Borda & Serverless (Vercel gru1)"]
         PROXY["src/proxy.ts (Edge JWT Guard)"]
         RL["src/lib/rateLimit.ts (Sliding Window)"]
-        API["Next.js 16 Route Handlers (45 endpoints)"]
+        API["Next.js 16 Route Handlers (49 endpoints)"]
     end
 
     subgraph CACHE ["Perímetro de Cache & Rate Limit (Opcional)"]

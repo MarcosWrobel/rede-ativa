@@ -183,21 +183,41 @@ export default function PrintPageClient({
           )}
         </div>
 
-        {/* Informações dos Estudantes Vinculados */}
-        <div className="font-sans text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1 print:p-2 print:py-1.5 print:rounded-lg">
-          <p className="font-bold text-slate-700">
-            Estudantes vinculados:
-          </p>
-          <ul className="list-disc list-inside space-y-0.5 text-slate-800">
-            {minute.students?.map((s: any) => (
-              <li key={s.id}>
-                <strong>{s.studentNameSnapshot}</strong>
-                {s.classNameSnapshot ? ` — Turma: ${s.classNameSnapshot}` : ""}
-                {s.cgmSnapshot ? ` — CGM: ${s.cgmSnapshot}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
+        {/* Informações dos Estudantes ou Docentes Vinculados */}
+        {minute.students && minute.students.length > 0 ? (
+          <div className="font-sans text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1 print:p-2 print:py-1.5 print:rounded-lg">
+            <p className="font-bold text-slate-700">
+              Estudantes vinculados:
+            </p>
+            <ul className="list-disc list-inside space-y-0.5 text-slate-800">
+              {minute.students.map((s: any) => (
+                <li key={s.id}>
+                  <strong>{s.studentNameSnapshot}</strong>
+                  {s.classNameSnapshot ? ` — Turma: ${s.classNameSnapshot}` : ""}
+                  {s.cgmSnapshot ? ` — CGM: ${s.cgmSnapshot}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="font-sans text-xs bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-200 space-y-1 print:p-2 print:py-1.5 print:rounded-lg">
+            <p className="font-bold text-indigo-900">
+              Docente(s) / Servidor(es) Envolvido(s):
+            </p>
+            <ul className="list-disc list-inside space-y-0.5 text-slate-800">
+              {(minute.participants?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")?.length > 0
+                ? minute.participants.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
+                : minute.participants || []
+              ).map((p: any, idx: number) => (
+                <li key={p.id || idx}>
+                  <strong>{p.name}</strong>
+                  {p.kinship ? ` — Função/Disciplina: ${p.kinship}` : ""}
+                  {p.expectedEmail ? ` — E-mail: ${p.expectedEmail}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Corpo da Ata */}
         <div className="text-justify text-sm leading-relaxed space-y-3 font-serif print:text-[13px] print:leading-normal print:space-y-2">

@@ -319,7 +319,7 @@ export async function generateAtaPdfA1b(
   });
   y -= 18;
 
-  // Estudantes Vinculados
+  // Estudantes Vinculados ou Docentes Envolvidos
   const studentsArr = (minute.students || []) as any[];
   if (studentsArr.length > 0) {
     const studentNamesList = studentsArr.map((s) => {
@@ -339,6 +339,25 @@ export async function generateAtaPdfA1b(
     y -= 11;
     drawWrappedText(studentNamesList, 8.5, fontRegular, rgb(0.2, 0.2, 0.2), 2);
     y -= 6;
+  } else {
+    const participantsArr = (minute.participants || []) as any[];
+    const teacherParticipants = participantsArr.filter(
+      (p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR" || p.role === "EQUIPE_PEDAGOGICA"
+    );
+    const targetTeachers = teacherParticipants.length > 0 ? teacherParticipants : participantsArr;
+    if (targetTeachers.length > 0) {
+      const teachersList = targetTeachers.map((p) => `${p.name}${p.kinship ? ` (${p.kinship})` : ""}`).join(", ");
+      currentPage.drawText("Docente(s) / Servidor(es) Envolvido(s):", {
+        x: MARGIN_LEFT,
+        y,
+        size: 8.5,
+        font: fontBold,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      y -= 11;
+      drawWrappedText(teachersList, 8.5, fontRegular, rgb(0.2, 0.2, 0.2), 2);
+      y -= 6;
+    }
   }
 
   // Texto Formal da Ata (Preâmbulo e Corpo)

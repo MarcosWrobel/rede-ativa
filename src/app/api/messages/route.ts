@@ -108,7 +108,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     console.error("Erro na listagem paginada do histórico:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao consultar histórico." },
+      { error: "Erro ao consultar histórico." },
       { status: 500 }
     );
   }

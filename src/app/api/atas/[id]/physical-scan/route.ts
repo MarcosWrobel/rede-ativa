@@ -128,7 +128,7 @@ export async function GET(
   } catch (error: any) {
     console.error("[GET /api/atas/[id]/physical-scan] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno ao obter anexo da via física" },
+      { error: "Erro interno ao obter anexo da via física" },
       { status: 500 }
     );
   }
@@ -252,7 +252,7 @@ export async function POST(
   } catch (error: any) {
     console.error("[POST /api/atas/[id]/physical-scan] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno ao salvar via física digitalizada" },
+      { error: "Erro interno ao salvar via física digitalizada" },
       { status: 500 }
     );
   }
@@ -354,7 +354,7 @@ export async function DELETE(
   } catch (error: any) {
     console.error("[DELETE /api/atas/[id]/physical-scan] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro interno ao remover via física" },
+      { error: "Erro interno ao remover via física" },
       { status: 500 }
     );
   }

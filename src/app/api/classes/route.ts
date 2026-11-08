@@ -30,7 +30,8 @@ export async function GET(req: Request) {
       }))
     );
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao listar turmas:", error);
+    return NextResponse.json({ error: "Erro ao listar turmas." }, { status: 500 });
   }
 }
 
@@ -101,6 +102,7 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao criar turma:", error);
+    return NextResponse.json({ error: "Erro ao criar turma." }, { status: 500 });
   }
 }

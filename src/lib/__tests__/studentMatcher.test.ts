@@ -53,8 +53,28 @@ describe("studentMatcher", () => {
 
     expect(cgmMap.get("123456")).toBe("s1");
     expect(usedCgms.has("123456")).toBe(true);
-    expect(nameMap.get("JOSE AVILA")).toEqual({ id: "s1", hasCgm: true });
-    expect(nameMap.get("MARIA EDUARDA")).toEqual({ id: "s2", hasCgm: false });
+    expect(nameMap.get("JOSE AVILA")).toEqual({ id: "s1", hasCgm: true, isHomonym: false });
+    expect(nameMap.get("MARIA EDUARDA")).toEqual({ id: "s2", hasCgm: false, isHomonym: false });
+  });
+
+  it("detecta homônimos e marca isHomonym no mapa para proteção contra contaminação cadastral (Q-01)", () => {
+    const { cgmMap, nameMap } = buildStudentLookupMaps([
+      { id: "s1", cgm: "111", name: "Lucas Silva" },
+      { id: "s2", cgm: "222", name: "Lucas Silva" },
+    ]);
+
+    expect(cgmMap.get("111")).toBe("s1");
+    expect(cgmMap.get("222")).toBe("s2");
+    expect(nameMap.get("LUCAS SILVA")?.isHomonym).toBe(true);
+  });
+
+  it("garante clamp de percentual de frequência no intervalo [0, 100] (Q-02)", () => {
+    expect(parseAttendancePercent(120)).toBe(100);
+    expect(parseAttendancePercent(-15)).toBe(0);
+    expect(parseAttendancePercent("150%")).toBe(100);
+    expect(parseAttendancePercent("-5%")).toBe(0);
+    expect(parseAttendancePercent("85.5%")).toBe(85.5);
+    expect(parseAttendancePercent(null)).toBeNull();
   });
 });
 

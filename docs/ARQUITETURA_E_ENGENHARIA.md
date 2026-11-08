@@ -63,7 +63,7 @@ flowchart TD
         GoogleOAuth["Google Identity Services (OAuth2 / OIDC)"]
         GeminiAPI["Google Gemini API (@google/genai)"]
         WhatsApp["WhatsApp Web / App Nativo / Gateway HTTP"]
-        NeonDB[("Neon PostgreSQL Serverless - AWS sa-east-1 (20 Models)")]
+        NeonDB[("Neon PostgreSQL Serverless - AWS sa-east-1 (21 Models)")]
     end
 
     SuperAdmin -->|HTTPS| EdgeProxy
@@ -106,18 +106,18 @@ flowchart TD
 
 | Camada | Tecnologia | Versão (`package.json`) | Papel Arquitetural |
 | :--- | :--- | :---: | :--- |
-| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.3` | Renderização híbrida Server/Client, 44 Route Handlers serverless em [`src/app/api/`](../src/app/api), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
+| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.3` | Renderização híbrida Server/Client, 49 Route Handlers serverless em [`src/app/api/`](../src/app/api), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
 | **UI Runtime** | **React & React DOM** | `^19.3.1` | Painéis operacionais densos, modais baseados em `<dialog>` nativo ([`ModalDialog.tsx`](../src/components/ModalDialog.tsx)) e captura vetorial/forense de traço em [`SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx). |
 | **Linguagem** | **TypeScript** | `^6.0.3` | `strict: true` em [`tsconfig.json`](../tsconfig.json) e alias `@/* -> ./src/*`, garantindo contratos estáticos ponta a ponta. |
 | **Estilização** | **Tailwind CSS v4** | `^4.3.3` | Utilitários via `@tailwindcss/postcss`, modo escuro sem *flash* (FOUC), ícones `lucide-react` (`^1.63.0`) e diagramação `@media print` A4 pericial com moldura perimétrica padronizada. |
-| **ORM & Persistência** | **Prisma ORM + Neon PostgreSQL** | `^6.4.0` | Schema multi-tenant com **20 models** em [`prisma/schema.prisma`](../prisma/schema.prisma), usando *Connection Pooler* (`DATABASE_URL`) em runtime e conexão direta (`DIRECT_URL`) para DDL, além de `Prisma.sql` parametrizado em *bulk upserts*. |
+| **ORM & Persistência** | **Prisma ORM + Neon PostgreSQL** | `^6.4.0` | Schema multi-tenant com **21 models** em [`prisma/schema.prisma`](../prisma/schema.prisma), usando *Connection Pooler* (`DATABASE_URL`) em runtime e conexão direta (`DIRECT_URL`) para DDL, além de `Prisma.sql` parametrizado em *bulk upserts*. |
 | **Autenticação** | **NextAuth.js (Auth.js v5)** | `^5.0.0-beta.32` | Sessão `jwt` *stateless* dividida entre borda ([`auth.config.ts`](../src/lib/auth.config.ts)) e Node/Prisma ([`auth.ts`](../src/lib/auth.ts)), com revalidação periódica a cada 5 minutos (`SESSION_REVALIDATE_MS`). |
 | **Validação** | **Zod** | `^4.6.7` | Validação estrutural estrita em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e nos endpoints críticos contra *Mass Assignment*. |
 | **IA Generativa** | **Google Gen AI SDK (`@google/genai`)** | `^2.31.0` | Integração com modelos Gemini usando `responseSchema` JSON estrito, fuso `America/Sao_Paulo`, precedida por [`aiPseudonymizer.ts`](../src/lib/aiPseudonymizer.ts) e sucedida por *fallback* determinístico local. |
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `jspdf`, `qrcode`** | `^0.18.5` / `^1.9.1` / `^4.2.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão de Dossiês A4 e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.5.0` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta e confirmação automática de envio WhatsApp, empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-leopoldina.zip`. |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **42 suítes / 250 testes automatizados** (~3,3s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), auditoria jurídico-pericial V2, RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **47 suítes / 310 testes automatizados** (~3,4s) cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), auditoria de segurança e estabilidade V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
 
 ---
 
@@ -187,7 +187,7 @@ stateDiagram-v2
 
 ---
 
-## 4. Modelagem de Dados Multi-Tenant (`prisma/schema.prisma` — 20 Models)
+## 4. Modelagem de Dados Multi-Tenant (`prisma/schema.prisma` — 21 Models)
 
 ### 4.1 Diagrama Entidade-Relacionamento (ERD)
 
@@ -220,7 +220,7 @@ erDiagram
     PedagogicalMinute ||--o{ PedagogicalActionItem : "encaminhamentos"
 ```
 
-### 4.2 Síntese das 20 Entidades do Schema
+### 4.2 Síntese das 21 Entidades do Schema
 
 | # | Model Prisma | Chave / Unicidade | Responsabilidade Principal |
 | :-: | :--- | :--- | :--- |
@@ -244,12 +244,13 @@ erDiagram
 | 18 | `PedagogicalMinuteParticipant` | `mobileSignToken @unique` | Signatários com evidências híbridas: `signatureData`, `biometricStrokeData`, `signerUserAgent`, WebAuthn e OIDC `@escola.pr.gov.br`. |
 | 19 | `PedagogicalMinuteAddendum` | `id` | Termos aditivos *"Em tempo"* encadeados criptograficamente (`previousHash -> addendumHash`). |
 | 20 | `PedagogicalActionItem` | `id` | Combinados e prazos derivados da ata (`responsible`, `dueDate`, `status`, `completedAt`). |
+| 21 | `RateLimitBucket` | `key @id` | Bucket distribuído no PostgreSQL (`tokens`, `lastRefill`, `expiresAt`) para mitigação de ataques de força bruta e DoS. |
 
 ---
 
 ## 5. Catálogo Completo de Rotas e Endpoints
 
-### 5.1 Páginas da Aplicação (`src/app/*` — 27 Páginas)
+### 5.1 Páginas da Aplicação (`src/app/*` — 28 Páginas)
 
 | Rota | Acesso Mínimo | Descrição Funcional |
 | :--- | :---: | :--- |
@@ -276,12 +277,13 @@ erDiagram
 | `/encaminhamentos` | `PEDAGOGA` | Central de alertas temáticos e baixa de combinados/prazos firmados em atas. |
 | `/boletim` | `PEDAGOGA` | Boletim semanal executivo de infrequência e fila prioritária sem contato > 7 dias. |
 | `/relatorios` | `PEDAGOGA` | Indicadores analíticos agregados por motivo, segmento, trimestre, autora e status de entrega. |
+| `/impacto` | `PEDAGOGA` | Painel de métricas pedagógicas e impacto de resgate escolar em conformidade com o ECA. |
 | `/modelos` | `PEDAGOGA` | Biblioteca CRUD de modelos institucionais de mensagens e estúdio generativo Gemini. |
 | `/auditoria` | `GESTOR_ESCOLAR` / `SUPERADMIN` | Trilha pericial imutável estritamente escopada pelo `schoolId` da sessão (ou global para `SUPERADMIN`). |
 | `/assinar/ata/[token]` | Público (Token) | Portal móvel temporário para coleta de assinatura com traço forense, WebAuthn ou OIDC `@escola`. |
 | `/validar/ata/[code]` | Público | Certidão pública cega LGPD-safe de conferência de autenticidade (`SHA-256`), adendos e averbação Gov.br. |
 
-### 5.2 Route Handlers REST (`src/app/api/*` — 44 Endpoints)
+### 5.2 Route Handlers REST (`src/app/api/*` — 49 Endpoints)
 
 | Domínio | Endpoint | Métodos Exatos | Finalidade e Guarda |
 | :--- | :--- | :---: | :--- |
@@ -316,6 +318,7 @@ erDiagram
 | **Livro de Atas** | `/api/atas` | `GET, POST` | Listagem escopada e abertura de minutas `DRAFT` com validação estrita de `studentIds`. |
 | **Livro de Atas** | `/api/atas/[id]` | `GET, PATCH, DELETE` | Leitura, autosave de rascunho (bloqueado se `FINALIZED`) e descarte/expurgo. |
 | **Livro de Atas** | `/api/atas/[id]/finalize` | `POST` | Lavratura oficial atômica: valida PIN do servidor, regra extemporânea, numeração anual e `SHA-256`. |
+| **Livro de Atas** | `/api/atas/[id]/pdfa` | `GET` | Emissão pericial de certidão arquivística em padrão normativo ISO 19005-1 (PDF/A-1b). |
 | **Livro de Atas** | `/api/atas/[id]/addendums` | `POST` | Lavratura de termo aditivo *"Em tempo"* com *hash-chaining* transacional. |
 | **Livro de Atas** | `/api/atas/[id]/void` | `POST` | Anulação justificada (`VOIDED`) preservando a sequência numérica do Livro Oficial. |
 | **Livro de Atas** | `/api/atas/[id]/physical-scan` | `POST, DELETE` | Upload auditado de via física escaneada e averbação de protocolo Gov.br/ITI. |
@@ -334,7 +337,7 @@ erDiagram
 | **IA, Relatórios & Cron** | `/api/reports` | `GET` | Agregações SQL paralelas (`count` + `groupBy`) para o painel `/relatorios`. |
 | **IA, Relatórios & Cron** | `/api/cron/weekly-digest` | `GET, POST` | Job semanal (`CRON_SECRET` / sessão) alimentando o diagnóstico executivo `/boletim`. |
 
-*(Nota: Os 48 itens lógicos acima estão implementados em exatamente **44 arquivos `route.ts`** sob `src/app/api/`, pois rotas como `/api/atas/[id]` e `/api/students` agrupam múltiplos verbos REST no mesmo handler).*
+*(Nota: Os endpoints lógicos acima estão implementados em exatamente **49 arquivos `route.ts`** sob `src/app/api/`).*
 
 ---
 
@@ -342,9 +345,9 @@ erDiagram
 
 A integridade arquitetural é validada continuamente via **Vitest (`npm test`)** e compilação estrita **Next.js 16 + Turbopack (`npm run build`)**:
 
-- **Volume Atual:** **40 arquivos de teste / 232 testes automatizados aprovados (100% verdes)**.
+- **Volume Atual:** **47 arquivos de teste / 310 testes automatizados aprovados (100% verdes)**.
 - **Pilares de Cobertura:**
-  - **Segurança Adversarial Multi-Tenant:** `adversarialQa.test.ts`, `multiTenantSecurityAudit.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`.
+  - **Segurança Adversarial Multi-Tenant & V3:** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`.
   - **Conformidade Jurídica, PIN & Perícia Forense:** `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.
   - **Privacidade LGPD/ECA & IA:** `aiPseudonymizer.test.ts`, `nreAtaFormalize.test.ts`, `predictiveAnalytics.test.ts`.
   - **Operação Pedagógica, SERE, Extensão & SSR:** `sereParser.test.ts`, `studentMatcher.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `clientDispatcher.test.ts`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`.

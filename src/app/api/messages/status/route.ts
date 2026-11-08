@@ -122,7 +122,7 @@ async function handleStatusUpdate(req: Request) {
     });
   } catch (error: any) {
     console.error("Erro ao atualizar status de entrega:", error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao atualizar status de entrega" }, { status: 500 });
   }
 }
 

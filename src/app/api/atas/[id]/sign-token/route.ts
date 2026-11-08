@@ -78,6 +78,6 @@ export async function POST(
     });
   } catch (error: any) {
     console.error("[POST /api/atas/[id]/sign-token] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao gerar token mobile" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao gerar token mobile" }, { status: 500 });
   }
 }

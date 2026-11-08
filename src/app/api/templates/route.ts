@@ -30,7 +30,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(templates);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao listar modelos de mensagem:", error);
+    return NextResponse.json({ error: "Erro ao listar modelos de mensagem." }, { status: 500 });
   }
 }
 
@@ -74,7 +75,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(template);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao criar modelo de mensagem:", error);
+    return NextResponse.json({ error: "Erro ao criar modelo de mensagem." }, { status: 500 });
   }
 }
 
@@ -142,6 +144,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(template);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao atualizar modelo de mensagem:", error);
+    return NextResponse.json({ error: "Erro ao atualizar modelo de mensagem." }, { status: 500 });
   }
 }

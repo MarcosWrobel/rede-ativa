@@ -121,7 +121,7 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("[GET /api/justifications] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao consultar atestados" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao consultar atestados" }, { status: 500 });
   }
 }
 
@@ -196,6 +196,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("[POST /api/justifications] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao registrar atestado" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao registrar atestado" }, { status: 500 });
   }
 }

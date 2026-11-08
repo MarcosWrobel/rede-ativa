@@ -84,8 +84,9 @@ export async function POST(
 
     return NextResponse.json(created, { status: 201 });
   } catch (error: any) {
+    console.error("Erro ao cadastrar contato:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao cadastrar contato." },
+      { error: "Erro ao cadastrar contato." },
       { status: 500 }
     );
   }
@@ -172,8 +173,9 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch (error: any) {
+    console.error("Erro ao atualizar contato:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao atualizar contato." },
+      { error: "Erro ao atualizar contato." },
       { status: 500 }
     );
   }
@@ -227,8 +229,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Erro ao remover contato:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao remover contato." },
+      { error: "Erro ao remover contato." },
       { status: 500 }
     );
   }

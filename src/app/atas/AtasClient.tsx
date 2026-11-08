@@ -29,6 +29,7 @@ import {
   Users,
   AlertTriangle,
   X,
+  GraduationCap,
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import AtaQrCode from "@/components/ata/AtaQrCode";
@@ -36,6 +37,12 @@ import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
 
 function getCategoryConfig(category?: string) {
   switch (category) {
+    case "ORIENTACAO_DOCENTE":
+      return {
+        label: "Orientação Docente",
+        className: "bg-indigo-50 text-indigo-900 border-indigo-200",
+        icon: GraduationCap,
+      };
     case "BUSCA_ATIVA_FALTAS":
       return {
         label: "Busca Ativa / Frequência",
@@ -345,6 +352,7 @@ export default function AtasClient({
               className="w-full py-2.5 px-3 border border-slate-200 rounded-xl bg-slate-50/50 font-semibold text-slate-700"
             >
               <option value="ALL">Todas as Categorias</option>
+              <option value="ORIENTACAO_DOCENTE">Orientação Docente</option>
               <option value="ACOMPANHAMENTO_PEDAGOGICO">Acompanhamento / Rendimento</option>
               <option value="BUSCA_ATIVA_FALTAS">Busca Ativa / Frequência</option>
               <option value="CONVIVENCIA_INDISCIPLINA">Convivência / Conflitos</option>
@@ -382,7 +390,11 @@ export default function AtasClient({
               const isVoid = m.status === "VOIDED";
               const ataNumStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
               const isReadyToQuickFinalize =
-                !isFinal && !isVoid && m.summary && m.summary.trim().length >= 10 && m.students?.length > 0;
+                !isFinal &&
+                !isVoid &&
+                m.summary &&
+                m.summary.trim().length >= 10 &&
+                ((m.students && m.students.length > 0) || (m.participants && m.participants.length > 0));
 
               return (
                 <div
@@ -436,22 +448,40 @@ export default function AtasClient({
                       {m.subject}
                     </h3>
 
-                    {/* Alunos Vinculados */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                      <span className="font-bold text-slate-500">Estudante(s):</span>
-                      {m.students?.map((s: any) => (
-                        <Link
-                          key={s.studentId}
-                          href={`/alunos/${s.studentId}`}
-                          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 font-semibold text-[11px] transition"
-                        >
-                          <span>{s.studentNameSnapshot}</span>
-                          {s.classNameSnapshot && (
-                            <span className="text-sky-600 text-[10px]">({s.classNameSnapshot})</span>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
+                    {/* Alunos ou Docentes Vinculados */}
+                    {m.students && m.students.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                        <span className="font-bold text-slate-500">Estudante(s):</span>
+                        {m.students.map((s: any) => (
+                          <Link
+                            key={s.studentId}
+                            href={`/alunos/${s.studentId}`}
+                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 font-semibold text-[11px] transition"
+                          >
+                            <span>{s.studentNameSnapshot}</span>
+                            {s.classNameSnapshot && (
+                              <span className="text-sky-600 text-[10px]">({s.classNameSnapshot})</span>
+                            )}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                        <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                          Orientação Docente
+                        </span>
+                        {m.participants
+                          ?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
+                          .map((p: any) => (
+                            <span
+                              key={p.id || p.name}
+                              className="px-2 py-0.5 rounded-lg bg-purple-50 text-purple-800 font-semibold text-[11px]"
+                            >
+                              {p.name}
+                            </span>
+                          ))}
+                      </div>
+                    )}
 
                     {/* Servidora e Participantes */}
                     <p className="text-[11px] text-slate-500">

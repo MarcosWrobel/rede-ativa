@@ -9,6 +9,7 @@ export interface AiPseudonymizer {
   unmaskText: (text: string) => string;
   maskedStudentNames: string[];
   maskedGuardianNames: string[];
+  maskedTeacherNames: string[];
 }
 
 function escapeRegex(str: string): string {
@@ -21,7 +22,8 @@ const PHONE_REGEX = /\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)(?:9\s?)?\d{4}[-.\s]?\d{4}
 
 export function createAiPseudonymizer(
   studentNames: string[] = [],
-  guardianNames: string[] = []
+  guardianNames: string[] = [],
+  teacherNames: string[] = []
 ): AiPseudonymizer {
   const replacements: Array<{ placeholder: string; real: string }> = [];
 
@@ -37,6 +39,14 @@ export function createAiPseudonymizer(
     const trimmed = (name || "").trim();
     if (!trimmed) return "";
     const placeholder = `[RESPONSAVEL_${idx + 1}]`;
+    replacements.push({ placeholder, real: trimmed });
+    return placeholder;
+  }).filter(Boolean);
+
+  const maskedTeacherNames = teacherNames.map((name, idx) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return "";
+    const placeholder = `[DOCENTE_${idx + 1}]`;
     replacements.push({ placeholder, real: trimmed });
     return placeholder;
   }).filter(Boolean);
@@ -80,5 +90,6 @@ export function createAiPseudonymizer(
     unmaskText,
     maskedStudentNames,
     maskedGuardianNames,
+    maskedTeacherNames,
   };
 }

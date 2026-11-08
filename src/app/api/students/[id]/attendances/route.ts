@@ -66,8 +66,9 @@ export async function POST(
 
     return NextResponse.json(created, { status: 201 });
   } catch (error: any) {
+    console.error("Erro ao registrar ata presencial:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao registrar ata presencial." },
+      { error: "Erro ao registrar ata presencial." },
       { status: 500 }
     );
   }
@@ -121,8 +122,9 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Erro ao remover ata presencial:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao remover ata presencial." },
+      { error: "Erro ao remover ata presencial." },
       { status: 500 }
     );
   }

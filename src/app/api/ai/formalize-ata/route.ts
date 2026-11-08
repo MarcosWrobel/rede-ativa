@@ -43,6 +43,7 @@ const formalizeAtaSchema = z
     category: z.string().default("ACOMPANHAMENTO_PEDAGOGICO"),
     studentNames: z.array(z.string()).default([]),
     guardianNames: z.array(z.string()).default([]),
+    teacherNames: z.array(z.string()).default([]),
     attendedAt: z.string().optional(),
     apiKey: z.string().optional(),
   })
@@ -77,7 +78,7 @@ const FORMALIZE_ATA_JSON_SCHEMA = {
           description: { type: "string", description: "Descrição objetiva da ação ou compromisso pactuado." },
           responsible: {
             type: "string",
-            enum: ["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO"],
+            enum: ["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO", "DOCENTE"],
             description: "Responsável direto pelo cumprimento deste combinado.",
           },
           suggestedDaysToComplete: {
@@ -108,8 +109,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const { rawNotes, existingSummary, category, studentNames, guardianNames, attendedAt, apiKey: bodyApiKey } = parsed.data;
+    const { rawNotes, existingSummary, category, studentNames, guardianNames, teacherNames, attendedAt, apiKey: bodyApiKey } = parsed.data;
 
+    const isDocentMeeting = category === "ORIENTACAO_DOCENTE" || studentNames.length === 0;
     const dateInfo = formatAtaDateExtenso(attendedAt);
 
     // Prioriza a chave oficial da Vercel (GEMINI_API_KEY)
@@ -135,6 +137,7 @@ export async function POST(req: Request) {
         category,
         studentNames,
         guardianNames,
+        teacherNames,
         attendedAt,
       });
       return NextResponse.json({
@@ -148,26 +151,61 @@ export async function POST(req: Request) {
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
+    const openingCanonical = isDocentMeeting
+      ? `"${dateInfo.dataExtensoCompleta}, nas dependências deste estabelecimento de ensino, reuniu-se a Equipe Pedagógica/Direção com..."`
+      : `"${dateInfo.dataExtensoCompleta}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento com a presença de..."`;
+
     const systemInstruction = `Você atua como Revisor Gramatical e Redator Oficial da Equipe Pedagógica de um Colégio Estadual da Rede Pública do Paraná (SEED-PR / Núcleo Regional de Educação - NRE).
-Sua missão é formalizar e revisar o texto da ata de atendimento pedagógico aplicando com o mais alto rigor a Norma Culta da Língua Portuguesa e as Diretrizes Oficiais do NRE/SEED-PR para elaboração de Atas Escolares.
+Sua missão é formalizar e revisar o texto da ata de atendimento/orientação pedagógica aplicando com o mais alto rigor a Norma Culta da Língua Portuguesa e as Diretrizes Oficiais do NRE/SEED-PR para elaboração de Atas Escolares.
 
 DIRETRIZES OBRIGATÓRIAS DO NRE/SEED-PR E REVISÃO GRAMATICAL:
 1. RIGOR GRAMATICAL TOTAL: Atue como corretor ortográfico (Novo Acordo Ortográfico), garantindo concordância verbal e nominal perfeitas, sintaxe impecável, pontuação precisa e regência verbal e nominal exata. Corrija imediatamente erros e vícios como "conflita", "por conta de", "entraram em atrito", convertendo para linguagem pedagógica culta.
 2. ABERTURA CANÔNICA COM DATA REAL DO ATENDIMENTO: O corpo da ata (formalSummary) DEVE OBRIGATORIAMENTE iniciar mencionando a data oficial do atendimento por extenso:
-"${dateInfo.dataExtensoCompleta}, nas dependências da Equipe Pedagógica deste estabelecimento de ensino, realizou-se atendimento com a presença de..."
+${openingCanonical}
 É EXPRESSAMENTE VEDADO inventar qualquer outro mês, dia ou ano (exemplo: JAMAIS invente maio, outro dia ou expressões como 'ano pré-estabelecido'). O ano DEVE ser estritamente ${dateInfo.anoExtenso}.
 3. CONTINUIDADE TEXTUAL (TEXTO CORRIDO): O corpo da ata (formalSummary) DEVE ser redigido em um ÚNICO bloco contínuo de texto corrido. NÃO utilize quebras de linha duplas, tópicos com marcadores (bullet points), listas ou parágrafos em branco no meio do texto, pois a legislação e as normas de registro do NRE vedam entrelinhas e espaços vazios em atas oficiais.
 4. TEMPO VERBAL: Empregue estritamente os verbos no PRETÉRITO PERFEITO DO INDICATIVO para narrar os fatos já ocorridos (exemplo: "reuniu-se", "compareceu", "foi apresentada", "pontuou-se", "declarou", "assumiu o compromisso").
 5. PROIBIÇÃO DE ABREVIATURAS INFORMAIS: É expressamente vedado o uso de abreviações ou gírias (como "prof.", "coord.", "vc", "p/", "ct"). Empregue sempre os termos completos: "Professor(a)", "Equipe Pedagógica", "Conselho Tutelar", "Secretaria de Estado da Educação".
-6. IMPESSOALIDADE E ECA: Mantenha postura institucional protetiva, sóbria e descritiva. Jamais empregue termos pejorativos, preconceituosos ou juízos de valor (ex.: "aluno problemático", "pais relapsos"). Registre objetivamente o que foi relatado, observado e acordado, preservando a dignidade do estudante nos termos dos Artigos 17 e 18 do Estatuto da Criança e do Adolescente (ECA).
+6. IMPESSOALIDADE E POSTURA INSTITUCIONAL: Mantenha postura institucional protetiva, sóbria e descritiva. Jamais empregue termos pejorativos, preconceituosos ou juízos de valor. Registre objetivamente o que foi pontuado, alinhado e acordado.
 7. CLÁUSULA DE CIÊNCIA E FECHAMENTO: Conclua obrigatoriamente o texto declarando que nada mais havendo a tratar, a ata foi lida, conferida, achada conforme e segue assinada por todos os presentes em sinal de ciência e concordância.
 8. PRESERVAÇÃO DE EDIÇÃO PRÉVIA: Se for fornecido um texto já existente (existingSummary), considere que a pedagoga já pode ter realizado ajustes manuais. Nesse caso, PRESERVE o conteúdo e as intenções já expressas, focando em corrigir erros de concordância, ortografia, sintaxe, ajustar tempos verbais e garantir o enquadramento estrito nas diretrizes acima.`;
 
-    const pseudonymizer = createAiPseudonymizer(studentNames, guardianNames);
+    const pseudonymizer = createAiPseudonymizer(studentNames, guardianNames, teacherNames);
     const maskedRawNotes = pseudonymizer.maskText(rawNotes || "");
     const maskedExistingSummary = pseudonymizer.maskText(existingSummary || "");
 
-    const inputPrompt = `DADOS DO ATENDIMENTO:
+    const inputPrompt = isDocentMeeting
+      ? `DADOS DA ORIENTAÇÃO PEDAGÓGICA DOCENTE / REUNIÃO DE EQUIPE:
+- Data e Hora Oficiais: ${dateInfo.dataExtensoCompleta}, às ${dateInfo.horaFormatada}
+- Docente(s) / Servidor(es) Orientado(s): ${pseudonymizer.maskedTeacherNames.join(", ") || "Docente presente"}
+${pseudonymizer.maskedStudentNames.length > 0 ? `- Estudante(s) citado(s) no contexto: ${pseudonymizer.maskedStudentNames.join(", ")}` : "- Foco: Alinhamento e orientação técnico-pedagógica docente (RCO, prazos, recomposição de aprendizagem, planejamento, avaliações)"}
+- Natureza da Ocorrência: ${category}
+${
+  maskedExistingSummary && maskedExistingSummary.trim().length >= 5
+    ? `- Texto Formal Já em Edição pela Pedagoga (REVISAR E AJUSTAR SEM PERDER O SENTIDO):\n"""\n${maskedExistingSummary.trim()}\n"""\n`
+    : ""
+}
+- Anotações / Tópicos Brutos da Reunião (ou transcrição de voz):
+"""
+${maskedRawNotes.trim() || "(Sem notas adicionais — revisar o texto formal existente)"}
+"""
+
+REGRAS DE FORMATAÇÃO DO JSON DE RESPOSTA:
+Responda OBRIGATORIAMENTE em formato JSON com as 4 chaves exatas:
+{
+  "formalSubject": "Título formal e objetivo da ata de orientação docente",
+  "formalSummary": "${dateInfo.dataExtensoCompleta}, nas dependências deste estabelecimento de ensino, reuniu-se a Equipe Pedagógica...",
+  "agreementsSummary": "Síntese dos combinados e compromissos pedagógicos pactuados",
+  "actionItems": [
+    {
+      "description": "Texto claro da ação combinada (ex: Atualizar registros de frequência e avaliações no RCO)",
+      "responsible": "DOCENTE",
+      "suggestedDaysToComplete": 5
+    }
+  ]
+}
+Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "description" obrigatoriamente preenchida (nunca string solta ou vazia), "responsible" ("DOCENTE", "ESCOLA", "FAMILIA", "ESTUDANTE" ou "REDE_PROTECAO") e "suggestedDaysToComplete" (número de dias de prazo).`
+      : `DADOS DO ATENDIMENTO:
 - Data e Hora Oficiais do Atendimento: ${dateInfo.dataExtensoCompleta}, às ${dateInfo.horaFormatada}
 - Estudante(s): ${pseudonymizer.maskedStudentNames.join(", ") || "Conforme identificado em registro"}
 - Responsável(is) / Presentes: ${pseudonymizer.maskedGuardianNames.join(", ") || "Responsável legal presente"}
@@ -196,7 +234,7 @@ Responda OBRIGATORIAMENTE em formato JSON com as 4 chaves exatas:
     }
   ]
 }
-Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "description" obrigatoriamente preenchida (nunca string solta ou vazia), "responsible" ("FAMILIA", "ESTUDANTE", "ESCOLA" ou "REDE_PROTECAO") e "suggestedDaysToComplete" (número de dias de prazo).`;
+Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "description" obrigatoriamente preenchida (nunca string solta ou vazia), "responsible" ("FAMILIA", "ESTUDANTE", "ESCOLA", "DOCENTE" ou "REDE_PROTECAO") e "suggestedDaysToComplete" (número de dias de prazo).`;
 
     // Modelos vigentes na API do Google (2026) - gemini-3.5-flash confirmado como prioritário
     const modelsToTry = [
@@ -334,8 +372,8 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
               if (typeof item === "string") {
                 return {
                   description: item.trim(),
-                  responsible: "FAMILIA",
-                  suggestedDaysToComplete: 7,
+                  responsible: isDocentMeeting ? "DOCENTE" : "FAMILIA",
+                  suggestedDaysToComplete: 5,
                 };
               }
               const desc =
@@ -347,9 +385,9 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
                 item.texto ||
                 item.detalhes ||
                 "";
-              let resp = String(item.responsible || item.responsavel || "FAMILIA").toUpperCase();
-              if (!["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO"].includes(resp)) {
-                resp = "FAMILIA";
+              let resp = String(item.responsible || item.responsavel || (isDocentMeeting ? "DOCENTE" : "FAMILIA")).toUpperCase();
+              if (!["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO", "DOCENTE"].includes(resp)) {
+                resp = isDocentMeeting ? "DOCENTE" : "FAMILIA";
               }
               const days =
                 Number(item.suggestedDaysToComplete || item.prazoDias || item.prazo || item.days) || 7;
@@ -408,6 +446,6 @@ Importante: O campo "actionItems" DEVE conter de 1 a 3 objetos com a chave "desc
     });
   } catch (error: any) {
     console.error("[AI Formalize Ata] Erro inesperado:", error);
-    return NextResponse.json({ error: error.message || "Erro ao processar minuta" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao processar minuta" }, { status: 500 });
   }
 }

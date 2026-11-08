@@ -211,7 +211,7 @@ export async function PUT(
     });
   } catch (error: any) {
     console.error("[PUT /api/schools/[id]] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao atualizar instituição" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao atualizar instituição" }, { status: 500 });
   }
 }
 
@@ -305,7 +305,7 @@ export async function DELETE(
   } catch (error: any) {
     console.error("[DELETE /api/schools/[id]] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao excluir instituição escolar" },
+      { error: "Erro ao excluir instituição escolar" },
       { status: 500 }
     );
   }

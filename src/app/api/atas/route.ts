@@ -50,7 +50,7 @@ const createMinuteDraftSchema = z.object({
   rawNotes: z.string().optional().nullable(),
   summary: z.string().default(""),
   agreementsSummary: z.string().optional().nullable(),
-  studentIds: z.array(z.string()).min(1, "Vincule pelo menos um estudante"),
+  studentIds: z.array(z.string()).default([]),
   participants: z
     .array(
       z.object({
@@ -215,7 +215,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, minutes: responseMinutes, year, school });
   } catch (error: any) {
     console.error("[GET /api/atas] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao listar atas" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao listar atas" }, { status: 500 });
   }
 }
 
@@ -256,16 +256,29 @@ export async function POST(req: Request) {
       }
     }
 
-    // Busca dados cadastrais atuais dos estudantes para snapshot fiel, garantindo escopo da escola ativa
-    const studentsDb = await prisma.student.findMany({
-      where: {
-        id: { in: studentIds },
-        schoolId: effectiveSchoolId,
-      },
-      include: { classGroup: true },
-    });
+    const uniqueStudentIds = Array.from(new Set(studentIds));
 
-    if (studentsDb.length !== studentIds.length) {
+    if (uniqueStudentIds.length === 0) {
+      if (!participants || participants.length === 0) {
+        return NextResponse.json(
+          { error: "Vincule pelo menos um estudante ou adicione ao menos um docente/participante na ata." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Busca dados cadastrais atuais dos estudantes para snapshot fiel, garantindo escopo da escola ativa
+    const studentsDb = uniqueStudentIds.length > 0
+      ? await prisma.student.findMany({
+          where: {
+            id: { in: uniqueStudentIds },
+            schoolId: effectiveSchoolId,
+          },
+          include: { classGroup: true },
+        })
+      : [];
+
+    if (uniqueStudentIds.length > 0 && studentsDb.length !== uniqueStudentIds.length) {
       return NextResponse.json(
         { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
         { status: 400 }
@@ -354,6 +367,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, minute }, { status: 201 });
   } catch (error: any) {
     console.error("[POST /api/atas] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao criar rascunho de ata" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao criar rascunho de ata" }, { status: 500 });
   }
 }

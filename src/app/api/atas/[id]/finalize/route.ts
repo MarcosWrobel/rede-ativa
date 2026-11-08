@@ -121,26 +121,31 @@ export async function POST(
 
             // 2. Se o cliente enviou os dados atualizados do formulário no momento de lavrar, sincroniza antes de selar o hash
             if (rawBody && typeof rawBody === "object") {
-              if (Array.isArray(rawBody.studentIds) && rawBody.studentIds.length > 0) {
-                const studentsDb = await tx.student.findMany({
-                  where: { id: { in: rawBody.studentIds }, schoolId: minute.schoolId },
-                  include: { classGroup: true },
-                });
-                if (studentsDb.length !== rawBody.studentIds.length) {
-                  throw new Error(
-                    "VALIDATION:Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular."
-                  );
+              if (Array.isArray(rawBody.studentIds)) {
+                const uniqueStudentIds: string[] = Array.from(new Set(rawBody.studentIds.map(String)));
+                if (uniqueStudentIds.length > 0) {
+                  const studentsDb: any[] = await tx.student.findMany({
+                    where: { id: { in: uniqueStudentIds }, schoolId: minute.schoolId },
+                    include: { classGroup: true },
+                  });
+                  if (studentsDb.length !== uniqueStudentIds.length) {
+                    throw new Error(
+                      "VALIDATION:Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular."
+                    );
+                  }
+                  await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+                  await tx.pedagogicalMinuteStudent.createMany({
+                    data: studentsDb.map((s: any) => ({
+                      minuteId: id,
+                      studentId: s.id,
+                      studentNameSnapshot: s.name,
+                      classNameSnapshot: s.classGroup?.name || null,
+                      cgmSnapshot: s.cgm || null,
+                    })),
+                  });
+                } else {
+                  await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
                 }
-                await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-                await tx.pedagogicalMinuteStudent.createMany({
-                  data: studentsDb.map((s) => ({
-                    minuteId: id,
-                    studentId: s.id,
-                    studentNameSnapshot: s.name,
-                    classNameSnapshot: s.classGroup?.name || null,
-                    cgmSnapshot: s.cgm || null,
-                  })),
-                });
               }
 
               if (Array.isArray(rawBody.participants)) {
@@ -290,8 +295,8 @@ export async function POST(
               throw new Error("VALIDATION:O texto formal da ata deve ser preenchido (mínimo de 10 caracteres) antes da lavratura oficial.");
             }
 
-            if (refreshedMinute.students.length === 0) {
-              throw new Error("VALIDATION:Vincule pelo menos um estudante antes de lavrar.");
+            if (refreshedMinute.students.length === 0 && refreshedMinute.participants.length === 0) {
+              throw new Error("VALIDATION:Vincule pelo menos um estudante ou registre participantes docentes/servidores antes de lavrar.");
             }
 
             // 4. Numeração atômica com trava contra concorrência
@@ -440,6 +445,6 @@ export async function POST(
     if (msg.startsWith("STATUS_INVALID:") || msg.startsWith("VALIDATION:")) {
       return NextResponse.json({ error: msg.replace(/^(STATUS_INVALID|VALIDATION):/, "") }, { status: 400 });
     }
-    return NextResponse.json({ error: msg || "Erro ao lavrar ata" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao lavrar ata" }, { status: 500 });
   }
 }

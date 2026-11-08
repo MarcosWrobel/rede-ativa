@@ -50,7 +50,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(users);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao listar equipe:", error);
+    return NextResponse.json({ error: "Erro ao listar equipe." }, { status: 500 });
   }
 }
 
@@ -212,7 +213,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(targetUser, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao convidar membro da equipe:", error);
+    return NextResponse.json({ error: "Erro ao convidar membro da equipe." }, { status: 500 });
   }
 }
 
@@ -348,6 +350,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(updated);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao atualizar membro da equipe:", error);
+    return NextResponse.json({ error: "Erro ao atualizar membro da equipe." }, { status: 500 });
   }
 }

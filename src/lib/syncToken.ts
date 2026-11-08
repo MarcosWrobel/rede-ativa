@@ -12,12 +12,14 @@ export function hashSchoolSyncToken(rawToken: string): string {
 
 /**
  * Compara duas strings em tempo constante contra ataques de temporização (timing attacks).
+ * Aplica digest SHA-256 preliminar garantindo tamanho fixo (32 bytes) em ambos os buffers,
+ * neutralizando vazamento de comprimento do segredo por retorno antecipado.
  */
-export function safeCompareStrings(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+export function safeCompareStrings(provided?: string | null, expected?: string | null): boolean {
+  if (!provided || !expected) return false;
+  const hashA = crypto.createHash("sha256").update(provided.trim(), "utf8").digest();
+  const hashB = crypto.createHash("sha256").update(expected.trim(), "utf8").digest();
+  return crypto.timingSafeEqual(hashA, hashB);
 }
 
 /**

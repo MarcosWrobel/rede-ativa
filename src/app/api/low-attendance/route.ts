@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { parseAttendancePercent } from "@/lib/studentMatcher";
 
 export async function GET() {
   try {
@@ -24,7 +26,8 @@ export async function GET() {
     });
     return NextResponse.json(records);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao consultar registros de infrequência:", error);
+    return NextResponse.json({ error: "Erro ao consultar registros de infrequência." }, { status: 500 });
   }
 }
 
@@ -43,20 +46,22 @@ export async function POST(req: Request) {
       where: { id: studentId },
       select: { id: true, schoolId: true },
     });
-    if (!targetStudent || (targetStudent.schoolId && targetStudent.schoolId !== currentSchool.id)) {
+    if (!targetStudent || !assertTenantOwnership(targetStudent.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Estudante não encontrado na instituição atual." }, { status: 404 });
     }
+
+    const clampedPercent = parseAttendancePercent(attendancePercent) ?? 0;
 
     const record = await prisma.lowAttendanceRecord.upsert({
       where: { studentId },
       update: {
-        attendancePercent: parseFloat(attendancePercent) || 0,
+        attendancePercent: clampedPercent,
         enrollmentDetail,
         actionsTaken,
       },
       create: {
         studentId,
-        attendancePercent: parseFloat(attendancePercent) || 0,
+        attendancePercent: clampedPercent,
         enrollmentDetail,
         actionsTaken,
       },
@@ -83,6 +88,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(record);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro ao registrar infrequência:", error);
+    return NextResponse.json({ error: "Erro ao registrar infrequência." }, { status: 500 });
   }
 }

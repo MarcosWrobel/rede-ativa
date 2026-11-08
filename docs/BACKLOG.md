@@ -72,6 +72,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`ATA-03`** `[P1 | Esforço: G]` **Assinatura OIDC `@escola`, QR Code Móvel & Biometria WebAuthn/FIDO2** — [`src/components/ata/SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx) e [`src/app/assinar/ata/[token]/MobileSignClient.tsx`](../src/app/assinar/ata/[token]/MobileSignClient.tsx).
 - [x] **`ATA-04`** `[P1 | Esforço: M]` **Imutabilidade, Adendos Encadeados (*"Em tempo"*) & Cancelamento (`VOIDED`)** — [`src/app/api/atas/[id]/addendums/route.ts`](../src/app/api/atas/[id]/addendums/route.ts) e [`src/app/api/atas/[id]/void/route.ts`](../src/app/api/atas/[id]/void/route.ts).
 - [x] **`ATA-05`** `[P1 | Esforço: M]` **Impressão A4 (`1 of 1`), Livro Anual, Certidão Cega LGPD & Sigilo ECA** — [`/atas/[id]/imprimir`](../src/app/atas/[id]/imprimir/PrintPageClient.tsx), [`/atas/livro/[ano]`](../src/app/atas/livro/[ano]/page.tsx) e [`/validar/ata/[code]`](../src/app/validar/ata/[code]/page.tsx).
+- [x] **`ATA-06`** `[P1 | Esforço: M]` **Atas de Orientação Docente / Equipe Escolar (`ORIENTACAO_DOCENTE`)** — Suporte nativo a atas com `studentIds: []` e participantes docentes registrados, formalização NRE/SEED-PR sem citar responsáveis familiares, pseudonimização LGPD `[DOCENTE_n]`, assinatura OIDC `@escola.pr.gov.br` e renderização de Docentes Envolvidos na impressão e PDF/A-1b, validado por 8 testes em [`src/lib/__tests__/teacherAtas.test.ts`](../src/lib/__tests__/teacherAtas.test.ts).
 
 ---
 
@@ -146,7 +147,22 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`JUR-11`** `[P1 | Esforço: M]` **Herança Automática de Governança por Rede Municipal (SEMEC)**  
   Configuração de edição pelo Superadmin no diretório de escolas ([`AdminEscolasClient.tsx`](../src/app/admin/escolas/AdminEscolasClient.tsx)) e herança automática da versão da rede quando novos estabelecimentos são criados por gestores de secretaria ([`/api/schools`](../src/app/api/schools/route.ts)).
 - [x] **`JUR-12`** `[P1 | Esforço: M]` **Adaptação Dinâmica do Frontend & Neutralidade de Nomenclaturas Governamentais**  
-  Ocultação de gatilhos de sincronização de Power BI e tokens de extensão em `/faltas`, e substituição de termos proprietários de governo por nomenclaturas administrativas neutras em `/alunos/[id]` (Prontuário) e [`/alunos/[id]/dossie`](../src/app/alunos/[id]/dossie/DossieClient.tsx). Coberto por 9 testes unitários em [`platformEditions.test.ts`](../src/lib/__tests__/platformEditions.test.ts) (**250 testes em 42 suítes**).
+  Ocultação de gatilhos de sincronização de Power BI e tokens de extensão em `/faltas`, e substituição de termos proprietários de governo por nomenclaturas administrativas neutras em `/alunos/[id]` (Prontuário) e [`/alunos/[id]/dossie`](../src/app/alunos/[id]/dossie/DossieClient.tsx). Coberto por 9 testes unitários em [`platformEditions.test.ts`](../src/lib/__tests__/platformEditions.test.ts).
+
+---
+
+## Épico 14 — Auditoria Técnica, de Segurança e Estabilidade V3 (Sprint 16 — Pré-Expansão) — ✅ Concluído
+
+- [x] **`SEC-09`** `[P0 | Esforço: P]` **Comparação Criptográfica em Tempo Constante nos Webhooks & Cron (`H-06` / `H-07`)**  
+  Eliminação de timing attacks via `safeCompareStrings` (`crypto.timingSafeEqual` sobre digests SHA-256 de tamanho uniforme) em [`src/app/api/webhooks/whatsapp/route.ts`](../src/app/api/webhooks/whatsapp/route.ts) e [`src/app/api/cron/weekly-digest/route.ts`](../src/app/api/cron/weekly-digest/route.ts).
+- [x] **`SEC-10`** `[P0 | Esforço: M]` **Contenção Total de Vazamento de Exceções Internas (`H-11`) & Bootstrap Dinâmico (`H-10`)**  
+  Mascaramento estrito de `error.message` do Prisma/banco em 500 em todos os Route Handlers sob `src/app/api/**`, e resolução dinâmica de `BOOTSTRAP_ADMIN_EMAIL` com prioridade para `process.env.ADMIN_EMAIL` em [`src/lib/roles.ts`](../src/lib/roles.ts).
+- [x] **`DATA-01`** `[P0 | Esforço: M]` **Proteção Cadastral contra Sobrescrita de Homônimos SERE & Clamp de Percentuais (`Q-01` / `Q-02` / `Q-03`)**  
+  Detecção de homônimos na mesma escola em `buildStudentLookupMaps` (`isHomonym: true`), exigindo CGM explícito para pareamento, clamp matemático de frequência no intervalo `[0, 100]` em `parseAttendancePercent` ([`src/lib/studentMatcher.ts`](../src/lib/studentMatcher.ts)), e preservação de dispensas manuais no sync de amparos em [`src/app/api/frequencia/sync/route.ts`](../src/app/api/frequencia/sync/route.ts).
+- [x] **`MSG-01`** `[P0 | Esforço: P]` **Atomicidade Probatória na Mensageria & Validação Zod Estrita (`P-07` / `P-08`)**  
+  Persistência obrigatória do `MessageLog` no banco antes de acionar gateways externos de rede, e restrição de `initialDeliveryStatus` aos estados válidos de despacho em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e [`src/app/api/messages/send/route.ts`](../src/app/api/messages/send/route.ts).
+- [x] **`PERF-06`** `[P1 | Esforço: P]` **Remoção de Índices Redundantes no Prisma Schema (`D-04`)**  
+  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts). Suíte global expandida para **310 testes em 47 suítes**.
 
 ---
 

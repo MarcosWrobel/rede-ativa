@@ -101,7 +101,7 @@ export async function POST(
   } catch (error: any) {
     console.error("[POST /api/schools/[id]/sanitize] Erro:", error);
     return NextResponse.json(
-      { error: error.message || "Erro ao higienizar dados da instituição" },
+      { error: "Erro ao higienizar dados da instituição" },
       { status: 500 }
     );
   }

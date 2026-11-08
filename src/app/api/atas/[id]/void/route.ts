@@ -117,6 +117,6 @@ export async function POST(
     return NextResponse.json({ success: true, minute: updated });
   } catch (error: any) {
     console.error("[POST /api/atas/[id]/void] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao averbar cancelamento" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao averbar cancelamento" }, { status: 500 });
   }
 }

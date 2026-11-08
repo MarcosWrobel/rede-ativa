@@ -72,7 +72,6 @@ model School {
   auditLogs       AuditLog[]
   pedagogicalMinutes PedagogicalMinute[]
 
-  @@index([inepCode])
   @@index([active])
   @@index([networkId])
 }
@@ -389,7 +388,6 @@ model PedagogicalMinute {
   @@unique([schoolId, year, ataNumber])
   @@index([schoolId, year, status])
   @@index([schoolId, attendedAt(sort: Desc)])
-  @@index([verificationCode])
 }
 
 model PedagogicalMinuteStudent {
@@ -451,7 +449,6 @@ model PedagogicalMinuteParticipant {
   createdAt               DateTime          @default(now())
 
   @@index([minuteId])
-  @@index([mobileSignToken])
   @@index([verifiedEmail])
 }
 

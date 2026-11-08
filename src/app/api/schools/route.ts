@@ -331,6 +331,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, school: createdSchool }, { status: 201 });
   } catch (error: any) {
     console.error("[POST /api/schools] Erro:", error);
-    return NextResponse.json({ error: error.message || "Erro ao criar instituição escolar" }, { status: 500 });
+    return NextResponse.json({ error: "Erro ao criar instituição escolar" }, { status: 500 });
   }
 }

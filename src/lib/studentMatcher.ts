@@ -29,13 +29,18 @@ export function normalizeWhatsAppPhone(raw?: string | null): string {
 
 export function parseAttendancePercent(raw?: string | number | null): number | null {
   if (raw === null || raw === undefined) return null;
+  let parsed: number | null = null;
   if (typeof raw === "number") {
-    return Number.isFinite(raw) ? raw : null;
+    parsed = Number.isFinite(raw) ? raw : null;
+  } else {
+    const cleaned = String(raw).replace("%", "").replace(",", ".").trim();
+    if (!cleaned) return null;
+    const num = parseFloat(cleaned);
+    parsed = Number.isFinite(num) ? num : null;
   }
-  const cleaned = String(raw).replace("%", "").replace(",", ".").trim();
-  if (!cleaned) return null;
-  const parsed = parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (parsed === null) return null;
+  // Clamp estrito de integridade no intervalo percentual válido [0, 100] (Q-02)
+  return Math.min(100, Math.max(0, parsed));
 }
 
 export type SerpStatusEnum =
@@ -64,9 +69,15 @@ export interface StudentLookupEntry {
   name: string;
 }
 
+export interface StudentLookupNameMatch {
+  id: string;
+  hasCgm: boolean;
+  isHomonym?: boolean;
+}
+
 export function buildStudentLookupMaps(students: StudentLookupEntry[]) {
   const cgmMap = new Map<string, string>();
-  const nameMap = new Map<string, { id: string; hasCgm: boolean }>();
+  const nameMap = new Map<string, StudentLookupNameMatch>();
   const usedCgms = new Set<string>();
 
   for (const s of students) {
@@ -77,7 +88,16 @@ export function buildStudentLookupMaps(students: StudentLookupEntry[]) {
     }
     const norm = normalizeStudentName(s.name);
     if (norm) {
-      nameMap.set(norm, { id: s.id, hasCgm: Boolean(cleanCgm) });
+      const existing = nameMap.get(norm);
+      if (existing) {
+        if (existing.id !== s.id) {
+          // Homônimo detectado: mais de um aluno com mesmo nome normalizado na instituição (Q-01)
+          existing.isHomonym = true;
+          nameMap.set(norm, { id: existing.id, hasCgm: existing.hasCgm, isHomonym: true });
+        }
+      } else {
+        nameMap.set(norm, { id: s.id, hasCgm: Boolean(cleanCgm), isHomonym: false });
+      }
     }
   }
 

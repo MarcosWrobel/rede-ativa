@@ -176,6 +176,7 @@ export async function POST(
   } catch (error: any) {
     console.error("[POST /api/atas/[id]/addendums] Erro:", error);
     const status = error.message?.includes("Acesso negado") ? 403 : error.message?.includes("não encontrada") ? 404 : error.message?.includes("já finalizadas") ? 400 : 500;
-    return NextResponse.json({ error: error.message || "Erro ao adicionar termo de aditamento" }, { status });
+    const safeMsg = status === 500 ? "Erro ao adicionar termo de aditamento" : error.message || "Erro ao adicionar termo de aditamento";
+    return NextResponse.json({ error: safeMsg }, { status });
   }
 }
