@@ -1,6 +1,27 @@
 import { handlers } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { CANONICAL_PRODUCTION_HOST, APEX_PRODUCTION_HOST } from "@/lib/proxyConstants";
+
+function resolveCanonicalLoginUrl(req: NextRequest, errorCode = "Configuration"): URL {
+  const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL;
+  let base: string;
+  if (authUrl && !authUrl.includes(".vercel.app")) {
+    base = authUrl;
+  } else {
+    const forwardedHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+    const host = forwardedHost || req.headers.get("host") || req.nextUrl.host;
+    const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
+    base = `${proto}://${host}`;
+  }
+
+  const loginUrl = new URL(`/login?error=${encodeURIComponent(errorCode)}`, base);
+  if (loginUrl.hostname === APEX_PRODUCTION_HOST) {
+    loginUrl.hostname = CANONICAL_PRODUCTION_HOST;
+    loginUrl.protocol = "https:";
+  }
+  return loginUrl;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     const acceptsHtml = req.headers.get("accept")?.includes("text/html");
     if (acceptsHtml) {
-      const loginUrl = new URL("/login?error=Configuration", req.url);
+      const loginUrl = resolveCanonicalLoginUrl(req, "Configuration");
       return NextResponse.redirect(loginUrl);
     }
 

@@ -24,6 +24,7 @@ export const APEX_PRODUCTION_HOST = "redeativa.app.br";
 
 export function shouldRedirectApexToCanonical(host: string | null | undefined): boolean {
   if (!host) return false;
-  const clean = host.toLowerCase().split(":")[0].trim();
+  const firstHost = host.split(",")[0].trim().toLowerCase();
+  const clean = firstHost.split(":")[0].trim();
   return clean === APEX_PRODUCTION_HOST;
 }

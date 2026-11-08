@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   sanitizeCredentialValue,
+  canonicalizeAuthUrl,
   resolveGoogleCredentials,
+  resolveAuthSecret,
   authConfig,
 } from "../auth.config";
 import {
@@ -29,10 +31,14 @@ describe("AUTH-01: Higienização e Resolução de Credenciais OAuth do Google",
     ).toBe("GOCSPX-secret67890");
   });
 
-  it("sanitizeCredentialValue remove comando export, aspas duplas, simples e espaços", () => {
+  it("sanitizeCredentialValue remove comando export, aspas duplas, simples, crases e pontuação de fechamento", () => {
     expect(
       sanitizeCredentialValue('export GOOGLE_CLIENT_SECRET="GOCSPX-quoted-secret" ')
     ).toBe("GOCSPX-quoted-secret");
+
+    expect(
+      sanitizeCredentialValue('export GOOGLE_CLIENT_ID="123456789.apps.googleusercontent.com";')
+    ).toBe("123456789.apps.googleusercontent.com");
 
     expect(
       sanitizeCredentialValue(" 'GOOGLE_CLIENT_ID=my-client-id' ")
@@ -41,6 +47,10 @@ describe("AUTH-01: Higienização e Resolução de Credenciais OAuth do Google",
     expect(
       sanitizeCredentialValue("`GOCSPX-backtick-secret`")
     ).toBe("GOCSPX-backtick-secret");
+
+    expect(
+      sanitizeCredentialValue('"export GOOGLE_CLIENT_SECRET="GOCSPX-secret";"')
+    ).toBe("GOCSPX-secret");
   });
 
   it("sanitizeCredentialValue retorna undefined para valores vazios, indefinidos ou apenas com espaços", () => {
@@ -49,6 +59,8 @@ describe("AUTH-01: Higienização e Resolução de Credenciais OAuth do Google",
     expect(sanitizeCredentialValue("   ")).toBeUndefined();
     expect(sanitizeCredentialValue('""')).toBeUndefined();
     expect(sanitizeCredentialValue("''")).toBeUndefined();
+    expect(sanitizeCredentialValue("null")).toBeUndefined();
+    expect(sanitizeCredentialValue("undefined")).toBeUndefined();
   });
 
   it("resolveGoogleCredentials prioriza e extrai corretamente GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET", () => {
@@ -89,6 +101,14 @@ describe("AUTH-01: Higienização e Resolução de Credenciais OAuth do Google",
     expect(resolved.clientId).toBeUndefined();
     expect(resolved.clientSecret).toBeUndefined();
   });
+
+  it("resolveAuthSecret higieniza prefixos acidentais como export ou aspas no segredo", () => {
+    const env = {
+      AUTH_SECRET: 'export AUTH_SECRET="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6";',
+    };
+    const secret = resolveAuthSecret(env);
+    expect(secret).toBe("a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6");
+  });
 });
 
 describe("AUTH-02: Consistência de Redirecionamento e Domínio Canônico", () => {
@@ -99,6 +119,15 @@ describe("AUTH-02: Consistência de Redirecionamento e Domínio Canônico", () =
     const res = await redirectCb!({
       url: "/busca-ativa",
       baseUrl: "https://www.redeativa.app.br",
+    });
+    expect(res).toBe("https://www.redeativa.app.br/busca-ativa");
+  });
+
+  it("authConfig.callbacks.redirect normaliza baseUrl apex para www em URLs relativas", async () => {
+    const redirectCb = authConfig.callbacks?.redirect;
+    const res = await redirectCb!({
+      url: "/busca-ativa",
+      baseUrl: "https://redeativa.app.br",
     });
     expect(res).toBe("https://www.redeativa.app.br/busca-ativa");
   });
@@ -125,7 +154,7 @@ describe("AUTH-02: Consistência de Redirecionamento e Domínio Canônico", () =
     const redirectCb = authConfig.callbacks?.redirect;
     const res = await redirectCb!({
       url: "https://malicious-phishing.com/steal",
-      baseUrl: "https://www.redeativa.app.br",
+      baseUrl: "https://redeativa.app.br",
     });
     expect(res).toBe("https://www.redeativa.app.br");
   });
@@ -136,6 +165,7 @@ describe("AUTH-03: Redirecionamento Canônico 308 no Proxy (Apex para WWW)", () 
     expect(shouldRedirectApexToCanonical("redeativa.app.br")).toBe(true);
     expect(shouldRedirectApexToCanonical("redeativa.app.br:3000")).toBe(true);
     expect(shouldRedirectApexToCanonical("REDEATIVA.APP.BR")).toBe(true);
+    expect(shouldRedirectApexToCanonical("redeativa.app.br, 10.0.0.1")).toBe(true);
   });
 
   it("não redireciona hosts já canônicos ou de desenvolvimento", () => {
@@ -149,40 +179,33 @@ describe("AUTH-03: Redirecionamento Canônico 308 no Proxy (Apex para WWW)", () 
   });
 });
 
-describe("AUTH-04: Preservação de AUTH_URL Canônica na Vercel", () => {
-  it("preserva AUTH_URL do domínio de produção mesmo em ambiente VERCEL=1", () => {
-    const testEnv: Record<string, string | undefined> = {
-      VERCEL: "1",
-      AUTH_URL: "https://www.redeativa.app.br",
-      NEXTAUTH_URL: "https://www.redeativa.app.br",
-    };
-
-    // Aplica a mesma lógica de higienização de auth.config.ts
-    for (const key of ["NEXTAUTH_URL", "AUTH_URL"] as const) {
-      if (testEnv[key] && testEnv[key]!.includes(".vercel.app")) {
-        delete testEnv[key];
-      }
-    }
-
-    expect(testEnv.AUTH_URL).toBe("https://www.redeativa.app.br");
-    expect(testEnv.NEXTAUTH_URL).toBe("https://www.redeativa.app.br");
+describe("AUTH-04: Preservação e Canonicização de AUTH_URL", () => {
+  it("canonicalizeAuthUrl preserva AUTH_URL de produção e normaliza para HTTPS www", () => {
+    expect(canonicalizeAuthUrl("https://www.redeativa.app.br")).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl("https://www.redeativa.app.br/")).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl("https://www.redeativa.app.br/api/auth")).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl("https://redeativa.app.br")).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl("http://redeativa.app.br")).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl('export AUTH_URL="https://redeativa.app.br";')).toBe("https://www.redeativa.app.br");
+    expect(canonicalizeAuthUrl("www.redeativa.app.br")).toBe("https://www.redeativa.app.br");
   });
 
-  it("remove NEXTAUTH_URL ou AUTH_URL quando apontam para .vercel.app", () => {
-    const testEnv: Record<string, string | undefined> = {
-      VERCEL: "1",
-      AUTH_URL: "https://registro-preview-123.vercel.app",
-      NEXTAUTH_URL: "https://registro-preview-123.vercel.app",
-    };
+  it("canonicalizeAuthUrl neutraliza URLs preview .vercel.app retornando undefined", () => {
+    expect(canonicalizeAuthUrl("https://registro-preview-123.vercel.app")).toBeUndefined();
+    expect(canonicalizeAuthUrl("https://minha-branch.vercel.app/api/auth")).toBeUndefined();
+  });
 
-    for (const key of ["NEXTAUTH_URL", "AUTH_URL"] as const) {
-      if (testEnv[key] && testEnv[key]!.includes(".vercel.app")) {
-        delete testEnv[key];
-      }
-    }
+  it("canonicalizeAuthUrl preserva ambiente de desenvolvimento local", () => {
+    expect(canonicalizeAuthUrl("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(canonicalizeAuthUrl("http://localhost:3000/api/auth")).toBe("http://localhost:3000");
+  });
 
-    expect(testEnv.AUTH_URL).toBeUndefined();
-    expect(testEnv.NEXTAUTH_URL).toBeUndefined();
+  it("canonicalizeAuthUrl retorna undefined para valores vazios ou inválidos", () => {
+    expect(canonicalizeAuthUrl(undefined)).toBeUndefined();
+    expect(canonicalizeAuthUrl("")).toBeUndefined();
+    expect(canonicalizeAuthUrl("   ")).toBeUndefined();
+    expect(canonicalizeAuthUrl("null")).toBeUndefined();
   });
 });
+
 
