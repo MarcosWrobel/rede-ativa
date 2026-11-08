@@ -27,7 +27,9 @@
     "http://127.0.0.1/*",
     "https://*.vercel.app/*",
     "https://redeativa.app.br/*",
-    "https://*.redeativa.app.br/*"
+    "https://*.redeativa.app.br/*",
+    "https://redeativa.com.br/*",
+    "https://*.redeativa.com.br/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -72,6 +74,8 @@
         "https://*.vercel.app/*",
         "https://redeativa.app.br/*",
         "https://*.redeativa.app.br/*",
+        "https://redeativa.com.br/*",
+        "https://*.redeativa.com.br/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],

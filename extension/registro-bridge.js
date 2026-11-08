@@ -13,12 +13,21 @@
         const parsed = new URL(origin);
         const { protocol, hostname } = parsed;
         if (protocol === "http:") {
-          return hostname === "localhost" || hostname === "127.0.0.1";
+          return (
+            hostname === "localhost" ||
+            hostname === "127.0.0.1" ||
+            hostname === "0.0.0.0" ||
+            hostname.startsWith("192.168.") ||
+            hostname.startsWith("10.") ||
+            hostname.endsWith(".local")
+          );
         }
         if (protocol === "https:") {
           return (
             hostname === "redeativa.app.br" ||
             hostname.endsWith(".redeativa.app.br") ||
+            hostname === "redeativa.com.br" ||
+            hostname.endsWith(".redeativa.com.br") ||
             hostname.endsWith(".vercel.app")
           );
         }

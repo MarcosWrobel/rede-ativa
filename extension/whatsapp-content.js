@@ -227,103 +227,276 @@
     });
   }
 
+  // Helpers para Canonicalização de Telefone Brasileiro e Seleção Automática de Chat
+  function canonicalizeBrazilPhone(rawPhone) {
+    if (!rawPhone || (typeof rawPhone !== "string" && typeof rawPhone !== "number")) {
+      return { fullDigits: "", ddd: "", last8: "" };
+    }
+    const digits = String(rawPhone).replace(/\D/g, "");
+    let fullDigits = digits;
+    if (fullDigits.length === 10 || fullDigits.length === 11) {
+      fullDigits = "55" + fullDigits;
+    }
+    const ddd = fullDigits.length >= 4 ? fullDigits.slice(2, 4) : "";
+    const last8 = fullDigits.length >= 8 ? fullDigits.slice(-8) : "";
+    return { fullDigits, ddd, last8 };
+  }
+
+  // Verifica se o chat atualmente ativo em #main corresponde ao número alvo (tolerância ao 9º dígito)
+  function isCurrentChatMatchingPhone(targetPhone) {
+    if (!targetPhone) return true; // Fallback legado
+    const canonical = canonicalizeBrazilPhone(targetPhone);
+    if (!canonical.last8) return true;
+
+    const mainEl = document.querySelector("#main");
+    if (!mainEl) return false;
+
+    // 1. Inspeciona elementos com [data-id*="@c.us"] dentro de #main
+    const elementsWithJid = mainEl.querySelectorAll('[data-id*="@c.us"]');
+    if (elementsWithJid && elementsWithJid.length > 0) {
+      for (const el of elementsWithJid) {
+        const dataId = el.getAttribute("data-id") || "";
+        const match = dataId.match(/(?:false|true)_(\d+)@c\.us/) || dataId.match(/(\d+)@c\.us/);
+        if (match && match[1]) {
+          const jidCanon = canonicalizeBrazilPhone(match[1]);
+          if (jidCanon.ddd === canonical.ddd && jidCanon.last8 === canonical.last8) {
+            return true;
+          }
+        }
+      }
+      // Se encontrou balões com JID no #main e nenhum casou, é outro chat
+      return false;
+    }
+
+    // 2. Se não há balões com data-id (chat vazio/recente), inspeciona o cabeçalho #main header
+    const headerEl = mainEl.querySelector("header");
+    if (headerEl) {
+      const titleAttr = headerEl.querySelector("[title]")?.getAttribute("title") || "";
+      const headerText = (headerEl.innerText || "") + " " + titleAttr;
+      const cleanDigits = headerText.replace(/\D/g, "");
+      if (cleanDigits.includes(canonical.last8) || headerText.includes(canonical.last8)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Navega até a conversa via roteamento interno SPA do WhatsApp Web sem recarregar a página
+  function navigateSpaToPhone(fullDigits) {
+    const url = `https://web.whatsapp.com/send/?phone=${fullDigits}`;
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      try {
+        anchor.remove();
+      } catch {}
+    }, 150);
+  }
+
+  // Detecta diálogos modais de número inválido ou sem conta no WhatsApp Web
+  function isInvalidNumberModalPresent() {
+    const dialogs = document.querySelectorAll('div[role="dialog"], div[data-animate-modal-popup="true"]');
+    for (const dialog of dialogs) {
+      const text = (dialog.innerText || "").toLowerCase();
+      if (
+        text.includes("inválido") ||
+        text.includes("invalido") ||
+        text.includes("invalid") ||
+        text.includes("não está no whatsapp") ||
+        text.includes("nao esta no whatsapp") ||
+        text.includes("is not on whatsapp") ||
+        text.includes("phone number shared via url")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Aguarda reativamente o chat estar montado e pronto ou detecta número inválido
+  function waitForChatReadyOrInvalid(targetPhone, timeoutMs = 9000) {
+    const startTime = Date.now();
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        // 1. Detecção de número inválido / sem WhatsApp
+        if (isInvalidNumberModalPresent()) {
+          clearInterval(interval);
+          resolve({ status: "NUMBER_NOT_ON_WHATSAPP" });
+          return;
+        }
+
+        // 2. Confirmação do chat alvo ativo
+        const mainEl = document.querySelector("#main");
+        if (mainEl && isCurrentChatMatchingPhone(targetPhone)) {
+          clearInterval(interval);
+          setTimeout(() => {
+            resolve({ status: "READY" });
+          }, 150);
+          return;
+        }
+
+        // 3. Timeout
+        if (Date.now() - startTime >= timeoutMs) {
+          clearInterval(interval);
+          resolve({ status: "TIMEOUT" });
+        }
+      }, 250);
+    });
+  }
+
   // Listener para extração assistida de retorno (Modo Estritamente Read-Only)
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE") {
-      try {
-        const incomingMessages = document.querySelectorAll("div.message-in");
-        if (!incomingMessages || incomingMessages.length === 0) {
-          sendResponse({
-            success: false,
-            error: "NO_INCOMING_MESSAGE",
-            message: "Nenhuma mensagem recebida foi localizada na conversa aberta do WhatsApp Web.",
-          });
-          return false;
-        }
+      (async () => {
+        try {
+          const targetPhone = message.phone;
 
-        const lastMessageEl = incomingMessages[incomingMessages.length - 1];
+          // Se telefone foi informado e não estamos no chat dele, navega via SPA
+          if (targetPhone && !isCurrentChatMatchingPhone(targetPhone)) {
+            const canonical = canonicalizeBrazilPhone(targetPhone);
+            if (canonical.fullDigits) {
+              console.log("[Leopoldina WA] Navegando SPA para conversa:", canonical.fullDigits);
+              navigateSpaToPhone(canonical.fullDigits);
+              const waitRes = await waitForChatReadyOrInvalid(targetPhone, 9000);
 
-        // 1. Extração do texto da mensagem na ordem estrita de prioridade
-        let extractedText = "";
-        const selectors = [
-          ".selectable-text span",
-          ".selectable-text",
-          "div.copyable-text",
-          "span._ao3e",
-          'span[dir="ltr"]',
-        ];
+              if (waitRes.status === "NUMBER_NOT_ON_WHATSAPP") {
+                sendResponse({
+                  success: false,
+                  logId: message.logId,
+                  phone: targetPhone,
+                  error: "NUMBER_NOT_ON_WHATSAPP",
+                  message: "Este número de telefone não possui conta ativa no WhatsApp.",
+                });
+                return;
+              }
 
-        for (const selector of selectors) {
-          const el = lastMessageEl.querySelector(selector);
-          if (el) {
-            const txt = (el.innerText || el.textContent || "").trim();
-            if (txt.length > 0) {
-              extractedText = txt;
-              break;
+              if (waitRes.status === "TIMEOUT" || !isCurrentChatMatchingPhone(targetPhone)) {
+                sendResponse({
+                  success: false,
+                  logId: message.logId,
+                  phone: targetPhone,
+                  error: "CHAT_OPEN_TIMEOUT",
+                  message: "Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web.",
+                });
+                return;
+              }
             }
           }
-        }
 
-        // Fallback defensivo se seletores específicos não encontrarem o nó
-        if (!extractedText) {
-          extractedText = (lastMessageEl.innerText || lastMessageEl.textContent || "").trim();
-        }
+          // Uma vez confirmado no chat correto (ou sem filtro de telefone)
+          const mainEl = document.querySelector("#main");
+          let activeChatTitle = null;
+          const headerTitleEl =
+            document.querySelector("#main header span[title]") ||
+            document.querySelector("#main header div[role='button'] span[title]") ||
+            document.querySelector("header span[title]") ||
+            document.querySelector("#main header span[dir='auto']");
+          if (headerTitleEl) {
+            activeChatTitle = headerTitleEl.getAttribute("title") || headerTitleEl.innerText || null;
+          }
 
-        if (!extractedText) {
-          sendResponse({
-            success: false,
-            error: "EMPTY_TEXT",
-            message: "A última mensagem recebida não possui texto legível.",
-          });
-          return false;
-        }
+          const incomingMessages = (mainEl || document).querySelectorAll(
+            "div.message-in, div[data-id*='false_'], div[role='row'] div[class*='message-in']"
+          );
 
-        // 2. Extração do metadado de data/hora (domTimestamp)
-        let domTimestamp = null;
-        const copyableEl = lastMessageEl.querySelector("div.copyable-text");
-        if (copyableEl && copyableEl.getAttribute("data-pre-plain-text")) {
-          domTimestamp = copyableEl.getAttribute("data-pre-plain-text").trim();
-        } else {
-          const timeSpans = lastMessageEl.querySelectorAll("span");
-          for (let i = timeSpans.length - 1; i >= 0; i--) {
-            const text = (timeSpans[i].innerText || timeSpans[i].textContent || "").trim();
-            if (/\d{1,2}:\d{2}/.test(text)) {
-              domTimestamp = text;
-              break;
+          if (!incomingMessages || incomingMessages.length === 0) {
+            sendResponse({
+              success: false,
+              logId: message.logId,
+              phone: targetPhone,
+              activeChatTitle,
+              error: "NO_INCOMING_MESSAGE",
+              message: "Conversa localizada, mas nenhuma resposta foi recebida da família até o momento.",
+            });
+            return;
+          }
+
+          const lastMessageEl = incomingMessages[incomingMessages.length - 1];
+
+          // 1. Extração do texto da mensagem na ordem estrita de prioridade
+          let extractedText = "";
+          const selectors = [
+            ".selectable-text span",
+            ".selectable-text",
+            "div.copyable-text span",
+            "div.copyable-text",
+            "span.copyable-text",
+            "span._ao3e",
+            'span[dir="ltr"]',
+            'span[dir="auto"]',
+          ];
+
+          for (const selector of selectors) {
+            const el = lastMessageEl.querySelector(selector);
+            if (el) {
+              const txt = (el.innerText || el.textContent || "").trim();
+              if (txt.length > 0) {
+                extractedText = txt;
+                break;
+              }
             }
           }
-          if (!domTimestamp && timeSpans.length > 0) {
-            const lastSpanText = (timeSpans[timeSpans.length - 1].innerText || "").trim();
-            if (lastSpanText) domTimestamp = lastSpanText;
+
+          // Fallback defensivo se seletores específicos não encontrarem o nó
+          if (!extractedText) {
+            extractedText = (lastMessageEl.innerText || lastMessageEl.textContent || "").trim();
           }
-        }
 
-        // 3. Extração do título do chat aberto no cabeçalho
-        let activeChatTitle = null;
-        const headerTitleEl =
-          document.querySelector("header span[title]") ||
-          document.querySelector("header div[role='button'] span[title]") ||
-          document.querySelector("#main header span[title]");
-        if (headerTitleEl) {
-          activeChatTitle = headerTitleEl.getAttribute("title") || headerTitleEl.innerText || null;
-        }
+          if (!extractedText) {
+            sendResponse({
+              success: false,
+              logId: message.logId,
+              phone: targetPhone,
+              activeChatTitle,
+              error: "EMPTY_TEXT",
+              message: "A última mensagem recebida não possui texto legível.",
+            });
+            return;
+          }
 
-        sendResponse({
-          success: true,
-          logId: message.logId,
-          phone: message.phone,
-          rawText: extractedText.trim(),
-          domTimestamp,
-          activeChatTitle,
-        });
-      } catch (err) {
-        sendResponse({
-          success: false,
-          error: "EXTRACTION_EXCEPTION",
-          message: err?.message || "Erro inesperado ao extrair mensagem do WhatsApp Web.",
-        });
-      }
-      return false; // Resposta síncrona
+          // 2. Extração do metadado de data/hora (domTimestamp)
+          let domTimestamp = null;
+          const copyableEl = lastMessageEl.querySelector("div.copyable-text");
+          if (copyableEl && copyableEl.getAttribute("data-pre-plain-text")) {
+            domTimestamp = copyableEl.getAttribute("data-pre-plain-text").trim();
+          } else {
+            const timeSpans = lastMessageEl.querySelectorAll("span");
+            for (let i = timeSpans.length - 1; i >= 0; i--) {
+              const text = (timeSpans[i].innerText || timeSpans[i].textContent || "").trim();
+              if (/\d{1,2}:\d{2}/.test(text)) {
+                domTimestamp = text;
+                break;
+              }
+            }
+            if (!domTimestamp && timeSpans.length > 0) {
+              const lastSpanText = (timeSpans[timeSpans.length - 1].innerText || "").trim();
+              if (lastSpanText) domTimestamp = lastSpanText;
+            }
+          }
+
+          sendResponse({
+            success: true,
+            logId: message.logId,
+            phone: targetPhone,
+            rawText: extractedText.trim(),
+            domTimestamp,
+            activeChatTitle,
+          });
+        } catch (err) {
+          sendResponse({
+            success: false,
+            logId: message.logId,
+            phone: message?.phone,
+            error: "EXTRACTION_EXCEPTION",
+            message: err?.message || "Erro inesperado ao extrair mensagem do WhatsApp Web.",
+          });
+        }
+      })();
+      return true; // Resposta assíncrona garantida no MV3
     }
   });
 

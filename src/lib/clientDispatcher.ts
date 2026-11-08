@@ -143,7 +143,7 @@ export interface ExtractWhatsAppReplyResult {
 export function extractWhatsAppReplyViaExtension(
   logId: string,
   phone?: string,
-  timeoutMs = 8000
+  timeoutMs = 15000
 ): Promise<ExtractWhatsAppReplyResult> {
   if (typeof window === "undefined") {
     return Promise.resolve({
@@ -169,7 +169,12 @@ export function extractWhatsAppReplyViaExtension(
       if (isSettled) return;
 
       // Validação de origem rigorosa contra spoofing
-      if (window.location?.origin && event.origin !== window.location.origin) {
+      if (
+        window.location?.origin &&
+        event.origin &&
+        event.origin !== "null" &&
+        event.origin !== window.location.origin
+      ) {
         return;
       }
 

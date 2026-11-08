@@ -214,6 +214,52 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
       expect(result.message).toBe("Abra o WhatsApp Web antes de capturar o retorno.");
     });
 
+    it("repasse de erro NUMBER_NOT_ON_WHATSAPP quando número não possui conta", async () => {
+      const promise = extractWhatsAppReplyViaExtension("log_invalid_num", "5541999999999");
+
+      messageListeners.forEach((listener) =>
+        listener({
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            logId: "log_invalid_num",
+            success: false,
+            error: "NUMBER_NOT_ON_WHATSAPP",
+            message: "Este número de telefone não possui conta ativa no WhatsApp.",
+          },
+        })
+      );
+
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("NUMBER_NOT_ON_WHATSAPP");
+      expect(result.message).toBe("Este número de telefone não possui conta ativa no WhatsApp.");
+    });
+
+    it("repasse de NO_INCOMING_MESSAGE com metadados de chat localizado mas sem resposta", async () => {
+      const promise = extractWhatsAppReplyViaExtension("log_no_msg", "5542988881234");
+
+      messageListeners.forEach((listener) =>
+        listener({
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            logId: "log_no_msg",
+            success: false,
+            error: "NO_INCOMING_MESSAGE",
+            activeChatTitle: "Mãe do Aluno Pedro",
+            message: "Conversa localizada, mas nenhuma resposta foi recebida da família até o momento.",
+          },
+        })
+      );
+
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("NO_INCOMING_MESSAGE");
+      expect(result.activeChatTitle).toBe("Mãe do Aluno Pedro");
+      expect(result.message).toContain("nenhuma resposta foi recebida");
+    });
+
     it("ignora mensagens com logId diferente ou de origem não confiável", async () => {
       vi.useFakeTimers();
       const promise = extractWhatsAppReplyViaExtension("log_real", "5542999999999", 5000);
@@ -263,14 +309,19 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
       vi.useRealTimers();
     });
 
-    it("aciona timeout de EXTENSION_TIMEOUT se a extensão não responder a tempo e remove listener", async () => {
+    it("aciona timeout padrão de 15000ms de EXTENSION_TIMEOUT se a extensão não responder a tempo e remove listener", async () => {
       vi.useFakeTimers();
       const removeEventListenerSpy = vi.spyOn(globalThis.window, "removeEventListener");
 
-      const promise = extractWhatsAppReplyViaExtension("log_timeout", undefined, 8000);
+      // Chama sem timeout explicito para testar o novo padrão de 15000ms
+      const promise = extractWhatsAppReplyViaExtension("log_timeout");
 
-      // Avança o tempo além dos 8000ms
-      vi.advanceTimersByTime(8001);
+      // Avança 14000ms (ainda não deve expirar)
+      vi.advanceTimersByTime(14000);
+      expect(removeEventListenerSpy).not.toHaveBeenCalled();
+
+      // Avança além dos 15000ms
+      vi.advanceTimersByTime(1001);
 
       const result = await promise;
       expect(result.success).toBe(false);

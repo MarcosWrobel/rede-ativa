@@ -112,4 +112,38 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
     expect(html).toContain("Responsável informou consulta médica e entregará atestado.");
     expect(html).toContain("value=\"SAUDE\"");
   });
+
+  it("renderiza link de abertura direta do WhatsApp Web com o número limpo do estudante", () => {
+    const html = renderToString(
+      <WhatsAppReplyCaptureModal
+        isOpen={true}
+        onClose={() => {}}
+        messageLog={mockLog}
+        studentName="João da Silva Sauro"
+        classNameLabel="9º Ano A - Manhã"
+        onSuccess={() => {}}
+      />
+    );
+
+    // Link direto para a conversa do aluno no WhatsApp Web
+    expect(html).toContain("https://web.whatsapp.com/send?phone=42999998888");
+    expect(html).toContain("Abrir Conversa");
+    expect(html).toContain("Extrair da Aba do WhatsApp Web");
+  });
+
+  it("renderiza botão de ação e placeholder de fallback manual", () => {
+    const html = renderToString(
+      <WhatsAppReplyCaptureModal
+        isOpen={true}
+        onClose={() => {}}
+        messageLog={mockLog}
+        studentName="João da Silva Sauro"
+        classNameLabel="9º Ano A - Manhã"
+        onSuccess={() => {}}
+      />
+    );
+
+    expect(html).toContain("Extrair da Aba do WhatsApp Web");
+    expect(html).toContain("Cole aqui a resposta recebida ou clique no botão acima para extrair da aba ativa");
+  });
 });

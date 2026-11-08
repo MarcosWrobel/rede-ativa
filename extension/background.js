@@ -21,6 +21,51 @@ function isAllowedWhatsAppUrl(urlStr) {
   }
 }
 
+function sanitizeWhatsAppPhone(phone) {
+  if (!phone || (typeof phone !== "string" && typeof phone !== "number")) return "";
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) {
+    return "55" + digits;
+  }
+  return digits;
+}
+
+function waitForTabLoad(tabId, timeoutMs = 10000) {
+  return new Promise((resolve) => {
+    let timer = null;
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        cleanup();
+        resolve(true);
+      }
+    };
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve(false);
+    }, timeoutMs);
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function getPopupCoordinates() {
+  let left = 1000;
+  let top = 40;
+  try {
+    const currentWin = await chrome.windows.getCurrent();
+    if (currentWin && currentWin.width) {
+      left = Math.max(0, (currentWin.left || 0) + currentWin.width - POPUP_WIDTH - 20);
+      top = Math.max(0, (currentWin.top || 0) + 30);
+    }
+  } catch (e) {
+    console.warn("[Sincronizador Leopoldina] Geometria da janela não obtida, usando padrão:", e);
+  }
+  return { left, top };
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // 1. Despacho de WhatsApp da aplicação Registro para a janela dedicada
   if (request?.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && request.url) {
@@ -118,17 +163,85 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.type === "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY") {
     (async () => {
       try {
+        const cleanPhone = sanitizeWhatsAppPhone(request.phone);
         const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
+
+        // Caso nenhuma aba do WhatsApp Web esteja aberta no momento
         if (!tabs || tabs.length === 0) {
-          sendResponse({
-            success: false,
-            error: "WHATSAPP_TAB_NOT_FOUND",
-            message: "Abra o WhatsApp Web antes de capturar o retorno.",
+          let targetUrl = "https://web.whatsapp.com";
+          if (cleanPhone && cleanPhone.length >= 10) {
+            targetUrl = `https://web.whatsapp.com/send/?phone=${cleanPhone}`;
+          }
+          if (!isAllowedWhatsAppUrl(targetUrl)) {
+            targetUrl = "https://web.whatsapp.com";
+          }
+
+          const { left, top } = await getPopupCoordinates();
+          const newWindow = await chrome.windows.create({
+            url: targetUrl,
+            type: "popup",
+            width: POPUP_WIDTH,
+            height: POPUP_HEIGHT,
+            left,
+            top,
+            focused: true,
           });
+
+          const createdTab = newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0] : null;
+          if (!createdTab || !createdTab.id) {
+            sendResponse({
+              success: false,
+              error: "WINDOW_CREATION_FAILED",
+              message: "Não foi possível abrir a janela do WhatsApp Web.",
+            });
+            return;
+          }
+
+          // Aguarda a aba carregar completamente e o content script inicializar
+          await waitForTabLoad(createdTab.id, 10000);
+          await new Promise((r) => setTimeout(r, 800));
+
+          let replyResult = null;
+          try {
+            replyResult = await chrome.tabs.sendMessage(createdTab.id, {
+              type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+              logId: request.logId,
+              phone: request.phone,
+            });
+          } catch (firstCommErr) {
+            console.warn("[Background] Tentando injeção sob demanda na nova janela:", createdTab.id, firstCommErr);
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: createdTab.id },
+                files: ["whatsapp-content.js"],
+              });
+              replyResult = await chrome.tabs.sendMessage(createdTab.id, {
+                type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+                logId: request.logId,
+                phone: request.phone,
+              });
+            } catch (injectErr) {
+              console.error("[Background] Falha ao injetar script na nova janela:", injectErr);
+              sendResponse({
+                success: false,
+                error: "TAB_COMMUNICATION_ERROR",
+                message: "Não foi possível comunicar com a janela recém-aberta do WhatsApp Web.",
+              });
+              return;
+            }
+          }
+
+          sendResponse(
+            replyResult || {
+              success: false,
+              error: "EMPTY_RESPONSE",
+              message: "Resposta vazia da aba do WhatsApp Web.",
+            }
+          );
           return;
         }
 
-        // Prioriza a janela compacta dedicada se existir (tipo popup) ou a aba ativa
+        // Se já existe aba do WhatsApp Web aberta: prioriza janela compacta dedicada (tipo popup) ou a aba ativa
         let targetTab = null;
         for (const tab of tabs) {
           try {
@@ -153,11 +266,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        const replyResult = await chrome.tabs.sendMessage(targetTab.id, {
-          type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-          logId: request.logId,
-          phone: request.phone,
-        });
+        // Traz a aba e janela do WhatsApp para o foco imediato
+        if (targetTab.windowId) {
+          try {
+            await chrome.windows.update(targetTab.windowId, { focused: true });
+          } catch {}
+        }
+        if (targetTab.id) {
+          try {
+            await chrome.tabs.update(targetTab.id, { active: true });
+          } catch {}
+        }
+
+        let replyResult = null;
+        try {
+          replyResult = await chrome.tabs.sendMessage(targetTab.id, {
+            type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+            logId: request.logId,
+            phone: request.phone,
+          });
+        } catch (commErr) {
+          console.warn("[Background] Falha inicial ao comunicar com aba aberta do WhatsApp Web:", targetTab.id, commErr?.message || commErr);
+
+          // Se a comunicação falhou e temos telefone válido, tenta atualizar a aba para a URL do chat
+          if (cleanPhone && cleanPhone.length >= 10) {
+            const targetUrl = `https://web.whatsapp.com/send/?phone=${cleanPhone}`;
+            if (isAllowedWhatsAppUrl(targetUrl)) {
+              try {
+                await chrome.tabs.update(targetTab.id, { url: targetUrl });
+                await waitForTabLoad(targetTab.id, 10000);
+                await new Promise((r) => setTimeout(r, 800));
+                replyResult = await chrome.tabs.sendMessage(targetTab.id, {
+                  type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+                  logId: request.logId,
+                  phone: request.phone,
+                });
+              } catch (updateErr) {
+                console.warn("[Background] Falha ao recarregar aba com URL do chat:", updateErr);
+              }
+            }
+          }
+
+          // Se ainda não obtivemos resultado, tenta injeção explícita de script
+          if (!replyResult) {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: targetTab.id },
+                files: ["whatsapp-content.js"],
+              });
+              replyResult = await chrome.tabs.sendMessage(targetTab.id, {
+                type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+                logId: request.logId,
+                phone: request.phone,
+              });
+            } catch (injectErr) {
+              console.error("[Background] Falha ao injetar script no WhatsApp Web:", injectErr);
+              sendResponse({
+                success: false,
+                error: "TAB_COMMUNICATION_ERROR",
+                message:
+                  "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp Web (F5) e tente novamente.",
+              });
+              return;
+            }
+          }
+        }
 
         sendResponse(
           replyResult || {
@@ -213,18 +386,7 @@ async function handleWhatsAppDispatch(targetUrl) {
     }
 
     // 2. Se nenhuma estiver aberta, calcula a posição ideal no lado direito da tela
-    let left = 1000;
-    let top = 40;
-
-    try {
-      const currentWin = await chrome.windows.getCurrent();
-      if (currentWin && currentWin.width) {
-        left = Math.max(0, (currentWin.left || 0) + currentWin.width - POPUP_WIDTH - 20);
-        top = Math.max(0, (currentWin.top || 0) + 30);
-      }
-    } catch (e) {
-      console.warn("[Sincronizador Leopoldina] Geometria da janela não obtida, usando padrão:", e);
-    }
+    const { left, top } = await getPopupCoordinates();
 
     // 3. Cria a Janela Dedicada Compacta (Popup Minimalista nativo do Chrome)
     const newWindow = await chrome.windows.create({
