@@ -103,6 +103,7 @@ describe("FASE 3 — Frontend & UX Pedagógica Human-in-the-Loop", () => {
     );
 
     expect(html).toContain("Lucas Pereira");
+    expect(html).toContain("Capturar Retorno");
     expect(html).toContain("+ Nota");
   });
 });
