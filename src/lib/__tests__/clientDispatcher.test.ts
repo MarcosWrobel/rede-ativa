@@ -260,6 +260,28 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
       expect(result.message).toContain("nenhuma resposta foi recebida");
     });
 
+    it("repasse de erro CHAT_OPEN_TIMEOUT quando a extensão não consegue abrir automaticamente a conversa", async () => {
+      const promise = extractWhatsAppReplyViaExtension("log_chat_timeout", "5542999998888");
+
+      messageListeners.forEach((listener) =>
+        listener({
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            logId: "log_chat_timeout",
+            success: false,
+            error: "CHAT_OPEN_TIMEOUT",
+            message: "Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web.",
+          },
+        })
+      );
+
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("CHAT_OPEN_TIMEOUT");
+      expect(result.message).toBe("Não foi possível abrir automaticamente a conversa deste número no WhatsApp Web.");
+    });
+
     it("ignora mensagens com logId diferente ou de origem não confiável", async () => {
       vi.useFakeTimers();
       const promise = extractWhatsAppReplyViaExtension("log_real", "5542999999999", 5000);

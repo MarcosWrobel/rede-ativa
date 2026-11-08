@@ -144,8 +144,16 @@ export default function WhatsAppReplyCaptureModal({
         message: `Localizando conversa do número ${phoneUsed} no WhatsApp Web e buscando última resposta...`,
       });
 
+      const progressTimer = setTimeout(() => {
+        setExtractionNotice({
+          type: "info",
+          message: `Aguardando carregamento da conversa no WhatsApp Web (${phoneUsed})...`,
+        });
+      }, 3500);
+
       try {
         const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed);
+        clearTimeout(progressTimer);
 
         if (res.success && res.rawText) {
           setRawReply(res.rawText);
@@ -193,6 +201,7 @@ export default function WhatsAppReplyCaptureModal({
           });
         }
       } catch (err: unknown) {
+        clearTimeout(progressTimer);
         const errorMsg =
           err instanceof Error
             ? err.message

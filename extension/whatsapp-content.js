@@ -230,21 +230,30 @@
   // Helpers para Canonicalização de Telefone Brasileiro e Seleção Automática de Chat
   function canonicalizeBrazilPhone(rawPhone) {
     if (!rawPhone || (typeof rawPhone !== "string" && typeof rawPhone !== "number")) {
-      return { fullDigits: "", ddd: "", last8: "" };
+      return { fullDigits: "", ddd: "", last8: "", last9: "" };
     }
-    const digits = String(rawPhone).replace(/\D/g, "");
+    let digits = String(rawPhone).replace(/\D/g, "");
+    if (digits.startsWith("0")) {
+      digits = digits.replace(/^0+/, "");
+    }
     let fullDigits = digits;
     if (fullDigits.length === 10 || fullDigits.length === 11) {
       fullDigits = "55" + fullDigits;
     }
-    const ddd = fullDigits.length >= 4 ? fullDigits.slice(2, 4) : "";
+    let ddd = "";
+    if (fullDigits.startsWith("55") && fullDigits.length >= 4) {
+      ddd = fullDigits.slice(2, 4);
+    } else if (fullDigits.length >= 2) {
+      ddd = fullDigits.slice(0, 2);
+    }
     const last8 = fullDigits.length >= 8 ? fullDigits.slice(-8) : "";
-    return { fullDigits, ddd, last8 };
+    const last9 = fullDigits.length >= 9 ? fullDigits.slice(-9) : last8;
+    return { fullDigits, ddd, last8, last9 };
   }
 
   // Verifica se o chat atualmente ativo em #main corresponde ao número alvo (tolerância ao 9º dígito)
   function isCurrentChatMatchingPhone(targetPhone) {
-    if (!targetPhone) return true; // Fallback legado
+    if (!targetPhone) return true; // Fallback legado se nenhum telefone foi informado
     const canonical = canonicalizeBrazilPhone(targetPhone);
     if (!canonical.last8) return true;
 
@@ -259,7 +268,10 @@
         const match = dataId.match(/(?:false|true)_(\d+)@c\.us/) || dataId.match(/(\d+)@c\.us/);
         if (match && match[1]) {
           const jidCanon = canonicalizeBrazilPhone(match[1]);
-          if (jidCanon.ddd === canonical.ddd && jidCanon.last8 === canonical.last8) {
+          if (
+            (!canonical.ddd || !jidCanon.ddd || jidCanon.ddd === canonical.ddd) &&
+            (jidCanon.last8 === canonical.last8 || (canonical.last9 && jidCanon.last9 === canonical.last9))
+          ) {
             return true;
           }
         }
@@ -274,9 +286,22 @@
       const titleAttr = headerEl.querySelector("[title]")?.getAttribute("title") || "";
       const headerText = (headerEl.innerText || "") + " " + titleAttr;
       const cleanDigits = headerText.replace(/\D/g, "");
-      if (cleanDigits.includes(canonical.last8) || headerText.includes(canonical.last8)) {
+      if (
+        (canonical.last8 && cleanDigits.includes(canonical.last8)) ||
+        (canonical.last9 && cleanDigits.includes(canonical.last9)) ||
+        (canonical.last8 && headerText.includes(canonical.last8))
+      ) {
         return true;
       }
+    }
+
+    // 3. Inspeciona se a URL ativa da página contém os dígitos do telefone
+    const currentUrl = window.location.href || "";
+    if (
+      (canonical.last8 && currentUrl.includes(canonical.last8)) ||
+      (canonical.fullDigits && currentUrl.includes(canonical.fullDigits))
+    ) {
+      return true;
     }
 
     return false;
@@ -311,6 +336,12 @@
         text.includes("is not on whatsapp") ||
         text.includes("phone number shared via url")
       ) {
+        const okBtn = dialog.querySelector('button, div[role="button"]');
+        if (okBtn) {
+          setTimeout(() => {
+            try { okBtn.click(); } catch {}
+          }, 800);
+        }
         return true;
       }
     }
@@ -318,7 +349,7 @@
   }
 
   // Aguarda reativamente o chat estar montado e pronto ou detecta número inválido
-  function waitForChatReadyOrInvalid(targetPhone, timeoutMs = 9000) {
+  function waitForChatReadyOrInvalid(targetPhone, timeoutMs = 10000) {
     const startTime = Date.now();
     return new Promise((resolve) => {
       const interval = setInterval(() => {
@@ -335,7 +366,7 @@
           clearInterval(interval);
           setTimeout(() => {
             resolve({ status: "READY" });
-          }, 150);
+          }, 200);
           return;
         }
 
@@ -350,6 +381,26 @@
 
   // Listener para extração assistida de retorno (Modo Estritamente Read-Only)
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // 1. Verificação instantânea do chat aberto (Etapa 1 da Arquitetura)
+    if (message?.type === "LEOPOLDINA_VERIFY_ACTIVE_CHAT") {
+      const isTargetChat = isCurrentChatMatchingPhone(message.phone);
+      let activeChatTitle = null;
+      const headerTitleEl =
+        document.querySelector("#main header span[title]") ||
+        document.querySelector("#main header div[role='button'] span[title]") ||
+        document.querySelector("header span[title]") ||
+        document.querySelector("#main header span[dir='auto']");
+      if (headerTitleEl) {
+        activeChatTitle = (headerTitleEl.getAttribute("title") || headerTitleEl.innerText || "").trim() || null;
+      }
+      sendResponse({
+        isTargetChat,
+        activeChatTitle,
+      });
+      return false;
+    }
+
+    // 2. Extração da última mensagem recebida
     if (message?.type === "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE") {
       (async () => {
         try {
@@ -361,7 +412,7 @@
             if (canonical.fullDigits) {
               console.log("[Leopoldina WA] Navegando SPA para conversa:", canonical.fullDigits);
               navigateSpaToPhone(canonical.fullDigits);
-              const waitRes = await waitForChatReadyOrInvalid(targetPhone, 9000);
+              const waitRes = await waitForChatReadyOrInvalid(targetPhone, 10000);
 
               if (waitRes.status === "NUMBER_NOT_ON_WHATSAPP") {
                 sendResponse({
@@ -396,12 +447,20 @@
             document.querySelector("header span[title]") ||
             document.querySelector("#main header span[dir='auto']");
           if (headerTitleEl) {
-            activeChatTitle = headerTitleEl.getAttribute("title") || headerTitleEl.innerText || null;
+            activeChatTitle = (headerTitleEl.getAttribute("title") || headerTitleEl.innerText || "").trim() || null;
           }
 
-          const incomingMessages = (mainEl || document).querySelectorAll(
+          // Aguarda breve renderização se os balões de mensagem ainda estiverem montando
+          let incomingMessages = (mainEl || document).querySelectorAll(
             "div.message-in, div[data-id*='false_'], div[role='row'] div[class*='message-in']"
           );
+
+          if (!incomingMessages || incomingMessages.length === 0) {
+            await new Promise((r) => setTimeout(r, 600));
+            incomingMessages = (mainEl || document).querySelectorAll(
+              "div.message-in, div[data-id*='false_'], div[role='row'] div[class*='message-in']"
+            );
+          }
 
           if (!incomingMessages || incomingMessages.length === 0) {
             sendResponse({

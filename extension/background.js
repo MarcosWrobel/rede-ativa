@@ -23,7 +23,10 @@ function isAllowedWhatsAppUrl(urlStr) {
 
 function sanitizeWhatsAppPhone(phone) {
   if (!phone || (typeof phone !== "string" && typeof phone !== "number")) return "";
-  const digits = String(phone).replace(/\D/g, "");
+  let digits = String(phone).replace(/\D/g, "");
+  if (digits.startsWith("0")) {
+    digits = digits.replace(/^0+/, "");
+  }
   if (digits.length === 10 || digits.length === 11) {
     return "55" + digits;
   }
@@ -278,6 +281,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } catch {}
         }
 
+        // Etapa 1: Validação do Chat Aberto (Verifica se já pertence ao número alvo)
+        let isAlreadyTargetChat = false;
+        try {
+          const verifyRes = await chrome.tabs.sendMessage(targetTab.id, {
+            type: "LEOPOLDINA_VERIFY_ACTIVE_CHAT",
+            phone: request.phone,
+          });
+          if (verifyRes && verifyRes.isTargetChat) {
+            isAlreadyTargetChat = true;
+          }
+        } catch (verifyErr) {
+          // Aba pode ainda não ter o content script injetado
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: targetTab.id },
+              files: ["whatsapp-content.js"],
+            });
+            const retryVerify = await chrome.tabs.sendMessage(targetTab.id, {
+              type: "LEOPOLDINA_VERIFY_ACTIVE_CHAT",
+              phone: request.phone,
+            });
+            if (retryVerify && retryVerify.isTargetChat) {
+              isAlreadyTargetChat = true;
+            }
+          } catch {}
+        }
+
+        // Etapa 2: Se o chat aberto for diferente ou nenhum aberto, navega via chrome.tabs.update
+        if (!isAlreadyTargetChat && cleanPhone && cleanPhone.length >= 10) {
+          const targetUrl = `https://web.whatsapp.com/send/?phone=${cleanPhone}`;
+          if (isAllowedWhatsAppUrl(targetUrl)) {
+            try {
+              console.log("[Background] Navegação automática de aba para conversa:", cleanPhone);
+              await chrome.tabs.update(targetTab.id, { url: targetUrl });
+              // Pequena pausa para a inicialização da rota SPA do WhatsApp Web
+              await new Promise((r) => setTimeout(r, 600));
+            } catch (navErr) {
+              console.warn("[Background] Falha ao atualizar URL da aba:", navErr);
+            }
+          }
+        }
+
+        // Etapas 3 e 4: Solicita extração ao content script (que aguarda montagem do chat ou detecta número inválido)
         let replyResult = null;
         try {
           replyResult = await chrome.tabs.sendMessage(targetTab.id, {
@@ -286,49 +332,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             phone: request.phone,
           });
         } catch (commErr) {
-          console.warn("[Background] Falha inicial ao comunicar com aba aberta do WhatsApp Web:", targetTab.id, commErr?.message || commErr);
+          console.warn("[Background] Falha ao comunicar com aba aberta do WhatsApp Web:", targetTab.id, commErr?.message || commErr);
 
-          // Se a comunicação falhou e temos telefone válido, tenta atualizar a aba para a URL do chat
-          if (cleanPhone && cleanPhone.length >= 10) {
-            const targetUrl = `https://web.whatsapp.com/send/?phone=${cleanPhone}`;
-            if (isAllowedWhatsAppUrl(targetUrl)) {
-              try {
-                await chrome.tabs.update(targetTab.id, { url: targetUrl });
-                await waitForTabLoad(targetTab.id, 10000);
-                await new Promise((r) => setTimeout(r, 800));
-                replyResult = await chrome.tabs.sendMessage(targetTab.id, {
-                  type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-                  logId: request.logId,
-                  phone: request.phone,
-                });
-              } catch (updateErr) {
-                console.warn("[Background] Falha ao recarregar aba com URL do chat:", updateErr);
-              }
-            }
-          }
-
-          // Se ainda não obtivemos resultado, tenta injeção explícita de script
-          if (!replyResult) {
-            try {
-              await chrome.scripting.executeScript({
-                target: { tabId: targetTab.id },
-                files: ["whatsapp-content.js"],
-              });
-              replyResult = await chrome.tabs.sendMessage(targetTab.id, {
-                type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-                logId: request.logId,
-                phone: request.phone,
-              });
-            } catch (injectErr) {
-              console.error("[Background] Falha ao injetar script no WhatsApp Web:", injectErr);
-              sendResponse({
-                success: false,
-                error: "TAB_COMMUNICATION_ERROR",
-                message:
-                  "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp Web (F5) e tente novamente.",
-              });
-              return;
-            }
+          // Se a navegação provocou recarregamento da página, aguarda término e reinjeta
+          try {
+            await waitForTabLoad(targetTab.id, 8000);
+            await chrome.scripting.executeScript({
+              target: { tabId: targetTab.id },
+              files: ["whatsapp-content.js"],
+            });
+            replyResult = await chrome.tabs.sendMessage(targetTab.id, {
+              type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+              logId: request.logId,
+              phone: request.phone,
+            });
+          } catch (injectErr) {
+            console.error("[Background] Falha ao restabelecer comunicação com aba:", injectErr);
+            sendResponse({
+              success: false,
+              error: "TAB_COMMUNICATION_ERROR",
+              message:
+                "Não foi possível comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp Web (F5) e tente novamente.",
+            });
+            return;
           }
         }
 
