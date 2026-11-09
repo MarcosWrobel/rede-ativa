@@ -24,6 +24,7 @@ Consulte [`AI_CONTEXT.md`](file:///home/marcoswrobel/Documents/Registro/AI_CONTE
 - **Integridade de FKs em Criação E Atualização (`POST`, `PUT`, `PATCH`, `/finalize`):** Sempre valide que chaves estrangeiras referenciadas em arrays ou campos (`studentIds`, `classGroupId`, `templateId`) pertençam estritamente ao mesmo `schoolId` do recurso/sessão (conferindo `matched.length === requestedIds.length`), inclusive em edições de rascunho e finalizações.
 - **Rejeição Explícita de Parâmetros Restritos (RBAC):** Quando um payload contiver flags ou operações restritas a papéis superiores (ex.: `updateSchoolInfo: true` para não-`SUPERADMIN`), retorne explicitamente **`403 Forbidden`** — nunca ignore silenciosamente retornando `200 OK`.
 - **Auditoria com `schoolId` Raiz Obrigatório & Exportação CSV Segura:** Toda chamada `logAudit(...)` em contexto escolar **DEVE** receber `schoolId` na raiz do objeto (nunca apenas dentro de `details`), e consultas em `/auditoria` nunca devem expor `{ schoolId: null }` entre tenants. Em exportações CSV, todas as colunas textuais devem aplicar `sanitizeCsvField(...)` combinado ao escape RFC 4180 (`.replace(/"/g, '""')`).
+- **Desambiguação e Prevenção de Colisão em Webhooks:** Webhooks passivos que localizem registros de mensagens ou estudantes por telefone DEVEM exigir identificação explícita de tenant (`schoolId`) ou desambiguação por nome. Se o número pertencer a mais de uma escola ativa (`distinctSchoolIds.length > 1`), a associação cega é estritamente proibida e a requisição deve ser ignorada para evitar colisão cadastral ou vazamento cruzado (*passive IDOR*).
 
 ---
 
@@ -42,11 +43,12 @@ Respeite o modelo de papéis e o isolamento de painéis:
 - Retificações ou complementações devem ser lavradas obrigatoriamente através de **Termo Aditivo (*"Em tempo"* - `PedagogicalMinuteAddendum`)** com *hash-chaining* criptográfico.
 - Cancelamentos devem manter o registro histórico marcado como `VOIDED` com justificativa legal expressa (`voidReason`), sem apagar a ata.
 - Exclusão física atômica de atas é estritamente restrita a administradores gerais e exclusiva para minutas de teste.
+- **Integridade Criptográfica Bipartida da Mensageria (SHA-256):** Qualquer rotina que crie, atualize, retifique ou receba respostas de mensagens (`/reply`, `/manage`, `/webhooks`) **DEVE** preservar e atualizar deterministicamente o hash SHA-256 (`computeMessageContentHash`) com a regra bipartida (7 chaves no disparo inicial + 4 chaves condicionais quando `guardianReplied === true`), garantindo que `verifyMessageIntegrity` permaneça 100% íntegro.
 
 ---
 
 ## 5. Conformidade com LGPD e ECA (Arts. 17 e 143)
-- Nomes e informações identificáveis de estudantes menores de idade **nunca** devem ser enviados diretamente a APIs de inteligência artificial externas (Google Gemini). Utilize sempre o pseudonimizador `src/lib/aiPseudonymizer.ts`.
+- Nomes e informações identificáveis de estudantes menores de idade e seus responsáveis legais **nunca** devem ser enviados diretamente a APIs de inteligência artificial externas (Google Gemini). Utilize sempre o pseudonimizador `src/lib/aiPseudonymizer.ts`, garantindo mascaramento insensível a acentos (ex.: "Joao" e "João") e sanitização absoluta de mensagens de erro HTTP 500 sem vazar `error.message`.
 - No portal público de conferência via QR Code (`/validar/ata/[code]`), exiba apenas a Certidão Cega com nomes e documentos mascarados, sem expor o texto da ata ou dados sensíveis.
 - No Dossiê Oficial em PDF (`/alunos/[id]/dossie`), aplique anonimização automática por iniciais a outros menores citados em ocorrências conjuntas.
 
@@ -63,7 +65,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes passem (250+ testes em 42+ suítes Vitest, incluindo `adversarialQa.test.ts` e `platformEditions.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (353 testes em 51 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts` e `platformEditions.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 

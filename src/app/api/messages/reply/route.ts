@@ -11,6 +11,8 @@ import {
   classifyGuardianReplyHeuristic,
   type ReplyCategory,
 } from "@/lib/whatsappProvider";
+import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
+import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { GoogleGenAI } from "@google/genai";
 
 const CLASSIFICATION_JSON_SCHEMA = {
@@ -161,6 +163,10 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const rateLimitKey = `msg-reply:${authCheck.schoolId || "global"}:${authCheck.userId}`;
+    const rlCheck = await enforceRateLimit(rateLimitKey, RATE_LIMIT_POLICIES.MESSAGE_REPLY);
+    if (!rlCheck.ok) return rlCheck.response;
+
     const rawBody = await req.json();
     const parsed = messageReplySchema.safeParse(rawBody);
     if (!parsed.success) {
@@ -272,6 +278,28 @@ export async function POST(req: Request) {
           : {}),
       },
     });
+
+    if (Boolean(guardianReplied) && previous.studentId && previous.phoneUsed) {
+      try {
+        const normalizedTarget = normalizeWhatsAppPhone(previous.phoneUsed);
+        if (normalizedTarget && prisma.studentContact?.updateMany) {
+          const contacts = await prisma.studentContact.findMany({
+            where: { studentId: previous.studentId, whatsappValid: false },
+          });
+          const matchIds = contacts
+            .filter((c) => normalizeWhatsAppPhone(c.phone) === normalizedTarget)
+            .map((c) => c.id);
+          if (matchIds.length > 0) {
+            await prisma.studentContact.updateMany({
+              where: { id: { in: matchIds } },
+              data: { whatsappValid: true },
+            });
+          }
+        }
+      } catch (contactErr) {
+        console.warn("Aviso ao revalidar contato após retorno:", contactErr);
+      }
+    }
 
     await logAudit({
       action: "MARK_REPLY",

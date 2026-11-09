@@ -16,6 +16,30 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function buildDiacriticInsensitivePattern(str: string): string {
+  const charMap: Record<string, string> = {
+    a: "[aáàãâäAÁÀÃÂÄ]",
+    e: "[eéèêëEÉÈÊË]",
+    i: "[iíìîïIÍÌÎÏ]",
+    o: "[oóòõôöOÓÒÕÔÖ]",
+    u: "[uúùûüUÚÙÛÜ]",
+    c: "[cçCÇ]",
+  };
+
+  const escaped = escapeRegex(str);
+  let pattern = "";
+  for (let i = 0; i < escaped.length; i++) {
+    const ch = escaped[i];
+    const normalized = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (charMap[normalized]) {
+      pattern += charMap[normalized];
+    } else {
+      pattern += ch;
+    }
+  }
+  return pattern;
+}
+
 const CPF_REGEX = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const PHONE_REGEX = /\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)(?:9\s?)?\d{4}[-.\s]?\d{4}\b/g;
@@ -60,10 +84,11 @@ export function createAiPseudonymizer(
     if (!text || typeof text !== "string") return text;
     let masked = text;
 
-    // 1. Substitui nomes de estudantes e responsáveis conhecidos
+    // 1. Substitui nomes de estudantes e responsáveis conhecidos (inclusive variações acentuadas)
     for (const item of sortedByLengthDesc) {
       if (!item.real || item.real.length < 2) continue;
-      const regex = new RegExp(escapeRegex(item.real), "gi");
+      const pattern = buildDiacriticInsensitivePattern(item.real);
+      const regex = new RegExp(pattern, "gi");
       masked = masked.replace(regex, item.placeholder);
     }
 

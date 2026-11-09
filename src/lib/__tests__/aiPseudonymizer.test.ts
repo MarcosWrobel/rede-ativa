@@ -43,6 +43,21 @@ describe("createAiPseudonymizer (LGPD & ECA)", () => {
     expect(unmasked).toContain("Pedro Santos");
   });
 
+  it("mascara nomes com variações acentuadas digitadas pela família (ex: Joao/João, Sonia/Sônia)", () => {
+    const pseudonymizer = createAiPseudonymizer(["João Pedro Rocha"], ["Sônia Regina"]);
+    const inputSemAcento = "Bom dia, sou a Sonia Regina, mae do aluno Joao Pedro Rocha.";
+    const masked = pseudonymizer.maskText(inputSemAcento);
+
+    expect(masked).not.toContain("Sonia Regina");
+    expect(masked).not.toContain("Joao Pedro Rocha");
+    expect(masked).toContain("[RESPONSAVEL_1]");
+    expect(masked).toContain("[ESTUDANTE_1]");
+
+    const unmasked = pseudonymizer.unmaskText(masked);
+    expect(unmasked).toContain("Sônia Regina");
+    expect(unmasked).toContain("João Pedro Rocha");
+  });
+
   it("lida com listas vazias e strings nulas sem falhar", () => {
     const pseudonymizer = createAiPseudonymizer([], []);
     expect(pseudonymizer.maskText("Texto normal sem nomes")).toBe("Texto normal sem nomes");

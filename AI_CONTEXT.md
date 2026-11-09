@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 330 testes em 50 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, securityAndStabilityAuditV3.test.ts e teacherAtas.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 353 testes em 51 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, securityAndStabilityAuditV3.test.ts e teacherAtas.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -81,7 +81,7 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`AUT-05`**: Criptografia Canônica Bipartida de Retorno (`messageCrypto.ts` & `POST /api/messages/reply`): expansão de `computeMessageContentHash` com regra bipartida (7 chaves no despacho + 4 chaves condicionais quando `guardianReplied === true`), blindagem contra IDOR (`assertTenantOwnership`), atualização transacional para status `READ` e auditoria com `schoolId` raiz.
 - **`AUT-06`**: Extração Assistida Read-Only no WhatsApp Web via Extensão MV3 (`whatsapp-content.js` & `clientDispatcher.ts`): captura do último balão de mensagem recebida (`div.message-in`) sem simular digitação, despachando metadados forenses com timeout defensivo de 8s e checagem de origem autorizada.
 - **`AUT-07`**: Modal Human-in-the-Loop de Revisão, Triagem IA e Selagem SHA-256 (`WhatsAppReplyCaptureModal.tsx`): esteira guiada com tema escuro nativo, triagem por IA Google Gemini com pseudonimizador LGPD/ECA e fallback heurístico, reatividade instantânea no Prontuário 360º e no Histórico.
-- Suíte automatizada consolidada em **50 suítes / 330 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+- Suíte automatizada consolidada em **51 suítes / 353 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
 ---
 
@@ -130,7 +130,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **100% da suíte Vitest deve passar (250+ testes em 42+ suítes, incluindo `adversarialQa.test.ts` e `platformEditions.test.ts`)**.
+  1. Execute `npm test` — **100% da suíte Vitest deve passar (353 testes em 51 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts` e `platformEditions.test.ts`)**.
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -236,7 +236,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 50 suítes / 330 testes)
+# Executar suíte completa de testes (Vitest — 51 suítes / 353 testes)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

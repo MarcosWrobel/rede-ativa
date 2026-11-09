@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const { rawReply, screenshotDataUrl, studentName, reasonTitle } = parsed.data;
+    const { rawReply, screenshotDataUrl, studentName, guardianName, reasonTitle } = parsed.data;
     const parsedImage = parseDataUrlImage(screenshotDataUrl);
 
     const headerKey = req.headers.get("x-gemini-key")?.trim();
@@ -120,7 +120,10 @@ Regras:
 3. Escreva "formalSummary" em terceira pessoa (ex.: "Responsável informou via WhatsApp que...").
 4. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
 
-    const pseudonymizer = createAiPseudonymizer(studentName ? [studentName] : [], []);
+    const pseudonymizer = createAiPseudonymizer(
+      studentName ? [studentName] : [],
+      guardianName ? [guardianName] : []
+    );
     const maskedReply = rawReply ? pseudonymizer.maskText(rawReply) : "";
 
     const textPrompt = parsedImage
@@ -274,7 +277,7 @@ ${maskedReply}
   } catch (error: any) {
     console.error("Erro em /api/ai/classify-reply:", error);
     return NextResponse.json(
-      { error: error?.message || "Erro interno ao classificar retorno." },
+      { error: "Erro interno ao classificar retorno pedagógico." },
       { status: 500 }
     );
   }

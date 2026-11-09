@@ -551,6 +551,10 @@ export default function DossieClient({
                       messageContent: log.messageContent || "",
                       sentByName: log.sentByName,
                       sentAt: log.sentAt,
+                      guardianReplied: log.guardianReplied,
+                      replyNotes: log.replyNotes,
+                      replyCategory: log.replyCategory,
+                      repliedAt: log.repliedAt,
                     });
 
                   return (

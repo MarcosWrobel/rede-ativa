@@ -35,6 +35,11 @@ export const RATE_LIMIT_POLICIES = {
     limit: 10,
     windowMs: 15 * 60 * 1000, // 10 erros em 15 min
   },
+  MESSAGE_REPLY: {
+    name: "MESSAGE_REPLY",
+    limit: 60,
+    windowMs: 60 * 1000, // 60 req/min
+  },
 } as const;
 
 export interface RateLimitResult {

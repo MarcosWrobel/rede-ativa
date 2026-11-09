@@ -5,6 +5,11 @@ import { requireAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
+import {
+  formatZodError,
+  messageManageUpdateSchema,
+  messageManageDeleteSchema,
+} from "@/lib/schemas";
 
 // PUT: Editar campos de um registro do histórico (Restrito a ADMIN)
 export async function PUT(req: Request) {
@@ -13,6 +18,11 @@ export async function PUT(req: Request) {
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
+    const parsed = messageManageUpdateSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+    }
+
     const {
       id,
       sentAt,
@@ -24,11 +34,7 @@ export async function PUT(req: Request) {
       replyCategory,
       deliveryStatus,
       messageContent,
-    } = body;
-
-    if (!id) {
-      return NextResponse.json({ error: "ID do registro não informado" }, { status: 400 });
-    }
+    } = parsed.data;
 
     const previous = await prisma.messageLog.findUnique({
       where: { id },
@@ -77,6 +83,16 @@ export async function PUT(req: Request) {
     const effectivePhone = updateData.phoneUsed !== undefined ? updateData.phoneUsed : previous.phoneUsed;
     const effectiveContent = updateData.messageContent !== undefined ? updateData.messageContent : previous.messageContent;
     const effectiveSentByName = updateData.sentByName !== undefined ? updateData.sentByName : previous.sentByName;
+    const effectiveGuardianReplied =
+      updateData.guardianReplied !== undefined
+        ? updateData.guardianReplied
+        : Boolean(previous.guardianReplied);
+    const effectiveReplyNotes =
+      updateData.replyNotes !== undefined ? updateData.replyNotes : previous.replyNotes;
+    const effectiveReplyCategory =
+      updateData.replyCategory !== undefined ? updateData.replyCategory : previous.replyCategory;
+    const effectiveRepliedAt =
+      updateData.repliedAt !== undefined ? updateData.repliedAt : previous.repliedAt;
 
     updateData.contentHash = computeMessageContentHash({
       studentId: previous.studentId,
@@ -86,6 +102,10 @@ export async function PUT(req: Request) {
       messageContent: effectiveContent,
       sentByName: effectiveSentByName,
       sentAt: effectiveSentAt,
+      guardianReplied: effectiveGuardianReplied,
+      replyNotes: effectiveReplyNotes,
+      replyCategory: effectiveReplyCategory,
+      repliedAt: effectiveRepliedAt,
     });
 
     const updated = await prisma.messageLog.update({
@@ -147,11 +167,11 @@ export async function DELETE(req: Request) {
     if (!authCheck.ok) return authCheck.response;
 
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json({ error: "ID do registro não informado" }, { status: 400 });
+    const parsedQuery = messageManageDeleteSchema.safeParse({ id: searchParams.get("id") });
+    if (!parsedQuery.success) {
+      return NextResponse.json({ error: formatZodError(parsedQuery.error) }, { status: 400 });
     }
+    const { id } = parsedQuery.data;
 
     const previous = await prisma.messageLog.findUnique({
       where: { id },

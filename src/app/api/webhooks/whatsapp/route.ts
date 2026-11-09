@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { classifyGuardianReplyHeuristic } from "@/lib/whatsappProvider";
 import { safeCompareStrings } from "@/lib/syncToken";
+import { computeMessageContentHash } from "@/lib/messageCrypto";
 
 export const dynamic = "force-dynamic";
 
@@ -94,20 +95,47 @@ export async function POST(req: Request) {
       });
 
       if (candidateLogs.length > 0) {
-        // Desambiguação de irmãos: se houver texto e múltiplos logs, tenta casar pelo primeiro nome do estudante
-        if (incomingText && candidateLogs.length > 1) {
-          const matchedByName = candidateLogs.find((l) => {
-            const firstName = l.student.name.split(" ")[0].toLowerCase();
-            return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
-          });
+        // Multi-tenant check: se os logs candidatos pertencerem a mais de uma instituição de ensino
+        // e não houver explicitSchoolId nem identificador unívoco:
+        const distinctSchoolIds = Array.from(
+          new Set(candidateLogs.map((l: any) => l.student?.schoolId).filter(Boolean))
+        );
+
+        if (!explicitSchoolId && distinctSchoolIds.length > 1) {
+          // Se houver texto, tenta desambiguar pelo primeiro nome do estudante
+          let matchedByName: any = null;
+          if (incomingText) {
+            matchedByName = candidateLogs.find((l: any) => {
+              const firstName = l.student.name.split(" ")[0].toLowerCase();
+              return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
+            });
+          }
+
           if (matchedByName) {
             targetLog = matchedByName;
+          } else {
+            // Rejeita associação cega entre escolas distintas para evitar vazamento / IDOR passivo
+            return NextResponse.json({
+              ignored: true,
+              reason: "Número vinculado a múltiplos estabelecimentos de ensino sem identificação explícita de escola.",
+            });
           }
-        }
+        } else {
+          // Desambiguação de irmãos: se houver texto e múltiplos logs, tenta casar pelo primeiro nome do estudante
+          if (incomingText && candidateLogs.length > 1) {
+            const matchedByName = candidateLogs.find((l: any) => {
+              const firstName = l.student.name.split(" ")[0].toLowerCase();
+              return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
+            });
+            if (matchedByName) {
+              targetLog = matchedByName;
+            }
+          }
 
-        // Prioriza o envio mais recente ainda pendente de resposta do responsável
-        if (!targetLog) {
-          targetLog = candidateLogs.find((l) => !l.guardianReplied) || candidateLogs[0];
+          // Prioriza o envio mais recente ainda pendente de resposta do responsável
+          if (!targetLog) {
+            targetLog = candidateLogs.find((l: any) => !l.guardianReplied) || candidateLogs[0];
+          }
         }
       }
     }
@@ -137,15 +165,31 @@ export async function POST(req: Request) {
     }
 
     const classified = classifyGuardianReplyHeuristic(incomingText);
+    const repliedAt = new Date();
+    const newContentHash = computeMessageContentHash({
+      studentId: targetLog.studentId,
+      schoolId: targetLog.student?.schoolId || null,
+      phoneUsed: targetLog.phoneUsed,
+      reasonTitle: targetLog.reasonTitle,
+      messageContent: targetLog.messageContent,
+      sentByName: targetLog.sentByName,
+      sentAt: targetLog.sentAt,
+      guardianReplied: true,
+      replyNotes: classified.formalSummary,
+      replyCategory: classified.category,
+      repliedAt,
+    });
+
     const updated = await prisma.messageLog.update({
       where: { id: targetLog.id },
       data: {
         guardianReplied: true,
         replyCategory: classified.category,
         replyNotes: classified.formalSummary,
-        repliedAt: new Date(),
+        repliedAt,
         deliveryStatus: "READ",
         deliveryUpdatedAt: new Date(),
+        contentHash: newContentHash,
       },
     });
 
@@ -153,11 +197,12 @@ export async function POST(req: Request) {
       action: "WEBHOOK_REPLY",
       entityType: "MessageLog",
       entityId: targetLog.id,
-      schoolId: targetLog.student.schoolId || null,
+      schoolId: targetLog.student?.schoolId || null,
       details: {
-        studentName: targetLog.student.name,
+        studentName: targetLog.student?.name,
         phone: digits,
         category: classified.category,
+        contentHash: newContentHash,
       },
       user: {
         name: "Webhook Automático WhatsApp",

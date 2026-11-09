@@ -45,6 +45,7 @@ export interface MessageLogModalItem {
   student?: {
     id?: string;
     name?: string;
+    guardianName?: string | null;
     classGroup?: {
       name?: string;
     } | null;
@@ -177,6 +178,7 @@ export default function WhatsAppReplyCaptureModal({
             rawReply: trimmed,
             screenshotDataUrl: screenshotDataUrl || undefined,
             studentName: resolvedStudentName,
+            guardianName: messageLog?.student?.guardianName || undefined,
             reasonTitle: messageLog?.reasonTitle || "Busca Ativa Escolar",
           }),
         });

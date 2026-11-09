@@ -149,6 +149,42 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
     expect(html).toContain("Cole aqui a resposta recebida ou clique no botão acima para extrair da aba ativa");
   });
 
+  it("opera com neutralidade de marca e sem dependência de scrapers para nova escola na edição INSTITUCIONAL_ESSENCIAL", () => {
+    const municipalLog = {
+      ...mockLog,
+      id: "msg-municipal-999",
+      phoneUsed: "43988887777",
+      student: {
+        id: "student-muni-1",
+        name: "Carlos Eduardo da Silva",
+        classGroup: { name: "5º Ano Municipal" },
+      },
+    };
+
+    const html = renderToString(
+      <WhatsAppReplyCaptureModal
+        isOpen={true}
+        onClose={() => {}}
+        messageLog={municipalLog}
+        studentName="Carlos Eduardo da Silva"
+        classNameLabel="5º Ano Municipal"
+        onSuccess={() => {}}
+      />
+    );
+
+    // Não contém referências hardcoded à escola piloto nem à sede
+    expect(html).not.toContain("41042730");
+    expect(html).not.toContain("default-leopoldina");
+    expect(html).not.toContain("Leopoldina");
+
+    // Contém os elementos neutros e canônicos da Busca Ativa Rede Ativa
+    expect(html).toContain("Carlos Eduardo da Silva");
+    expect(html).toContain("5º Ano Municipal");
+    expect(html).toContain("43988887777");
+    expect(html).toContain("Capturar Retorno do Responsável");
+    expect(html).toContain("Confirmar e Selar Retorno (SHA-256)");
+  });
+
   describe("isPhoneCompatible (Tolerância de formato e DDI)", () => {
     it("reconhece compatibilidade entre formato limpo e formato com DDI 55", () => {
       expect(isPhoneCompatible("5542999998888", "42999998888")).toBe(true);

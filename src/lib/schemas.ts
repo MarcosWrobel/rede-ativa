@@ -134,36 +134,54 @@ export const replyCategoryEnum = z.enum([
 ]);
 
 export const messageSendSchema = z.object({
-  studentId: z.string().trim().min(1, "Aluno é obrigatório"),
-  templateId: z.string().optional().nullable(),
-  reasonTitle: z.string().trim().min(1, "Motivo é obrigatório"),
-  messageContent: z.string().trim().min(2, "Conteúdo da mensagem é obrigatório"),
-  customPhone: z.string().optional().nullable(),
+  studentId: z.string().trim().min(1, "Aluno é obrigatório").max(100),
+  templateId: z.string().trim().max(100).optional().nullable(),
+  reasonTitle: z.string().trim().min(1, "Motivo é obrigatório").max(300),
+  messageContent: z.string().trim().min(2, "Conteúdo da mensagem é obrigatório").max(10_000),
+  customPhone: z.string().trim().max(30).optional().nullable(),
   initialDeliveryStatus: initialDeliveryStatusEnum.optional(),
 });
 
 export const messageDeliveryStatusUpdateSchema = z.object({
-  logId: z.string().trim().min(1, "ID do registro é obrigatório"),
+  logId: z.string().trim().min(1, "ID do registro é obrigatório").max(100),
   deliveryStatus: deliveryStatusEnum,
 });
 
 export const messageReplySchema = z.object({
-  logId: z.string().trim().min(1, "ID do registro é obrigatório"),
+  logId: z.string().trim().min(1, "ID do registro é obrigatório").max(100),
   guardianReplied: z.boolean(),
   replyNotes: z.string().max(4000).optional().nullable(),
   replyCategory: replyCategoryEnum.optional().nullable(),
-  rawReply: z.string().max(6000).optional().nullable(),
+  rawReply: z.string().max(10_000).optional().nullable(),
   extractedAt: z.union([z.string(), z.date()]).optional().nullable(),
   sourceMethod: z.enum(["MANUAL", "EXTENSION_ASSISTED"]).optional().default("MANUAL"),
   classifyWithAi: z.boolean().optional().default(false),
 });
 
+export const messageManageUpdateSchema = z.object({
+  id: z.string().trim().min(1, "ID do registro é obrigatório").max(100),
+  sentAt: z.union([z.string(), z.date()]).optional(),
+  reasonTitle: z.string().trim().min(1).max(300).optional(),
+  phoneUsed: z.string().trim().min(8).max(30).optional(),
+  sentByName: z.string().trim().min(1).max(200).optional(),
+  guardianReplied: z.boolean().optional(),
+  replyNotes: z.string().max(4000).optional().nullable(),
+  replyCategory: replyCategoryEnum.optional().nullable(),
+  deliveryStatus: deliveryStatusEnum.optional(),
+  messageContent: z.string().trim().min(1).max(10_000).optional(),
+});
+
+export const messageManageDeleteSchema = z.object({
+  id: z.string().trim().min(1, "ID do registro é obrigatório").max(100),
+});
+
 export const aiClassifyReplySchema = z
   .object({
-    rawReply: z.string().trim().optional().default(""),
+    rawReply: z.string().trim().max(10_000).optional().default(""),
     screenshotDataUrl: z.string().max(6_000_000).optional().nullable(),
-    studentName: z.string().trim().optional().nullable(),
-    reasonTitle: z.string().trim().optional().nullable(),
+    studentName: z.string().trim().max(200).optional().nullable(),
+    guardianName: z.string().trim().max(200).optional().nullable(),
+    reasonTitle: z.string().trim().max(300).optional().nullable(),
   })
   .refine(
     (d) =>
