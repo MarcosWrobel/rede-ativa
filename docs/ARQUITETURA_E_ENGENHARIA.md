@@ -117,7 +117,7 @@ flowchart TD
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `jspdf`, `qrcode`** | `^0.18.5` / `^1.9.1` / `^4.2.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão de Dossiês A4 e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.5.0` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta e confirmação automática de envio WhatsApp, empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-leopoldina.zip`. |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **51 suítes / 353 testes automatizados aprovados (100% verdes)** (~4,5s) cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), testes de modal e integração WhatsApp (`whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`), tokens de sincronização da extensão (`schoolSyncToken.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), auditoria de segurança e estabilidade V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **52 suítes / 364 testes automatizados aprovados (100% verdes)** (~4,5s) cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), testes de modal e integração WhatsApp (`whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`), tokens de sincronização da extensão (`schoolSyncToken.test.ts`), duas versões da plataforma e herança de políticas (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade e arquivamento do livro de atas (`atasArchiveUsability.test.ts`), auditoria de segurança e estabilidade V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
 
 ---
 
@@ -271,9 +271,9 @@ erDiagram
 | `/alunos/[id]` | `PEDAGOGA` | Prontuário 360º do estudante (frequência, contatos, atestados, prazos de atas e digitalização física). |
 | `/alunos/[id]/dossie` | `PEDAGOGA` | Emissão de Dossiê Pericial A4 para Conselho Tutelar / MP com selo criptográfico e sigilo ECA. |
 | `/atestados` | `PEDAGOGA` | Central de lançamento e auditoria de atestados médicos e dispensas legais vigentes. |
-| `/atas` | `PEDAGOGA` | Livro Oficial Digital de Atas: editor widescreen, ditado por voz, IA NRE, PIN de fé pública e QR Code. |
-| `/atas/[id]/imprimir` | `PEDAGOGA` | Diagramação oficial A4 em folha única (`1 of 1`) com moldura perimétrica, brasão e nota extemporânea. |
-| `/atas/livro/[ano]` | `PEDAGOGA` | Livro Anual consolidado com Termo de Abertura, índice sequencial e Termo de Encerramento. |
+| `/atas` | `PEDAGOGA` | Livro Oficial Digital de Atas: editor widescreen, ditado por voz, IA NRE, PIN de fé pública, QR Code, digitalização direta de via física/Gov.br, download rápido de PDF/A-1b e filtro de pendências. |
+| `/atas/[id]/imprimir` | `PEDAGOGA` | Diagramação oficial A4 em folha única (`1 of 1`) com moldura perimétrica, brasão, nota extemporânea e download PDF/A-1b. |
+| `/atas/livro/[ano]` | `PEDAGOGA` | Livro Anual consolidado com Termo de Abertura, índice sequencial, Termo de Encerramento com extenso feminino (0–999) e datas parametrizáveis. |
 | `/encaminhamentos` | `PEDAGOGA` | Central de alertas temáticos e baixa de combinados/prazos firmados em atas. |
 | `/boletim` | `PEDAGOGA` | Boletim semanal executivo de infrequência e fila prioritária sem contato > 7 dias. |
 | `/relatorios` | `PEDAGOGA` | Indicadores analíticos agregados por motivo, segmento, trimestre, autora e status de entrega. |
@@ -345,10 +345,10 @@ erDiagram
 
 A integridade arquitetural é validada continuamente via **Vitest (`npm test`)** e compilação estrita **Next.js 16 + Turbopack (`npm run build`)**:
 
-- **Volume Atual:** **51 suítes / 353 testes automatizados aprovados (100% verdes)**.
+- **Volume Atual:** **52 suítes / 364 testes automatizados aprovados (100% verdes)**.
 - **Pilares de Cobertura:**
   - **Segurança Adversarial Multi-Tenant, V3 & Mensageria:** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `messageReplySecurity.test.ts`, `schoolSyncToken.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`.
-  - **Conformidade Jurídica, PIN & Perícia Forense:** `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.
+  - **Conformidade Jurídica, PIN & Perícia Forense:** `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `atasArchiveUsability.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.
   - **Privacidade LGPD/ECA & IA:** `aiPseudonymizer.test.ts`, `nreAtaFormalize.test.ts`, `predictiveAnalytics.test.ts`.
   - **Operação Pedagógica, SERE, Extensão & SSR:** `sereParser.test.ts`, `studentMatcher.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `clientDispatcher.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`.
 

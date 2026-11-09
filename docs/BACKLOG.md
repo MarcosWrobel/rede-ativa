@@ -177,6 +177,21 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ---
 
+## Épico 15 — Usabilidade do Livro de Atas, Digitalização Direta & Preservação Arquivística (Sprint 17) — ✅ Concluído
+
+> Base legal e arquivística: Lei Federal nº 14.063/2020, Lei nº 8.159/1991 (Política Nacional de Arquivos), Decreto nº 10.278/2020 (Digitalização de Documentos Públicos), ISO 19005-1 Level B (PDF/A-1b), LGPD e ECA.
+
+- [x] **`ATA-07`** `[P1 | Esforço: M]` **Integração do `PhysicalScanModal` na Listagem Geral de Atas & Suporte a Orientação Docente**  
+  Eliminação do gargalo operacional que exigia abrir o Prontuário 360º do aluno para anexar a via física/Gov.br digitalizada. Botão de digitalização direta adicionado em [`src/app/atas/AtasClient.tsx`](../src/app/atas/AtasClient.tsx) e no modo de visualização imutável em [`src/components/ata/AtaEditorModal.tsx`](../src/components/ata/AtaEditorModal.tsx), estendendo o arquivamento físico para atas sem estudantes vinculados (`ORIENTACAO_DOCENTE`).
+- [x] **`ATA-08`** `[P1 | Esforço: P]` **Atalho Rápido de Emissão da Certidão PDF/A-1b (ISO 19005-1 Level B)**  
+  Acesso em 1 clique ao artefato de preservação permanente arquivística com conformidade ISO 19005-1 Level B, metadados XMP e fontes embutidas na listagem central de atas (`AtasClient.tsx`) e na tela de celebração pós-lavratura (`AtaEditorModal.tsx`), contornando a necessidade de abrir o layout de impressão HTML para download do arquivo preservado.
+- [x] **`ATA-09`** `[P1 | Esforço: M]` **Badges de Status Físico e Filtro de Saneamento de Pendências de Arquivamento**  
+  Implementação de badges factuais e autoexplicativas de custódia física (*"Via Física Anexa"*, *"Gov.br Anexo"*, *"Pendente de Anexo"*) e filtro reativo instantâneo no cliente (*"Arquivo: Todos"*, *"Com Via Física / Gov.br"*, *"Pendente de Anexo"*) na central `/atas`, permitindo triagem e saneamento imediato do arquivo físico pela equipe pedagógica.
+- [x] **`ATA-10`** `[P1 | Esforço: M]` **Parametrização do Livro Anual & Numeração por Extenso Feminino (0–999)**  
+  Suporte a datas dinâmicas configuráveis de abertura e encerramento do Livro de Atas Anual em [`src/app/atas/livro/[ano]/LivroAnualClient.tsx`](../src/app/atas/livro/[ano]/LivroAnualClient.tsx) (com derivação automática baseada no ano letivo e seletores nativos na barra de ação `print:hidden`), acompanhado da conversão por extenso com concordância de gênero gramatical feminino (*"uma"*, *"duas"*, *"quarenta e duas atas"*), validado por 11 testes em [`src/lib/__tests__/atasArchiveUsability.test.ts`](../src/lib/__tests__/atasArchiveUsability.test.ts) (**364 testes em 52 suítes Vitest**).
+
+---
+
 ## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Não-Essencial no Momento)
 
 > **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM).  
@@ -215,4 +230,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 14** | CI GitHub Actions, Rate-Limiter, PDF/A-1b & Storage Multi-Driver | Épico 12 | ✅ Concluído |
 | **Sprint 15** | Duas Versões PR, Desacoplamento de Scrapers & Herança SEMEC | Épico 13 | ✅ Concluído |
 | **Sprint 16** | Fluxo Assistido WhatsApp Web & Selagem Bipartida | Épico 14 | ✅ Concluído |
+| **Sprint 17** | Usabilidade do Livro de Atas, Digitalização Direta & Preservação Arquivística | Épico 15 | ✅ Concluído |
 | **Futuro** | Observabilidade APM, Filas Assíncronas & Refatoração DDD | Expansão | ⏳ Planejado sob Demanda |

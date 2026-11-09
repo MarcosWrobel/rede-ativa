@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   BookOpenCheck,
@@ -30,8 +30,12 @@ import {
   AlertTriangle,
   X,
   GraduationCap,
+  Camera,
+  Download,
+  Paperclip,
 } from "lucide-react";
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
+import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import AtaQrCode from "@/components/ata/AtaQrCode";
 import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
 
@@ -110,6 +114,7 @@ export default function AtasClient({
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory || "ALL");
+  const [physicalScanFilter, setPhysicalScanFilter] = useState<"ALL" | "ATTACHED" | "PENDING">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [minutes, setMinutes] = useState<any[]>([]);
@@ -117,6 +122,7 @@ export default function AtasClient({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(Boolean(initialCreateOpen));
   const [selectedStudentForDraft, setSelectedStudentForDraft] = useState<string | undefined>(initialStudentId);
   const [editingMinute, setEditingMinute] = useState<any | null>(null);
+  const [scanningMinute, setScanningMinute] = useState<any | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -220,6 +226,25 @@ export default function AtasClient({
     0
   );
 
+  const displayedMinutes = useMemo(() => {
+    if (physicalScanFilter === "ALL") return minutes;
+    if (physicalScanFilter === "ATTACHED") {
+      return minutes.filter(
+        (m) => Boolean(m.hasPhysicalScan || m.physicalSignedScanData || m.govBrVerified)
+      );
+    }
+    if (physicalScanFilter === "PENDING") {
+      return minutes.filter(
+        (m) =>
+          m.status === "FINALIZED" &&
+          !m.hasPhysicalScan &&
+          !m.physicalSignedScanData &&
+          !m.govBrVerified
+      );
+    }
+    return minutes;
+  }, [minutes, physicalScanFilter]);
+
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
@@ -307,7 +332,7 @@ export default function AtasClient({
       {/* Filtros e Busca */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
-          <div className="md:col-span-5 relative">
+          <div className="md:col-span-4 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             <input
               type="text"
@@ -345,7 +370,7 @@ export default function AtasClient({
             </select>
           </div>
 
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
@@ -359,6 +384,19 @@ export default function AtasClient({
               <option value="SAUDE_VULNERABILIDADE">Saúde / Vulnerabilidade</option>
               <option value="REDE_PROTECAO_CT">Rede de Proteção / CT</option>
               <option value="ORIENTACAO_ROTINA">Orientação de Rotina</option>
+            </select>
+          </div>
+
+          <div className="md:col-span-2">
+            <select
+              value={physicalScanFilter}
+              onChange={(e) => setPhysicalScanFilter(e.target.value as any)}
+              className="w-full py-2.5 px-3 border border-slate-200 rounded-xl bg-slate-50/50 font-semibold text-slate-700"
+              title="Filtrar por status do arquivo da via física / digitalização"
+            >
+              <option value="ALL">Arquivo: Todos</option>
+              <option value="ATTACHED">Com Via Física / Gov.br</option>
+              <option value="PENDING">Pendente de Anexo</option>
             </select>
           </div>
         </div>
@@ -375,7 +413,7 @@ export default function AtasClient({
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-xs text-slate-500">Carregando livro de atas...</div>
-        ) : minutes.length === 0 ? (
+        ) : displayedMinutes.length === 0 ? (
           <div className="p-12 text-center space-y-2">
             <FileText className="w-8 h-8 text-slate-300 mx-auto" />
             <p className="text-sm font-bold text-slate-700">Nenhuma ata encontrada</p>
@@ -385,7 +423,7 @@ export default function AtasClient({
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {minutes.map((m) => {
+            {displayedMinutes.map((m) => {
               const isFinal = m.status === "FINALIZED";
               const isVoid = m.status === "VOIDED";
               const ataNumStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
@@ -436,6 +474,33 @@ export default function AtasClient({
                           <Lock className="w-3 h-3" />
                           <span>Sigilo Reforçado</span>
                         </span>
+                      )}
+
+                      {/* Badge de Arquivamento Físico e Gov.br (apenas para atas lavradas) */}
+                      {isFinal && (
+                        <>
+                          {m.hasPhysicalScan || m.physicalSignedScanData ? (
+                            <span
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200"
+                              title={
+                                m.govBrVerified
+                                  ? `Autenticado via Gov.br (${m.govBrProtocol || "ITI"})`
+                                  : "Via física assinada digitalizada"
+                              }
+                            >
+                              <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                              <span>{m.govBrVerified ? "Gov.br Anexo" : "Via Física Anexa"}</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200"
+                              title="Pendente de digitalização da folha assinada pelos participantes"
+                            >
+                              <Paperclip className="w-3 h-3 text-amber-600" />
+                              <span>Pendente de Anexo</span>
+                            </span>
+                          )}
+                        </>
                       )}
 
                       <span className="text-[11px] text-slate-400 flex items-center space-x-1">
@@ -494,6 +559,31 @@ export default function AtasClient({
                   <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
                     {isFinal && (
                       <>
+                        <button
+                          type="button"
+                          onClick={() => setScanningMinute(m)}
+                          className={`p-2 rounded-xl border transition cursor-pointer ${
+                            m.hasPhysicalScan || m.physicalSignedScanData
+                              ? "border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
+                              : "border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 text-slate-700 hover:text-indigo-700"
+                          }`}
+                          title={
+                            m.hasPhysicalScan || m.physicalSignedScanData
+                              ? "Visualizar ou substituir via física / Gov.br"
+                              : "Digitalizar folha assinada ou anexar Gov.br"
+                          }
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+
+                        <a
+                          href={`/api/atas/${m.id}/pdfa?download=1`}
+                          className="p-2 rounded-xl border border-slate-200 hover:bg-sky-50 hover:border-sky-200 text-slate-700 hover:text-sky-700 transition"
+                          title="Baixar Certidão Arquivística PDF/A-1b (ISO 19005-1 Level B)"
+                        >
+                          <Download className="w-4 h-4 text-sky-600" />
+                        </a>
+
                         <button
                           type="button"
                           onClick={() => {
@@ -750,6 +840,30 @@ export default function AtasClient({
           </div>
         </div>
       )}
+
+      {/* Modal de Captura de Via Física e Assinatura Gov.br (JUR-04) */}
+      <PhysicalScanModal
+        isOpen={Boolean(scanningMinute)}
+        minute={scanningMinute}
+        onClose={() => setScanningMinute(null)}
+        onSuccess={(updated) => {
+          const hasScan = Boolean(
+            updated.physicalSignedScanData || updated.physicalScanStorageKey
+          );
+          setMinutes((prev) =>
+            prev.map((m) =>
+              m.id === updated.id
+                ? {
+                    ...m,
+                    ...updated,
+                    hasPhysicalScan: hasScan,
+                  }
+                : m
+            )
+          );
+          setScanningMinute(null);
+        }}
+      />
     </div>
   );
 }

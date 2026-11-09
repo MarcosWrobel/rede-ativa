@@ -5,6 +5,7 @@ import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
 import AtaQrCode from "./AtaQrCode";
 import SigningPinModal from "./SigningPinModal";
+import PhysicalScanModal from "./PhysicalScanModal";
 import { calculateBusinessDaysDiff } from "@/lib/signingPin";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
@@ -39,6 +40,7 @@ import {
   Clock,
   Download,
   GraduationCap,
+  Camera,
 } from "lucide-react";
 
 interface StudentOption {
@@ -158,6 +160,7 @@ export default function AtaEditorModal({
   const [showAdminDeleteConfirm, setShowAdminDeleteConfirm] = useState(false);
   const [isDeletingAdmin, setIsDeletingAdmin] = useState(false);
   const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
   // Carrega chave Gemini salva no navegador e checa chave no servidor
   useEffect(() => {
@@ -1103,6 +1106,15 @@ export default function AtaEditorModal({
               <span>Imprimir / Salvar PDF Oficial A4</span>
             </a>
 
+            <a
+              href={`/api/atas/${finalizedAta.id}/pdfa?download=1`}
+              className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-extrabold transition shadow-xs"
+              title="Baixar Certidão Arquivística PDF/A-1b (ISO 19005-1 Level B)"
+            >
+              <Download className="w-4 h-4 text-sky-600" />
+              <span>Baixar PDF/A-1b</span>
+            </a>
+
             {finalizedAta.agreementsSummary && (() => {
               const schoolHeader = finalizedAta.school?.name || existingMinute?.school?.name || "Rede Ativa";
               const waUrl = buildWhatsAppDispatchUrl(
@@ -1503,6 +1515,23 @@ export default function AtaEditorModal({
                 <Download className="w-4 h-4 text-emerald-600" />
                 <span>Baixar PDF/A-1b</span>
               </a>
+              <button
+                type="button"
+                onClick={() => setIsScanModalOpen(true)}
+                className={`inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border font-bold transition cursor-pointer ${
+                  viewMinuteData.hasPhysicalScan || viewMinuteData.physicalSignedScanData
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                    : "border-slate-300 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700"
+                }`}
+                title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
+              >
+                <Camera className="w-4 h-4 text-indigo-600" />
+                <span>
+                  {viewMinuteData.hasPhysicalScan || viewMinuteData.physicalSignedScanData
+                    ? "Via Física Anexa"
+                    : "Digitalizar Folha"}
+                </span>
+              </button>
               {viewMinuteData.verificationCode && (
                 <a
                   href={`/validar/ata/${viewMinuteData.verificationCode}`}
@@ -1542,6 +1571,26 @@ export default function AtaEditorModal({
           }}
           hasPinInitial={hasSigningPin}
         />
+
+        {/* Modal de Captura de Via Física e Assinatura Gov.br (JUR-04) */}
+        {isScanModalOpen && viewMinuteData && (
+          <PhysicalScanModal
+            isOpen={isScanModalOpen}
+            minute={viewMinuteData}
+            onClose={() => setIsScanModalOpen(false)}
+            onSuccess={(updated) => {
+              const hasScan = Boolean(
+                updated.physicalSignedScanData || updated.physicalScanStorageKey
+              );
+              setViewMinuteData((prev: any) => ({
+                ...prev,
+                ...updated,
+                hasPhysicalScan: hasScan,
+              }));
+              setIsScanModalOpen(false);
+            }}
+          />
+        )}
       </AtaDialog>
     );
   }

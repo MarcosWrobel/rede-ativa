@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Printer, ArrowLeft, BookOpen, ShieldCheck } from "lucide-react";
 
@@ -38,31 +39,177 @@ function getSchoolNetworkHeader(school: any) {
   };
 }
 
+const MONTHS_PT_BR = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+export function formatFormalOpeningDate(dateStr: string, fallbackYear: number): string {
+  if (!dateStr) return `Aos 02 dias do mês de fevereiro de ${fallbackYear}`;
+  const parts = dateStr.split("-");
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dayStr = String(d).padStart(2, "0");
+    const monthName = MONTHS_PT_BR[m] || "fevereiro";
+    return `Aos ${dayStr} dias do mês de ${monthName} de ${y}`;
+  }
+  return `Aos 02 dias do mês de fevereiro de ${fallbackYear}`;
+}
+
+export function formatFormalClosingDate(dateStr: string, fallbackYear: number): string {
+  if (!dateStr) return `Aos 22 dias do mês de dezembro de ${fallbackYear}`;
+  const parts = dateStr.split("-");
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dayStr = String(d).padStart(2, "0");
+    const monthName = MONTHS_PT_BR[m] || "dezembro";
+    return `Aos ${dayStr} dias do mês de ${monthName} de ${y}`;
+  }
+  return `Aos 22 dias do mês de dezembro de ${fallbackYear}`;
+}
+
+export function numberToPortugueseWords(num: number): string {
+  if (num === 0) return "zero";
+  if (num === 1) return "uma";
+  if (num === 2) return "duas";
+
+  const units = ["", "uma", "duas", "três", "quatro", "cinco", "seis", "sete", "oito", "nove"];
+  const teens = [
+    "dez",
+    "onze",
+    "doze",
+    "treze",
+    "quatorze",
+    "quinze",
+    "dezesseis",
+    "dezessete",
+    "dezoito",
+    "dezenove",
+  ];
+  const tens = [
+    "",
+    "dez",
+    "vinte",
+    "trinta",
+    "quarenta",
+    "cinquenta",
+    "sessenta",
+    "setenta",
+    "oitenta",
+    "noventa",
+  ];
+  const hundreds = [
+    "",
+    "cento",
+    "duzentas",
+    "trezentas",
+    "quatrocentas",
+    "quinhentas",
+    "seiscentas",
+    "setecentas",
+    "oitocentas",
+    "novecentas",
+  ];
+
+  if (num === 100) return "cem";
+  if (num < 10) return units[num];
+  if (num < 20) return teens[num - 10];
+  if (num < 100) {
+    const ten = Math.floor(num / 10);
+    const rest = num % 10;
+    return rest === 0 ? tens[ten] : `${tens[ten]} e ${units[rest]}`;
+  }
+  if (num < 1000) {
+    const hundred = Math.floor(num / 100);
+    const rest = num % 100;
+    return rest === 0 ? hundreds[hundred] : `${hundreds[hundred]} e ${numberToPortugueseWords(rest)}`;
+  }
+  return String(num);
+}
+
 export default function LivroAnualClient({ school, year, minutes }: Props) {
   const totalAtas = minutes.length;
   const networkHeader = getSchoolNetworkHeader(school);
   const schoolLogo = school?.logoUrl || "/logo.svg";
 
+  const initialOpening = useMemo(() => {
+    if (minutes.length > 0 && minutes[0].attendedAt) {
+      const d = new Date(minutes[0].attendedAt);
+      return `${year}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    return `${year}-02-02`;
+  }, [minutes, year]);
+
+  const initialClosing = useMemo(() => {
+    if (minutes.length > 0 && minutes[minutes.length - 1].attendedAt) {
+      const d = new Date(minutes[minutes.length - 1].attendedAt);
+      return `${year}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    return `${year}-12-22`;
+  }, [minutes, year]);
+
+  const [openingDate, setOpeningDate] = useState<string>(initialOpening);
+  const [closingDate, setClosingDate] = useState<string>(initialClosing);
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Barra de Ações (Oculta na Impressão) */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between print:hidden">
-        <Link
-          href="/atas"
-          className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Atas</span>
-        </Link>
+      {/* Barra de Ações e Configuração (Oculta na Impressão) */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/atas"
+            className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Atas</span>
+          </Link>
 
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
-        >
-          <Printer className="w-4 h-4 text-amber-400" />
-          <span>Imprimir livro</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
+          >
+            <Printer className="w-4 h-4 text-amber-400" />
+            <span>Imprimir livro</span>
+          </button>
+        </div>
+
+        {/* Parametrização das Datas do Livro */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs">
+          <span className="font-bold text-slate-700">Datas oficiais do ano letivo:</span>
+          <label className="flex items-center space-x-1.5 text-slate-600">
+            <span>Abertura:</span>
+            <input
+              type="date"
+              value={openingDate}
+              onChange={(e) => setOpeningDate(e.target.value)}
+              className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-medium bg-slate-50 focus:bg-white"
+            />
+          </label>
+          <label className="flex items-center space-x-1.5 text-slate-600">
+            <span>Encerramento:</span>
+            <input
+              type="date"
+              value={closingDate}
+              onChange={(e) => setClosingDate(e.target.value)}
+              className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-medium bg-slate-50 focus:bg-white"
+            />
+          </label>
+        </div>
       </div>
 
       {/* DOCUMENTO DO LIVRO ANUAL */}
@@ -111,7 +258,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               Termo de Abertura
             </h3>
             <p>
-              Aos 02 dias do mês de fevereiro de {year}, abre-se o presente Livro de Atas do
+              {formatFormalOpeningDate(openingDate, year)}, abre-se o presente Livro de Atas do
               Atendimento Pedagógico e Acompanhamento Escolar do <strong>{school.name}</strong>,
               destinado a lavrar eletronicamente todos os registros, atendimentos a familiares,
               deliberações da Equipe Pedagógica e encaminhamentos à Rede de Proteção da Criança
@@ -224,9 +371,9 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               Termo de Encerramento
             </h3>
             <p>
-              Aos 22 dias do mês de dezembro de {year}, encerra-se o presente Livro de Atas do
+              {formatFormalClosingDate(closingDate, year)}, encerra-se o presente Livro de Atas do
               Atendimento Pedagógico e Acompanhamento Escolar do <strong>{school.name}</strong>,
-              contendo o total de <strong>{totalAtas} ({numberToWords(totalAtas)})</strong> ata(s)
+              contendo o total de <strong>{totalAtas} ({numberToPortugueseWords(totalAtas)})</strong> ata(s)
               oficialmente lavrada(s) e arquivada(s) eletronicamente sob responsabilidade da
               Equipe Pedagógica e Direção Escolar para fins de arquivo permanente na Secretaria
               Escolar e instrução processual junto {networkHeader.protocolSystem}.
@@ -247,11 +394,4 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
       </div>
     </div>
   );
-}
-
-function numberToWords(num: number): string {
-  if (num === 0) return "zero";
-  if (num === 1) return "uma";
-  if (num === 2) return "duas";
-  return String(num);
 }

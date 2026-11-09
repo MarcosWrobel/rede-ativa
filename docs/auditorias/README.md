@@ -12,4 +12,4 @@ Este diretório preserva os **relatórios de auditoria point-in-time (snapshots 
 | **08/11/2026 (V4)** | *Auditoria White-Box do Sistema de Retorno de Mensagens da Busca Ativa* (Registro Oficial de Governança): blindagem IDOR em `/reply`, `/status` e `/manage`, garantia de fé pública e integridade do hash bipartido SHA-256 (`computeMessageContentHash`), desambiguação multi-tenant de webhooks WhatsApp, pseudonimização diacrítica LGPD/ECA e contenção de vazamento 500 em IA. | **51 suítes / 353 testes** |
 
 > [!NOTE]
-> Para consultar o **estado arquitetural vigente e unificado** do sistema (21 models Prisma, 28 páginas SSR, 49 Route Handlers, 51 suítes e 353 testes aprovados), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).
+> Para consultar o **estado arquitetural vigente e unificado** do sistema (21 models Prisma, 28 páginas SSR, 49 Route Handlers, 52 suítes e 364 testes aprovados), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).

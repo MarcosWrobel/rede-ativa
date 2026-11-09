@@ -51,11 +51,11 @@ flowchart TD
 - **Frontend & Backend**: Next.js 16.4 (App Router + Turbopack), React 19.3, TypeScript 6.0 estrito
 - **PWA Mobile**: Aplicativo web progressivo instalável com Service Worker (`sw.js`) e ícones adaptativos
 - **Design System & Acessibilidade**: Tailwind CSS v4, Lucide Icons, `<dialog>` widescreen nativo e diagramação A4 pericial
-- **Banco de Dados Multi-Tenant**: Neon PostgreSQL Serverless (AWS São Paulo - `sa-east-1`) com 20 models em Prisma ORM 6 (`EducationNetwork`, `School`, `UserSchool`, `PedagogicalMinute`, etc.)
+- **Banco de Dados Multi-Tenant**: Neon PostgreSQL Serverless (AWS São Paulo - `sa-east-1`) com 21 models em Prisma ORM 6 (`EducationNetwork`, `School`, `UserSchool`, `PedagogicalMinute`, etc.)
 - **Segurança, Fé Pública & Perícia**: NextAuth.js v5, Proxy de borda (`src/proxy.ts`), guarda atômica `assertTenantOwnership` (REST e SSR), validação anti-spoofing em `getCurrentSchool`, proteção contra CSV Formula Injection (CWE-1236 + RFC 4180), PIN de Fé Pública (`PBKDF2-SHA512`), captura vetorial de assinatura (`biometricStrokeData`), WebAuthn/FIDO2 e selamento `SHA-256` canônico
 - **Ingestão Poliglota (SERE/SEED-PR)**: Parser em memória com `xlsx` (`.xls` BIFF8 e `.xlsx`), `unpdf` (`.pdf`) e `.csv` (`UTF-8` / `Windows-1252`), com desduplicação de dupla matrícula técnica
 - **Extensão Universal Chrome MV3 (`v1.5.0`)**: Sincronização assistida com Power BI (*Presente na Escola*) e portal SERP/Celepar, Janela Dedicada Compacta (`480x760px`) e confirmação automática de envio no WhatsApp Web
-- **Qualidade & Confiabilidade**: **215 testes automatizados em 37 suítes Vitest** cobrindo os 7 vetores adversariais multi-tenant (`adversarialQa.test.ts`), auditoria jurídico-pericial V2 (`securityAndLegalAuditV2.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
+- **Qualidade & Confiabilidade**: **364 testes automatizados em 52 suítes Vitest (100% verdes)** cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança e integridade de retorno WhatsApp (`messageReplySecurity.test.ts`), usabilidade e preservação arquivística de atas (`atasArchiveUsability.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
 
 ---
 
@@ -87,7 +87,7 @@ npm run build
 | **Painel Secretaria (SEMEC)** | `/secretaria` | Dashboard executivo municipal com ranking inter-escolas e análise preditiva de causas de infrequência. |
 | **Painel Direção Escolar** | `/gestao` · `/equipe` · `/configuracoes/escola` | KPIs da unidade, criação de turmas, gestão de servidores autorizados, brasão oficial e token de sincronização. |
 | **Busca Ativa WhatsApp** | `/busca-ativa` | Disparo individual ou Fila Assistida por Turma com salto automático de atestados vigentes e saneamento de telefones. |
-| **Livro de Atas Digital** | `/atas` · `/atas/livro/[ano]` | Numeração anual sequencial, editor widescreen com voz e IA NRE, PIN do servidor, traço forense, QR Code móvel com biometria, scan físico/Gov.br, adendos *"Em tempo"* e Livro Anual. |
+| **Livro de Atas Digital** | `/atas` · `/atas/livro/[ano]` | Numeração anual sequencial, editor widescreen com voz e IA NRE, PIN do servidor, traço forense, QR Code móvel com biometria, scan físico/Gov.br direto na listagem e na visualização, atalho rápido PDF/A-1b (ISO 19005-1), adendos *"Em tempo"*, filtro de pendências arquivísticas e Livro Anual customizável. |
 | **Validação & Assinatura** | `/validar/ata/[code]` · `/assinar/ata/[token]` | Certidão Cega pública LGPD-safe (`SHA-256`) e portal móvel temporário para assinatura presencial/remota. |
 | **Prontuário 360º & Dossiê** | `/alunos/[id]` · `/alunos/[id]/dossie` | Linha do tempo integral do estudante e emissão em 1 clique de Dossiê Pericial A4 para Conselho Tutelar / MP (ECA Arts. 17 e 143). |
 | **Frequência & Atestados** | `/faltas` · `/atestados` · `/boletim` | Monitoramento `<75%`, alerta de queda abrupta, fichas SERP, vigência de atestados e boletim semanal automatizado. |
