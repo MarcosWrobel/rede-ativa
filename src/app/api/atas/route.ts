@@ -193,7 +193,7 @@ export async function GET(req: Request) {
           agreementsSummary: null,
           actionItems: [],
           addendums: [],
-          physicalSignedScanData: false,
+          physicalSignedScanData: null,
           hasPhysicalScan: false,
           restrictedConfidential: true,
           participants: safeParticipants,
@@ -207,7 +207,7 @@ export async function GET(req: Request) {
         hasPhysicalScan: hasScan,
         physicalSignedScanData: includeSignatures
           ? m.physicalSignedScanData
-          : hasScan,
+          : null,
         participants: safeParticipants,
       };
     });

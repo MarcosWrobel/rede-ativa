@@ -41,12 +41,18 @@ export default function PhysicalScanModal({
 
   if (!isOpen || !minute) return null;
 
-  const hasScan = Boolean(minute.physicalSignedScanData || minute.physicalScanStorageKey || minute.hasPhysicalScan);
+  const hasScan = Boolean(
+    minute.hasPhysicalScan ||
+    minute.physicalScanStorageKey ||
+    (typeof minute.physicalSignedScanData === "string" && minute.physicalSignedScanData.length > 0) ||
+    minute.physicalSignedScanData === true
+  );
   const currentScanUrl = `/api/atas/${minute.id}/physical-scan`;
   const isCurrentPdf =
     minute.physicalScanMimeType === "application/pdf" ||
-    minute.physicalSignedScanData?.startsWith("data:application/pdf") ||
-    minute.physicalSignedScanData?.startsWith("%PDF");
+    (typeof minute.physicalSignedScanData === "string" &&
+      (minute.physicalSignedScanData.startsWith("data:application/pdf") ||
+       minute.physicalSignedScanData.startsWith("%PDF")));
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -82,8 +88,9 @@ export default function PhysicalScanModal({
     setError(null);
 
     try {
+      const validExistingScan = typeof minute.physicalSignedScanData === "string" ? minute.physicalSignedScanData : null;
       const payload = {
-        scanData: fileDataUrl || minute.physicalSignedScanData,
+        scanData: fileDataUrl || validExistingScan,
         govBrVerified: isGovBr,
         govBrProtocol: govBrProtocol.trim() || null,
       };

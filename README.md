@@ -55,7 +55,7 @@ flowchart TD
 - **Segurança, Fé Pública & Perícia**: NextAuth.js v5, Proxy de borda (`src/proxy.ts`), guarda atômica `assertTenantOwnership` (REST e SSR), validação anti-spoofing em `getCurrentSchool`, proteção contra CSV Formula Injection (CWE-1236 + RFC 4180), PIN de Fé Pública (`PBKDF2-SHA512`), captura vetorial de assinatura (`biometricStrokeData`), WebAuthn/FIDO2 e selamento `SHA-256` canônico
 - **Ingestão Poliglota (SERE/SEED-PR)**: Parser em memória com `xlsx` (`.xls` BIFF8 e `.xlsx`), `unpdf` (`.pdf`) e `.csv` (`UTF-8` / `Windows-1252`), com desduplicação de dupla matrícula técnica
 - **Extensão Universal Chrome MV3 (`v1.5.0`)**: Sincronização assistida com Power BI (*Presente na Escola*) e portal SERP/Celepar, Janela Dedicada Compacta (`480x760px`) e confirmação automática de envio no WhatsApp Web
-- **Qualidade & Confiabilidade**: **364 testes automatizados em 52 suítes Vitest (100% verdes)** cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança e integridade de retorno WhatsApp (`messageReplySecurity.test.ts`), usabilidade e preservação arquivística de atas (`atasArchiveUsability.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
+- **Qualidade & Confiabilidade**: **366 testes automatizados em 52 suítes Vitest (100% verdes)** cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança e integridade de retorno WhatsApp (`messageReplySecurity.test.ts`), usabilidade e preservação arquivística de atas (`atasArchiveUsability.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
 
 ---
 

@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 364 testes em 52 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, platformEditions.test.ts, securityAndStabilityAuditV3.test.ts, teacherAtas.test.ts e atasArchiveUsability.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 366 testes em 52 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, platformEditions.test.ts, securityAndStabilityAuditV3.test.ts, teacherAtas.test.ts e atasArchiveUsability.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -88,7 +88,7 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`JUR-14`**: Acesso Ágil à Certidão Arquivística PDF/A-1b (ISO 19005-1 Level B): atalho de download direto exposto nas ações da listagem de `/atas` e na tela comemorativa pós-lavratura em `AtaEditorModal.tsx`.
 - **`JUR-15`**: Badges Factuais de Arquivamento & Filtro de Saneamento: indicadores visuais (*"Via Física Anexa"*, *"Gov.br Anexo"*, *"Pendente de Anexo"*) e seletor instantâneo de pendências para a secretaria escolar.
 - **`JUR-16`**: Parametrização Dinâmica do Livro Anual (`LivroAnualClient.tsx`): controles na interface para ajuste das datas de abertura e encerramento homologadas pela rede de ensino e conversor gramatical por extenso no gênero feminino de 0 a 999 (`numberToPortugueseWords`), coberto por 11 testes em `atasArchiveUsability.test.ts`.
-- Suíte automatizada consolidada em **52 suítes / 364 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+- Suíte automatizada consolidada em **52 suítes / 366 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
 ---
 
@@ -137,7 +137,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **100% da suíte Vitest deve passar (364 testes em 52 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `platformEditions.test.ts` e `atasArchiveUsability.test.ts`)**.
+  1. Execute `npm test` — **100% da suíte Vitest deve passar (366 testes em 52 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `platformEditions.test.ts` e `atasArchiveUsability.test.ts`)**.
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -243,7 +243,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 52 suítes / 364 testes)
+# Executar suíte completa de testes (Vitest — 52 suítes / 366 testes)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

@@ -128,4 +128,70 @@ describe("Atas Usability & Archival: Livro Anual & Filtros de Arquivo", () => {
       expect(all.length).toBe(4);
     });
   });
+
+  describe("Blindagem de Tipagem e Anexo em PhysicalScanModal", () => {
+    function computeScanState(minute: any) {
+      const hasScan = Boolean(
+        minute.hasPhysicalScan ||
+        minute.physicalScanStorageKey ||
+        (typeof minute.physicalSignedScanData === "string" && minute.physicalSignedScanData.length > 0) ||
+        minute.physicalSignedScanData === true
+      );
+      const isCurrentPdf =
+        minute.physicalScanMimeType === "application/pdf" ||
+        (typeof minute.physicalSignedScanData === "string" &&
+          (minute.physicalSignedScanData.startsWith("data:application/pdf") ||
+           minute.physicalSignedScanData.startsWith("%PDF")));
+
+      const validExistingScan = typeof minute.physicalSignedScanData === "string" ? minute.physicalSignedScanData : null;
+
+      return { hasScan, isCurrentPdf, validExistingScan };
+    }
+
+    it("nunca lança TypeError quando physicalSignedScanData é booleano (true ou false da listagem /atas)", () => {
+      const minuteWithBooleanFalse = {
+        id: "ata-bool-false",
+        hasPhysicalScan: false,
+        physicalSignedScanData: false,
+      };
+      const minuteWithBooleanTrue = {
+        id: "ata-bool-true",
+        hasPhysicalScan: true,
+        physicalSignedScanData: true,
+      };
+
+      expect(() => computeScanState(minuteWithBooleanFalse)).not.toThrow();
+      expect(() => computeScanState(minuteWithBooleanTrue)).not.toThrow();
+
+      const resFalse = computeScanState(minuteWithBooleanFalse);
+      expect(resFalse.hasScan).toBe(false);
+      expect(resFalse.isCurrentPdf).toBe(false);
+      expect(resFalse.validExistingScan).toBeNull();
+
+      const resTrue = computeScanState(minuteWithBooleanTrue);
+      expect(resTrue.hasScan).toBe(true);
+      expect(resTrue.isCurrentPdf).toBe(false);
+      expect(resTrue.validExistingScan).toBeNull();
+    });
+
+    it("identifica corretamente documento PDF quando physicalSignedScanData é string base64 ou mimeType", () => {
+      const minuteWithPdfString = {
+        id: "ata-pdf",
+        physicalSignedScanData: "data:application/pdf;base64,JVBERi0xLjQK...",
+      };
+      const minuteWithMimeType = {
+        id: "ata-pdf-mime",
+        physicalScanMimeType: "application/pdf",
+        physicalSignedScanData: null,
+      };
+
+      const res1 = computeScanState(minuteWithPdfString);
+      expect(res1.hasScan).toBe(true);
+      expect(res1.isCurrentPdf).toBe(true);
+      expect(res1.validExistingScan).toBe(minuteWithPdfString.physicalSignedScanData);
+
+      const res2 = computeScanState(minuteWithMimeType);
+      expect(res2.isCurrentPdf).toBe(true);
+    });
+  });
 });

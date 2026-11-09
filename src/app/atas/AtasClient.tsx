@@ -842,28 +842,33 @@ export default function AtasClient({
       )}
 
       {/* Modal de Captura de Via Física e Assinatura Gov.br (JUR-04) */}
-      <PhysicalScanModal
-        isOpen={Boolean(scanningMinute)}
-        minute={scanningMinute}
-        onClose={() => setScanningMinute(null)}
-        onSuccess={(updated) => {
-          const hasScan = Boolean(
-            updated.physicalSignedScanData || updated.physicalScanStorageKey
-          );
-          setMinutes((prev) =>
-            prev.map((m) =>
-              m.id === updated.id
-                ? {
-                    ...m,
-                    ...updated,
-                    hasPhysicalScan: hasScan,
-                  }
-                : m
-            )
-          );
-          setScanningMinute(null);
-        }}
-      />
+      {scanningMinute && (
+        <PhysicalScanModal
+          key={scanningMinute.id}
+          isOpen={Boolean(scanningMinute)}
+          minute={scanningMinute}
+          onClose={() => setScanningMinute(null)}
+          onSuccess={(updated) => {
+            const hasScan = Boolean(
+              updated.hasPhysicalScan ||
+              updated.physicalSignedScanData ||
+              updated.physicalScanStorageKey
+            );
+            setMinutes((prev) =>
+              prev.map((m) =>
+                m.id === updated.id
+                  ? {
+                      ...m,
+                      ...updated,
+                      hasPhysicalScan: hasScan,
+                    }
+                  : m
+              )
+            );
+            setScanningMinute(null);
+          }}
+        />
+      )}
     </div>
   );
 }

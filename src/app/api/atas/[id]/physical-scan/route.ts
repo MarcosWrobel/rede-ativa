@@ -22,7 +22,9 @@ const physicalScanSchema = z
       .min(10, "Dados do anexo digitalizado não informados")
       .refine((v) => ALLOWED_SCAN_PREFIX.test(v.trim()), {
         message: "Formato de arquivo inválido. Envie apenas imagem (PNG, JPEG, WEBP) ou documento PDF codificado em Base64.",
-      }),
+      })
+      .optional()
+      .nullable(),
     govBrVerified: z.boolean().default(false),
     govBrProtocol: z.string().optional().nullable(),
   })
@@ -158,6 +160,7 @@ export async function POST(
         status: true,
         physicalScanStorageKey: true,
         physicalScanProvider: true,
+        physicalSignedScanData: true,
       },
     });
 
@@ -183,19 +186,39 @@ export async function POST(
     }
 
     const { scanData, govBrVerified, govBrProtocol } = parsed.data;
+    const hasExistingScan = Boolean(existing.physicalScanStorageKey || existing.physicalSignedScanData);
 
-    // Salva via motor híbrido (Object Storage se configurado ou Fallback Base64 no Postgres)
-    const stored = await savePhysicalScanFile({
-      schoolId: existing.schoolId,
-      minuteId: id,
-      year: existing.year,
-      dataUrl: scanData,
-    });
+    if (!scanData && !hasExistingScan) {
+      return NextResponse.json(
+        { error: "O envio do arquivo digitalizado é obrigatório quando a ata ainda não possui anexo físico." },
+        { status: 400 }
+      );
+    }
 
     const now = new Date();
-    const updated = await prisma.pedagogicalMinute.update({
-      where: { id },
-      data: {
+    let updateData: any = {
+      govBrVerified: Boolean(govBrVerified),
+      govBrProtocol: govBrProtocol?.trim() || null,
+    };
+    let auditDetails: any = {
+      ataNumber: existing.ataNumber,
+      year: existing.year,
+      subject: existing.subject,
+      govBrVerified: Boolean(govBrVerified),
+      govBrProtocol: govBrProtocol?.trim() || null,
+    };
+
+    if (scanData) {
+      // Salva via motor híbrido (Object Storage se configurado ou Fallback Base64 no Postgres)
+      const stored = await savePhysicalScanFile({
+        schoolId: existing.schoolId,
+        minuteId: id,
+        year: existing.year,
+        dataUrl: scanData,
+      });
+
+      updateData = {
+        ...updateData,
         physicalSignedScanData: stored.fallbackBase64,
         physicalScanStorageKey: stored.storageKey,
         physicalScanProvider: stored.provider,
@@ -204,9 +227,19 @@ export async function POST(
         physicalScanSha256: stored.sha256,
         physicalScanUploadedAt: now,
         physicalScanUploadedBy: authCheck.userName,
-        govBrVerified: Boolean(govBrVerified),
-        govBrProtocol: govBrProtocol?.trim() || null,
-      },
+      };
+
+      auditDetails = {
+        ...auditDetails,
+        storageProvider: stored.provider,
+        dataSizeBytes: stored.sizeBytes,
+        scanSha256: stored.sha256,
+      };
+    }
+
+    const updated = await prisma.pedagogicalMinute.update({
+      where: { id },
+      data: updateData,
       select: {
         id: true,
         physicalSignedScanData: true,
@@ -226,16 +259,7 @@ export async function POST(
       action: "ATTACH_PHYSICAL_SCAN",
       entityType: "PedagogicalMinute",
       entityId: id,
-      details: {
-        ataNumber: existing.ataNumber,
-        year: existing.year,
-        subject: existing.subject,
-        govBrVerified: Boolean(govBrVerified),
-        govBrProtocol: govBrProtocol?.trim() || null,
-        storageProvider: stored.provider,
-        dataSizeBytes: stored.sizeBytes,
-        scanSha256: stored.sha256,
-      },
+      details: auditDetails,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
