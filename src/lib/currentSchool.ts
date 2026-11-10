@@ -1,6 +1,7 @@
 import { cache } from "react";
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { withNeonWakeRetry } from "./neonWakeRetry";
 import { cookies } from "next/headers";
 import { checkIsSuperAdmin } from "./roles";
 import { PlatformEdition, resolveSchoolEdition } from "./platformEditions";
@@ -148,10 +149,12 @@ const resolveSchoolByIdInRequest = cache(async (targetId: string): Promise<Schoo
   if (cached) return cached;
 
   try {
-    const school = await prisma.school.findUnique({
-      where: { id: targetId },
-      select: SCHOOL_CONTEXT_SELECT,
-    });
+    const school = await withNeonWakeRetry(() =>
+      prisma.school.findUnique({
+        where: { id: targetId },
+        select: SCHOOL_CONTEXT_SELECT,
+      })
+    );
     if (school && school.active !== false) {
       const ctx = mapSchoolRecordToContext(school);
       setCachedSchool(targetId, ctx);
@@ -168,11 +171,13 @@ const resolveFirstActiveSchoolInRequest = cache(async (): Promise<SchoolContext>
   if (cached) return cached;
 
   try {
-    const firstSchool = await prisma.school.findFirst({
-      where: { active: true },
-      orderBy: { createdAt: "asc" },
-      select: SCHOOL_CONTEXT_SELECT,
-    });
+    const firstSchool = await withNeonWakeRetry(() =>
+      prisma.school.findFirst({
+        where: { active: true },
+        orderBy: { createdAt: "asc" },
+        select: SCHOOL_CONTEXT_SELECT,
+      })
+    );
     if (firstSchool) {
       const ctx = mapSchoolRecordToContext(firstSchool);
       setCachedSchool("__first__", ctx);

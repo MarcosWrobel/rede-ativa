@@ -1,12 +1,13 @@
 import { prisma } from "./prisma";
+import { withNeonWakeRetry } from "./neonWakeRetry";
 
 /**
- * Executa consultas das tabelas pedagógicas da Fase 3 com fallback resiliente
- * caso o ambiente local ainda não tenha aplicado `prisma db push` (que roda automaticamente na Vercel).
+ * Executa consultas das tabelas pedagógicas da Fase 3 com retry de wake-up do Neon
+ * e fallback resiliente caso uma tabela opcional ainda não exista.
  */
 export async function safeQueryList<T>(fn: () => Promise<T[]>): Promise<T[]> {
   try {
-    return await fn();
+    return await withNeonWakeRetry(fn);
   } catch (err: any) {
     if (err?.code === "P2021" || String(err?.message || "").includes("does not exist")) {
       return [];

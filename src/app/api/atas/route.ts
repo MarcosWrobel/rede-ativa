@@ -230,14 +230,8 @@ export async function GET(req: Request) {
         return {
           ...rest,
           ...(includeSignatures && allowedConfidential ? { signatureData } : {}),
-          hasSignature:
-            typeof p.hasSignature === "boolean"
-              ? p.hasSignature
-              : Boolean(signatureData || p.verifiedEmail),
-          hasActiveSignLink:
-            typeof p.hasActiveSignLink === "boolean"
-              ? p.hasActiveSignLink
-              : Boolean(mobileSignToken),
+          hasSignature: Boolean(p.hasSignature),
+          hasActiveSignLink: Boolean(p.hasActiveSignLink),
         };
       });
 
@@ -257,18 +251,10 @@ export async function GET(req: Request) {
       }
 
       const minuteWithScan = m as typeof m & { physicalSignedScanData?: string | null };
-      const hasScan =
-        typeof m.hasPhysicalScan === "boolean"
-          ? m.hasPhysicalScan
-          : Boolean(
-              minuteWithScan.physicalSignedScanData ||
-                m.physicalScanStorageKey ||
-                m.physicalScanSha256
-            );
 
       return {
         ...m,
-        hasPhysicalScan: hasScan,
+        hasPhysicalScan: Boolean(m.hasPhysicalScan),
         physicalSignedScanData: includeSignatures
           ? minuteWithScan.physicalSignedScanData ?? null
           : null,

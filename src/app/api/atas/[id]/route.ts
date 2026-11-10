@@ -129,25 +129,12 @@ export async function GET(
 
     const safeMinute = {
       ...minute,
-      hasPhysicalScan:
-        typeof (minute as any).hasPhysicalScan === "boolean"
-          ? (minute as any).hasPhysicalScan
-          : Boolean(
-              minute.physicalSignedScanData ||
-                minute.physicalScanStorageKey ||
-                minute.physicalScanSha256
-            ),
+      hasPhysicalScan: Boolean(minute.hasPhysicalScan),
       participants: (minute.participants || []).map(
         ({ mobileSignToken, mobileSignExpiresAt, ...rest }: any) => ({
           ...rest,
-          hasSignature:
-            typeof rest.hasSignature === "boolean"
-              ? rest.hasSignature
-              : Boolean(rest.signatureData || rest.verifiedEmail),
-          hasActiveSignLink:
-            typeof rest.hasActiveSignLink === "boolean"
-              ? rest.hasActiveSignLink
-              : Boolean(mobileSignToken),
+          hasSignature: Boolean(rest.hasSignature),
+          hasActiveSignLink: Boolean(rest.hasActiveSignLink),
         })
       ),
     };

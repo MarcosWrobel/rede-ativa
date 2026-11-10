@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "./prisma";
+import { withNeonWakeRetry } from "./neonWakeRetry";
 import { extractClientIp } from "./audit";
 
 export type RateLimitFailMode = "open" | "closed";
@@ -184,10 +185,10 @@ async function checkPostgresRateLimit(
     return checkMemoryRateLimit(key, policy);
   }
 
-  // Em testes unitários onde o Prisma foi mockado parcialmente sem $queryRaw nem rateLimitBucket
+  // Em testes unitários onde o Prisma foi mockado parcialmente sem $queryRaw
   const hasQueryRaw = typeof (prisma as any)?.$queryRaw === "function";
   const hasBucketModel = Boolean((prisma as any)?.rateLimitBucket);
-  if (!hasQueryRaw && !hasBucketModel) {
+  if (!hasQueryRaw) {
     return checkMemoryRateLimit(key, policy);
   }
 
@@ -204,12 +205,9 @@ async function checkPostgresRateLimit(
         .catch(() => {});
     }
 
-    let count = 1;
-    let actualExpiresAt = expiresAt;
-
-    if (hasQueryRaw) {
-      // Operação atômica única no PostgreSQL (elimina TOCTOU / race condition em rajadas paralelas)
-      const rows = await prisma.$queryRaw<Array<{ count: number | bigint; expiresAt: Date | string }>>`
+    // Operação atômica única no PostgreSQL (elimina TOCTOU / race condition em rajadas paralelas)
+    const rows = await withNeonWakeRetry(() =>
+      prisma.$queryRaw<Array<{ count: number | bigint; expiresAt: Date | string }>>`
         INSERT INTO "RateLimitBucket" ("key", "count", "windowStart", "expiresAt")
         VALUES (${key}, 1, ${now}, ${expiresAt})
         ON CONFLICT ("key") DO UPDATE SET
@@ -226,33 +224,15 @@ async function checkPostgresRateLimit(
             ELSE "RateLimitBucket"."expiresAt"
           END
         RETURNING "count", "expiresAt"
-      `;
+      `
+    );
 
-      const row = Array.isArray(rows) ? rows[0] : undefined;
-      if (!row) {
-        throw new Error("Retorno vazio de RateLimitBucket upsert atômico");
-      }
-      count = Number(row.count);
-      actualExpiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(row.expiresAt);
-    } else {
-      const existing = await prisma.rateLimitBucket.findUnique({ where: { key } });
-      if (!existing || existing.expiresAt <= now) {
-        const saved = await prisma.rateLimitBucket.upsert({
-          where: { key },
-          create: { key, count: 1, windowStart: now, expiresAt },
-          update: { count: 1, windowStart: now, expiresAt },
-        });
-        count = saved.count;
-        actualExpiresAt = saved.expiresAt;
-      } else {
-        const updated = await prisma.rateLimitBucket.update({
-          where: { key },
-          data: { count: { increment: 1 } },
-        });
-        count = updated.count;
-        actualExpiresAt = existing.expiresAt;
-      }
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    if (!row) {
+      throw new Error("Retorno vazio de RateLimitBucket upsert atômico");
     }
+    const count = Number(row.count);
+    const actualExpiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(row.expiresAt);
 
     const remaining = Math.max(0, policy.limit - count);
     const msUntilReset = Math.max(1000, actualExpiresAt.getTime() - Date.now());

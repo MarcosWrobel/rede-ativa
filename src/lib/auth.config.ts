@@ -309,7 +309,9 @@ export const authConfig: NextAuthConfig = {
       if (session.user) {
         const email = (session.user.email || "").toLowerCase().trim();
         const isRoot = isBootstrapAdminEmail(email);
-        session.user.id = (token.userId as string | undefined) || "";
+        if (token.userId) {
+          session.user.id = String(token.userId);
+        }
         session.user.role = resolveTokenRole({
           isRootAdmin: isRoot,
           dbRole: token.role as string | undefined,
