@@ -14,6 +14,7 @@ import {
 } from "@/lib/studentMatcher";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { findSchoolBySyncToken, safeCompareStrings } from "@/lib/syncToken";
+import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
 import { checkRateLimit, resetRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
@@ -115,7 +116,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Payload JSON inválido." },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
     const rawList = body?.fichas || body?.alunos || [];
     const parsedList = z
       .array(serpSyncItemSchema)
@@ -142,6 +152,13 @@ export async function POST(req: Request) {
     });
 
     const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
+
+    // Previne colisão P2002 na restrição @unique global de CGM com alunos inativos ou de outras escolas
+    await populateGlobalTakenCgms(
+      prisma,
+      fichas.map((f) => String(f.cgm ?? "").replace(/\u0000/g, "").trim()),
+      usedCgms
+    );
 
     const pendingCgmUpdates = new Map<string, string>();
     const batchRecords = new Map<
@@ -237,24 +254,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Atualiza CGMs novos em transação única
-    let cgmVinculados = 0;
-    if (pendingCgmUpdates.size > 0) {
-      const updates = Array.from(pendingCgmUpdates.entries());
-      const CHUNK = 100;
-      for (let i = 0; i < updates.length; i += CHUNK) {
-        const slice = updates.slice(i, i + CHUNK);
-        await prisma.$transaction(
-          slice.map(([id, cgm]) =>
-            prisma.student.update({
-              where: { id },
-              data: { cgm },
-            })
-          )
-        );
-        cgmVinculados += slice.length;
-      }
-    }
+    // 4. Atualiza CGMs novos com blindagem contra P2002
+    const cgmVinculados = await applyPendingCgmUpdatesSafely(prisma, pendingCgmUpdates);
 
     // 5. Bulk Upsert via SQL parametrizado em blocos de 250 linhas
     const rowsToUpsert = Array.from(batchRecords.values());

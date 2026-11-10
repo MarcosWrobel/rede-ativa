@@ -138,8 +138,9 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   } catch (error: any) {
+    console.error("[POST /api/ai/test-key] Erro interno:", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Erro interno ao testar chave." },
+      { success: false, error: "Erro interno ao testar conectividade da chave de IA." },
       { status: 500 }
     );
   }

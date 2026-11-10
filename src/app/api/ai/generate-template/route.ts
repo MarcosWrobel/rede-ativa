@@ -192,7 +192,7 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
   } catch (error: any) {
     console.error("Erro geral na rota de IA:", error);
     return NextResponse.json(
-      { error: error?.message || "Erro interno ao processar modelo com IA." },
+      { error: "Erro interno ao processar modelo com IA." },
       { status: 500 }
     );
   }

@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
 import {
+  MAX_SERE_BATCH_TOTAL_BYTES,
+  MAX_SERE_FILE_SIZE_BYTES,
   consolidateSelectedStudents,
   parseSereRawFiles,
   type SchoolSegment,
@@ -153,6 +155,22 @@ export default function SereImportModal({
 
     if (files.length === 0) {
       setErrorMsg("Selecione um ou mais arquivos em formato Excel (.xls, .xlsx), PDF ou CSV exportados do SERE.");
+      return;
+    }
+
+    const oversizedFile = files.find((f) => f.size > MAX_SERE_FILE_SIZE_BYTES);
+    if (oversizedFile) {
+      setErrorMsg(
+        `O arquivo "${oversizedFile.name}" excede o limite máximo permitido de 10 MB por arquivo.`
+      );
+      return;
+    }
+
+    const totalBatchBytes = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalBatchBytes > MAX_SERE_BATCH_TOTAL_BYTES) {
+      setErrorMsg(
+        "O tamanho total dos arquivos selecionados excede o limite máximo permitido de 25 MB por lote."
+      );
       return;
     }
 

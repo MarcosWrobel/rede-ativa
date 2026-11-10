@@ -49,12 +49,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json(
-      {
-        erro_autenticacao: true,
-        tipo: error?.name || error?.type || "AuthError",
-        mensagem: error?.message || "Falha no callback de autenticação",
-        detalhes: errorDetails,
-      },
+      { error: "Falha interna no processamento de autenticação." },
       { status: 500 }
     );
   }
@@ -69,10 +64,7 @@ export async function POST(req: NextRequest) {
     }
     console.error("[CRITICAL_AUTH_POST_ERROR]", error);
     return NextResponse.json(
-      {
-        erro_autenticacao: true,
-        mensagem: error?.message || "Falha na autenticação POST",
-      },
+      { error: "Falha interna no processamento de autenticação." },
       { status: 500 }
     );
   }

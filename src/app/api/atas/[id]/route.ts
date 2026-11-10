@@ -5,43 +5,13 @@ import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import {
+  mergeParticipantSignatures,
+  sanitizeMinutePayload,
+} from "@/services/ataParticipantService";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
-
-function sanitizeUpdateBody(raw: any) {
-  if (!raw || typeof raw !== "object") return raw;
-  const cleaned = { ...raw };
-
-  if (typeof cleaned.subject === "string") {
-    cleaned.subject = cleaned.subject.trim() || "Atendimento Pedagógico";
-    if (cleaned.subject.length < 2) cleaned.subject = "Atendimento Pedagógico";
-  }
-
-  if (Array.isArray(cleaned.participants)) {
-    cleaned.participants = cleaned.participants
-      .filter((p: any) => p && (p.name?.trim() || p.signatureData || p.signatureMode === "REFUSED" || p.id))
-      .map((p: any) => {
-        const trimmedName = (p.name || "").trim();
-        return {
-          ...p,
-          name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
-        };
-      });
-  }
-
-  if (Array.isArray(cleaned.actionItems)) {
-    cleaned.actionItems = cleaned.actionItems
-      .filter((a: any) => a && typeof a.description === "string" && a.description.trim().length >= 2)
-      .map((a: any) => ({
-        ...a,
-        description: a.description.trim(),
-        dueDate: a.dueDate && String(a.dueDate).trim() !== "" ? a.dueDate : null,
-      }));
-  }
-
-  return cleaned;
-}
 
 const updateMinuteDraftSchema = z.object({
   category: z.string().optional(),
@@ -211,7 +181,7 @@ export async function PATCH(
     }
 
     const rawBody = await req.json();
-    const parsed = updateMinuteDraftSchema.safeParse(sanitizeUpdateBody(rawBody));
+    const parsed = updateMinuteDraftSchema.safeParse(sanitizeMinutePayload(rawBody, "UPDATE"));
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
@@ -219,174 +189,111 @@ export async function PATCH(
     const data = parsed.data;
     const ip = extractClientIp(req);
 
-    // Se informou studentIds, atualiza vínculos garantindo isolamento multi-tenant
-    if (data.studentIds !== undefined) {
-      const uniqueStudentIds = Array.from(new Set(data.studentIds));
+    const runTx =
+      typeof prisma.$transaction === "function"
+        ? prisma.$transaction.bind(prisma)
+        : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
 
-      if (uniqueStudentIds.length === 0) {
-        // Se ficou com 0 estudantes, verifica se a ata terá ao menos 1 participante
-        const participantsCount = data.participants !== undefined
-          ? data.participants.length
-          : await prisma.pedagogicalMinuteParticipant.count({ where: { minuteId: id } });
+    const updated = await runTx(async (tx) => {
+      // Se informou studentIds, valida e atualiza vínculos garantindo isolamento multi-tenant
+      if (data.studentIds !== undefined) {
+        const uniqueStudentIds = Array.from(new Set(data.studentIds));
 
-        if (participantsCount === 0) {
-          return NextResponse.json(
-            { error: "A ata deve possuir ao menos um estudante vinculado ou participante docente/servidor registrado." },
-            { status: 400 }
-          );
+        if (uniqueStudentIds.length === 0) {
+          // Se ficou com 0 estudantes, verifica se a ata terá ao menos 1 participante
+          const participantsCount =
+            data.participants !== undefined
+              ? data.participants.length
+              : tx.pedagogicalMinuteParticipant?.count
+                ? await tx.pedagogicalMinuteParticipant.count({ where: { minuteId: id } })
+                : (existing.participants || []).length;
+
+          if (participantsCount === 0) {
+            throw new Error(
+              "VALIDATION:A ata deve possuir ao menos um estudante vinculado ou participante docente/servidor registrado."
+            );
+          }
+
+          await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+        } else {
+          const studentsDb = await tx.student.findMany({
+            where: { id: { in: uniqueStudentIds }, schoolId: existing.schoolId },
+            include: { classGroup: true },
+          });
+
+          if (studentsDb.length !== uniqueStudentIds.length) {
+            throw new Error(
+              "VALIDATION:Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular."
+            );
+          }
+
+          await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+          await tx.pedagogicalMinuteStudent.createMany({
+            data: studentsDb.map((s) => ({
+              minuteId: id,
+              studentId: s.id,
+              studentNameSnapshot: s.name,
+              classNameSnapshot: s.classGroup?.name || null,
+              cgmSnapshot: s.cgm || null,
+            })),
+          });
         }
-
-        await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-      } else {
-        const studentsDb = await prisma.student.findMany({
-          where: { id: { in: uniqueStudentIds }, schoolId: existing.schoolId },
-          include: { classGroup: true },
-        });
-
-        if (studentsDb.length !== uniqueStudentIds.length) {
-          return NextResponse.json(
-            { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
-            { status: 400 }
-          );
-        }
-
-        await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-        await prisma.pedagogicalMinuteStudent.createMany({
-          data: studentsDb.map((s) => ({
-            minuteId: id,
-            studentId: s.id,
-            studentNameSnapshot: s.name,
-            classNameSnapshot: s.classGroup?.name || null,
-            cgmSnapshot: s.cgm || null,
-          })),
-        });
       }
-    }
 
-    // Se informou participants, preserva id, mobileSignToken e assinaturas mobile recém-coletadas
-    if (data.participants) {
-      const existingParticipants = await prisma.pedagogicalMinuteParticipant.findMany({
-        where: { minuteId: id },
-      });
+      // Se informou participants, preserva id, mobileSignToken e assinaturas mobile recém-coletadas
+      if (data.participants) {
+        const existingParticipants = tx.pedagogicalMinuteParticipant?.findMany
+          ? await tx.pedagogicalMinuteParticipant.findMany({ where: { minuteId: id } })
+          : existing.participants || [];
 
-      const usedIds = new Set<string>();
+        const participantsToCreate = mergeParticipantSignatures(
+          data.participants,
+          existingParticipants,
+          { clearMobileTokens: false, minuteId: id }
+        );
 
-      const participantsToCreate = data.participants.map((p) => {
-        const match =
-          (p.id && existingParticipants.find((ep) => ep.id === p.id && !usedIds.has(ep.id))) ||
-          existingParticipants.find(
-            (ep) => !usedIds.has(ep.id) && ep.name.trim().toLowerCase() === p.name.trim().toLowerCase()
-          ) ||
-          (existingParticipants.length === 1 && data.participants?.length === 1 && !usedIds.has(existingParticipants[0].id)
-            ? existingParticipants[0]
-            : undefined);
-
-        if (match?.id) {
-          usedIds.add(match.id);
+        await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
+        if (participantsToCreate.length > 0) {
+          await tx.pedagogicalMinuteParticipant.createMany({
+            data: participantsToCreate,
+          });
         }
-
-        const shouldClear = Boolean(p.clearSignature);
-        const isRefused = p.signatureMode === "REFUSED";
-
-        const sigData = shouldClear || isRefused ? null : (p.signatureData || match?.signatureData || null);
-        const sigMode = isRefused
-          ? "REFUSED"
-          : sigData
-            ? p.signatureMode !== "PENDING"
-              ? p.signatureMode
-              : match?.signatureMode || "SCREEN_CANVAS"
-            : "PENDING";
-        const signedAt = sigData ? (p.signedAt ? new Date(p.signedAt) : match?.signedAt || new Date()) : null;
-
-        // HARDENING JURÍDICO (Lei 14.063/2020): Provas de biometria e autenticação OIDC Google NÃO podem
-        // ser forjadas via payload de PATCH. Preservam estritamente o estado verificado no banco via sign-token.
-        const bioVerified = shouldClear || isRefused ? false : (match?.biometricVerified ?? false);
-        const bioDevice = shouldClear || isRefused ? null : (match?.biometricDeviceType || null);
-        const bioTime = bioVerified ? (match?.biometricAuthTime || null) : null;
-
-        const verifiedEmail = shouldClear || isRefused ? null : (match?.verifiedEmail || null);
-        const verifiedGoogleName = shouldClear || isRefused ? null : (match?.verifiedGoogleName || null);
-        const verifiedGoogleSub = shouldClear || isRefused ? null : (match?.verifiedGoogleSub || null);
-        const emailVerifiedAt = verifiedEmail ? (match?.emailVerifiedAt || null) : null;
-
-        const effectiveSigMode = isRefused
-          ? "REFUSED"
-          : verifiedEmail
-            ? "ESCOLA_OAUTH"
-            : sigMode;
-
-        return {
-          ...(match?.id ? { id: match.id } : {}),
-          minuteId: id,
-          role: p.role,
-          studentId: p.studentId || null,
-          name: p.name,
-          kinship: p.kinship || null,
-          documentType: p.documentType || null,
-          documentNumber: p.documentNumber || null,
-          documentVerifiedByStaff: p.documentVerifiedByStaff,
-          phone: p.phone || null,
-          signatureMode: effectiveSigMode,
-          signatureData: sigData,
-          signedAt: sigData || verifiedEmail ? (signedAt || new Date()) : null,
-          signerIp: shouldClear || isRefused ? null : (match?.signerIp || null),
-          signerUserAgent: shouldClear || isRefused ? null : (match?.signerUserAgent || null),
-          biometricStrokeData: shouldClear || isRefused ? null : (match?.biometricStrokeData || null),
-          clientTimestampIso: shouldClear || isRefused ? null : (match?.clientTimestampIso || null),
-          mobileSignToken: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignToken || null),
-          mobileSignExpiresAt: sigData || verifiedEmail || shouldClear || isRefused ? null : (match?.mobileSignExpiresAt || null),
-          biometricVerified: bioVerified,
-          biometricDeviceType: bioDevice,
-          biometricAuthTime: bioTime,
-          expectedEmail: p.expectedEmail !== undefined ? p.expectedEmail : (match?.expectedEmail || null),
-          verifiedEmail,
-          verifiedGoogleSub,
-          verifiedGoogleName,
-          emailVerifiedAt,
-          refusalReason: isRefused ? (p.refusalReason || null) : null,
-          witnessName: isRefused ? (p.witnessName || null) : null,
-        };
-      });
-
-      await prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
-      if (participantsToCreate.length > 0) {
-        await prisma.pedagogicalMinuteParticipant.createMany({
-          data: participantsToCreate,
-        });
       }
-    }
 
-    // Se informou actionItems, atualiza
-    if (data.actionItems) {
-      await prisma.pedagogicalActionItem.deleteMany({ where: { minuteId: id } });
-      await prisma.pedagogicalActionItem.createMany({
-        data: data.actionItems.map((a) => ({
-          minuteId: id,
-          description: a.description,
-          responsible: a.responsible,
-          dueDate: a.dueDate ? new Date(a.dueDate) : null,
-          status: a.status || "PENDING",
-        })),
+      // Se informou actionItems, atualiza
+      if (data.actionItems) {
+        await tx.pedagogicalActionItem.deleteMany({ where: { minuteId: id } });
+        if (data.actionItems.length > 0) {
+          await tx.pedagogicalActionItem.createMany({
+            data: data.actionItems.map((a) => ({
+              minuteId: id,
+              description: a.description,
+              responsible: a.responsible,
+              dueDate: a.dueDate ? new Date(a.dueDate) : null,
+              status: a.status || "PENDING",
+            })),
+          });
+        }
+      }
+
+      return await tx.pedagogicalMinute.update({
+        where: { id },
+        data: {
+          category: data.category,
+          isConfidential: data.isConfidential,
+          attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
+          subject: data.subject,
+          rawNotes: data.rawNotes,
+          summary: data.summary,
+          agreementsSummary: data.agreementsSummary,
+          physicalSignedScanData: data.physicalSignedScanData,
+        },
+        include: {
+          students: true,
+          participants: true,
+          actionItems: true,
+        },
       });
-    }
-
-    const updated = await prisma.pedagogicalMinute.update({
-      where: { id },
-      data: {
-        category: data.category,
-        isConfidential: data.isConfidential,
-        attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
-        subject: data.subject,
-        rawNotes: data.rawNotes,
-        summary: data.summary,
-        agreementsSummary: data.agreementsSummary,
-        physicalSignedScanData: data.physicalSignedScanData,
-      },
-      include: {
-        students: true,
-        participants: true,
-        actionItems: true,
-      },
     });
 
     await logAudit({
@@ -405,6 +312,10 @@ export async function PATCH(
 
     return NextResponse.json({ success: true, minute: updated });
   } catch (error: any) {
+    const msg = error?.message || "";
+    if (msg.startsWith("VALIDATION:")) {
+      return NextResponse.json({ error: msg.replace("VALIDATION:", "") }, { status: 400 });
+    }
     console.error("[PATCH /api/atas/[id]] Erro:", error);
     return NextResponse.json({ error: "Erro ao atualizar rascunho" }, { status: 500 });
   }

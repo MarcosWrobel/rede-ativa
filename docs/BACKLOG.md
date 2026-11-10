@@ -1,6 +1,7 @@
 # Backlog Geral de Evolução & Roadmap — Rede Ativa SaaS
 
 Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa SaaS**.
+- **Estado Vivo do Repositório:** **21 models Prisma** • **29 páginas (`page.tsx`)** • **49 Route Handlers (`route.ts`)** • **56 suítes / 408 testes Vitest aprovados**
 - Status: `[x]` Concluído • `[/]` Em Andamento • `[ ]` Pendente (Roadmap Futuro)
 - Prioridade: `P0` Crítico (Segurança/LGPD/Jurídico) • `P1` Alta (Estabilidade/Performance) • `P2` Média (Valor Pedagógico) • `P3` Expansão Estratégica
 - Esforço: `P` Pequeno (1–2h) • `M` Médio (3–6h) • `G` Grande (1–3 dias)
@@ -72,7 +73,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`ATA-03`** `[P1 | Esforço: G]` **Assinatura OIDC `@escola`, QR Code Móvel & Biometria WebAuthn/FIDO2** — [`src/components/ata/SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx) e [`src/app/assinar/ata/[token]/MobileSignClient.tsx`](../src/app/assinar/ata/[token]/MobileSignClient.tsx).
 - [x] **`ATA-04`** `[P1 | Esforço: M]` **Imutabilidade, Adendos Encadeados (*"Em tempo"*) & Cancelamento (`VOIDED`)** — [`src/app/api/atas/[id]/addendums/route.ts`](../src/app/api/atas/[id]/addendums/route.ts) e [`src/app/api/atas/[id]/void/route.ts`](../src/app/api/atas/[id]/void/route.ts).
 - [x] **`ATA-05`** `[P1 | Esforço: M]` **Impressão A4 (`1 of 1`), Livro Anual, Certidão Cega LGPD & Sigilo ECA** — [`/atas/[id]/imprimir`](../src/app/atas/[id]/imprimir/PrintPageClient.tsx), [`/atas/livro/[ano]`](../src/app/atas/livro/[ano]/page.tsx) e [`/validar/ata/[code]`](../src/app/validar/ata/[code]/page.tsx).
-- [x] **`ATA-06`** `[P1 | Esforço: M]` **Atas de Orientação Docente / Equipe Escolar (`ORIENTACAO_DOCENTE`)** — Suporte nativo a atas com `studentIds: []` e participantes docentes registrados, formalização NRE/SEED-PR sem citar responsáveis familiares, pseudonimização LGPD `[DOCENTE_n]`, assinatura OIDC `@escola.pr.gov.br` e renderização de Docentes Envolvidos na impressão e PDF/A-1b, validado por 8 testes em [`src/lib/__tests__/teacherAtas.test.ts`](../src/lib/__tests__/teacherAtas.test.ts).
+- [x] **`ATA-06`** `[P1 | Esforço: M]` **Atas de Orientação Docente / Equipe Escolar (`ORIENTACAO_DOCENTE`)** — Suporte nativo a atas com `studentIds: []` e participantes docentes registrados, formalização NRE/SEED-PR sem citar responsáveis familiares, pseudonimização LGPD `[DOCENTE_n]`, assinatura OIDC `@escola.pr.gov.br` e renderização de Docentes Envolvidos na impressão e PDF/A-1b, validado por 9 testes em [`src/lib/__tests__/teacherAtas.test.ts`](../src/lib/__tests__/teacherAtas.test.ts).
 
 ---
 
@@ -119,7 +120,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`JUR-06`** `[P0 | Esforço: M]` **PIN de Fé Pública do Servidor na Lavratura (`PBKDF2-SHA512`)**  
   Criptografia com 100.000 iterações, bloqueio temporário após 3 tentativas incorretas, onboarding modal ([`SigningPinModal.tsx`](../src/components/ata/SigningPinModal.tsx)) e redefinição via OIDC `@escola.pr.gov.br` em [`src/lib/signingPin.ts`](../src/lib/signingPin.ts) e [`src/app/api/user/signing-pin/route.ts`](../src/app/api/user/signing-pin/route.ts).
 - [x] **`JUR-07`** `[P0 | Esforço: M]` **Governança da Sequência Cronológica e Lavratura Extemporânea (> 5 dias úteis)**  
-  Exigência obrigatória de `extemporaneousReason` quando o intervalo entre `attendedAt` e `finalizedAt` excede 5 dias úteis, com impressão de **Nota de Escrituração & Fé Pública** na folha A4 e na certidão pública, validada em [`complianceAndForensics.test.ts`](../src/lib/__tests__/complianceAndForensics.test.ts), [`signingPin.test.ts`](../src/lib/__tests__/signingPin.test.ts) e [`securityAndLegalAuditV2.test.ts`](../src/lib/__tests__/securityAndLegalAuditV2.test.ts) (**215 testes em 37 suítes**).
+  Exigência obrigatória de `extemporaneousReason` quando o intervalo entre `attendedAt` e `finalizedAt` excede 5 dias úteis, com impressão de **Nota de Escrituração & Fé Pública** na folha A4 e na certidão pública, validada em [`complianceAndForensics.test.ts`](../src/lib/__tests__/complianceAndForensics.test.ts), [`signingPin.test.ts`](../src/lib/__tests__/signingPin.test.ts) e [`securityAndLegalAuditV2.test.ts`](../src/lib/__tests__/securityAndLegalAuditV2.test.ts) (marco histórico de 215 testes em 37 suítes à época; consolidado hoje em **55 suítes / 396 testes**).
 
 ---
 
@@ -162,7 +163,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`MSG-01`** `[P0 | Esforço: P]` **Atomicidade Probatória na Mensageria & Validação Zod Estrita (`P-07` / `P-08`)**  
   Persistência obrigatória do `MessageLog` no banco antes de acionar gateways externos de rede, e restrição de `initialDeliveryStatus` aos estados válidos de despacho em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e [`src/app/api/messages/send/route.ts`](../src/app/api/messages/send/route.ts).
 - [x] **`PERF-06`** `[P1 | Esforço: P]` **Remoção de Índices Redundantes no Prisma Schema (`D-04`)**  
-  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 12 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts).
+  Expurgo de `@@index` duplicados em campos já cobertos por restrições `@unique` (`School.inepCode`, `PedagogicalMinute.verificationCode`, `PedagogicalMinuteParticipant.mobileSignToken`) em [`prisma/schema.prisma`](../prisma/schema.prisma), validado por 18 testes em [`securityAndStabilityAuditV3.test.ts`](../src/lib/__tests__/securityAndStabilityAuditV3.test.ts).
 
 ---
 
@@ -173,7 +174,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`AUT-06`** `[P1 | Esforço: M]` **Extração Assistida Read-Only no WhatsApp Web via Extensão MV3 (`whatsapp-content.js` & `clientDispatcher.ts`)**  
   Mecanismo estritamente *read-only* na extensão Chrome Manifest V3 para capturar o último balão de mensagem recebida (`div.message-in`) na conversa ativa do WhatsApp Web, extraindo `rawText`, `domTimestamp` e `activeChatTitle`. Canal de comunicação seguro via `window.postMessage` com checagem de origem autorizada, cancelamento automático de listeners e timeout resiliente de 8 segundos no dispatcher cliente.
 - [x] **`AUT-07`** `[P1 | Esforço: M]` **Modal Human-in-the-Loop de Revisão, Triagem IA e Selagem SHA-256 (`WhatsAppReplyCaptureModal.tsx`)**  
-  Interface modular acessível baseada em `<dialog>` nativo com suporte integral a tema escuro, ciclo de vida isolado por `messageLog.id` (desmontagem limpa entre aberturas sequenciais, bloqueio de replay de cache da extensão via `shouldAcceptLiveWhatsAppPush`, limpeza explícita com `clearWhatsAppPushedReplyCache` e cancelamento via `AbortController`), esteira guiada de 4 etapas (captura assistida/manual, triagem por IA Google Gemini com pseudonimizador LGPD/ECA e fallback heurístico, revisão de notas pedagógicas e selagem criptográfica final) e atualização reativa em tempo real na Linha do Tempo do Prontuário 360º (`ProntuarioClient.tsx`) e na tabela do Histórico (`HistoricoClient.tsx`). Validado por 15 testes em `whatsappReplyCaptureModal.test.tsx` (**370 testes em 52 suítes Vitest**).
+  Interface modular acessível baseada em `<dialog>` nativo com suporte integral a tema escuro, ciclo de vida isolado por `messageLog.id` (desmontagem limpa entre aberturas sequenciais, bloqueio de replay de cache da extensão via `shouldAcceptLiveWhatsAppPush`, limpeza explícita com `clearWhatsAppPushedReplyCache` e cancelamento via `AbortController`), esteira guiada de 4 etapas (captura assistida/manual, triagem por IA Google Gemini com pseudonimizador LGPD/ECA e fallback heurístico, revisão de notas pedagógicas e selagem criptográfica final) e atualização reativa em tempo real na Linha do Tempo do Prontuário 360º (`ProntuarioClient.tsx`) e na tabela do Histórico (`HistoricoClient.tsx`). Validado por 15 testes em `whatsappReplyCaptureModal.test.tsx`.
 
 ---
 
@@ -188,27 +189,39 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`ATA-09`** `[P1 | Esforço: M]` **Badges de Status Físico e Filtro de Saneamento de Pendências de Arquivamento**  
   Implementação de badges factuais e autoexplicativas de custódia física (*"Via Física Anexa"*, *"Gov.br Anexo"*, *"Pendente de Anexo"*) e filtro reativo instantâneo no cliente (*"Arquivo: Todos"*, *"Com Via Física / Gov.br"*, *"Pendente de Anexo"*) na central `/atas`, permitindo triagem e saneamento imediato do arquivo físico pela equipe pedagógica.
 - [x] **`ATA-10`** `[P1 | Esforço: M]` **Parametrização do Livro Anual & Numeração por Extenso Feminino (0–999)**  
-  Suporte a datas dinâmicas configuráveis de abertura e encerramento do Livro de Atas Anual em [`src/app/atas/livro/[ano]/LivroAnualClient.tsx`](../src/app/atas/livro/[ano]/LivroAnualClient.tsx) (com derivação automática baseada no ano letivo e seletores nativos na barra de ação `print:hidden`), acompanhado da conversão por extenso com concordância de gênero gramatical feminino (*"uma"*, *"duas"*, *"quarenta e duas atas"*), validado por 11 testes em [`src/lib/__tests__/atasArchiveUsability.test.ts`](../src/lib/__tests__/atasArchiveUsability.test.ts) (**366 testes em 52 suítes Vitest**).
+  Suporte a datas dinâmicas configuráveis de abertura e encerramento do Livro de Atas Anual em [`src/app/atas/livro/[ano]/LivroAnualClient.tsx`](../src/app/atas/livro/[ano]/LivroAnualClient.tsx) (com derivação automática baseada no ano letivo e seletores nativos na barra de ação `print:hidden`), acompanhado da conversão por extenso com concordância de gênero gramatical feminino (*"uma"*, *"duas"*, *"quarenta e duas atas"*), validado por 13 testes em [`src/lib/__tests__/atasArchiveUsability.test.ts`](../src/lib/__tests__/atasArchiveUsability.test.ts).
 
 ---
 
-## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Não-Essencial no Momento)
+## Épico 16 — Hardening Referencial, Arquitetura Limpa de Atas & Modularização UI (Sprint 18) — ✅ Concluído
 
-> **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM).  
-> **Classificação de Prioridade:** **Não são necessários nem essenciais para a operação atual ou para a entrada das primeiras dezenas de escolas**, pois a plataforma já é estável, segura e auditada. Devem ser ativados gradualmente conforme o projeto alcançar escala de múltiplas redes municipais e geração de receita.
+> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 49 Route Handlers (`route.ts`) • 56 suítes / 408 testes Vitest (100% verdes)**.
+
+- [x] **`SEC-11`** `[P0 | Esforço: P]` **Contenção Residual 500 & Limites Defensivos SERE (`AUD-04`)**  
+  Sanitização de mensagens de erro 500 residuais em [`/api/ai/test-key`](../src/app/api/ai/test-key/route.ts), [`/api/ai/generate-template`](../src/app/api/ai/generate-template/route.ts) e [`/api/auth/[...nextauth]`](../src/app/api/auth/%5B...nextauth%5D/route.ts), aliada a limites superiores em `sereBatchImportSchema` (500 turmas / 5.000 estudantes / 5.000 transferidos) e `MAX_SERE_FILE_SIZE_BYTES = 10 MB`.
+- [x] **`DATA-02`** `[P0 | Esforço: M]` **Proteção Referencial Jurídica (`onDelete: Restrict`) & Build Strict (`AUD-06`)**  
+  Substituição de `onDelete: Cascade` por `onDelete: Restrict` em relações de prova legal (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student`, `PedagogicalMinute.school`) com deleção explícita em `/sanitize` e `DELETE /api/schools/[id]`, e falha bloqueante em produção no [`scripts/vercel_db_push.cjs`](../scripts/vercel_db_push.cjs).
+- [x] **`DOC-01`** `[P1 | Esforço: P]` **Governança Documental & Padronização de Pacote (`AUD-01` / `AUD-05`)**  
+  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 49 rotas, 56 suítes / 408 testes) e artefato primário `/extensao-rede-ativa.zip`.
+- [x] **`SYNC-01`** `[P0 | Esforço: M]` **Blindagem da Sincronização de Frequência (Power BI, CSV & JSON — `10/11/2026`)**  
+  Prevenção de erro HTTP 500 por colisão `P2002` na chave global `@unique` `Student.cgm` em `/api/frequencia/sync` e `/api/serp/sync` via [`src/lib/syncCgmGuard.ts`](../src/lib/syncCgmGuard.ts), atualização cadastral em lote por *delta check*, parser CSV/JSON RFC 4180 completo de 11 colunas em [`src/lib/frequencyImportParser.ts`](../src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](../src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br` e 12 testes em [`src/lib/__tests__/frequenciaSync.test.ts`](../src/lib/__tests__/frequenciaSync.test.ts).
+
+---
+
+## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Entregas & Próximos Passos)
+
+> **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM). Os itens arquiteturais prioritários de código limpo (`SAAS-ARCH-01` e `SAAS-UI-01`) já foram concluídos na **Sprint 18**.
 
 - [ ] **`SAAS-OPS-01`** `[P3 | Esforço: P]` **Observabilidade Externa & Error Tracking em Tempo Real (Sentry / BetterStack)**  
   - **Objetivo:** Captura automatizada de exceções em runtime no cliente (`error.tsx`), no middleware (`src/proxy.ts`) e nos Route Handlers de background (sincronização SERE, webhooks).  
   - **Gatilho de Ativação:** Operação simultânea com mais de 20 escolas ativas, reduzindo a necessidade de suporte técnico reativo.
-- [ ] **`SAAS-ARCH-01`** `[P3 | Esforço: M]` **Camada de Casos de Uso / Domain Services (Refatoração DDD)**  
-  - **Objetivo:** Desacoplar regras de negócio complexas hoje contidas diretamente em Route Handlers extensos (ex: `/api/atas/[id]/finalize` e `/api/frequencia/sync`) para serviços puros de aplicação em `src/services/` (ex: `AtaFinalizationService.ts`, `SereIngestionService.ts`).  
-  - **Gatilho de Ativação:** Entrada de novos desenvolvedores no time ou necessidade de expor funcionalidades via CLI/SDK.
+- [x] **`SAAS-ARCH-01`** `[P3 | Esforço: M]` **Camada de Casos de Uso / Domain Services (Refatoração DDD — Sprint 18 / `AUD-03`)**  
+  - **Entregue:** Desacoplamento das regras puras de sanitização/pareamento anti-forja de signatários ([`src/services/ataParticipantService.ts`](../src/services/ataParticipantService.ts)) e cálculo extemporâneo `America/Sao_Paulo`, payload canônico SHA-256 e orquestração transacional de lavratura ([`src/services/ataFinalizationService.ts`](../src/services/ataFinalizationService.ts)), enxugando `/api/atas`, `/api/atas/[id]` e `/api/atas/[id]/finalize` e validado por 8 testes em [`src/lib/__tests__/ataServices.test.ts`](../src/lib/__tests__/ataServices.test.ts) *(expansão futura opcional para `/api/frequencia/sync`)*.
 - [ ] **`SAAS-QUEUE-01`** `[P4 | Esforço: G]` **Processamento Assíncrono com Filas em Background (Inngest / QStash)**  
   - **Objetivo:** Deslocar importações massivas do SERE (> 5.000 alunos) e disparos em lote de mensagens para filas desacopladas com *retries* automáticos, emitindo `202 Accepted` e barra de progresso via Server-Sent Events (SSE).  
   - **Gatilho de Ativação:** Contratação da plataforma por redes municipais de grande porte (capitais ou redes com mais de 50.000 matrículas).
-- [ ] **`SAAS-UI-01`** `[P3 | Esforço: M]` **Modularização Componentizada do Editor de Atas (`AtaEditorModal.tsx`)**  
-  - **Objetivo:** Decomposição do modal mestre (~2.600 linhas) em submódulos isolados com tipagem limpa (`AtaWizardStep1.tsx`, `AtaWizardStep2.tsx`, `AtaViewerMode.tsx`, `AtaAddendumForm.tsx`), facilitando a manutenção e testes isolados de interface.  
-  - **Gatilho de Ativação:** Manutenções evolutivas na interface ou inclusão de novos tipos de atas especializadas (ex: atas de Conselho de Classe).
+- [x] **`SAAS-UI-01`** `[P3 | Esforço: M]` **Modularização Componentizada do Editor de Atas (`AtaEditorModal.tsx` — Sprint 18)**  
+  - **Entregue:** Substituição integral de 37 ocorrências de `any` em [`AtaEditorModal.tsx`](../src/components/ata/AtaEditorModal.tsx) por contratos estritos em [`src/components/ata/editor/types.ts`](../src/components/ata/editor/types.ts) e extração acessível (`aria-label`, `aria-describedby`, `required`) dos subcomponentes [`AtaExtemporaneousBanner.tsx`](../src/components/ata/editor/AtaExtemporaneousBanner.tsx), [`AtaAddendumsSection.tsx`](../src/components/ata/editor/AtaAddendumsSection.tsx) e [`AtaActionItemsSection.tsx`](../src/components/ata/editor/AtaActionItemsSection.tsx), validados por 3 testes em [`src/lib/__tests__/ataEditorSubcomponents.test.tsx`](../src/lib/__tests__/ataEditorSubcomponents.test.tsx).
 
 ---
 
@@ -231,4 +244,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 15** | Duas Versões PR, Desacoplamento de Scrapers & Herança SEMEC | Épico 13 | ✅ Concluído |
 | **Sprint 16** | Fluxo Assistido WhatsApp Web & Selagem Bipartida | Épico 14 | ✅ Concluído |
 | **Sprint 17** | Usabilidade do Livro de Atas, Digitalização Direta & Preservação Arquivística | Épico 15 | ✅ Concluído |
-| **Futuro** | Observabilidade APM, Filas Assíncronas & Refatoração DDD | Expansão | ⏳ Planejado sob Demanda |
+| **Sprint 18** | Hardening Referencial (`AUD-04`/`06`), Camada `src/services/` & Modularização UI | Épico 16 | ✅ Concluído |
+| **Futuro** | Observabilidade APM & Filas Assíncronas | Expansão | ⏳ Planejado sob Demanda |

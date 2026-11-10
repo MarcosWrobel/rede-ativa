@@ -281,7 +281,7 @@
             <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">URL do Servidor:</label>
-                <input id="leo-serp-cfg-url" type="text" value="https://busca-ativa-leopoldina.vercel.app" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace;" />
+                <input id="leo-serp-cfg-url" type="text" value="https://www.redeativa.app.br" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace;" />
               </div>
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">Chave de Sincronização:</label>
@@ -815,7 +815,8 @@
 
     const inputUrl = document.getElementById('leo-serp-cfg-url');
     const inputToken = document.getElementById('leo-serp-cfg-token');
-    const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app').replace(/\/+$/, '');
+    const rawBaseUrl = (inputUrl?.value?.trim() || 'https://www.redeativa.app.br').replace(/\/+$/, '');
+    const baseUrl = rawBaseUrl.replace(/^https?:\/\/redeativa\.app\.br(?=\/|$)/i, 'https://www.redeativa.app.br');
     const token = inputToken?.value?.trim() || '';
 
     if (!token) {

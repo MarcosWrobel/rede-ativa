@@ -10,6 +10,13 @@ if (process.env.VERCEL === "1" && process.env.DATABASE_URL) {
     execSync("npx prisma db push --skip-generate --accept-data-loss=false", { stdio: "inherit" });
     console.log("[Vercel Build] Schema sincronizado com sucesso.");
   } catch (err) {
-    console.warn("[Vercel Build] Aviso ao executar prisma db push:", err.message);
+    if (process.env.VERCEL_ENV === "production") {
+      console.error(
+        "[Vercel Build] ERRO CRÍTICO: Falha ao sincronizar schema Prisma com Neon PostgreSQL em produção (--accept-data-loss=false):",
+        err
+      );
+      process.exit(1);
+    }
+    console.warn("[Vercel Build] Aviso ao executar prisma db push:", err?.message || err);
   }
 }

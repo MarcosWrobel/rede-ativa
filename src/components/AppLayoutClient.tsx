@@ -50,6 +50,7 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
     pathname === "/" ||
     pathname === "/login" ||
     pathname === "/impacto" ||
+    pathname === "/preview-landing" ||
     pathname.startsWith("/impacto/") ||
     pathname.startsWith("/validar/ata/") ||
     pathname.startsWith("/assinar/ata/");

@@ -14,6 +14,7 @@ import {
 import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { findSchoolBySyncToken, safeCompareStrings } from "@/lib/syncToken";
+import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
 import { checkRateLimit, resetRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
@@ -115,7 +116,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const rawBody = await req.json();
+    let rawBody: unknown;
+    try {
+      rawBody = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Payload JSON inválido." },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
     const parsedBody = frequenciaSyncSchema.safeParse(rawBody);
     if (!parsedBody.success) {
       return NextResponse.json(
@@ -134,10 +144,20 @@ export async function POST(req: Request) {
         cgm: true,
         name: true,
         isExchangeStudent: true,
+        isSpecialNeeds: true,
+        age: true,
       },
     });
 
+    const studentByIdMap = new Map(allStudents.map((s) => [s.id, s]));
     const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
+
+    // Previne colisão P2002 na restrição @unique global de CGM com alunos inativos ou de outras escolas
+    await populateGlobalTakenCgms(
+      prisma,
+      alunos.map((a) => String(a.cgm ?? "").replace(/\u0000/g, "").trim()),
+      usedCgms
+    );
 
     const pendingCgmUpdates = new Map<string, string>(); // studentId -> cgm
     const pendingStudentUpdates = new Map<
@@ -169,8 +189,11 @@ export async function POST(req: Request) {
       if (!val) return null;
       const match = String(val).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       if (!match) return null;
-      const [, d, m, y] = match;
-      const date = new Date(Number(y), Number(m) - 1, Number(d), 23, 59, 59);
+      const d = Number(match[1]);
+      const m = Number(match[2]);
+      const y = Number(match[3]);
+      if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+      const date = new Date(y, m - 1, d, 23, 59, 59);
       return isNaN(date.getTime()) ? null : date;
     }
 
@@ -184,7 +207,7 @@ export async function POST(req: Request) {
       return false;
     }
 
-    // Helper para parsear idade (inteiro positivo entre 10 e 99)
+    // Helper para parsear idade (inteiro positivo entre 5 e 99)
     function parseAge(val?: number | string | null): number | null {
       if (val === undefined || val === null || val === "") return null;
       const num = typeof val === "number" ? Math.round(val) : parseInt(String(val).replace(/\D/g, ""), 10);
@@ -193,7 +216,7 @@ export async function POST(req: Request) {
 
     // 3. Pareamento em memória (O(N)) e preparação dos lotes deduplicados
     for (const item of alunos) {
-      const cgmClean = String(item.cgm ?? "").trim();
+      const cgmClean = String(item.cgm ?? "").replace(/\u0000/g, "").trim();
       const rawName = normalizeStudentName(item.nome);
 
       let studentId: string | undefined = cgmClean ? cgmMap.get(cgmClean) : undefined;
@@ -219,38 +242,52 @@ export async function POST(req: Request) {
       }
 
       if (studentId) {
-        // Enriquecimento cadastral: Ganhando Mundo, Deficiência e Idade
+        const studentRecord = studentByIdMap.get(studentId);
+
+        // Enriquecimento cadastral (apenas quando houver alteração efetiva em relação ao banco)
         const isExchangeStudent = parseBooleanFlag(item.ganhandoMundo);
         const isSpecialNeeds = parseBooleanFlag(item.deficienciaAltasHabilidades);
         const age = parseAge(item.idade);
 
-        if (isExchangeStudent || isSpecialNeeds || age !== null) {
+        const needsExchange = isExchangeStudent && !studentRecord?.isExchangeStudent;
+        const needsSpecial = isSpecialNeeds && !studentRecord?.isSpecialNeeds;
+        const needsAge = age !== null && studentRecord?.age !== age;
+
+        if (needsExchange || needsSpecial || needsAge) {
           const current = pendingStudentUpdates.get(studentId) || {};
-          if (isExchangeStudent) current.isExchangeStudent = true;
-          if (isSpecialNeeds) current.isSpecialNeeds = true;
-          if (age !== null) current.age = age;
+          if (needsExchange) current.isExchangeStudent = true;
+          if (needsSpecial) current.isSpecialNeeds = true;
+          if (needsAge) current.age = age;
           pendingStudentUpdates.set(studentId, current);
         }
 
         // Verifica se o estudante é Ganhando Mundo (no payload ou no banco)
-        const studentRecord = allStudents.find((s) => s.id === studentId);
         const isGanhandoMundo = isExchangeStudent || Boolean(studentRecord?.isExchangeStudent);
 
         // Amparo Legal Vigência Máx (Automação de Atestado / Dispensa Legal)
         // REGRA DE NEGÓCIO: Se o estudante for de intercâmbio (Ganhando Mundo), a vigência na coluna do BI
         // refere-se ao período de intercâmbio internacional e NÃO deve ser inserida como atestado médico/pedagógico.
-        const amparoDate = parseBrDate(item.amparoLegalVigencia);
-        if (amparoDate && !isGanhandoMundo) {
+        const cleanAmparo = item.amparoLegalVigencia
+          ? String(item.amparoLegalVigencia).replace(/\u0000/g, "").trim()
+          : null;
+        const amparoDate = parseBrDate(cleanAmparo);
+        if (amparoDate && cleanAmparo && !isGanhandoMundo) {
           pendingAmparos.set(studentId, {
-            vigenciaStr: item.amparoLegalVigencia!.trim(),
+            vigenciaStr: cleanAmparo,
             date: amparoDate,
           });
         }
 
-        const percent = parseAttendancePercent(item.mediaGeral);
+        const percent = parseAttendancePercent(item.mediaGeral ?? item.frequencia);
         if (percent !== null) {
-          const semAtual = item.semanaAtual !== undefined && item.semanaAtual !== null ? String(item.semanaAtual).trim() : "";
-          const semAnt = item.semanaAnterior !== undefined && item.semanaAnterior !== null ? String(item.semanaAnterior).trim() : "";
+          const semAtual =
+            item.semanaAtual !== undefined && item.semanaAtual !== null
+              ? String(item.semanaAtual).replace(/\u0000/g, "").trim()
+              : "";
+          const semAnt =
+            item.semanaAnterior !== undefined && item.semanaAnterior !== null
+              ? String(item.semanaAnterior).replace(/\u0000/g, "").trim()
+              : "";
           const weeklyPercent = parseAttendancePercent(semAtual);
           const previousWeeklyPercent = parseAttendancePercent(semAnt);
           const detail = [
@@ -280,24 +317,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Atualiza CGMs novos em transação única (quando aplicável)
-    let cgmVinculados = 0;
-    if (pendingCgmUpdates.size > 0) {
-      const updates = Array.from(pendingCgmUpdates.entries());
-      const CHUNK = 100;
-      for (let i = 0; i < updates.length; i += CHUNK) {
-        const slice = updates.slice(i, i + CHUNK);
-        await prisma.$transaction(
-          slice.map(([id, cgm]) =>
-            prisma.student.update({
-              where: { id },
-              data: { cgm },
-            })
-          )
-        );
-        cgmVinculados += slice.length;
-      }
-    }
+    // 4. Atualiza CGMs novos com blindagem contra P2002
+    const cgmVinculados = await applyPendingCgmUpdatesSafely(prisma, pendingCgmUpdates);
 
     // 5. Bulk Upsert via SQL parametrizado em blocos de 250 linhas (~150ms para toda a escola)
     const rowsToUpsert = Array.from(batchRecords.values());
@@ -309,7 +330,7 @@ export async function POST(req: Request) {
       const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
       const values = chunk.map(
         (r) =>
-          Prisma.sql`(${r.id}, ${r.studentId}, ${r.percent}, ${r.detail}, ${defaultAction}, NOW())`
+          Prisma.sql`(${r.id}, ${r.studentId}, CAST(${r.percent} AS DOUBLE PRECISION), ${r.detail}, ${defaultAction}, NOW())`
       );
 
       await prisma.$executeRaw`
@@ -332,7 +353,7 @@ export async function POST(req: Request) {
       try {
         const snapshotValues = chunk.map(
           (r) =>
-            Prisma.sql`(${r.snapshotId}, ${r.studentId}, ${referenceWeek}, ${r.percent}, ${r.weeklyPercent}, ${r.previousWeeklyPercent}, NOW())`
+            Prisma.sql`(${r.snapshotId}, ${r.studentId}, ${referenceWeek}, CAST(${r.percent} AS DOUBLE PRECISION), CAST(${r.weeklyPercent} AS DOUBLE PRECISION), CAST(${r.previousWeeklyPercent} AS DOUBLE PRECISION), NOW())`
         );
 
         await prisma.$executeRaw`
@@ -357,21 +378,27 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5c. Atualiza atributos adicionais do estudante (Ganhando Mundo, PCD / Altas Habilidades, Idade)
+    // 5c. Atualiza atributos adicionais alterados em lote via SQL parametrizado (elimina 600+ roundtrips)
     let estudantesEnriquecidos = 0;
     if (pendingStudentUpdates.size > 0) {
       const studentUpdateEntries = Array.from(pendingStudentUpdates.entries());
-      const CHUNK = 100;
-      for (let i = 0; i < studentUpdateEntries.length; i += CHUNK) {
-        const slice = studentUpdateEntries.slice(i, i + CHUNK);
-        await prisma.$transaction(
-          slice.map(([id, data]) =>
-            prisma.student.update({
-              where: { id },
-              data,
-            })
-          )
+      for (let i = 0; i < studentUpdateEntries.length; i += BATCH_SIZE) {
+        const slice = studentUpdateEntries.slice(i, i + BATCH_SIZE);
+        const values = slice.map(
+          ([id, data]) =>
+            Prisma.sql`(${id}, CAST(${Boolean(data.isExchangeStudent)} AS BOOLEAN), CAST(${Boolean(data.isSpecialNeeds)} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
         );
+        await prisma.$executeRaw`
+          UPDATE "Student" AS s
+          SET
+            "isExchangeStudent" = CASE WHEN v."setExchange" THEN true ELSE s."isExchangeStudent" END,
+            "isSpecialNeeds" = CASE WHEN v."setSpecial" THEN true ELSE s."isSpecialNeeds" END,
+            "age" = COALESCE(v."ageVal", s."age"),
+            "updatedAt" = NOW()
+          FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
+          WHERE s."id" = v."id"
+            ${currentSchool.id ? Prisma.sql`AND s."schoolId" = ${currentSchool.id}` : Prisma.empty}
+        `;
       }
       estudantesEnriquecidos = studentUpdateEntries.length;
     }
@@ -421,6 +448,7 @@ export async function POST(req: Request) {
 
       const existingMap = new Map<string, { id: string; endDate: Date }>();
       existingJusts.forEach((j) => existingMap.set(j.studentId, j));
+      const now = new Date();
 
       for (const [studentId, amparo] of pendingAmparos.entries()) {
         const existing = existingMap.get(studentId);
@@ -429,7 +457,7 @@ export async function POST(req: Request) {
             data: {
               studentId,
               type: "DISPENSA_LEGAL",
-              startDate: new Date(),
+              startDate: amparo.date < now ? amparo.date : now,
               endDate: amparo.date,
               notes: `Sincronizado automaticamente via Power BI (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
               createdByName: userName,

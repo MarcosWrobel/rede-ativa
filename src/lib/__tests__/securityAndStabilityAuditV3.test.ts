@@ -1,8 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/auth", () => ({
-  auth: vi.fn(async () => null),
+const hoistedMocks = vi.hoisted(() => ({
+  auth: vi.fn(async () => null as any),
+  handlersGet: vi.fn(),
+  handlersPost: vi.fn(),
+  enforceRateLimit: vi.fn(async () => ({ ok: true as const })),
 }));
+
+vi.mock("@/lib/auth", () => ({
+  auth: hoistedMocks.auth,
+  handlers: {
+    GET: hoistedMocks.handlersGet,
+    POST: hoistedMocks.handlersPost,
+  },
+}));
+
+vi.mock("@/lib/rateLimit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rateLimit")>("@/lib/rateLimit");
+  return {
+    ...actual,
+    enforceRateLimit: hoistedMocks.enforceRateLimit,
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -23,7 +42,18 @@ vi.mock("@/lib/prisma", () => ({
 
 import { safeCompareStrings } from "@/lib/syncToken";
 import { BOOTSTRAP_ADMIN_EMAIL, isBootstrapAdminEmail } from "@/lib/roles";
-import { messageSendSchema, initialDeliveryStatusEnum } from "@/lib/schemas";
+import {
+  messageSendSchema,
+  initialDeliveryStatusEnum,
+  sereBatchImportSchema,
+} from "@/lib/schemas";
+import {
+  MAX_SERE_FILE_SIZE_BYTES,
+  MAX_SERE_BATCH_TOTAL_BYTES,
+  extractRowsFromFile,
+  parseExcelBufferToRows,
+  parseSereRawFiles,
+} from "@/lib/sereParser";
 
 describe("Auditoria Técnica e de Segurança V3 (Pré-Expansão)", () => {
   describe("H-06 & H-07: Comparação em Tempo Constante (safeCompareStrings)", () => {
@@ -161,6 +191,208 @@ describe("Auditoria Técnica e de Segurança V3 (Pré-Expansão)", () => {
 
       const res = await GET(req);
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe("AUD-04: Limites Defensivos SERE e Sanitização 500 Residual", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      hoistedMocks.auth.mockResolvedValue(null);
+      hoistedMocks.enforceRateLimit.mockResolvedValue({ ok: true as const });
+    });
+
+    it("rejeita lotes SERE com mais de 500 turmas no sereBatchImportSchema", () => {
+      const turmasExcedentes = Array.from({ length: 501 }, (_, idx) => ({
+        tempId: `t-${idx}`,
+        name: `Turma ${idx}`,
+        segment: "FUNDAMENTAL" as const,
+        shift: "MANHA" as const,
+      }));
+
+      const result = sereBatchImportSchema.safeParse({
+        turmas: turmasExcedentes,
+        students: [
+          {
+            cgm: "123456",
+            name: "Estudante Teste",
+            phone: "41999998888",
+            turmaTempId: "t-0",
+          },
+        ],
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toContain("500 turmas");
+      }
+    });
+
+    it("rejeita lotes SERE com mais de 5.000 estudantes ou transferidos no sereBatchImportSchema", () => {
+      const studentsExcedentes = Array.from({ length: 5001 }, (_, idx) => ({
+        cgm: String(1000000 + idx),
+        name: `Estudante ${idx}`,
+        phone: "41999998888",
+        turmaTempId: "t-0",
+      }));
+
+      const resultStudents = sereBatchImportSchema.safeParse({
+        turmas: [
+          {
+            tempId: "t-0",
+            name: "6º Ano A",
+            segment: "FUNDAMENTAL",
+            shift: "MANHA",
+          },
+        ],
+        students: studentsExcedentes,
+      });
+
+      expect(resultStudents.success).toBe(false);
+      if (!resultStudents.success) {
+        expect(resultStudents.error.issues[0]?.message).toContain("5.000 estudantes");
+      }
+
+      const transferredExcedentes = Array.from({ length: 5001 }, (_, idx) => ({
+        cgm: String(2000000 + idx),
+        name: `Transferido ${idx}`,
+      }));
+
+      const resultTransferred = sereBatchImportSchema.safeParse({
+        turmas: [
+          {
+            tempId: "t-0",
+            name: "6º Ano A",
+            segment: "FUNDAMENTAL",
+            shift: "MANHA",
+          },
+        ],
+        students: [
+          {
+            cgm: "123456",
+            name: "Estudante Válido",
+            phone: "41999998888",
+            turmaTempId: "t-0",
+          },
+        ],
+        transferredStudents: transferredExcedentes,
+      });
+
+      expect(resultTransferred.success).toBe(false);
+      if (!resultTransferred.success) {
+        expect(resultTransferred.error.issues[0]?.message).toContain("5.000 transferidos");
+      }
+    });
+
+    it("rejeita buffers acima de MAX_SERE_FILE_SIZE_BYTES (10 MB) e lotes acima de 25 MB no sereParser", async () => {
+      expect(MAX_SERE_FILE_SIZE_BYTES).toBe(10 * 1024 * 1024);
+      expect(MAX_SERE_BATCH_TOTAL_BYTES).toBe(25 * 1024 * 1024);
+
+      const oversizedBuffer = new ArrayBuffer(MAX_SERE_FILE_SIZE_BYTES + 1);
+
+      expect(() => parseExcelBufferToRows(oversizedBuffer)).toThrow(/10 MB/);
+      await expect(
+        extractRowsFromFile({ fileName: "grande.xlsx", buffer: oversizedBuffer })
+      ).rejects.toThrow(/10 MB/);
+
+      const chunk9Mb = new ArrayBuffer(9 * 1024 * 1024);
+      await expect(
+        parseSereRawFiles([
+          { fileName: "turno1.csv", buffer: chunk9Mb },
+          { fileName: "turno2.csv", buffer: chunk9Mb },
+          { fileName: "turno3.csv", buffer: chunk9Mb },
+        ])
+      ).rejects.toThrow(/25 MB/);
+    });
+
+    it("POST /api/ai/test-key não vaza error.message bruto no JSON HTTP 500", async () => {
+      hoistedMocks.auth.mockResolvedValueOnce({
+        user: { id: "usr-1", email: "pedagoga@escola.pr.gov.br", name: "Pedagoga", role: "PEDAGOGA", active: true },
+      });
+      hoistedMocks.enforceRateLimit.mockRejectedValueOnce(
+        new Error("NEON_INTERNAL_CONNECTION_STRING_SECRET")
+      );
+
+      const { POST } = await import("@/app/api/ai/test-key/route");
+      const req = new Request("http://localhost:3000/api/ai/test-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "AIzaFakeKey1234567890" }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body).toEqual({
+        success: false,
+        error: "Erro interno ao testar conectividade da chave de IA.",
+      });
+      expect(JSON.stringify(body)).not.toContain("NEON_INTERNAL_CONNECTION_STRING_SECRET");
+    });
+
+    it("POST /api/ai/generate-template não vaza error.message bruto no JSON HTTP 500", async () => {
+      hoistedMocks.auth.mockResolvedValueOnce({
+        user: { id: "usr-1", email: "pedagoga@escola.pr.gov.br", name: "Pedagoga", role: "PEDAGOGA", active: true },
+      });
+      hoistedMocks.enforceRateLimit.mockRejectedValueOnce(
+        new Error("SENSITIVE_STACK_TRACE_INTERNAL_DB")
+      );
+
+      const { POST } = await import("@/app/api/ai/generate-template/route");
+      const req = new Request("http://localhost:3000/api/ai/generate-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "Aviso de reunião" }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body).toEqual({
+        error: "Erro interno ao processar modelo com IA.",
+      });
+      expect(JSON.stringify(body)).not.toContain("SENSITIVE_STACK_TRACE_INTERNAL_DB");
+    });
+
+    it("GET e POST /api/auth/[...nextauth] não vazam error.message nem errorDetails no JSON HTTP 500", async () => {
+      const sensitiveError: any = new Error("AUTH_SECRET_PG_DSN_LEAK_TOKEN");
+      sensitiveError.name = "OAuthCallbackError";
+      sensitiveError.type = "CallbackRouteError";
+      sensitiveError.cause = "postgres://admin:supersecret@db.internal:5432/prod";
+
+      hoistedMocks.handlersGet.mockRejectedValueOnce(sensitiveError);
+      hoistedMocks.handlersPost.mockRejectedValueOnce(new Error("AUTH_POST_SECRET_LEAK"));
+
+      const { GET, POST } = await import("@/app/api/auth/[...nextauth]/route");
+      const { NextRequest } = await import("next/server");
+
+      const reqGet = new NextRequest("http://localhost:3000/api/auth/callback/google?code=secret", {
+        headers: { accept: "application/json", host: "app.redeativa.com.br" },
+      });
+      const resGet = await GET(reqGet);
+      expect(resGet.status).toBe(500);
+      const bodyGet = await resGet.json();
+      expect(bodyGet).toEqual({
+        error: "Falha interna no processamento de autenticação.",
+      });
+      const serializedGet = JSON.stringify(bodyGet);
+      expect(serializedGet).not.toContain("AUTH_SECRET_PG_DSN_LEAK_TOKEN");
+      expect(serializedGet).not.toContain("postgres://");
+      expect(serializedGet).not.toContain("detalhes");
+      expect(serializedGet).not.toContain("cookiesPresent");
+      expect(serializedGet).not.toContain("mensagem");
+      expect(serializedGet).not.toContain("tipo");
+
+      const reqPost = new NextRequest("http://localhost:3000/api/auth/signin/google", {
+        method: "POST",
+        headers: { accept: "application/json" },
+      });
+      const resPost = await POST(reqPost);
+      expect(resPost.status).toBe(500);
+      const bodyPost = await resPost.json();
+      expect(bodyPost).toEqual({
+        error: "Falha interna no processamento de autenticação.",
+      });
+      expect(JSON.stringify(bodyPost)).not.toContain("AUTH_POST_SECRET_LEAK");
     });
   });
 });

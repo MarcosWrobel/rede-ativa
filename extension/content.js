@@ -219,7 +219,7 @@
         try {
           const res = await chrome.storage.local.get(['leopoldina_server_url', 'leopoldina_sync_token']);
           if (inputUrl) {
-            inputUrl.value = res.leopoldina_server_url || 'https://busca-ativa-leopoldina.vercel.app';
+            inputUrl.value = res.leopoldina_server_url || 'https://www.redeativa.app.br';
           }
           if (inputToken) {
             inputToken.value = res.leopoldina_sync_token || '';
@@ -228,7 +228,7 @@
           console.warn('[Leopoldina] Falha ao ler storage:', err);
         }
       } else {
-        if (inputUrl) inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
+        if (inputUrl) inputUrl.value = 'https://www.redeativa.app.br';
       }
     })();
 
@@ -246,7 +246,7 @@
 
     document.getElementById('leo-cfg-btn-vercel')?.addEventListener('click', () => {
       if (inputUrl) {
-        inputUrl.value = 'https://busca-ativa-leopoldina.vercel.app';
+        inputUrl.value = 'https://www.redeativa.app.br';
         salvarConfigs();
       }
     });
@@ -853,7 +853,8 @@
 
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
-    const baseUrl = (inputUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app').replace(/\/+$/, '');
+    const rawBaseUrl = (inputUrl?.value?.trim() || 'https://www.redeativa.app.br').replace(/\/+$/, '');
+    const baseUrl = rawBaseUrl.replace(/^https?:\/\/redeativa\.app\.br(?=\/|$)/i, 'https://www.redeativa.app.br');
     const token = inputToken?.value?.trim() || '';
 
     if (!token) {

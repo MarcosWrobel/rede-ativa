@@ -12,6 +12,9 @@
 import * as XLSX from "xlsx";
 import { normalizeStudentName } from "./studentMatcher";
 
+export const MAX_SERE_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB por arquivo
+export const MAX_SERE_BATCH_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB por lote
+
 export type SchoolSegment = "FUNDAMENTAL" | "MEDIO" | "NOTURNO";
 export type SchoolShift = "MANHA" | "TARDE" | "NOITE";
 
@@ -166,10 +169,20 @@ export function parseCsvRows(text: string, delimiter?: "," | ";"): string[][] {
   return rows;
 }
 
+function assertSereBufferWithinLimit(byteLength: number, fileName?: string): void {
+  if (byteLength > MAX_SERE_FILE_SIZE_BYTES) {
+    const label = fileName ? ` "${fileName}"` : "";
+    throw new Error(
+      `O arquivo${label} excede o limite máximo permitido de 10 MB para processamento SERE.`
+    );
+  }
+}
+
 /**
  * Extrai grade tabular de linhas a partir de planilhas Excel (.xls, .xlsx) ou HTML do SERE.
  */
 export function parseExcelBufferToRows(buffer: ArrayBuffer): string[][] {
+  assertSereBufferWithinLimit(buffer.byteLength);
   try {
     const wb = XLSX.read(buffer, { type: "array", cellDates: false });
     const allRows: string[][] = [];
@@ -287,6 +300,7 @@ export function parsePdfTextToRows(pdfText: string): string[][] {
  * suportando PDF, Excel (.xls/.xlsx), HTML e CSV.
  */
 export async function extractRowsFromFile(file: RawFileInput): Promise<string[][]> {
+  assertSereBufferWithinLimit(file.buffer.byteLength, file.fileName);
   const fileNameLower = file.fileName.toLowerCase();
   const bytes = new Uint8Array(file.buffer);
 
@@ -1134,6 +1148,13 @@ export function parseSereRows(
  * e devolve o resultado estruturado.
  */
 export async function parseSereRawFiles(files: RawFileInput[]): Promise<SereParseResult> {
+  const totalBytes = files.reduce((sum, file) => sum + file.buffer.byteLength, 0);
+  if (totalBytes > MAX_SERE_BATCH_TOTAL_BYTES) {
+    throw new Error(
+      "O tamanho total dos arquivos SERE excede o limite máximo permitido de 25 MB por lote."
+    );
+  }
+
   const sections: Array<{ fileName: string; rows: string[][] }> = [];
 
   for (const file of files) {

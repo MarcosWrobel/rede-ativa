@@ -4,43 +4,10 @@ import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import { sanitizeMinutePayload } from "@/services/ataParticipantService";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
-
-function sanitizeDraftBody(raw: any) {
-  if (!raw || typeof raw !== "object") return raw;
-  const cleaned = { ...raw };
-
-  if (typeof cleaned.subject === "string") {
-    cleaned.subject = cleaned.subject.trim() || "Atendimento Pedagógico";
-    if (cleaned.subject.length < 2) cleaned.subject = "Atendimento Pedagógico";
-  }
-
-  if (Array.isArray(cleaned.participants)) {
-    cleaned.participants = cleaned.participants
-      .filter((p: any) => p && (p.name?.trim() || p.signatureData || p.signatureMode === "REFUSED"))
-      .map((p: any) => {
-        const trimmedName = (p.name || "").trim();
-        return {
-          ...p,
-          name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
-        };
-      });
-  }
-
-  if (Array.isArray(cleaned.actionItems)) {
-    cleaned.actionItems = cleaned.actionItems
-      .filter((a: any) => a && typeof a.description === "string" && a.description.trim().length >= 2)
-      .map((a: any) => ({
-        ...a,
-        description: a.description.trim(),
-        dueDate: a.dueDate && String(a.dueDate).trim() !== "" ? a.dueDate : null,
-      }));
-  }
-
-  return cleaned;
-}
 
 const createMinuteDraftSchema = z.object({
   category: z.string().default("ACOMPANHAMENTO_PEDAGOGICO"),
@@ -225,7 +192,7 @@ export async function POST(req: Request) {
     if (!authCheck.ok) return authCheck.response;
 
     const rawBody = await req.json();
-    const parsed = createMinuteDraftSchema.safeParse(sanitizeDraftBody(rawBody));
+    const parsed = createMinuteDraftSchema.safeParse(sanitizeMinutePayload(rawBody, "CREATE"));
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }

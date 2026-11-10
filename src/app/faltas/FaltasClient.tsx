@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { formatMessage, determineShift, SchoolShift } from "@/lib/messageFormatter";
 import { sanitizeCsvField } from "@/lib/csvSanitizer";
+import { parseFrequencyImportInput } from "@/lib/frequencyImportParser";
 import {
   detectAbruptDrop,
   getActiveJustification,
@@ -113,6 +114,10 @@ export default function FaltasClient({
   const [percentText, setPercentText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [recordsList, setRecordsList] = useState(lowAttendance);
+
+  useEffect(() => {
+    setRecordsList(lowAttendance);
+  }, [lowAttendance]);
 
   // Import Power BI Modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -654,53 +659,11 @@ export default function FaltasClient({
   const processInputData = (raw: string) => {
     setImportError("");
     setSyncResult(null);
-    const clean = raw.replace(/^\uFEFF/, "").trim();
-    if (!clean) {
-      setParsedData([]);
-      return;
-    }
 
-    try {
-      if (clean.startsWith("[") || clean.startsWith("{")) {
-        const json = JSON.parse(clean);
-        const arr = Array.isArray(json) ? json : json.alunos || [];
-        if (arr.length > 0) {
-          setParsedData(arr);
-          return;
-        }
-      }
-
-      const lines = clean.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length > 1) {
-        const delimiter = lines[0].includes(";") ? ";" : ",";
-        const rows: any[] = [];
-        const startIdx = lines[0].toLowerCase().includes("cgm") || lines[0].toLowerCase().includes("nome") ? 1 : 0;
-
-        for (let i = startIdx; i < lines.length; i++) {
-          const parts = lines[i].split(delimiter).map((p) => p.replace(/^["']|["']$/g, "").trim());
-          if (parts.length >= 2) {
-            rows.push({
-              cgm: parts[0] || "",
-              nome: parts[1] || "",
-              turma: parts[2] || "",
-              mediaGeral: parts[3] || "",
-              semanaAtual: parts[4] || "",
-              semanaAnterior: parts[5] || "",
-            });
-          }
-        }
-
-        if (rows.length > 0) {
-          setParsedData(rows);
-          return;
-        }
-      }
-
-      setImportError("Formato não reconhecido. Cole o JSON ou envie o arquivo CSV exportado pela extensão.");
-      setParsedData([]);
-    } catch (e: any) {
-      setImportError("Erro ao processar dados: " + e.message);
-      setParsedData([]);
+    const parsed = parseFrequencyImportInput(raw);
+    setParsedData(parsed.rows);
+    if (parsed.error) {
+      setImportError(parsed.error);
     }
   };
 
@@ -715,6 +678,7 @@ export default function FaltasClient({
       processInputData(content);
     };
     reader.readAsText(file, "utf-8");
+    e.target.value = "";
   };
 
   const handleConfirmSync = async () => {
@@ -730,9 +694,14 @@ export default function FaltasClient({
         body: JSON.stringify({ alunos: parsedData }),
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {}
+
       if (!res.ok) {
-        throw new Error(data.error || "Falha na sincronização.");
+        throw new Error(data.error || `Falha na sincronização (HTTP ${res.status}).`);
       }
 
       setSyncResult(data);
@@ -1281,7 +1250,7 @@ export default function FaltasClient({
                               if (!activeJust) return null;
                               return (
                                 <span
-                                  title={`Atestado vigente até ${new Date(activeJust.endDate).toLocaleDateString("pt-BR")}`}
+                                  title={`Atestado vigente até ${new Date(activeJust.endDate).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}`}
                                   className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold text-[10px]"
                                 >
                                   <Stethoscope className="w-3 h-3" />
@@ -1598,7 +1567,7 @@ export default function FaltasClient({
                         {item.count} avisos
                       </td>
                       <td className="p-3 text-slate-500">
-                        {new Date(item.lastDate).toLocaleDateString("pt-BR")}
+                        {new Date(item.lastDate).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
                       </td>
                       <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
                         <Link
@@ -1978,7 +1947,7 @@ export default function FaltasClient({
                       </strong>
                       <span>
                         {JUSTIFICATION_TYPE_LABELS[activeJust.type] || activeJust.type} válido até{" "}
-                        <strong>{new Date(activeJust.endDate).toLocaleDateString("pt-BR")}</strong>.
+                        <strong>{new Date(activeJust.endDate).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</strong>.
                         {activeJust.notes ? ` (${activeJust.notes})` : ""}
                       </span>
                     </div>

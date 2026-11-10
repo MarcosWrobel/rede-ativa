@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     countEl.textContent = `${lista.length} alunos`;
 
     if (inputCfgUrl) {
-      inputCfgUrl.value = res.leopoldina_server_url || 'https://busca-ativa-leopoldina.vercel.app';
+      inputCfgUrl.value = res.leopoldina_server_url || 'https://www.redeativa.app.br';
     }
     if (inputCfgToken) {
       inputCfgToken.value = res.leopoldina_sync_token || '';
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const saveSettings = async () => {
-      const serverUrl = inputCfgUrl?.value?.trim() || 'https://busca-ativa-leopoldina.vercel.app';
+      const serverUrl = inputCfgUrl?.value?.trim() || 'https://www.redeativa.app.br';
       const syncToken = inputCfgToken?.value?.trim() || '';
       await chrome.storage.local.set({
         leopoldina_server_url: serverUrl,

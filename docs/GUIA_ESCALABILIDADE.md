@@ -162,7 +162,7 @@ O sistema já possui as interfaces e endpoints prontos para o crescimento hierá
    - No painel da rede ou em `/admin/escolas`, cadastre novas escolas informando nome oficial, código INEP (8 dígitos), e-mail institucional e endereço.
    - Cada escola recebe seu próprio **Token de Sincronização da Extensão** gerado criptograficamente ([`syncToken.ts`](../src/lib/syncToken.ts)).
 3. **Distribuição da Extensão Chrome:**
-   - A extensão pré-compilada fica disponível para download imediato em `/public/extensao-leopoldina.zip`.
+   - A extensão pré-compilada fica disponível para download imediato em `/public/extensao-rede-ativa.zip` (`/public/extensao-leopoldina.zip` é mantido automaticamente no build como alias de retrocompatibilidade).
    - A equipe da nova escola instala a extensão e insere o Token de Sincronização exclusivo de sua unidade, isolando 100% os dados importados do Power BI e SERP.
 
 ---

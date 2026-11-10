@@ -65,7 +65,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes passem (370 testes em 52 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts` e `atasArchiveUsability.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (408 testes em 56 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx` e `frequenciaSync.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -105,4 +105,26 @@ A interface deve seguir os princípios de design de alta densidade de informaç�
   - **Placeholders:** Objetivos e diretos (*"Buscar por estudante ou CGM..."* em vez de *"Digite aqui o nome do aluno que você deseja encontrar..."*).
   - **Toasts e Alertas:** Factuais e curtos (*"Ata registrada."* em vez de *"A sua ata foi salva com sucesso no banco de dados!"*).
 - **Preservação de Acessibilidade & Testes SSR:** Quando testes legados de renderização exigirem strings descritivas para asserção de integridade, utilize atributos de acessibilidade (`aria-label="..."`) no elemento, mantendo a interface visual limpa, acessível para leitores de tela e 100% compatível com a suíte de testes.
+
+---
+
+## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
+- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **49 Route Handlers `route.ts`** (`src/app/api/`) e **56 suítes / 408 testes Vitest**.
+- **Estrutura de Referência:**
+  ```text
+  src/
+  ├── app/                 # 29 páginas SSR + 49 Route Handlers REST (/api/*)
+  │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
+  │   ├── /login           # Login institucional Google OAuth / dev condicional
+  │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))
+  │   ├── /preview-landing # Demonstração e simulador interativo público
+  │   └── ...              # Demais rotas operacionais, RBAC e portais QR (/validar, /assinar)
+  ├── services/            # Camada pura de domínio e transações de Atas
+  │   ├── ataParticipantService.ts
+  │   └── ataFinalizationService.ts
+  ├── components/ata/editor/ # Subcomponentes acessíveis e tipagem estrita do editor de atas
+  └── lib/                 # Segurança multi-tenant, criptografia SHA-256, IA e parsers
+  ```
+- **Pacote da Extensão MV3:** O build gera `/public/extensao-rede-ativa.zip` como artefato principal (mantendo `/public/extensao-leopoldina.zip` automaticamente como alias de retrocompatibilidade).
+
 

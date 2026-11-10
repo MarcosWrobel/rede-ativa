@@ -42,7 +42,7 @@ A plataforma utiliza o Neon PostgreSQL Serverless em São Paulo (`sa-east-1`) pa
 | `WHATSAPP_WEBHOOK_SECRET` | Opcional | Segredo para ativar o endpoint `/api/webhooks/whatsapp` (retorna `503` se omitido). |
 
 4. Ao acionar **Deploy**, o script `npm run build` executará automaticamente:
-   - Compactação da extensão universal v1.5.0 (`scripts/package_extension.cjs` -> `public/extensao-leopoldina.zip`);
+   - Compactação da extensão universal v1.5.0 (`scripts/package_extension.cjs` -> `public/extensao-rede-ativa.zip`, mantendo `public/extensao-leopoldina.zip` automaticamente no build como alias de retrocompatibilidade);
    - Sincronização segura do schema Prisma com trava `--accept-data-loss=false` (`scripts/vercel_db_push.cjs`);
    - Compilação otimizada Next.js 16 com Turbopack.
 
@@ -80,7 +80,7 @@ Com o `SUPERADMIN` autenticado, a adesão de novas redes municipais (SEMEC) e es
 2. **Credenciamento de Gestores e Equipe (`/admin` ou `/equipe`)**:
    - Cadastre os e-mails institucionais dos secretários municipais (`GESTAO_SECRETARIA`), diretores (`GESTOR_ESCOLAR`) e equipe pedagógica (`PEDAGOGA`).
 3. **Instalação do Agente Universal de Sincronização (`v1.5.0`)**:
-   - Os operadores baixam `/extensao-leopoldina.zip`, configuram a chave individual da sua escola obtida em `/configuracoes/escola` e conectam seus navegadores ao Power BI, SERP e Janela Compacta do WhatsApp.
+   - Os operadores baixam `/extensao-rede-ativa.zip` (sendo `/extensao-leopoldina.zip` mantido automaticamente no build como alias de retrocompatibilidade), configuram a chave individual da sua escola obtida em `/configuracoes/escola` e conectam seus navegadores ao Power BI, SERP e Janela Compacta do WhatsApp.
 
 ---
 

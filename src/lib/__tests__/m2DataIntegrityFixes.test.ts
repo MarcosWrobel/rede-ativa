@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { PATCH as patchAtaDraft } from "@/app/api/atas/[id]/route";
 import { POST as finalizeAta } from "@/app/api/atas/[id]/finalize/route";
 import { POST as postClass } from "@/app/api/classes/route";
+import { DELETE as deleteSchool } from "@/app/api/schools/[id]/route";
+import { POST as sanitizeSchool } from "@/app/api/schools/[id]/sanitize/route";
 import AuditoriaPage from "@/app/auditoria/page";
 import { sanitizeCsvField } from "@/lib/csvSanitizer";
 
@@ -9,6 +13,7 @@ import { sanitizeCsvField } from "@/lib/csvSanitizer";
 const mockState = {
   session: null as any,
   cookies: {} as Record<string, string>,
+  deletionOrder: [] as string[],
   db: {
     schools: [] as any[],
     classGroups: [] as any[],
@@ -56,7 +61,17 @@ vi.mock("@/lib/prisma", () => {
   const getPrismaClient = () => ({
     school: {
       findUnique: vi.fn(async ({ where }: any) => {
-        return mockState.db.schools.find((s) => s.id === where.id) || null;
+        const found = mockState.db.schools.find((s) => s.id === where.id);
+        if (!found) return null;
+        return {
+          ...found,
+          _count: {
+            students: mockState.db.students.filter((st) => st.schoolId === found.id).length,
+            classGroups: mockState.db.classGroups.filter((cg) => cg.schoolId === found.id).length,
+            pedagogicalMinutes: mockState.db.minutes.filter((m) => m.schoolId === found.id).length,
+            userSchools: 0,
+          },
+        };
       }),
       findFirst: vi.fn(async ({ where }: any) => {
         if (!where) return mockState.db.schools[0] || null;
@@ -67,6 +82,11 @@ vi.mock("@/lib/prisma", () => {
             return true;
           }) || null
         );
+      }),
+      delete: vi.fn(async ({ where }: any) => {
+        mockState.deletionOrder.push("school.delete");
+        mockState.db.schools = mockState.db.schools.filter((s) => s.id !== where.id);
+        return { id: where.id };
       }),
     },
     student: {
@@ -79,6 +99,11 @@ vi.mock("@/lib/prisma", () => {
       }),
       findUnique: vi.fn(async ({ where }: any) => {
         return mockState.db.students.find((st) => st.id === where.id) || null;
+      }),
+      deleteMany: vi.fn(async ({ where }: any) => {
+        mockState.deletionOrder.push("student.deleteMany");
+        mockState.db.students = mockState.db.students.filter((st) => st.schoolId !== where?.schoolId);
+        return { count: 1 };
       }),
     },
     classGroup: {
@@ -95,6 +120,65 @@ vi.mock("@/lib/prisma", () => {
         const item = { id: `cg-${Date.now()}`, ...data };
         mockState.db.classGroups.push(item);
         return item;
+      }),
+      deleteMany: vi.fn(async ({ where }: any) => {
+        mockState.deletionOrder.push("classGroup.deleteMany");
+        mockState.db.classGroups = mockState.db.classGroups.filter((cg) => cg.schoolId !== where?.schoolId);
+        return { count: 1 };
+      }),
+    },
+    messageLog: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("messageLog.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    lowAttendanceRecord: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("lowAttendanceRecord.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    absenceJustification: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("absenceJustification.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    inPersonAttendance: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("inPersonAttendance.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    attendanceSnapshot: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("attendanceSnapshot.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    studentContact: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("studentContact.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    messageTemplate: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("messageTemplate.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    userSchool: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("userSchool.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    user: {
+      updateMany: vi.fn(async () => {
+        mockState.deletionOrder.push("user.updateMany");
+        return { count: 0 };
       }),
     },
     pedagogicalMinute: {
@@ -120,12 +204,22 @@ vi.mock("@/lib/prisma", () => {
           actionItems: mockState.db.actionItems.filter((ai) => ai.minuteId === where.id),
         };
       }),
+      deleteMany: vi.fn(async ({ where }: any) => {
+        mockState.deletionOrder.push("pedagogicalMinute.deleteMany");
+        mockState.db.minutes = mockState.db.minutes.filter((m) => m.schoolId !== where?.schoolId);
+        return { count: 1 };
+      }),
     },
     pedagogicalMinuteStudent: {
       deleteMany: vi.fn(async ({ where }: any) => {
-        mockState.db.minuteStudents = mockState.db.minuteStudents.filter(
-          (ms) => ms.minuteId !== where.minuteId
-        );
+        mockState.deletionOrder.push("pedagogicalMinuteStudent.deleteMany");
+        if (where?.minuteId) {
+          mockState.db.minuteStudents = mockState.db.minuteStudents.filter(
+            (ms) => ms.minuteId !== where.minuteId
+          );
+        } else {
+          mockState.db.minuteStudents = [];
+        }
         return { count: 1 };
       }),
       createMany: vi.fn(async ({ data }: any) => {
@@ -139,9 +233,14 @@ vi.mock("@/lib/prisma", () => {
         return mockState.db.minuteParticipants.filter((mp) => mp.minuteId === where.minuteId);
       }),
       deleteMany: vi.fn(async ({ where }: any) => {
-        mockState.db.minuteParticipants = mockState.db.minuteParticipants.filter(
-          (mp) => mp.minuteId !== where.minuteId
-        );
+        mockState.deletionOrder.push("pedagogicalMinuteParticipant.deleteMany");
+        if (where?.minuteId) {
+          mockState.db.minuteParticipants = mockState.db.minuteParticipants.filter(
+            (mp) => mp.minuteId !== where.minuteId
+          );
+        } else {
+          mockState.db.minuteParticipants = [];
+        }
         return { count: 1 };
       }),
       createMany: vi.fn(async ({ data }: any) => {
@@ -150,11 +249,22 @@ vi.mock("@/lib/prisma", () => {
         return { count: items.length };
       }),
     },
+    pedagogicalMinuteAddendum: {
+      deleteMany: vi.fn(async () => {
+        mockState.deletionOrder.push("pedagogicalMinuteAddendum.deleteMany");
+        return { count: 0 };
+      }),
+    },
     pedagogicalActionItem: {
       deleteMany: vi.fn(async ({ where }: any) => {
-        mockState.db.actionItems = mockState.db.actionItems.filter(
-          (ai) => ai.minuteId !== where.minuteId
-        );
+        mockState.deletionOrder.push("pedagogicalActionItem.deleteMany");
+        if (where?.minuteId) {
+          mockState.db.actionItems = mockState.db.actionItems.filter(
+            (ai) => ai.minuteId !== where.minuteId
+          );
+        } else {
+          mockState.db.actionItems = [];
+        }
         return { count: 1 };
       }),
       createMany: vi.fn(async ({ data }: any) => {
@@ -195,6 +305,7 @@ vi.mock("@/lib/prisma", () => {
 describe("Milestone M2: Data Integrity, RBAC & Audit Isolation Test Suite", () => {
   beforeEach(() => {
     mockState.cookies = {};
+    mockState.deletionOrder = [];
     mockState.session = {
       user: {
         id: "usr-gestor-a",
@@ -559,6 +670,115 @@ describe("Milestone M2: Data Integrity, RBAC & Audit Isolation Test Suite", () =
       expect(row).toBe(
         '"CGM ""123""";"Mariana ""Mari"" Souza";"8º ""B""";"Manhã ""Integral""";"72.5%";"Semana ""1""";"Semana ""0""";"-5%";"Acionado Conselho Tutelar: ""Em andamento"""'
       );
+    });
+  });
+
+  // ==========================================================================
+  // AUD-06: Integridade Referencial (onDelete: Restrict) & Ordem Transacional
+  // ==========================================================================
+  describe("AUD-06: Integridade Referencial (onDelete: Restrict) e Ordem Transacional", () => {
+    it("define onDelete: Restrict nas relações probatórias de Student e School em prisma/schema.prisma", () => {
+      const schemaPath = path.join(process.cwd(), "prisma", "schema.prisma");
+      const schemaText = fs.readFileSync(schemaPath, "utf-8");
+
+      const extractModelBlock = (modelName: string) => {
+        const match = schemaText.match(new RegExp(`model\\s+${modelName}\\s*\\{([\\s\\S]*?)\\n\\}`));
+        expect(match).not.toBeNull();
+        return match![1];
+      };
+
+      expect(extractModelBlock("MessageLog")).toMatch(/student\s+Student\s+@relation\([^)]*onDelete:\s*Restrict\)/);
+      expect(extractModelBlock("AbsenceJustification")).toMatch(/student\s+Student\s+@relation\([^)]*onDelete:\s*Restrict\)/);
+      expect(extractModelBlock("InPersonAttendance")).toMatch(/student\s+Student\s+@relation\([^)]*onDelete:\s*Restrict\)/);
+      expect(extractModelBlock("PedagogicalMinuteStudent")).toMatch(/student\s+Student\s+@relation\([^)]*onDelete:\s*Restrict\)/);
+      expect(extractModelBlock("PedagogicalMinute")).toMatch(/school\s+School\s+@relation\([^)]*onDelete:\s*Restrict\)/);
+    });
+
+    it("POST /api/schools/[id]/sanitize remove dependências probatórias antes de student.deleteMany e bloqueia escola piloto 41042730", async () => {
+      mockState.session = {
+        user: {
+          id: "usr-super",
+          name: "SuperAdmin",
+          email: "super@escola.pr.gov.br",
+          role: "SUPERADMIN",
+          active: true,
+        },
+      };
+
+      const pilotRes = await sanitizeSchool(
+        new Request("http://localhost:3000/api/schools/default-leopoldina/sanitize", { method: "POST" }),
+        { params: Promise.resolve({ id: "default-leopoldina" }) }
+      );
+      expect(pilotRes.status).toBe(403);
+      expect(mockState.deletionOrder).toHaveLength(0);
+
+      const res = await sanitizeSchool(
+        new Request("http://localhost:3000/api/schools/escola-a/sanitize", { method: "POST" }),
+        { params: Promise.resolve({ id: "escola-a" }) }
+      );
+      expect(res.status).toBe(200);
+
+      const order = mockState.deletionOrder;
+      const studentIdx = order.indexOf("student.deleteMany");
+      const minuteIdx = order.indexOf("pedagogicalMinute.deleteMany");
+      const classIdx = order.indexOf("classGroup.deleteMany");
+
+      expect(studentIdx).toBeGreaterThan(-1);
+      expect(minuteIdx).toBeGreaterThan(-1);
+      expect(classIdx).toBeGreaterThan(studentIdx);
+
+      expect(order.indexOf("messageLog.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("absenceJustification.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("inPersonAttendance.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("pedagogicalMinuteStudent.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("pedagogicalMinuteStudent.deleteMany")).toBeLessThan(minuteIdx);
+      expect(order.indexOf("pedagogicalMinuteParticipant.deleteMany")).toBeLessThan(minuteIdx);
+      expect(order.indexOf("pedagogicalMinuteAddendum.deleteMany")).toBeLessThan(minuteIdx);
+      expect(order.indexOf("pedagogicalActionItem.deleteMany")).toBeLessThan(minuteIdx);
+    });
+
+    it("DELETE /api/schools/[id] remove atas e dependências antes de student.deleteMany e school.delete e bloqueia escola piloto 41042730", async () => {
+      mockState.session = {
+        user: {
+          id: "usr-super",
+          name: "SuperAdmin",
+          email: "super@escola.pr.gov.br",
+          role: "SUPERADMIN",
+          active: true,
+        },
+      };
+
+      const pilotRes = await deleteSchool(
+        new Request("http://localhost:3000/api/schools/default-leopoldina", { method: "DELETE" }),
+        { params: Promise.resolve({ id: "default-leopoldina" }) }
+      );
+      expect(pilotRes.status).toBe(403);
+      expect(mockState.deletionOrder).toHaveLength(0);
+
+      const res = await deleteSchool(
+        new Request("http://localhost:3000/api/schools/escola-a", { method: "DELETE" }),
+        { params: Promise.resolve({ id: "escola-a" }) }
+      );
+      expect(res.status).toBe(200);
+
+      const order = mockState.deletionOrder;
+      const studentIdx = order.indexOf("student.deleteMany");
+      const minuteIdx = order.indexOf("pedagogicalMinute.deleteMany");
+      const classIdx = order.indexOf("classGroup.deleteMany");
+      const schoolIdx = order.indexOf("school.delete");
+
+      expect(studentIdx).toBeGreaterThan(-1);
+      expect(minuteIdx).toBeGreaterThan(-1);
+      expect(schoolIdx).toBeGreaterThan(studentIdx);
+      expect(schoolIdx).toBeGreaterThan(minuteIdx);
+      expect(classIdx).toBeGreaterThan(studentIdx);
+      expect(classIdx).toBeLessThan(schoolIdx);
+
+      expect(order.indexOf("messageLog.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("absenceJustification.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("inPersonAttendance.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("pedagogicalMinuteStudent.deleteMany")).toBeLessThan(studentIdx);
+      expect(order.indexOf("pedagogicalMinuteStudent.deleteMany")).toBeLessThan(minuteIdx);
     });
   });
 });

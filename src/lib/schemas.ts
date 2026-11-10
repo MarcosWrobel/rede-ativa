@@ -48,7 +48,8 @@ export const sereBatchImportSchema = z.object({
         shift: z.enum(["MANHA", "TARDE", "NOITE"]),
       })
     )
-    .min(1, "Selecione ao menos uma turma para importar."),
+    .min(1, "Selecione ao menos uma turma para importar.")
+    .max(500, "Limite máximo de 500 turmas por lote excedido."),
   students: z
     .array(
       z.object({
@@ -59,7 +60,8 @@ export const sereBatchImportSchema = z.object({
         turmaTempId: z.string().trim().min(1),
       })
     )
-    .min(1, "Nenhum aluno elegível para importação nas turmas selecionadas."),
+    .min(1, "Nenhum aluno elegível para importação nas turmas selecionadas.")
+    .max(5000, "Limite máximo de 5.000 estudantes por lote excedido."),
   transferredStudents: z
     .array(
       z.object({
@@ -67,6 +69,7 @@ export const sereBatchImportSchema = z.object({
         name: z.string().trim().min(2),
       })
     )
+    .max(5000, "Limite máximo de 5.000 transferidos por lote excedido.")
     .optional()
     .default([]),
   options: z
@@ -198,6 +201,7 @@ export const frequenciaSyncItemSchema = z.object({
   nome: z.string().optional().nullable(),
   turma: z.string().optional().nullable(),
   mediaGeral: z.union([z.string(), z.number()]).optional().nullable(),
+  frequencia: z.union([z.string(), z.number()]).optional().nullable(),
   semanaAtual: z.union([z.string(), z.number()]).optional().nullable(),
   semanaAnterior: z.union([z.string(), z.number()]).optional().nullable(),
   amparoLegalVigencia: z.string().optional().nullable(),

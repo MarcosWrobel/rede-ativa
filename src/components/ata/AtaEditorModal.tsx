@@ -30,7 +30,6 @@ import {
   X,
   Check,
   ShieldCheck,
-  FilePlus2,
   Ban,
   RotateCcw,
   ExternalLink,
@@ -42,25 +41,25 @@ import {
   GraduationCap,
   Camera,
 } from "lucide-react";
+import AtaExtemporaneousBanner from "./editor/AtaExtemporaneousBanner";
+import AtaAddendumsSection from "./editor/AtaAddendumsSection";
+import AtaActionItemsSection from "./editor/AtaActionItemsSection";
+import type {
+  AtaStudentOption,
+  AtaParticipantDraft,
+  AtaActionItemDraft,
+  AtaActionItemRecord,
+  AtaAddendumRecord,
+  AtaMinuteRecord,
+  SchoolHeaderConfig,
+  SpeechRecognitionWindow,
+  SpeechRecognitionResultEvent,
+  FormalizeAtaApiResponse,
+  AtaEditorModalProps,
+} from "./editor/types";
 
-interface StudentOption {
-  id: string;
-  name: string;
-  classGroupName?: string;
-  cgm?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  guardianName?: string | null;
-}
-
-interface Props {
-  isOpen: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-  availableStudents: StudentOption[];
-  preSelectedStudentId?: string;
-  existingMinute?: any;
-  isAdmin?: boolean;
+function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 const CATEGORIES = [
@@ -81,7 +80,7 @@ export default function AtaEditorModal({
   preSelectedStudentId,
   existingMinute,
   isAdmin = false,
-}: Props) {
+}: AtaEditorModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
 
   // Filtros de Pesquisa de Alunos (Passo 1)
@@ -109,8 +108,8 @@ export default function AtaEditorModal({
   const [rawNotes, setRawNotes] = useState("");
   const [summary, setSummary] = useState("");
   const [agreementsSummary, setAgreementsSummary] = useState("");
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [actionItems, setActionItems] = useState<any[]>([]);
+  const [participants, setParticipants] = useState<AtaParticipantDraft[]>([]);
+  const [actionItems, setActionItems] = useState<AtaActionItemDraft[]>([]);
 
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -137,7 +136,7 @@ export default function AtaEditorModal({
   } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [signDurationOption, setSignDurationOption] = useState<number>(20); // 20 min ou 1440 (24h)
-  const [finalizedAta, setFinalizedAta] = useState<any | null>(null);
+  const [finalizedAta, setFinalizedAta] = useState<AtaMinuteRecord | null>(null);
   const [minuteId, setMinuteId] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
@@ -150,7 +149,7 @@ export default function AtaEditorModal({
   const [hasSigningPin, setHasSigningPin] = useState<boolean | undefined>(undefined);
 
   // Estados exclusivos para visualização de Ata já Lavrada (Adendo / Cancelamento / Ações)
-  const [viewMinuteData, setViewMinuteData] = useState<any | null>(null);
+  const [viewMinuteData, setViewMinuteData] = useState<AtaMinuteRecord | null>(null);
   const [addendumText, setAddendumText] = useState("");
   const [savingAddendum, setSavingAddendum] = useState(false);
   const [showVoidForm, setShowVoidForm] = useState(false);
@@ -209,10 +208,10 @@ export default function AtaEditorModal({
           msg: data.error || "Chave inválida ou sem resposta do Google Gemini.",
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setKeyTestStatus({
         ok: false,
-        msg: err.message || "Erro ao conectar com o serviço do Google Gemini.",
+        msg: getErrorMessage(err, "Erro ao conectar com o serviço do Google Gemini."),
       });
     } finally {
       setIsTestingApiKey(false);
@@ -247,7 +246,7 @@ export default function AtaEditorModal({
       setViewMinuteData(null);
       setMinuteId(existingMinute.id || null);
       setSelectedStudentIds(
-        existingMinute.students ? existingMinute.students.map((s: any) => s.studentId) : []
+        existingMinute.students ? existingMinute.students.map((s) => s.studentId) : []
       );
       setCategory(existingMinute.category || "ACOMPANHAMENTO_PEDAGOGICO");
       setIsConfidential(Boolean(existingMinute.isConfidential));
@@ -258,7 +257,7 @@ export default function AtaEditorModal({
       setParticipants(existingMinute.participants || []);
       setActionItems(
         existingMinute.actionItems
-          ? existingMinute.actionItems.map((a: any) => ({
+          ? existingMinute.actionItems.map((a) => ({
               id: a.id,
               description: a.description,
               responsible: a.responsible,
@@ -269,9 +268,9 @@ export default function AtaEditorModal({
       );
       const isDocentExisting =
         existingMinute.category === "ORIENTACAO_DOCENTE" ||
-        (!existingMinute.students?.length && existingMinute.participants?.some((p: any) => p.role === "PROFESSOR"));
+        (!existingMinute.students?.length && existingMinute.participants?.some((p) => p.role === "PROFESSOR"));
       setAtaScope(isDocentExisting ? "TEACHERS" : "STUDENTS");
-      setStep((existingMinute.students?.length > 0 || isDocentExisting) ? 2 : 1);
+      setStep(((existingMinute.students?.length ?? 0) > 0 || isDocentExisting) ? 2 : 1);
     } else {
       setViewMinuteData(null);
       setMinuteId(null);
@@ -322,11 +321,11 @@ export default function AtaEditorModal({
     if (!isOpen) return;
     fetch("/api/users")
       .then((r) => (r.ok ? r.json() : []))
-      .then((data) => {
+      .then((data: unknown) => {
         if (Array.isArray(data)) {
-          const teachers = data
-            .map((u: any) => ({ name: u.name, email: u.email }))
-            .filter((u: any) => u.name);
+          const teachers = (data as Array<{ name?: string | null; email?: string | null }>)
+            .filter((u): u is { name: string; email?: string | null } => Boolean(u.name))
+            .map((u) => ({ name: u.name, email: u.email ?? undefined }));
           setTeamSuggestions(teachers);
         }
       })
@@ -359,7 +358,7 @@ export default function AtaEditorModal({
   }, [availableStudents, studentSearch, selectedTurmaFilter]);
 
   // Toggle de seleção do aluno
-  const handleToggleStudent = (student: StudentOption) => {
+  const handleToggleStudent = (student: AtaStudentOption) => {
     setStep1Error(null);
     const isSelected = selectedStudentIds.includes(student.id);
     let nextIds: string[];
@@ -369,12 +368,13 @@ export default function AtaEditorModal({
     } else {
       nextIds = [...selectedStudentIds, student.id];
 
-      if (student.guardianName && !participants.some((p) => p.name === student.guardianName)) {
+      const guardianName = student.guardianName;
+      if (guardianName && !participants.some((p) => p.name === guardianName)) {
         setParticipants((prev) => [
           ...prev,
           {
             role: "RESPONSAVEL",
-            name: student.guardianName,
+            name: guardianName,
             kinship: "Mãe/Pai",
             documentType: "CPF",
             documentNumber: "",
@@ -435,11 +435,11 @@ export default function AtaEditorModal({
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/atas/${minuteId}`);
-        const data = await res.json();
+        const data = (await res.json()) as { minute?: { participants?: AtaParticipantDraft[] } };
         if (data.minute?.participants) {
           setParticipants(data.minute.participants);
           const currentPart = data.minute.participants.find(
-            (p: any) => p.name === qrModalInfo.name || p.signatureData || p.verifiedEmail
+            (p) => p.name === qrModalInfo.name || Boolean(p.signatureData) || Boolean(p.verifiedEmail)
           );
           if (currentPart?.signatureData || currentPart?.verifiedEmail) {
             setQrModalInfo(null);
@@ -461,8 +461,9 @@ export default function AtaEditorModal({
       return;
     }
 
+    const speechWin = window as unknown as SpeechRecognitionWindow;
     const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      speechWin.SpeechRecognition || speechWin.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       setAiError("Seu navegador não possui suporte para reconhecimento de voz nativo.");
@@ -478,7 +479,7 @@ export default function AtaEditorModal({
       recognition.onstart = () => setIsListening(true);
       recognition.onend = () => setIsListening(false);
       recognition.onerror = () => setIsListening(false);
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionResultEvent) => {
         let transcript = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           transcript += event.results[i][0].transcript + " ";
@@ -544,9 +545,9 @@ export default function AtaEditorModal({
       });
 
       const rawText = await res.text();
-      let data: any = null;
+      let data: FormalizeAtaApiResponse | null = null;
       try {
-        data = JSON.parse(rawText);
+        data = JSON.parse(rawText) as FormalizeAtaApiResponse;
       } catch {
         throw new Error(
           `Servidor retornou resposta inválida (HTTP ${res.status}). Verifique a conexão com a IA.`
@@ -561,9 +562,12 @@ export default function AtaEditorModal({
         if (data.result.agreementsSummary) setAgreementsSummary(data.result.agreementsSummary);
 
         if (data.result.actionItems && Array.isArray(data.result.actionItems) && data.result.actionItems.length > 0) {
-          const suggested = data.result.actionItems
-            .map((a: any) => {
-              const days = Number(a.suggestedDaysToComplete || a.prazoDias || a.prazo || a.days);
+          const suggested: AtaActionItemDraft[] = data.result.actionItems
+            .map((a) => {
+              const days =
+                typeof a === "object" && a !== null
+                  ? Number(a.suggestedDaysToComplete || a.prazoDias || a.prazo || a.days)
+                  : NaN;
               let dueDate = "";
               if (days && !isNaN(days) && days > 0) {
                 const d = new Date();
@@ -581,16 +585,16 @@ export default function AtaEditorModal({
                     a.texto ||
                     "";
               const resp =
-                typeof a === "object" && a.responsible
-                  ? a.responsible
-                  : a.responsavel || "FAMILIA";
+                typeof a === "object" && a !== null
+                  ? a.responsible || a.responsavel || "FAMILIA"
+                  : "FAMILIA";
               return {
                 description: String(desc || "").trim(),
                 responsible: resp,
                 dueDate,
               };
             })
-            .filter((item: any) => item.description.length > 0);
+            .filter((item) => item.description.length > 0);
 
           if (suggested.length > 0) {
             setActionItems(suggested);
@@ -626,8 +630,8 @@ export default function AtaEditorModal({
           setTimeout(() => setAiSuccessMsg(null), 5000);
         }
       }
-    } catch (err: any) {
-      setAiError(err.message || "Erro ao formalizar e revisar minuta.");
+    } catch (err: unknown) {
+      setAiError(getErrorMessage(err, "Erro ao formalizar e revisar minuta."));
     } finally {
       setIsAiLoading(false);
     }
@@ -682,7 +686,7 @@ export default function AtaEditorModal({
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as { error?: string; minute?: AtaMinuteRecord };
     if (!res.ok) {
       throw new Error(data.error || "Erro ao salvar rascunho da ata.");
     }
@@ -715,8 +719,8 @@ export default function AtaEditorModal({
       onSaved();
       setTimeout(() => setDraftSavedMsg(null), 4000);
       return saved;
-    } catch (err: any) {
-      setFinalizeError(err.message || "Erro ao salvar rascunho.");
+    } catch (err: unknown) {
+      setFinalizeError(getErrorMessage(err, "Erro ao salvar rascunho."));
       return null;
     } finally {
       setSaving(false);
@@ -795,7 +799,7 @@ export default function AtaEditorModal({
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; minute?: AtaMinuteRecord };
       if (!res.ok) {
         if (data.error && data.error.includes("PIN_REQUIRED")) {
           setPendingPinAction("finalize");
@@ -805,11 +809,15 @@ export default function AtaEditorModal({
         throw new Error(data.error || "Erro ao lavrar ata oficial no servidor.");
       }
 
+      if (!data.minute) {
+        throw new Error("Resposta inválida do servidor ao lavrar ata oficial.");
+      }
+
       setFinalizedAta(data.minute);
       onSaved();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[handleFinalize] Erro:", err);
-      setFinalizeError(err.message || "Erro inesperado ao lavrar ata.");
+      setFinalizeError(getErrorMessage(err, "Erro inesperado ao lavrar ata."));
     } finally {
       setSavingFinal(false);
     }
@@ -837,7 +845,9 @@ export default function AtaEditorModal({
       if (!saved) return;
 
       const currentLocal = participants[index];
-      const part = saved.participants?.[index] || saved.participants?.find((p: any) => p.name === currentLocal?.name);
+      const part =
+        saved.participants?.[index] ||
+        saved.participants?.find((p) => p.name === currentLocal?.name);
       if (!part?.id) {
         throw new Error("Informe o nome do participante antes de gerar o link de assinatura.");
       }
@@ -850,7 +860,7 @@ export default function AtaEditorModal({
           expiresInMinutes: durationMinutes,
         }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; signUrl: string };
       if (!res.ok) throw new Error(data.error || "Falha ao gerar token de assinatura");
 
       setMinuteId(saved.id);
@@ -861,8 +871,8 @@ export default function AtaEditorModal({
         participantRole: currentLocal?.role || "PARTICIPANTE",
       });
       onSaved();
-    } catch (err: any) {
-      setFinalizeError(err.message || "Erro ao gerar link de assinatura móvel.");
+    } catch (err: unknown) {
+      setFinalizeError(getErrorMessage(err, "Erro ao gerar link de assinatura móvel."));
     } finally {
       setSaving(false);
     }
@@ -917,7 +927,7 @@ export default function AtaEditorModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: addendumText.trim(), signingPin: overridePin }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; addendum: AtaAddendumRecord };
       if (!res.ok) {
         if (data.error && data.error.includes("PIN_REQUIRED")) {
           setPendingPinAction("addendum");
@@ -927,21 +937,25 @@ export default function AtaEditorModal({
         throw new Error(data.error || "Erro ao registrar aditamento");
       }
 
-      setViewMinuteData((prev: any) => ({
-        ...prev,
-        addendums: [...(prev.addendums || []), data.addendum],
-      }));
+      setViewMinuteData((prev) =>
+        prev
+          ? {
+              ...prev,
+              addendums: [...(prev.addendums || []), data.addendum],
+            }
+          : prev
+      );
       setAddendumText("");
       setPostFinalizeMsg({ type: "ok", text: 'Termo de aditamento ("Em tempo") registrado e selado com sucesso!' });
       onSaved();
-    } catch (err: any) {
-      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao salvar adendo." });
+    } catch (err: unknown) {
+      setPostFinalizeMsg({ type: "err", text: getErrorMessage(err, "Erro ao salvar adendo.") });
     } finally {
       setSavingAddendum(false);
     }
   };
 
-  const handleToggleActionStatus = async (actionItem: any) => {
+  const handleToggleActionStatus = async (actionItem: AtaActionItemRecord) => {
     if (!viewMinuteData?.id || !actionItem?.id) return;
     const nextStatus = actionItem.status === "COMPLETED" ? "PENDING" : "COMPLETED";
     try {
@@ -950,16 +964,22 @@ export default function AtaEditorModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; actionItem: AtaActionItemRecord };
       if (!res.ok) throw new Error(data.error);
 
-      setViewMinuteData((prev: any) => ({
-        ...prev,
-        actionItems: prev.actionItems.map((a: any) => (a.id === actionItem.id ? data.actionItem : a)),
-      }));
+      setViewMinuteData((prev) =>
+        prev
+          ? {
+              ...prev,
+              actionItems: (prev.actionItems || []).map((a) =>
+                a.id === actionItem.id ? data.actionItem : a
+              ),
+            }
+          : prev
+      );
       onSaved();
-    } catch (err: any) {
-      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao atualizar encaminhamento." });
+    } catch (err: unknown) {
+      setPostFinalizeMsg({ type: "err", text: getErrorMessage(err, "Erro ao atualizar encaminhamento.") });
     }
   };
 
@@ -991,7 +1011,10 @@ export default function AtaEditorModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: voidReason.trim(), signingPin: overridePin }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        minute: { voidedAt?: string | Date; voidedByName?: string | null };
+      };
       if (!res.ok) {
         if (data.error && data.error.includes("PIN_REQUIRED")) {
           setPendingPinAction("void");
@@ -1001,19 +1024,24 @@ export default function AtaEditorModal({
         throw new Error(data.error || "Erro ao tornar ata sem efeito");
       }
 
-      setViewMinuteData((prev: any) => ({
-        ...prev,
-        status: "VOIDED",
-        voidReason: voidReason.trim(),
-        voidedAt: data.minute.voidedAt,
-        voidedByName: data.minute.voidedByName,
-      }));
+      setViewMinuteData((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "VOIDED",
+              voidReason: voidReason.trim(),
+              voidedAt: data.minute.voidedAt,
+              voidedByName: data.minute.voidedByName,
+            }
+          : prev
+      );
       setShowVoidForm(false);
       setPostFinalizeMsg({ type: "ok", text: "Averbação de cancelamento registrada no Livro Oficial." });
       onSaved();
-    } catch (err: any) {
-      setVoidError(err.message || "Erro ao cancelar ata.");
-      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao cancelar ata." });
+    } catch (err: unknown) {
+      const msg = getErrorMessage(err, "Erro ao cancelar ata.");
+      setVoidError(msg);
+      setPostFinalizeMsg({ type: "err", text: msg });
     } finally {
       setSavingVoid(false);
     }
@@ -1024,13 +1052,16 @@ export default function AtaEditorModal({
     setIsDeletingAdmin(true);
     try {
       const res = await fetch(`/api/atas/${viewMinuteData.id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "Erro ao excluir ata");
       setShowAdminDeleteConfirm(false);
       onSaved();
       onClose();
-    } catch (err: any) {
-      setPostFinalizeMsg({ type: "err", text: err.message || "Erro ao excluir ata pelo Administrador." });
+    } catch (err: unknown) {
+      setPostFinalizeMsg({
+        type: "err",
+        text: getErrorMessage(err, "Erro ao excluir ata pelo Administrador."),
+      });
     } finally {
       setIsDeletingAdmin(false);
     }
@@ -1091,7 +1122,10 @@ export default function AtaEditorModal({
             </p>
             <p className="text-xs text-slate-500">
               Lavrado com fé pública por <strong>{finalizedAta.authorName}</strong> em{" "}
-              {new Date(finalizedAta.finalizedAt).toLocaleString("pt-BR")}.
+              {finalizedAta.finalizedAt
+                ? new Date(finalizedAta.finalizedAt).toLocaleString("pt-BR")
+                : new Date(finalizedAta.attendedAt).toLocaleString("pt-BR")}
+              .
             </p>
           </div>
 
@@ -1116,7 +1150,9 @@ export default function AtaEditorModal({
             </a>
 
             {finalizedAta.agreementsSummary && (() => {
-              const schoolHeader = finalizedAta.school?.name || existingMinute?.school?.name || "Rede Ativa";
+              const schoolConfig: SchoolHeaderConfig | null | undefined =
+                finalizedAta.school ?? existingMinute?.school;
+              const schoolHeader = schoolConfig?.name || "Rede Ativa";
               const waUrl = buildWhatsAppDispatchUrl(
                 "",
                 `*${schoolHeader}*\n*Comprovante de Atendimento Pedagógico — Ata nº ${cleanNum}/${cleanYear}*\n\nPrezada família, confirmamos o atendimento realizado nesta data. Seguem os combinados firmados:\n\n${finalizedAta.agreementsSummary}\n\nPara verificar a autenticidade deste documento oficial, acesse: ${typeof window !== "undefined" ? window.location.origin : ""}/validar/ata/${finalizedAta.verificationCode}`
@@ -1246,55 +1282,14 @@ export default function AtaEditorModal({
               </div>
 
               {/* Termos de Aditamento ("Em tempo") */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
-                <h4 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center space-x-1.5">
-                  <FilePlus2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-                  <span>Termos de Aditamento / Retificação (&quot;Em tempo&quot;)</span>
-                </h4>
-
-                {viewMinuteData.addendums?.length > 0 ? (
-                  <div className="space-y-2.5">
-                    {viewMinuteData.addendums.map((add: any, i: number) => (
-                      <div key={add.id || i} className="p-3 bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-1">
-                        <p className="font-serif text-slate-800 dark:text-slate-200 text-xs leading-relaxed">
-                          <strong>Em tempo ({i + 1}):</strong> {add.content}
-                        </p>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                          Por {add.authorName} em {new Date(add.createdAt).toLocaleString("pt-BR")} • Hash:{" "}
-                          {add.addendumHash?.slice(0, 20)}...
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-slate-400 dark:text-slate-500 italic">Nenhum termo de aditamento registrado nesta ata.</p>
-                )}
-
-                {!isVoid && (
-                  <div className="pt-2 space-y-2 border-t border-slate-100 dark:border-slate-800">
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block">
-                      Lavrar novo adendo (&quot;Em tempo&quot;) sem alterar o texto original:
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={addendumText}
-                      onChange={(e) => setAddendumText(e.target.value)}
-                      placeholder="Ex.: Em tempo, retifica-se o prazo de entrega do atestado médico para o dia..."
-                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-950 focus:bg-white dark:focus:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleAddAddendum()}
-                        disabled={savingAddendum}
-                        className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition disabled:opacity-50 cursor-pointer"
-                      >
-                        {savingAddendum ? "Registrando adendo..." : "Registrar Termo de Aditamento"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <AtaAddendumsSection
+                addendums={viewMinuteData.addendums || []}
+                isVoid={isVoid}
+                addendumText={addendumText}
+                savingAddendum={savingAddendum}
+                onAddendumTextChange={setAddendumText}
+                onSubmitAddendum={() => handleAddAddendum()}
+              />
             </div>
 
             {/* Coluna Direita: Alunos, Assinaturas, Encaminhamentos e Ações */}
@@ -1302,7 +1297,7 @@ export default function AtaEditorModal({
               <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
                 <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">Estudante(s) & Presentes</h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {viewMinuteData.students?.map((s: any) => (
+                  {viewMinuteData.students?.map((s) => (
                     <span
                       key={s.studentId}
                       className="px-2.5 py-1 rounded-lg bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-300 border border-transparent dark:border-sky-800 font-bold text-xs"
@@ -1313,7 +1308,7 @@ export default function AtaEditorModal({
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                  {viewMinuteData.participants?.map((p: any, i: number) => (
+                  {viewMinuteData.participants?.map((p, i) => (
                     <div
                       key={p.id || i}
                       className="p-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between gap-2"
@@ -1350,8 +1345,8 @@ export default function AtaEditorModal({
               {/* Encaminhamentos */}
               <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-2.5">
                 <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">Encaminhamentos & Prazos</h4>
-                {viewMinuteData.actionItems?.length > 0 ? (
-                  viewMinuteData.actionItems.map((act: any) => {
+                {(viewMinuteData.actionItems?.length ?? 0) > 0 ? (
+                  (viewMinuteData.actionItems || []).map((act) => {
                     const done = act.status === "COMPLETED";
                     return (
                       <div
@@ -1578,15 +1573,19 @@ export default function AtaEditorModal({
             isOpen={isScanModalOpen}
             minute={viewMinuteData}
             onClose={() => setIsScanModalOpen(false)}
-            onSuccess={(updated) => {
+            onSuccess={(updated: AtaMinuteRecord) => {
               const hasScan = Boolean(
                 updated.physicalSignedScanData || updated.physicalScanStorageKey
               );
-              setViewMinuteData((prev: any) => ({
-                ...prev,
-                ...updated,
-                hasPhysicalScan: hasScan,
-              }));
+              setViewMinuteData((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      ...updated,
+                      hasPhysicalScan: hasScan,
+                    }
+                  : prev
+              );
               setIsScanModalOpen(false);
             }}
           />
@@ -2224,22 +2223,10 @@ export default function AtaEditorModal({
 
             {/* Aviso e Justificativa de Lavratura Extemporânea (> 5 dias úteis) */}
             {isExtemporaneousMeeting && (
-              <div className="p-4 bg-amber-50/90 border border-amber-300 rounded-2xl space-y-2 text-xs shadow-2xs">
-                <div className="flex items-center space-x-2 text-amber-900 font-black">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                  <span>Lavratura Extemporânea (Atendimento realizado há mais de 5 dias úteis)</span>
-                </div>
-                <p className="text-amber-800 leading-relaxed font-medium">
-                  Atendimentos lavrados após 5 dias úteis exigem justificativa administrativa para constar no Livro de Atas:
-                </p>
-                <textarea
-                  rows={2}
-                  value={extemporaneousReason}
-                  onChange={(e) => setExtemporaneousReason(e.target.value)}
-                  placeholder="Ex: Reunião presencial realizada na data informada, com colheita de assinaturas concluída nesta data pelo comparecimento do responsável à unidade escolar..."
-                  className="w-full p-2.5 bg-white border border-amber-300 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-amber-600 focus:ring-1 focus:ring-amber-500"
-                />
-              </div>
+              <AtaExtemporaneousBanner
+                value={extemporaneousReason}
+                onChange={setExtemporaneousReason}
+              />
             )}
 
             <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
@@ -2434,86 +2421,23 @@ export default function AtaEditorModal({
 
               {/* COLUNA DIREITA: ENCAMINHAMENTOS E PARTICIPANTES/ASSINATURAS (6 colunas) */}
               <div className="lg:col-span-6 space-y-4 mt-4 lg:mt-0">
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="font-extrabold text-slate-800 block text-xs">
-                        Encaminhamentos e Prazos:
-                      </label>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActionItems((prev) => [
-                          ...prev,
-                          { description: "", responsible: "FAMILIA", dueDate: "" },
-                        ])
-                      }
-                      className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>Novo Encaminhamento</span>
-                    </button>
-                  </div>
-
-                  {actionItems.length === 0 ? (
-                    <div className="text-center py-3 text-slate-400 text-xs italic">
-                      Nenhum encaminhamento registrado.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {actionItems.map((act, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs"
-                        >
-                          <input
-                            type="text"
-                            placeholder="Descrição da ação pactuada..."
-                            value={act.description}
-                            onChange={(e) => {
-                              const copy = [...actionItems];
-                              copy[idx].description = e.target.value;
-                              setActionItems(copy);
-                            }}
-                            className="flex-1 p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
-                          />
-                          <select
-                            value={act.responsible}
-                            onChange={(e) => {
-                              const copy = [...actionItems];
-                              copy[idx].responsible = e.target.value;
-                              setActionItems(copy);
-                            }}
-                            className="p-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-xs"
-                          >
-                            <option value="FAMILIA">Família</option>
-                            <option value="ESTUDANTE">Estudante</option>
-                            <option value="ESCOLA">Escola</option>
-                            <option value="REDE_PROTECAO">Rede / CT</option>
-                          </select>
-                          <input
-                            type="date"
-                            value={act.dueDate}
-                            onChange={(e) => {
-                              const copy = [...actionItems];
-                              copy[idx].dueDate = e.target.value;
-                              setActionItems(copy);
-                            }}
-                            className="p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setActionItems((prev) => prev.filter((_, i) => i !== idx))}
-                            className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AtaActionItemsSection
+                  actionItems={actionItems}
+                  onAdd={() =>
+                    setActionItems((prev) => [
+                      ...prev,
+                      { description: "", responsible: "FAMILIA", dueDate: "" },
+                    ])
+                  }
+                  onUpdate={(index, patch) =>
+                    setActionItems((prev) =>
+                      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item))
+                    )
+                  }
+                  onRemove={(index) =>
+                    setActionItems((prev) => prev.filter((_, i) => i !== index))
+                  }
+                />
 
                 {/* Participantes & Coleta de Assinatura */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">

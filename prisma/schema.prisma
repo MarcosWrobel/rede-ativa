@@ -191,7 +191,7 @@ model MessageTemplate {
 model MessageLog {
   id              String           @id @default(cuid())
   studentId       String
-  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student         Student          @relation(fields: [studentId], references: [id], onDelete: Restrict)
   templateId      String?
   template        MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   reasonTitle     String
@@ -294,7 +294,7 @@ model StudentContact {
 model AbsenceJustification {
   id             String   @id @default(cuid())
   studentId      String
-  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Restrict)
   type           String   @default("ATESTADO_MEDICO") // ATESTADO_MEDICO | ATESTADO_ODONTOLOGICO | DECLARACAO_COMPARECIMENTO | JUSTIFICATIVA_FAMILIAR | DISPENSA_LEGAL
   startDate      DateTime
   endDate        DateTime
@@ -311,7 +311,7 @@ model AbsenceJustification {
 model InPersonAttendance {
   id              String   @id @default(cuid())
   studentId       String
-  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Restrict)
   attendedAt      DateTime @default(now())
   guardianPresent String
   subject         String
@@ -331,7 +331,7 @@ model InPersonAttendance {
 model PedagogicalMinute {
   id                    String                         @id @default(cuid())
   schoolId              String
-  school                School                         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school                School                         @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   year                  Int                            // Ano do livro oficial (ex: 2026)
   ataNumber             Int?                           // Número sequencial anual (ex: 1, 2, 42). Null enquanto rascunho.
   status                String                         @default("DRAFT") // DRAFT | FINALIZED | VOIDED
@@ -395,7 +395,7 @@ model PedagogicalMinuteStudent {
   minuteId            String
   minute              PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
   studentId           String
-  student             Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student             Student           @relation(fields: [studentId], references: [id], onDelete: Restrict)
   
   // Snapshot imutável no momento da vinculação
   studentNameSnapshot String
