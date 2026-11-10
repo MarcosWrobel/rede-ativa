@@ -3,10 +3,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "./prisma";
 import { extractClientIp } from "./audit";
 
+export type RateLimitFailMode = "open" | "closed";
+
 export interface RateLimitPolicy {
   name: string;
   limit: number;
   windowMs: number;
+  failMode?: RateLimitFailMode;
 }
 
 export const RATE_LIMIT_POLICIES = {
@@ -14,31 +17,43 @@ export const RATE_LIMIT_POLICIES = {
     name: "AI_ENDPOINT",
     limit: 20,
     windowMs: 60 * 1000, // 20 req/min
+    failMode: "open" as const,
   },
   PUBLIC_ATA_VERIFY: {
     name: "PUBLIC_ATA_VERIFY",
     limit: 30,
     windowMs: 60 * 1000, // 30 req/min
+    failMode: "open" as const,
+  },
+  PUBLIC_LOGO: {
+    name: "PUBLIC_LOGO",
+    limit: 60,
+    windowMs: 60 * 1000, // 60 req/min
+    failMode: "open" as const,
   },
   SIGN_TOKEN_ACCESS: {
     name: "SIGN_TOKEN_ACCESS",
     limit: 15,
     windowMs: 60 * 1000, // 15 req/min
+    failMode: "closed" as const,
   },
   PIN_BRUTE_FORCE: {
     name: "PIN_BRUTE_FORCE",
     limit: 10,
     windowMs: 15 * 60 * 1000, // 10 erros em 15 min
+    failMode: "closed" as const,
   },
   EXTENSION_SYNC_AUTH: {
     name: "EXTENSION_SYNC_AUTH",
     limit: 10,
     windowMs: 15 * 60 * 1000, // 10 erros em 15 min
+    failMode: "closed" as const,
   },
   MESSAGE_REPLY: {
     name: "MESSAGE_REPLY",
     limit: 60,
     windowMs: 60 * 1000, // 60 req/min
+    failMode: "open" as const,
   },
 } as const;
 
@@ -128,58 +143,115 @@ async function checkUpstashRedis(
   }
 }
 
+function checkMemoryRateLimit(key: string, policy: RateLimitPolicy): RateLimitResult {
+  cleanMemoryStore();
+  const entry = memoryStore.get(key);
+  const nowMs = Date.now();
+
+  if (!entry || entry.expiresAt <= nowMs) {
+    memoryStore.set(key, { count: 1, expiresAt: nowMs + policy.windowMs });
+    return {
+      success: true,
+      limit: policy.limit,
+      remaining: Math.max(0, policy.limit - 1),
+      resetAt: nowMs + policy.windowMs,
+      retryAfterSeconds: Math.ceil(policy.windowMs / 1000),
+    };
+  }
+
+  entry.count += 1;
+  const remaining = Math.max(0, policy.limit - entry.count);
+  const retryAfterSeconds = Math.ceil(Math.max(1000, entry.expiresAt - nowMs) / 1000);
+
+  return {
+    success: entry.count <= policy.limit,
+    limit: policy.limit,
+    remaining,
+    resetAt: entry.expiresAt,
+    retryAfterSeconds,
+  };
+}
+
 /**
- * Driver Primário Padrão: Neon PostgreSQL Distribuído + L1 Memory Fallback
+ * Driver Primário Padrão: Neon PostgreSQL Distribuído Atômico + Fail-Closed/Open por Política
  */
 async function checkPostgresRateLimit(
   key: string,
   policy: RateLimitPolicy
 ): Promise<RateLimitResult> {
+  // Para políticas leves de assets públicos (ex.: PUBLIC_LOGO), evita escrita em banco por requisição
+  if (policy.name === "PUBLIC_LOGO") {
+    return checkMemoryRateLimit(key, policy);
+  }
+
+  // Em testes unitários onde o Prisma foi mockado parcialmente sem $queryRaw nem rateLimitBucket
+  const hasQueryRaw = typeof (prisma as any)?.$queryRaw === "function";
+  const hasBucketModel = Boolean((prisma as any)?.rateLimitBucket);
+  if (!hasQueryRaw && !hasBucketModel) {
+    return checkMemoryRateLimit(key, policy);
+  }
+
   const now = new Date();
   const expiresAt = new Date(now.getTime() + policy.windowMs);
 
   try {
-    if (Math.random() < 0.02) {
+    if (Math.random() < 0.02 && hasBucketModel) {
       // Limpeza oportunística leve de buckets expirados (2% das chamadas)
-      prisma.rateLimitBucket.deleteMany({
-        where: { expiresAt: { lt: now } },
-      }).catch(() => {});
+      prisma.rateLimitBucket
+        .deleteMany({
+          where: { expiresAt: { lt: now } },
+        })
+        .catch(() => {});
     }
-
-    // Upsert ou Incremento
-    const existing = await prisma.rateLimitBucket.findUnique({
-      where: { key },
-    });
 
     let count = 1;
     let actualExpiresAt = expiresAt;
 
-    if (!existing || existing.expiresAt <= now) {
-      const saved = await prisma.rateLimitBucket.upsert({
-        where: { key },
-        create: {
-          key,
-          count: 1,
-          windowStart: now,
-          expiresAt,
-        },
-        update: {
-          count: 1,
-          windowStart: now,
-          expiresAt,
-        },
-      });
-      count = saved.count;
-      actualExpiresAt = saved.expiresAt;
+    if (hasQueryRaw) {
+      // Operação atômica única no PostgreSQL (elimina TOCTOU / race condition em rajadas paralelas)
+      const rows = await prisma.$queryRaw<Array<{ count: number | bigint; expiresAt: Date | string }>>`
+        INSERT INTO "RateLimitBucket" ("key", "count", "windowStart", "expiresAt")
+        VALUES (${key}, 1, ${now}, ${expiresAt})
+        ON CONFLICT ("key") DO UPDATE SET
+          "count" = CASE
+            WHEN "RateLimitBucket"."expiresAt" <= ${now} THEN 1
+            ELSE "RateLimitBucket"."count" + 1
+          END,
+          "windowStart" = CASE
+            WHEN "RateLimitBucket"."expiresAt" <= ${now} THEN ${now}
+            ELSE "RateLimitBucket"."windowStart"
+          END,
+          "expiresAt" = CASE
+            WHEN "RateLimitBucket"."expiresAt" <= ${now} THEN ${expiresAt}
+            ELSE "RateLimitBucket"."expiresAt"
+          END
+        RETURNING "count", "expiresAt"
+      `;
+
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      if (!row) {
+        throw new Error("Retorno vazio de RateLimitBucket upsert atômico");
+      }
+      count = Number(row.count);
+      actualExpiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(row.expiresAt);
     } else {
-      const updated = await prisma.rateLimitBucket.update({
-        where: { key },
-        data: {
-          count: { increment: 1 },
-        },
-      });
-      count = updated.count;
-      actualExpiresAt = existing.expiresAt;
+      const existing = await prisma.rateLimitBucket.findUnique({ where: { key } });
+      if (!existing || existing.expiresAt <= now) {
+        const saved = await prisma.rateLimitBucket.upsert({
+          where: { key },
+          create: { key, count: 1, windowStart: now, expiresAt },
+          update: { count: 1, windowStart: now, expiresAt },
+        });
+        count = saved.count;
+        actualExpiresAt = saved.expiresAt;
+      } else {
+        const updated = await prisma.rateLimitBucket.update({
+          where: { key },
+          data: { count: { increment: 1 } },
+        });
+        count = updated.count;
+        actualExpiresAt = existing.expiresAt;
+      }
     }
 
     const remaining = Math.max(0, policy.limit - count);
@@ -194,33 +266,20 @@ async function checkPostgresRateLimit(
       retryAfterSeconds,
     };
   } catch (dbErr) {
-    // Fallback L1 em memória se o banco oscilar momentaneamente
-    cleanMemoryStore();
-    const entry = memoryStore.get(key);
-    const nowMs = Date.now();
-
-    if (!entry || entry.expiresAt <= nowMs) {
-      memoryStore.set(key, { count: 1, expiresAt: nowMs + policy.windowMs });
+    // Políticas críticas de autenticação/PIN operam em fail-closed quando o banco falha
+    if (policy.failMode === "closed") {
+      const retryAfterSeconds = Math.max(60, Math.ceil(policy.windowMs / 1000));
       return {
-        success: true,
+        success: false,
         limit: policy.limit,
-        remaining: policy.limit - 1,
-        resetAt: nowMs + policy.windowMs,
-        retryAfterSeconds: Math.ceil(policy.windowMs / 1000),
+        remaining: 0,
+        resetAt: Date.now() + retryAfterSeconds * 1000,
+        retryAfterSeconds,
       };
     }
 
-    entry.count += 1;
-    const remaining = Math.max(0, policy.limit - entry.count);
-    const retryAfterSeconds = Math.ceil(Math.max(1000, entry.expiresAt - nowMs) / 1000);
-
-    return {
-      success: entry.count <= policy.limit,
-      limit: policy.limit,
-      remaining,
-      resetAt: entry.expiresAt,
-      retryAfterSeconds,
-    };
+    // Políticas abertas usam fallback L1 em memória se o banco oscilar momentaneamente
+    return checkMemoryRateLimit(key, policy);
   }
 }
 

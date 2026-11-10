@@ -43,11 +43,14 @@ describe("Auditoria Restrita de Segurança Multi-Tenant", () => {
       expect(assertTenantOwnership("", "escola-a", gestorEscolaASession)).toBe(false);
     });
 
-    it("permite acesso retrocompatível a recursos legados (schoolId nulo ou default-leopoldina) na unidade fundadora piloto", () => {
+    it("P1: bloqueia estritamente recursos órfãos (schoolId nulo) para qualquer não-SuperAdmin, inclusive na escola piloto", () => {
       const leopoldinaPedagogaSession = {
         user: { email: "pedagoga@leopoldina.pr.gov.br", role: "PEDAGOGA", inepCode: "41042730" },
       };
-      expect(assertTenantOwnership(null, "default-leopoldina", leopoldinaPedagogaSession)).toBe(true);
+      expect(assertTenantOwnership(null, "default-leopoldina", leopoldinaPedagogaSession)).toBe(false);
+      expect(assertTenantOwnership(undefined, "default-leopoldina", leopoldinaPedagogaSession)).toBe(false);
+      expect(assertTenantOwnership("", "default-leopoldina", leopoldinaPedagogaSession)).toBe(false);
+      expect(assertTenantOwnership("default-leopoldina", "escola-real-id", leopoldinaPedagogaSession)).toBe(false);
       expect(assertTenantOwnership("default-leopoldina", "default-leopoldina", leopoldinaPedagogaSession)).toBe(true);
     });
 

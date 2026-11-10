@@ -293,8 +293,9 @@ vi.mock("@/lib/prisma", () => {
         });
       }),
     },
-    $transaction: vi.fn(async (callback: any) => {
-      return callback(getPrismaClient());
+    $transaction: vi.fn(async (arg: any) => {
+      if (Array.isArray(arg)) return Promise.all(arg);
+      return arg(getPrismaClient());
     }),
     $executeRaw: vi.fn(async () => 1),
   });

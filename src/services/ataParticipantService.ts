@@ -64,6 +64,8 @@ export interface MergedMinuteParticipantRecord {
   clientTimestampIso: string | null;
   mobileSignToken: string | null;
   mobileSignExpiresAt: Date | null;
+  hasSignature: boolean;
+  hasActiveSignLink: boolean;
   biometricVerified: boolean;
   biometricDeviceType: string | null;
   biometricAuthTime: Date | null;
@@ -213,6 +215,8 @@ export function mergeParticipantSignatures(
 
     const shouldBurnToken =
       options.clearMobileTokens || Boolean(sigData || verifiedEmail || shouldClear || isRefused);
+    const finalMobileSignToken = shouldBurnToken ? null : (match?.mobileSignToken || null);
+    const finalMobileSignExpiresAt = shouldBurnToken ? null : toNullableDate(match?.mobileSignExpiresAt);
 
     return {
       ...(match?.id ? { id: match.id } : {}),
@@ -235,8 +239,10 @@ export function mergeParticipantSignatures(
         shouldClear || isRefused ? null : (match?.biometricStrokeData || p.biometricStrokeData || null),
       clientTimestampIso:
         shouldClear || isRefused ? null : (match?.clientTimestampIso || p.clientTimestampIso || null),
-      mobileSignToken: shouldBurnToken ? null : (match?.mobileSignToken || null),
-      mobileSignExpiresAt: shouldBurnToken ? null : toNullableDate(match?.mobileSignExpiresAt),
+      mobileSignToken: finalMobileSignToken,
+      mobileSignExpiresAt: finalMobileSignExpiresAt,
+      hasSignature: Boolean(sigData || verifiedEmail),
+      hasActiveSignLink: Boolean(finalMobileSignToken),
       biometricVerified: bioVerified,
       biometricDeviceType: bioDevice,
       biometricAuthTime: bioTime,

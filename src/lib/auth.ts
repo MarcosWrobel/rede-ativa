@@ -1,16 +1,25 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import type { SessionSchoolLink, SessionNetworkLink } from "@/types/next-auth";
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
 import { authConfig, sanitizeJwtLogoUrl } from "./auth.config";
-import { isBootstrapAdminEmail } from "./roles";
+import {
+  isBootstrapAdminEmail,
+  resolveTokenRole,
+  assertNoDevAuthInProduction,
+} from "./roles";
 
 export { sanitizeJwtLogoUrl } from "./auth.config";
 
-const isDevAuthEnabled =
-  process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_AUTH === "true";
+assertNoDevAuthInProduction(process.env);
 
-const providers: any[] = [...(authConfig.providers || [])];
+const isDevAuthEnabled =
+  process.env.NODE_ENV !== "production" &&
+  process.env.VERCEL_ENV !== "production" &&
+  process.env.ENABLE_DEV_AUTH === "true";
+
+const providers: NonNullable<NextAuthConfig["providers"]> = [...(authConfig.providers || [])];
 
 if (isDevAuthEnabled) {
   providers.push(
@@ -26,11 +35,12 @@ if (isDevAuthEnabled) {
           throw new Error("Acesso restrito a contas institucionais @escola.pr.gov.br");
         }
 
+        const isRootAdmin = isBootstrapAdminEmail(email);
         const existing = await prisma.user.findUnique({ where: { email } });
-        if (!existing && !isBootstrapAdminEmail(email)) {
+        if (!existing && !isRootAdmin) {
           throw new Error("E-mail não autorizado na equipe da escola.");
         }
-        if (existing && !existing.active && !isBootstrapAdminEmail(email)) {
+        if (existing && !existing.active && !isRootAdmin) {
           throw new Error("Conta desativada.");
         }
 
@@ -40,8 +50,8 @@ if (isDevAuthEnabled) {
             data: {
               email,
               name: email.split("@")[0].replace(".", " ").toUpperCase(),
-              role: "ADMIN",
-              active: true,
+              role: isRootAdmin ? "SUPERADMIN" : "PEDAGOGA",
+              active: isRootAdmin ? true : false,
             },
           }));
 
@@ -49,9 +59,9 @@ if (isDevAuthEnabled) {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: isBootstrapAdminEmail(email) ? "ADMIN" : user.role,
-          active: user.active,
-        } as any;
+          role: resolveTokenRole({ isRootAdmin, dbRole: user.role }),
+          active: isRootAdmin ? true : user.active,
+        };
       },
     })
   );
@@ -117,9 +127,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return "/login?error=AccountInactive";
         }
 
-        const effectiveRole = isRootAdmin
-          ? "SUPERADMIN"
-          : existingUser?.role || "PEDAGOGA";
+        const effectiveRole = resolveTokenRole({
+          isRootAdmin,
+          dbRole: existingUser?.role,
+        });
 
         const dbUser = await prisma.user.upsert({
           where: { email },
@@ -137,10 +148,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           },
         });
 
-        (user as any).dbId = dbUser.id;
-        (user as any).role = isRootAdmin ? "SUPERADMIN" : dbUser.role;
-        (user as any).active = isRootAdmin ? true : dbUser.active;
-        (user as any).schoolId = dbUser.schoolId;
+        user.dbId = dbUser.id;
+        user.role = resolveTokenRole({ isRootAdmin, dbRole: dbUser.role });
+        user.active = isRootAdmin ? true : dbUser.active;
+        user.schoolId = dbUser.schoolId;
 
         await logAudit({
           action: "USER_LOGIN",
@@ -171,15 +182,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         delete token.picture;
       }
       if (
-        typeof (token as any).image === "string" &&
-        ((token as any).image.toLowerCase().startsWith("data:") ||
-          (token as any).image.toLowerCase().startsWith("blob:") ||
-          (token as any).image.length > 255)
+        typeof token.image === "string" &&
+        (token.image.toLowerCase().startsWith("data:") ||
+          token.image.toLowerCase().startsWith("blob:") ||
+          token.image.length > 255)
       ) {
-        delete (token as any).image;
+        delete token.image;
       }
       if (Array.isArray(token.userSchools)) {
-        token.userSchools = (token.userSchools as any[]).map((s) => ({
+        token.userSchools = (token.userSchools as SessionSchoolLink[]).map((s) => ({
           schoolId: String(s.schoolId || ""),
           role: s.role || "PEDAGOGA",
           name: s.name || "",
@@ -190,7 +201,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }));
       }
       if (Array.isArray(token.userNetworks)) {
-        token.userNetworks = (token.userNetworks as any[]).map((n) => ({
+        token.userNetworks = (token.userNetworks as SessionNetworkLink[]).map((n) => ({
           networkId: String(n.networkId || ""),
           role: n.role || "GESTAO_SECRETARIA",
           name: n.name || "",
@@ -204,7 +215,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // Trata requisição explícita de alternância de instituição ativa
       if (trigger === "update" && session?.activeSchoolId) {
         const targetSchoolId = String(session.activeSchoolId);
-        const userSchools = (token.userSchools as any[]) || [];
+        const userSchools = (token.userSchools as SessionSchoolLink[]) || [];
         const hasAccess = isRootAdmin || userSchools.some((s) => s.schoolId === targetSchoolId);
         if (hasAccess) {
           token.schoolId = targetSchoolId;
@@ -217,10 +228,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       if (user) {
-        token.userId = (user as any).dbId || user.id;
-        token.role = isRootAdmin ? "ADMIN" : (user as any).role || "PEDAGOGA";
-        token.active = isRootAdmin ? true : (user as any).active !== false;
-        token.schoolId = (user as any).schoolId;
+        token.userId = user.dbId || user.id;
+        token.role = resolveTokenRole({
+          isRootAdmin,
+          dbRole: user.role,
+        });
+        token.active = isRootAdmin ? true : user.active !== false;
+        token.schoolId = user.schoolId;
         token.checkedAt = Date.now();
       }
 
@@ -273,18 +287,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             token.name = dbUser.name;
             token.active = isRootAdmin ? true : dbUser.active;
 
-            const mappedSchools = dbUser.schools.map((s) => ({
+            const mappedSchools: SessionSchoolLink[] = dbUser.schools.map((s) => ({
               schoolId: s.schoolId,
               role: s.role,
               name: s.school.name,
               inepCode: s.school.inepCode,
               city: s.school.city,
-              network: (s.school as any).network || "ESTADUAL",
+              network: s.school.network || "ESTADUAL",
               logoUrl: `/api/schools/${s.schoolId}/logo?v=${s.school.updatedAt ? new Date(s.school.updatedAt).getTime() : 1}`,
             }));
             token.userSchools = mappedSchools;
 
-            const mappedNetworks = ((dbUser as any).networks || []).map((n: any) => ({
+            const mappedNetworks: SessionNetworkLink[] = (dbUser.networks || []).map((n) => ({
               networkId: n.networkId,
               role: n.role,
               name: n.network.name,
@@ -304,9 +318,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
             token.schoolId = validSelected;
             const activeSchoolInfo = mappedSchools.find((s) => s.schoolId === validSelected);
-            token.role = isRootAdmin
-              ? "SUPERADMIN"
-              : activeSchoolInfo?.role || dbUser.role || "PEDAGOGA";
+            token.role = resolveTokenRole({
+              isRootAdmin,
+              activeSchoolRole: activeSchoolInfo?.role,
+              dbRole: dbUser.role,
+            });
           } else if (!isRootAdmin) {
             token.active = false;
           }

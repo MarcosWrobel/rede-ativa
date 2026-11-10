@@ -12,13 +12,13 @@ export default async function ModelosPage() {
     redirect("/login");
   }
 
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const currentSchool = await getCurrentSchool(session.user?.schoolId);
 
   let templates: any[] = [];
   try {
     templates = await prisma.messageTemplate.findMany({
       where: {
-        OR: [{ schoolId: currentSchool.id }, { schoolId: null }],
+        schoolId: currentSchool.id,
       },
       orderBy: [{ segment: "asc" }, { title: "asc" }],
     });

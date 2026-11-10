@@ -129,10 +129,27 @@ export async function GET(
 
     const safeMinute = {
       ...minute,
-      participants: (minute.participants || []).map(({ mobileSignToken, ...rest }: any) => ({
-        ...rest,
-        hasActiveSignLink: Boolean(mobileSignToken),
-      })),
+      hasPhysicalScan:
+        typeof (minute as any).hasPhysicalScan === "boolean"
+          ? (minute as any).hasPhysicalScan
+          : Boolean(
+              minute.physicalSignedScanData ||
+                minute.physicalScanStorageKey ||
+                minute.physicalScanSha256
+            ),
+      participants: (minute.participants || []).map(
+        ({ mobileSignToken, mobileSignExpiresAt, ...rest }: any) => ({
+          ...rest,
+          hasSignature:
+            typeof rest.hasSignature === "boolean"
+              ? rest.hasSignature
+              : Boolean(rest.signatureData || rest.verifiedEmail),
+          hasActiveSignLink:
+            typeof rest.hasActiveSignLink === "boolean"
+              ? rest.hasActiveSignLink
+              : Boolean(mobileSignToken),
+        })
+      ),
     };
 
     return NextResponse.json({ success: true, minute: safeMinute });
@@ -276,25 +293,36 @@ export async function PATCH(
         }
       }
 
-      return await tx.pedagogicalMinute.update({
-        where: { id },
-        data: {
-          category: data.category,
-          isConfidential: data.isConfidential,
-          attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
-          subject: data.subject,
-          rawNotes: data.rawNotes,
-          summary: data.summary,
-          agreementsSummary: data.agreementsSummary,
-          physicalSignedScanData: data.physicalSignedScanData,
+          return await tx.pedagogicalMinute.update({
+            where: { id },
+            data: {
+              category: data.category,
+              isConfidential: data.isConfidential,
+              attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
+              subject: data.subject,
+              rawNotes: data.rawNotes,
+              summary: data.summary,
+              agreementsSummary: data.agreementsSummary,
+              physicalSignedScanData: data.physicalSignedScanData,
+              ...(data.physicalSignedScanData !== undefined
+                ? {
+                    hasPhysicalScan: Boolean(
+                      data.physicalSignedScanData ||
+                        existing.physicalScanStorageKey ||
+                        existing.physicalScanSha256
+                    ),
+                  }
+                : {}),
+            },
+            include: {
+              students: true,
+              participants: true,
+              actionItems: true,
+            },
+          });
         },
-        include: {
-          students: true,
-          participants: true,
-          actionItems: true,
-        },
-      });
-    });
+        { maxWait: 5000, timeout: 10000 }
+      );
 
     await logAudit({
       action: "UPDATE_ATA_DRAFT",

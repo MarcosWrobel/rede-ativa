@@ -375,7 +375,7 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
       expect(allowed2).toBe(false);
     });
 
-    it("concede contexto da sede estritamente quando inepCode for 41042730 ou currentSchoolId for default-leopoldina", () => {
+    it("P1: exige correspondência estrita resourceSchoolId === currentSchoolId e bloqueia recursos órfãos (schoolId: null) mesmo para sessão da escola piloto", () => {
       const pilotSession = {
         user: {
           email: "pedagoga@leopoldina.pr.gov.br",
@@ -385,7 +385,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
         },
       };
 
-      expect(assertTenantOwnership(null, "default-leopoldina", pilotSession)).toBe(true);
+      expect(assertTenantOwnership(null, "default-leopoldina", pilotSession)).toBe(false);
+      expect(assertTenantOwnership(undefined, "default-leopoldina", pilotSession)).toBe(false);
+      expect(assertTenantOwnership("default-leopoldina", "escola-outro-id", pilotSession)).toBe(false);
       expect(assertTenantOwnership("default-leopoldina", "default-leopoldina", pilotSession)).toBe(true);
     });
 

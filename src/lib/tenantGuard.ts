@@ -1,44 +1,26 @@
-import { checkIsSuperAdmin } from "./roles";
+import { checkIsSuperAdmin, type AuthSessionLike } from "./roles";
 
 /**
  * Validador atômico de isolamento multi-tenant (Prevenção BOLA / IDOR).
  *
  * Retorna true se:
  * 1. O usuário for SuperAdmin global autenticado da plataforma SaaS (Nível 1); ou
- * 2. O recurso pertencer comprovadamente à instituição ativa da sessão (resourceSchoolId === currentSchoolId); ou
- * 3. O recurso for um registro legado (schoolId nulo ou "default-leopoldina") e a sessão estiver operando na unidade fundadora padrão.
+ * 2. O recurso possuir schoolId definido e pertencer estritamente à instituição ativa da sessão (resourceSchoolId === currentSchoolId).
  *
- * Bloqueia estritamente acessos cruzados entre escolas distintas para qualquer papel não-SuperAdmin.
+ * Bloqueia estritamente recursos órfãos (schoolId nulo/vazio) e acessos cruzados entre escolas distintas para qualquer papel não-SuperAdmin.
  */
 export function assertTenantOwnership(
   resourceSchoolId: string | null | undefined,
   currentSchoolId: string,
-  session: any
+  session: AuthSessionLike | null | undefined
 ): boolean {
   if (checkIsSuperAdmin(session)) {
     return true;
   }
 
-  if (!currentSchoolId) {
+  if (!currentSchoolId || !resourceSchoolId) {
     return false;
   }
 
-  // Correspondência direta por ID
-  if (resourceSchoolId === currentSchoolId) {
-    return true;
-  }
-
-  // Retrocompatibilidade segura com dados legados da escola piloto fundadora:
-  // Se o recurso não tem schoolId ou carrega o ID fixo legado "default-leopoldina",
-  // e o contexto do usuário for comprovadamente a escola sede fundadora (INEP 41042730 ou ID fixo),
-  // permite o acesso para não travar a operação histórica da unidade piloto.
-  const isDefaultSchoolContext =
-    currentSchoolId === "default-leopoldina" ||
-    (session?.user as any)?.inepCode === "41042730";
-
-  if ((!resourceSchoolId || resourceSchoolId === "default-leopoldina") && isDefaultSchoolContext) {
-    return true;
-  }
-
-  return false;
+  return resourceSchoolId === currentSchoolId;
 }

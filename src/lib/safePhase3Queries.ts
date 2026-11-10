@@ -86,6 +86,7 @@ export async function loadStudent360Bundle(studentId: string) {
           physicalScanSha256: true,
           physicalScanUploadedAt: true,
           physicalScanUploadedBy: true,
+          hasPhysicalScan: true,
           govBrVerified: true,
           govBrProtocol: true,
           voidedAt: true,
@@ -120,6 +121,8 @@ export async function loadStudent360Bundle(studentId: string) {
               emailVerifiedAt: true,
               refusalReason: true,
               witnessName: true,
+              hasSignature: true,
+              hasActiveSignLink: true,
               createdAt: true,
             },
           },
@@ -138,14 +141,17 @@ export async function loadStudent360Bundle(studentId: string) {
     .filter((m: any) => !student.schoolId || !m.schoolId || m.schoolId === student.schoolId)
     .map((m: any) => ({
       ...m,
-      hasPhysicalScan: Boolean(
-        m.physicalSignedScanData ||
-          m.physicalScanStorageKey ||
-          m.physicalScanSha256 ||
-          m.physicalScanUploadedAt ||
-          m.physicalScanSizeBytes ||
-          m.physicalScanMimeType
-      ),
+      hasPhysicalScan:
+        typeof m.hasPhysicalScan === "boolean"
+          ? m.hasPhysicalScan
+          : Boolean(
+              m.physicalSignedScanData ||
+                m.physicalScanStorageKey ||
+                m.physicalScanSha256 ||
+                m.physicalScanUploadedAt ||
+                m.physicalScanSizeBytes ||
+                m.physicalScanMimeType
+            ),
       physicalSignedScanData: null,
     }));
 

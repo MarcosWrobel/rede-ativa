@@ -305,33 +305,33 @@ export async function DELETE(
       );
     }
 
-    // Executa a exclusão de todas as dependências em transação atômica
-    await prisma.$transaction(async (tx) => {
-      await tx.messageLog.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.absenceJustification.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.studentContact.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.pedagogicalMinuteStudent.deleteMany({
+    // Executa a exclusão de todas as dependências em batch transaction compatível com PgBouncer
+    await prisma.$transaction([
+      prisma.messageLog.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.absenceJustification.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.studentContact.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.pedagogicalMinuteStudent.deleteMany({
         where: {
           OR: [{ minute: { schoolId: id } }, { student: { schoolId: id } }],
         },
-      });
-      await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalMinute.deleteMany({ where: { schoolId: id } });
-      await tx.student.deleteMany({ where: { schoolId: id } });
-      await tx.classGroup.deleteMany({ where: { schoolId: id } });
-      await tx.messageTemplate.deleteMany({ where: { schoolId: id } });
-      await tx.userSchool.deleteMany({ where: { schoolId: id } });
-      await tx.user.updateMany({
+      }),
+      prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalMinute.deleteMany({ where: { schoolId: id } }),
+      prisma.student.deleteMany({ where: { schoolId: id } }),
+      prisma.classGroup.deleteMany({ where: { schoolId: id } }),
+      prisma.messageTemplate.deleteMany({ where: { schoolId: id } }),
+      prisma.userSchool.deleteMany({ where: { schoolId: id } }),
+      prisma.user.updateMany({
         where: { schoolId: id },
         data: { schoolId: null },
-      });
-      await tx.school.delete({ where: { id } });
-    });
+      }),
+      prisma.school.delete({ where: { id } }),
+    ]);
 
     await logAudit({
       action: "DELETE_SCHOOL",

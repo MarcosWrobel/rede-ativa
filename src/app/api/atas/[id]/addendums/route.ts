@@ -156,7 +156,7 @@ export async function POST(
         minuteYear: minute.year,
         minuteSchoolId: minute.schoolId,
       };
-    });
+    }, { maxWait: 5000, timeout: 10000 });
 
     await logAudit({
       action: "ADD_ATA_ADDENDUM",

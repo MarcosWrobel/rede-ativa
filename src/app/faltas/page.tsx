@@ -120,7 +120,7 @@ export default async function FaltasPage() {
         orderBy: { name: "asc" },
       }),
       prisma.messageTemplate.findMany({
-        where: { active: true, OR: [{ schoolId }, { schoolId: null }] },
+        where: { active: true, schoolId },
         orderBy: { title: "asc" },
         select: {
           id: true,

@@ -47,7 +47,7 @@ export default async function BuscaAtivaPage({
         orderBy: { name: "asc" },
       }),
       prisma.messageTemplate.findMany({
-        where: { active: true, OR: [{ schoolId }, { schoolId: null }] },
+        where: { active: true, schoolId },
         select: {
           id: true,
           title: true,

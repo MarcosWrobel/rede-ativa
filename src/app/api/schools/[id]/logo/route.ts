@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRateLimit,
+  getPublicIpRateLimitKey,
+  RATE_LIMIT_POLICIES,
+} from "@/lib/rateLimit";
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400",
@@ -13,6 +18,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const rlKey = getPublicIpRateLimitKey("pub-logo", req);
+    const rlCheck = await enforceRateLimit(rlKey, RATE_LIMIT_POLICIES.PUBLIC_LOGO);
+    if (!rlCheck.ok) {
+      return rlCheck.response;
+    }
+
     const { id } = await params;
 
     const school = await prisma.school.findUnique({

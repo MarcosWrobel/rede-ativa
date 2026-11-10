@@ -125,8 +125,8 @@ model ClassGroup {
   name      String    // e.g. "6º 1", "1º ADM", "2º Série"
   segment   String    // FUNDAMENTAL | MEDIO | NOTURNO
   shift     String    @default("MANHA") // MANHA | TARDE | NOITE
-  schoolId  String?
-  school    School?   @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  schoolId  String
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   createdAt DateTime  @default(now())
 
   students  Student[]
@@ -145,8 +145,8 @@ model Student {
   phone                String                // e.g. "42988189394"
   classGroupId         String
   classGroup           ClassGroup            @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
-  schoolId             String?
-  school               School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  schoolId             String
+  school               School                @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   active               Boolean               @default(true)
   isExchangeStudent    Boolean               @default(false) // Aluno do programa Ganhando Mundo (Intercâmbio Internacional)
   isSpecialNeeds       Boolean               @default(false) // Aluno com Deficiência / Altas Habilidades (AEE)
@@ -177,8 +177,8 @@ model MessageTemplate {
   suffixText       String       // Text after student name
   isAbsenceRelated Boolean      @default(false)
   active           Boolean      @default(true)
-  schoolId         String?
-  school           School?      @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  schoolId         String
+  school           School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   createdAt        DateTime     @default(now())
 
   messageLogs      MessageLog[]
@@ -206,7 +206,7 @@ model MessageLog {
   repliedAt         DateTime?
   repliedByUserId   String?
   repliedByUser     User?            @relation("RepliedByUser", fields: [repliedByUserId], references: [id], onDelete: SetNull)
-  deliveryStatus    String           @default("SENT") // LINK_OPENED | SENT | DELIVERED | READ | FAILED_NO_WHATSAPP
+  deliveryStatus    String           @default("SENT") // QUEUED | DISPATCHING | LINK_OPENED | SENT | DELIVERED | READ | FAILED_NO_WHATSAPP
   deliveryUpdatedAt DateTime?
   sentAt            DateTime         @default(now())
   contentHash       String?          // Hash SHA-256 canônico de integridade probatória e não-repúdio (JUR-02)
@@ -364,6 +364,7 @@ model PedagogicalMinute {
   physicalScanSha256     String?                       // Hash SHA-256 canônico dos bytes brutos do documento anexado (Cadeia de Custódia)
   physicalScanUploadedAt DateTime?                     // Data do upload da via física escaneada/fotografada (JUR-04)
   physicalScanUploadedBy String?                       // Nome do profissional que digitalizou (JUR-04)
+  hasPhysicalScan       Boolean                        @default(false) // Flag persistida na escrita (N4 - evita heurística e tráfego de blob)
   govBrVerified         Boolean                        @default(false) // Autenticado via Assinador ITI / Gov.br (JUR-04)
   govBrProtocol         String?                        // Código de validação / protocolo do assinador.iti.br (JUR-04)
   
@@ -435,6 +436,8 @@ model PedagogicalMinuteParticipant {
   
   mobileSignToken         String?           @unique // Token temporário para assinar pelo celular via QR Code / Link
   mobileSignExpiresAt     DateTime?
+  hasSignature            Boolean           @default(false) // Flag persistida na escrita (N4 - evita heurística)
+  hasActiveSignLink       Boolean           @default(false) // Flag persistida na escrita (N3 - evita trafegar mobileSignToken)
   biometricVerified       Boolean           @default(false) // Validação biométrica local do aparelho (WebAuthn/FIDO2)
   biometricDeviceType     String?           // Ex: "FIDO2_PASSKEY_PLATFORM" (TouchID/FaceID/Biometria Android)
   biometricAuthTime       DateTime?         // Registro do instante da autenticação biométrica local

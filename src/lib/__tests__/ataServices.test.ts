@@ -66,6 +66,8 @@ describe("ataParticipantService - Sanitização e Pareamento de Signatários", (
     expect(draftMerged[0].minuteId).toBe("ata-1");
     expect(draftMerged[0].mobileSignToken).toBe("tok-mobile-abc");
     expect(draftMerged[0].mobileSignExpiresAt).toEqual(tokenExpiry);
+    expect(draftMerged[0].hasActiveSignLink).toBe(true);
+    expect(draftMerged[0].hasSignature).toBe(false);
 
     const finalizedMerged = mergeParticipantSignatures(
       [{ id: "mp-1", name: "Ana Souza", role: "RESPONSAVEL" }],
@@ -74,6 +76,40 @@ describe("ataParticipantService - Sanitização e Pareamento de Signatários", (
     );
     expect(finalizedMerged[0].mobileSignToken).toBeNull();
     expect(finalizedMerged[0].mobileSignExpiresAt).toBeNull();
+    expect(finalizedMerged[0].hasActiveSignLink).toBe(false);
+    expect(finalizedMerged[0].hasSignature).toBe(false);
+  });
+
+  it("N3 & N4: hasSignature reflete estritamente signatureData ou verifiedEmail, sem falso-positivo por signedAt/signatureMode isolados", () => {
+    const mergedWithoutBlob = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-no-blob",
+          name: "Participante Sem Blob",
+          signatureMode: "SCREEN_CANVAS",
+          signedAt: "2026-11-10T12:00:00Z",
+          signatureData: null,
+        },
+      ],
+      [],
+      { clearMobileTokens: false, minuteId: "ata-n4" }
+    );
+    expect(mergedWithoutBlob[0].hasSignature).toBe(false);
+    expect(mergedWithoutBlob[0].signedAt).toBeNull();
+
+    const mergedWithBlob = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-with-blob",
+          name: "Participante Com Blob",
+          signatureMode: "SCREEN_CANVAS",
+          signatureData: "data:image/png;base64,iVBORw0KGgo=",
+        },
+      ],
+      [],
+      { clearMobileTokens: false, minuteId: "ata-n4" }
+    );
+    expect(mergedWithBlob[0].hasSignature).toBe(true);
   });
 
   it("mergeParticipantSignatures aplica fallback 1-para-1, preserva provas OIDC/WebAuthn e limpa provas em REFUSED/clearSignature", () => {

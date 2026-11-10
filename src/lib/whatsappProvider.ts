@@ -2,6 +2,8 @@ import { getActiveJustification } from "./pedagogicalClassifier";
 import { normalizeWhatsAppPhone } from "./studentMatcher";
 
 export type DeliveryStatus =
+  | "QUEUED"
+  | "DISPATCHING"
   | "LINK_OPENED"
   | "SENT"
   | "DELIVERED"
@@ -26,6 +28,8 @@ export type WhatsAppProviderMode = "WA_ME" | "HTTP_GATEWAY";
 export const WA_ME_REUSABLE_WINDOW_NAME = "leopoldina_whatsapp_dispatch";
 
 export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  QUEUED: "Em Fila (Aguardando)",
+  DISPATCHING: "Despachando (Em Curso)",
   LINK_OPENED: "Link Aberto (wa.me)",
   SENT: "Enviado (Confirmado)",
   DELIVERED: "Entregue",

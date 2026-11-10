@@ -1,4 +1,5 @@
 import { cache } from "react";
+import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { checkIsSuperAdmin } from "./roles";
@@ -52,7 +53,7 @@ const SCHOOL_CONTEXT_SELECT = {
 
 const SCHOOL_CACHE_TTL_MS = 60 * 1000;
 const schoolContextCache = new Map<string, { value: SchoolContext; expiresAt: number }>();
-const schoolDirectoryCache = new Map<string, { value: any[]; expiresAt: number }>();
+const schoolDirectoryCache = new Map<string, { value: unknown[]; expiresAt: number }>();
 
 function isCacheEnabled(): boolean {
   return process.env.VITEST !== "true" && process.env.NODE_ENV !== "test";
@@ -109,7 +110,24 @@ export function invalidateSchoolCache(schoolId?: string): void {
   }
 }
 
-function mapSchoolRecordToContext(school: any): SchoolContext {
+interface SchoolSelectRecord {
+  id: string;
+  inepCode: string;
+  name: string;
+  city: string;
+  state: string;
+  nre: string;
+  network?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  logoUrl?: string | null;
+  active?: boolean;
+  settingsJson?: string | null;
+  networkId?: string | null;
+  updatedAt?: Date | string | null;
+}
+
+function mapSchoolRecordToContext(school: SchoolSelectRecord): SchoolContext {
   return {
     id: school.id,
     inepCode: school.inepCode,
@@ -197,7 +215,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
     const cookieVal = cookieStore.get("active_school_id")?.value?.trim();
 
     if (cookieVal || !schoolId || !schoolId.trim()) {
-      let session: any = null;
+      let session: Session | null = null;
       try {
         const { auth } = await import("@/lib/auth");
         session = await auth();
@@ -205,21 +223,21 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
         // Fora de contexto de autenticação / CLI / testes
       }
 
-      if (session?.user && (session.user as any).schoolId) {
-        sessionSchoolId = String((session.user as any).schoolId).trim();
+      if (session?.user?.schoolId) {
+        sessionSchoolId = String(session.user.schoolId).trim();
       }
 
       if (cookieVal && session?.user) {
-        const role = (session.user as any).role;
+        const role = session.user.role;
         const isSuper = checkIsSuperAdmin(session);
-        const userSchools = ((session.user as any).schools as any[]) || [];
-        const userNetworks = ((session.user as any).networks as any[]) || [];
+        const userSchools = session.user.schools || [];
+        const userNetworks = session.user.networks || [];
 
         let hasAccess =
           isSuper ||
           sessionSchoolId === cookieVal ||
           userSchools.some(
-            (s: any) =>
+            (s) =>
               (s.id && s.id === cookieVal) ||
               (s.schoolId && s.schoolId === cookieVal)
           );
@@ -238,15 +256,15 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
           });
           if (candidateSchool && candidateSchool.active !== false) {
             const allowedNetIds = userNetworks
-              .map((n: any) => n.networkId || n.id)
-              .filter(Boolean);
+              .map((n) => n.networkId || n.id)
+              .filter((id): id is string => Boolean(id));
             const allowedCities = userNetworks
-              .map((n: any) => (n.city || n.network?.city || "").toLowerCase().trim())
+              .map((n) => (n.city || n.network?.city || "").toLowerCase().trim())
               .filter(Boolean);
 
             const matchesNetworkId =
               Boolean(candidateSchool.networkId) &&
-              allowedNetIds.includes(candidateSchool.networkId);
+              allowedNetIds.includes(candidateSchool.networkId!);
             const matchesMunicipalCity =
               (candidateSchool.network || "ESTADUAL") === "MUNICIPAL" &&
               Boolean(candidateSchool.city) &&

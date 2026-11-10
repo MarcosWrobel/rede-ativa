@@ -55,26 +55,10 @@ export async function POST(req: Request) {
         console.warn("[students/import] Aviso ao atualizar dados da escola:", err);
       }
     }
-    const schoolId = schoolRecord?.id || null;
-    const isDefaultSchoolContext =
-      schoolRecord?.id === "default-leopoldina" ||
-      schoolRecord?.inepCode === "41042730" ||
-      (schoolRecord as any)?.inep === "41042730" ||
-      (authCheck.session?.user as any)?.inepCode === "41042730";
+    const schoolId: string = schoolRecord?.id || currentSchool.id || "default-leopoldina";
+    const schoolFilter = { schoolId };
 
-    const schoolFilter = schoolId
-      ? isDefaultSchoolContext
-        ? {
-            OR: [
-              { schoolId },
-              { schoolId: null },
-              { schoolId: "default-leopoldina" },
-            ],
-          }
-        : { schoolId }
-      : undefined;
-
-    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola (com tolerância a turmas legadas)
+    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola
     const existingClassGroups = await prisma.classGroup.findMany({
       where: schoolFilter,
     });
@@ -115,7 +99,7 @@ export async function POST(req: Request) {
             name: cleanName,
             segment: t.segment,
             shift: t.shift,
-            ...(schoolId ? { schoolId } : {}),
+            schoolId,
           },
         });
         existingByName.set(upperKey, createdCg);
@@ -193,7 +177,7 @@ export async function POST(req: Request) {
       guardianName: string;
       phone: string;
       classGroupId: string;
-      schoolId?: string | null;
+      schoolId: string;
       active: boolean;
     }> = [];
 
@@ -205,7 +189,7 @@ export async function POST(req: Request) {
         guardianName?: string | null;
         phone?: string;
         classGroupId?: string;
-        schoolId?: string | null;
+        schoolId?: string;
         active?: boolean;
       };
     }> = [];
@@ -304,7 +288,7 @@ export async function POST(req: Request) {
           guardianName: item.guardianName?.trim() || "Responsável",
           phone: cleanPhone,
           classGroupId: targetClassGroupId,
-          ...(schoolId ? { schoolId } : {}),
+          schoolId,
           active: true,
         });
       }

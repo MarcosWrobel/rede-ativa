@@ -227,6 +227,7 @@ export async function POST(
         physicalScanSha256: stored.sha256,
         physicalScanUploadedAt: now,
         physicalScanUploadedBy: authCheck.userName,
+        hasPhysicalScan: true,
       };
 
       auditDetails = {
@@ -351,6 +352,7 @@ export async function DELETE(
         physicalScanSha256: null,
         physicalScanUploadedAt: null,
         physicalScanUploadedBy: null,
+        hasPhysicalScan: false,
         govBrVerified: false,
         govBrProtocol: null,
       },

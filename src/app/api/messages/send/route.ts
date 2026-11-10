@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageSendSchema } from "@/lib/schemas";
-import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
-import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { getCurrentSchool } from "@/lib/currentSchool";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { computeMessageContentHash } from "@/lib/messageCrypto";
+import { dispatchAndPersistMessage } from "@/services/messageDispatchService";
 
 export async function POST(req: Request) {
   try {
@@ -28,118 +23,29 @@ export async function POST(req: Request) {
       initialDeliveryStatus,
     } = parsed.data;
 
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      include: { classGroup: true },
-    });
-
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (!student || !assertTenantOwnership(student.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json({ error: "Aluno não encontrado nesta instituição" }, { status: 404 });
-    }
 
-    if (templateId) {
-      const template = await prisma.messageTemplate.findUnique({
-        where: { id: templateId },
-        select: { id: true, schoolId: true },
-      });
-      if (template && template.schoolId && !assertTenantOwnership(template.schoolId, currentSchool.id, authCheck.session)) {
-        return NextResponse.json({ error: "Modelo de mensagem não pertence a esta instituição." }, { status: 403 });
-      }
-    }
-
-    const digits = normalizeWhatsAppPhone(customPhone || student.phone);
-    if (!digits || digits.length < 10) {
-      return NextResponse.json(
-        { error: "Telefone inválido para envio no WhatsApp" },
-        { status: 400 }
-      );
-    }
-
-    const sentByName = authCheck.userName;
-    const userAgent = req.headers.get("user-agent") || undefined;
-    const sentAt = new Date();
-
-    // 1. Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
-    const contentHash = computeMessageContentHash({
-      studentId: student.id,
-      schoolId: student.schoolId || currentSchool.id,
-      phoneUsed: digits,
+    const result = await dispatchAndPersistMessage({
+      studentId,
+      templateId,
       reasonTitle,
       messageContent,
-      sentByName,
-      sentAt,
-    });
-
-    // 2. Persistência atômica garantida antes de acionar qualquer gateway de rede externa (P-07)
-    // Impede o envio de mensagens a famílias sem lastro persistido no sistema
-    const initialStatus = initialDeliveryStatus || "LINK_OPENED";
-    const log = await prisma.messageLog.create({
-      data: {
-        studentId: student.id,
-        templateId: templateId || null,
-        reasonTitle,
-        messageContent,
-        phoneUsed: digits,
-        sentByUserId: authCheck.userId || null,
-        sentByName,
-        deliveryStatus: initialStatus,
-        deliveryUpdatedAt: new Date(),
-        sentAt,
-        contentHash,
-      },
-    });
-
-    // 3. Despacho no gateway / construção de URL otimizada wa.me
-    const dispatch = await dispatchWhatsAppMessage({
-      phoneDigits: digits,
-      messageText: messageContent,
-      userAgent,
-    });
-
-    const finalStatus = initialDeliveryStatus || dispatch.initialStatus;
-    if (finalStatus !== initialStatus) {
-      await prisma.messageLog.update({
-        where: { id: log.id },
-        data: {
-          deliveryStatus: finalStatus,
-          deliveryUpdatedAt: new Date(),
-        },
-      });
-    }
-
-    // 4. Trilha de Auditoria com schoolId raiz
-    await logAudit({
-      action: "SEND_MESSAGE",
-      entityType: "MessageLog",
-      entityId: log.id,
-      details: {
-        studentName: student.name,
-        turma: student.classGroup.name,
-        reason: reasonTitle,
-        phone: digits,
-        deliveryStatus: finalStatus,
-        providerMode: dispatch.mode,
-        contentHash,
-        messageSnippet: messageContent.slice(0, 100),
-      },
-      user: {
-        id: authCheck.userId,
-        name: sentByName,
-        email: authCheck.email,
-      },
-      schoolId: currentSchool.id,
+      customPhone,
+      initialDeliveryStatus,
+      currentSchoolId: currentSchool.id,
+      session: authCheck.session,
+      userId: authCheck.userId,
+      userName: authCheck.userName,
+      userEmail: authCheck.email,
+      userAgent: req.headers.get("user-agent") || undefined,
       req,
     });
 
-    return NextResponse.json({
-      success: true,
-      logId: log.id,
-      whatsappUrl: dispatch.whatsappUrl,
-      deliveryStatus: finalStatus,
-      providerMode: dispatch.mode,
-      contentHash,
-    });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
+    return NextResponse.json(result.data);
   } catch (error: any) {
     console.error("Erro ao enviar mensagem:", error);
     return NextResponse.json({ error: "Erro interno ao registrar envio de mensagem" }, { status: 500 });

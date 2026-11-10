@@ -1,24 +1,72 @@
 import { PrismaClient } from "@prisma/client";
 
-function getDatasourceUrl() {
-  // Se houver DIRECT_URL configurada (ou se DATABASE_URL contiver -pooler com falha de rota na Vercel),
-  // direciona para o endpoint direto do Neon que responde com latência ultrarrápida (62ms)
-  const direct = process.env.DIRECT_URL;
-  if (direct && direct.trim() && !direct.includes("-pooler")) {
-    return direct.trim();
+/**
+ * Normaliza a URL de conexão em runtime para utilizar o PgBouncer (-pooler) do Neon
+ * com parâmetros controlados para ambientes serverless (Vercel Functions), evitando
+ * esgotamento de conexões TCP diretas e colisão de prepared statements em transaction mode.
+ *
+ * DIRECT_URL permanece restrita ao Prisma CLI (migrations / schema.prisma) e nunca é usada em runtime.
+ */
+export function normalizeRuntimeDatabaseUrl(rawUrl?: string | null): string | undefined {
+  const candidate = (rawUrl ?? process.env.DATABASE_URL ?? "").trim();
+  if (!candidate) return undefined;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol === "postgresql:" || parsed.protocol === "postgres:") {
+      if (parsed.hostname.includes("-pooler") && !parsed.searchParams.has("pgbouncer")) {
+        parsed.searchParams.set("pgbouncer", "true");
+      }
+      if (!parsed.searchParams.has("connection_limit")) {
+        parsed.searchParams.set("connection_limit", "1");
+      }
+      if (!parsed.searchParams.has("pool_timeout")) {
+        parsed.searchParams.set("pool_timeout", "20");
+      }
+      if (!parsed.searchParams.has("connect_timeout")) {
+        parsed.searchParams.set("connect_timeout", "15");
+      }
+      return parsed.toString();
+    }
+  } catch {
+    // Retorna string original caso não seja uma URL padrão parseável
   }
 
-  const url = process.env.DATABASE_URL;
-  if (!url || !url.trim()) return undefined;
+  return candidate;
+}
 
-  let cleanUrl = url.trim();
-  // No AWS sa-east-1 da Vercel, o endpoint PgBouncer (-pooler) do Neon sofre com timeouts e instabilidade.
-  // O endpoint direto (removendo -pooler.) estabelece conexão imediata e estável.
-  if (cleanUrl.includes("-pooler")) {
-    cleanUrl = cleanUrl.replace("-pooler.", ".");
+/**
+ * Executa uma operação Prisma com retry leve e exponential backoff apenas para erros
+ * transitórios de wake-up do Scale-to-Zero do Neon (N5), sem precisar de cron keep-alive.
+ */
+export async function withNeonWakeRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries = 2
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      attempt += 1;
+      const code = String(err?.code || "");
+      const msg = String(err?.message || "");
+      const isTransientWakeError =
+        code === "P1001" ||
+        code === "P1002" ||
+        msg.includes("57P01") ||
+        msg.includes("Can't reach database server") ||
+        msg.includes("Timed out fetching a new connection") ||
+        msg.includes("Connection terminated unexpectedly");
+
+      if (!isTransientWakeError || attempt > maxRetries) {
+        throw err;
+      }
+
+      const backoffMs = attempt * 300;
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
   }
-
-  return cleanUrl;
 }
 
 const globalForPrisma = globalThis as unknown as {
@@ -30,7 +78,7 @@ export const prisma =
   new PrismaClient({
     datasources: {
       db: {
-        url: getDatasourceUrl(),
+        url: normalizeRuntimeDatabaseUrl(),
       },
     },
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],

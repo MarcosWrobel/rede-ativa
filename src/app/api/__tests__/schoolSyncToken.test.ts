@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { GET, POST } from "../schools/[id]/sync-token/route";
-import { encryptSyncToken, decryptSyncToken } from "@/lib/syncToken";
+import { GET, POST, DELETE } from "../schools/[id]/sync-token/route";
+import { encryptSyncToken, decryptSyncToken, findSchoolBySyncToken } from "@/lib/syncToken";
 
 const mockSchool = {
   id: "school-123",
@@ -38,8 +38,18 @@ vi.mock("@/lib/prisma", () => ({
         if (where.id === mockSchool.id) return mockSchool;
         return null;
       }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        if (where.syncTokenHash && mockSchool.syncTokenHash === where.syncTokenHash) {
+          return { id: mockSchool.id, name: mockSchool.name };
+        }
+        return null;
+      }),
       update: vi.fn(async ({ where, data, select }: any) => {
         lastUpdateData = data;
+        if (where.id === mockSchool.id) {
+          if ("syncTokenHash" in data) mockSchool.syncTokenHash = data.syncTokenHash;
+          if ("settingsJson" in data) mockSchool.settingsJson = data.settingsJson;
+        }
         return {
           id: where.id,
           updatedAt: new Date("2026-11-08T14:30:00.000Z"),
@@ -53,6 +63,8 @@ describe("API /api/schools/[id]/sync-token (Geração e Consulta de Token de Ext
   beforeEach(() => {
     mockAuditLogs.length = 0;
     lastUpdateData = null;
+    mockSchool.syncTokenHash = "hash-existente-123";
+    mockSchool.settingsJson = null;
     mockAuthCheckResult = {
       ok: true,
       userId: "admin-1",
@@ -138,5 +150,37 @@ describe("API /api/schools/[id]/sync-token (Geração e Consulta de Token de Ext
     expect(body.configured).toBe(true);
     expect(body.syncToken).toBe(rawSecret);
     expect(body.rawToken).toBe(rawSecret);
+  });
+
+  it("N1: rotacionar ou revogar (DELETE) invalida imediatamente o token anterior em findSchoolBySyncToken", async () => {
+    const { prisma } = await import("@/lib/prisma");
+
+    // 1. Gera o token A
+    const res1 = await POST(new Request("http://localhost/api/schools/school-123/sync-token", { method: "POST" }), {
+      params: Promise.resolve({ id: "school-123" }),
+    });
+    const { syncToken: tokenA } = await res1.json();
+    expect((await findSchoolBySyncToken(prisma, tokenA))?.id).toBe("school-123");
+
+    // 2. Rotaciona para o token B -> token A deve falhar imediatamente
+    const res2 = await POST(new Request("http://localhost/api/schools/school-123/sync-token", { method: "POST" }), {
+      params: Promise.resolve({ id: "school-123" }),
+    });
+    const { syncToken: tokenB } = await res2.json();
+    expect(tokenB).not.toBe(tokenA);
+    expect(await findSchoolBySyncToken(prisma, tokenA)).toBeNull();
+    expect((await findSchoolBySyncToken(prisma, tokenB))?.id).toBe("school-123");
+
+    // 3. Revoga com DELETE -> token B deve falhar imediatamente e settingsJson não deve reter syncTokenEncrypted
+    const delRes = await DELETE(
+      new Request("http://localhost/api/schools/school-123/sync-token", { method: "DELETE" }),
+      { params: Promise.resolve({ id: "school-123" }) }
+    );
+    expect(delRes.status).toBe(200);
+    const delBody = await delRes.json();
+    expect(delBody.configured).toBe(false);
+    expect(await findSchoolBySyncToken(prisma, tokenB)).toBeNull();
+    expect(mockSchool.syncTokenHash).toBeNull();
+    expect(mockSchool.settingsJson).toBeNull();
   });
 });

@@ -74,12 +74,68 @@ export function isBootstrapAdminEmail(email?: string | null): boolean {
 }
 
 /**
+ * Resolve deterministicamente o papel efetivo do token/sessão em todos os ciclos de autenticação
+ * (signIn, jwt 1º login, jwt refresh e session), garantindo que o SuperAdmin raiz receba sempre
+ * "SUPERADMIN" desde a primeira sessão.
+ */
+export function resolveTokenRole(params: {
+  isRootAdmin: boolean;
+  activeSchoolRole?: string | null;
+  dbRole?: string | null;
+  fallbackRole?: RoleLevel;
+}): string {
+  if (params.isRootAdmin) {
+    return "SUPERADMIN";
+  }
+  return params.activeSchoolRole || params.dbRole || params.fallbackRole || "PEDAGOGA";
+}
+
+/**
+ * Guard de boot: aborta imediatamente caso ENABLE_DEV_AUTH esteja ativo em ambiente de produção.
+ */
+export function assertNoDevAuthInProduction(
+  env: Record<string, string | undefined> = process.env
+): void {
+  const isProd = env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
+  if (isProd && env.ENABLE_DEV_AUTH === "true") {
+    throw new Error(
+      "[CRITICAL SECURITY] ENABLE_DEV_AUTH=true detectado em ambiente de produção. Abortando inicialização de autenticação."
+    );
+  }
+}
+
+export interface AuthSessionLike {
+  user?: {
+    id?: string;
+    email?: string | null;
+    name?: string | null;
+    role?: string | null;
+    active?: boolean;
+    schoolId?: string | null;
+    networkId?: string | null;
+    inepCode?: string | null;
+    schools?: Array<{
+      id?: string;
+      schoolId?: string;
+      role?: string;
+      active?: boolean;
+    }>;
+    networks?: Array<{
+      id?: string;
+      networkId?: string;
+      city?: string;
+      network?: { city?: string };
+    }>;
+  } | null;
+}
+
+/**
  * Valida se uma sessão pertence ao SuperAdmin da plataforma (Nível 1).
  */
-export function checkIsSuperAdmin(session: any): boolean {
+export function checkIsSuperAdmin(session: AuthSessionLike | null | undefined): boolean {
   if (!session?.user?.email) return false;
-  if ((session.user as any).active === false) return false;
-  const role = (session.user as any).role;
+  if (session.user.active === false) return false;
+  const role = session.user.role;
   return isBootstrapAdminEmail(session.user.email) || role === "SUPERADMIN";
 }
 
@@ -87,10 +143,10 @@ export function checkIsSuperAdmin(session: any): boolean {
  * Valida se uma sessão pertence a um perfil ADMIN ativo (Retrocompatibilidade).
  * Retorna true para SuperAdmin ou Gestor Escolar.
  */
-export function checkIsAdmin(session: any): boolean {
+export function checkIsAdmin(session: AuthSessionLike | null | undefined): boolean {
   if (!session?.user?.email) return false;
-  if ((session.user as any).active === false) return false;
-  const role = (session.user as any).role;
+  if (session.user.active === false) return false;
+  const role = session.user.role;
   return (
     role === "ADMIN" ||
     role === "SUPERADMIN" ||
@@ -103,15 +159,18 @@ export function checkIsAdmin(session: any): boolean {
 /**
  * Valida se uma sessão pertence à Gestão da Secretaria de Educação (Nível 2).
  */
-export function checkIsSecretariat(session: any, networkId?: string | null): boolean {
+export function checkIsSecretariat(
+  session: AuthSessionLike | null | undefined,
+  networkId?: string | null
+): boolean {
   if (checkIsSuperAdmin(session)) return true;
-  if (!session?.user?.email || (session.user as any).active === false) return false;
-  const role = (session.user as any).role;
+  if (!session?.user?.email || session.user.active === false) return false;
+  const role = session.user.role;
   if (role !== "GESTAO_SECRETARIA") return false;
 
   if (networkId) {
-    const userNetworks = ((session.user as any)?.networks as any[]) || [];
-    return userNetworks.some((n: any) => n.networkId === networkId || n.id === networkId);
+    const userNetworks = session.user.networks || [];
+    return userNetworks.some((n) => n.networkId === networkId || n.id === networkId);
   }
   return true;
 }
@@ -119,11 +178,14 @@ export function checkIsSecretariat(session: any, networkId?: string | null): boo
 /**
  * Valida se o usuário tem privilégio de Gestor na escola (Nível 3 ou superior).
  */
-export function checkIsSchoolManager(session: any, schoolId?: string | null): boolean {
+export function checkIsSchoolManager(
+  session: AuthSessionLike | null | undefined,
+  schoolId?: string | null
+): boolean {
   if (checkIsSuperAdmin(session)) return true;
-  if (!session?.user?.email || (session.user as any).active === false) return false;
+  if (!session?.user?.email || session.user.active === false) return false;
 
-  const role = (session.user as any).role;
+  const role = session.user.role;
   if (role === "GESTAO_SECRETARIA") return true;
 
   // Se nenhum schoolId foi especificado, verifica se o usuário possui cargo de gestor
@@ -132,8 +194,8 @@ export function checkIsSchoolManager(session: any, schoolId?: string | null): bo
   }
 
   // Se schoolId foi especificado, valida se o usuário possui vínculo de gestão com esta escola específica
-  const userSchools = ((session.user as any)?.schools as any[]) || [];
-  const schoolLink = userSchools.find((s: any) => s.schoolId === schoolId);
+  const userSchools = session.user.schools || [];
+  const schoolLink = userSchools.find((s) => s.schoolId === schoolId);
   if (schoolLink) {
     return (
       schoolLink.role === "ADMIN" ||
@@ -143,7 +205,7 @@ export function checkIsSchoolManager(session: any, schoolId?: string | null): bo
   }
 
   // Vínculo pelo schoolId primário do usuário
-  if ((session.user as any).schoolId === schoolId && (role === "ADMIN" || role === "GESTOR_ESCOLAR")) {
+  if (session.user.schoolId === schoolId && (role === "ADMIN" || role === "GESTOR_ESCOLAR")) {
     return true;
   }
 

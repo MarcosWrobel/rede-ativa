@@ -21,6 +21,11 @@ export type ExtensionSyncAuthResult =
       response: NextResponse;
     };
 
+export type ExtensionSyncLabel =
+  | "Extensão Power BI"
+  | "Extensão SERP"
+  | "Fila Companion WhatsApp";
+
 /**
  * Autentica requisições de sincronização da Extensão Chrome MV3 usando leitura prévia
  * de Rate Limit (zero escritas no Postgres para tokens válidos) e incremento apenas em falhas.
@@ -28,7 +33,7 @@ export type ExtensionSyncAuthResult =
 export async function authenticateExtensionSyncToken(params: {
   req: Request;
   corsHeaders: Record<string, string>;
-  label: "Extensão Power BI" | "Extensão SERP";
+  label: ExtensionSyncLabel;
 }): Promise<ExtensionSyncAuthResult> {
   const { req, corsHeaders, label } = params;
   const configuredToken = (process.env.SYNC_API_TOKEN || "").trim();

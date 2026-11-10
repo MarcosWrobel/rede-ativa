@@ -113,6 +113,8 @@ export const templateUpdateSchema = z.object({
 });
 
 export const deliveryStatusEnum = z.enum([
+  "QUEUED",
+  "DISPATCHING",
   "LINK_OPENED",
   "SENT",
   "DELIVERED",
@@ -121,6 +123,8 @@ export const deliveryStatusEnum = z.enum([
 ]);
 
 export const initialDeliveryStatusEnum = z.enum([
+  "QUEUED",
+  "DISPATCHING",
   "LINK_OPENED",
   "SENT",
   "FAILED_NO_WHATSAPP",

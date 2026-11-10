@@ -5,10 +5,13 @@
   "description": "Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência e Livro Oficial Digital de Atas Pedagógicas",
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "node scripts/package_extension.cjs && node scripts/vercel_db_push.cjs && next build",
+    "build": "node scripts/package_extension.cjs && next build",
     "start": "next start -p 3001",
     "test": "vitest run",
     "seed": "node scripts/seed.cjs",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:diff": "prisma migrate diff --from-url \"$DIRECT_URL\" --to-schema-datamodel prisma/schema.prisma --script",
+    "db:migrate:baseline": "prisma migrate resolve --applied 0_init",
     "postinstall": "prisma generate"
   },
   "keywords": [],

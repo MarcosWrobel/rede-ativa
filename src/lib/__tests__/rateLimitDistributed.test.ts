@@ -115,4 +115,47 @@ describe("SEC-08: Rate Limiting Distribuído & Proteção Anti-Brute-Force", () 
     const reloaded = await checkRateLimit(testKey, testPolicy);
     expect(reloaded.success).toBe(true);
   });
+
+  it("P2: garante atomicidade sob N chamadas paralelas (Promise.all) no mesmo bucket sem exceder limit", async () => {
+    const parallelPolicy = {
+      name: "TEST_PARALLEL_ATOMIC",
+      limit: 5,
+      windowMs: 15000,
+      failMode: "closed" as const,
+    };
+    const parallelKey = `test-sec08:parallel:${Date.now()}`;
+
+    const calls = Array.from({ length: 12 }, () => checkRateLimit(parallelKey, parallelPolicy));
+    const results = await Promise.all(calls);
+
+    const allowedCount = results.filter((r) => r.success).length;
+    const blockedCount = results.filter((r) => !r.success).length;
+
+    expect(allowedCount).toBe(5);
+    expect(blockedCount).toBe(7);
+  });
+
+  it("P2: políticas com failMode='closed' bloqueiam (success=false) se o banco falhar, enquanto failMode='open' usa fallback", async () => {
+    const queryRawSpy = vi
+      .spyOn(prisma, "$queryRaw")
+      .mockRejectedValue(new Error("Simulated Postgres Outage"));
+
+    try {
+      const closedRes = await checkRateLimit(
+        `test-sec08:closed:${Date.now()}`,
+        RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE
+      );
+      expect(closedRes.success).toBe(false);
+      expect(closedRes.remaining).toBe(0);
+      expect(closedRes.retryAfterSeconds).toBeGreaterThanOrEqual(60);
+
+      const openRes = await checkRateLimit(
+        `test-sec08:open:${Date.now()}`,
+        RATE_LIMIT_POLICIES.PUBLIC_ATA_VERIFY
+      );
+      expect(openRes.success).toBe(true);
+    } finally {
+      queryRawSpy.mockRestore();
+    }
+  });
 });

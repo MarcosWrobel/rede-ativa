@@ -61,6 +61,7 @@ export async function POST(
       data: {
         mobileSignToken: token,
         mobileSignExpiresAt: expiresAt,
+        hasActiveSignLink: true,
       },
     });
 

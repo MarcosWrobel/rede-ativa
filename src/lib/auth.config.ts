@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
-import { isBootstrapAdminEmail } from "./roles";
+import { isBootstrapAdminEmail, resolveTokenRole } from "./roles";
 import { CANONICAL_PRODUCTION_HOST, APEX_PRODUCTION_HOST } from "./proxyConstants";
 
 export interface GoogleCredentials {
@@ -260,11 +260,12 @@ export const authConfig: NextAuthConfig = {
   ],
   logger: {
     error(error) {
+      const errObj = error as Error & { cause?: unknown };
       console.error("[AUTH_CRITICAL_LOGGER_ERROR]", {
-        name: (error as any)?.name,
-        message: (error as any)?.message,
-        stack: (error as any)?.stack,
-        cause: (error as any)?.cause,
+        name: errObj?.name,
+        message: errObj?.message,
+        stack: errObj?.stack,
+        cause: errObj?.cause,
       });
     },
     warn(code) {
@@ -308,20 +309,23 @@ export const authConfig: NextAuthConfig = {
       if (session.user) {
         const email = (session.user.email || "").toLowerCase().trim();
         const isRoot = isBootstrapAdminEmail(email);
-        (session.user as any).id = token.userId as string | undefined;
-        (session.user as any).role = isRoot ? "SUPERADMIN" : (token.role as string) || "PEDAGOGA";
-        (session.user as any).active = isRoot ? true : token.active !== false;
+        session.user.id = (token.userId as string | undefined) || "";
+        session.user.role = resolveTokenRole({
+          isRootAdmin: isRoot,
+          dbRole: token.role as string | undefined,
+        });
+        session.user.active = isRoot ? true : token.active !== false;
         if (token.name) {
           session.user.name = String(token.name);
         }
         if (token.schoolId) {
-          (session.user as any).schoolId = String(token.schoolId);
+          session.user.schoolId = String(token.schoolId);
         }
         if (token.userSchools) {
-          (session.user as any).schools = token.userSchools;
+          session.user.schools = token.userSchools;
         }
         if (token.userNetworks) {
-          (session.user as any).networks = token.userNetworks;
+          session.user.networks = token.userNetworks;
         }
       }
       return session;

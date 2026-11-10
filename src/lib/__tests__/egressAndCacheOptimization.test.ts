@@ -124,6 +124,7 @@ import { isInlineBase64Logo, isProxyLogoPath, resolveSchoolLogoProxyUrl } from "
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { loadStudent360Bundle } from "@/lib/safePhase3Queries";
 import { authenticateExtensionSyncToken } from "@/lib/extensionSyncAuth";
+import { resolveTokenRole, assertNoDevAuthInProduction } from "@/lib/roles";
 import { GET as getSchoolLogoRoute } from "@/app/api/schools/[id]/logo/route";
 import { PUT as putSchoolRoute } from "@/app/api/schools/[id]/route";
 
@@ -191,6 +192,69 @@ describe("Otimizações de Egress, Cache & Operações no Neon PostgreSQL", () =
 
       expect(res.status).toBe(307);
       expect(res.headers.get("Location")).toBe("https://www.redeativa.app.br/logo.svg");
+    });
+
+    it("N2: não diferencia escola inexistente de escola sem brasão (ambas retornam 307 /logo.svg)", async () => {
+      hoisted.schoolFindUnique.mockResolvedValueOnce(null);
+      const reqMissing = new Request("https://www.redeativa.app.br/api/schools/id-inexistente/logo");
+      const resMissing = await getSchoolLogoRoute(reqMissing, { params: Promise.resolve({ id: "id-inexistente" }) });
+
+      expect(resMissing.status).toBe(307);
+      expect(resMissing.headers.get("Location")).toBe("https://www.redeativa.app.br/logo.svg");
+    });
+  });
+
+  describe("P5 & P9: Consistência de SUPERADMIN e Guard de Dev Auth em Produção", () => {
+    it("P5: resolveTokenRole sempre retorna SUPERADMIN para root admin tanto no 1º login quanto no refresh", () => {
+      expect(resolveTokenRole({ isRootAdmin: true, dbRole: "ADMIN" })).toBe("SUPERADMIN");
+      expect(resolveTokenRole({ isRootAdmin: true, activeSchoolRole: "GESTOR_ESCOLAR", dbRole: "ADMIN" })).toBe("SUPERADMIN");
+      expect(resolveTokenRole({ isRootAdmin: false, activeSchoolRole: "GESTOR_ESCOLAR", dbRole: "PEDAGOGA" })).toBe("GESTOR_ESCOLAR");
+      expect(resolveTokenRole({ isRootAdmin: false, dbRole: "PEDAGOGA" })).toBe("PEDAGOGA");
+    });
+
+    it("P9: assertNoDevAuthInProduction lança erro fatal se ENABLE_DEV_AUTH=true em produção", () => {
+      expect(() =>
+        assertNoDevAuthInProduction({ NODE_ENV: "production", ENABLE_DEV_AUTH: "true" })
+      ).toThrow(/CRITICAL SECURITY/);
+
+      expect(() =>
+        assertNoDevAuthInProduction({ NODE_ENV: "development", VERCEL_ENV: "production", ENABLE_DEV_AUTH: "true" })
+      ).toThrow(/CRITICAL SECURITY/);
+
+      expect(() =>
+        assertNoDevAuthInProduction({ NODE_ENV: "development", ENABLE_DEV_AUTH: "true" })
+      ).not.toThrow();
+    });
+  });
+
+  describe("P4 & N5: normalizeRuntimeDatabaseUrl e withNeonWakeRetry", () => {
+    it("P4: preserva host -pooler do Neon e injeta pgbouncer=true, connection_limit=1, pool_timeout=20 e connect_timeout=15", async () => {
+      const { normalizeRuntimeDatabaseUrl } = await vi.importActual<typeof import("@/lib/prisma")>("@/lib/prisma");
+      const rawPooler = "postgresql://user:pass@ep-test-pooler.c-2.sa-east-1.aws.neon.tech/neondb?sslmode=require";
+      const normalized = normalizeRuntimeDatabaseUrl(rawPooler)!;
+
+      expect(normalized).toContain("ep-test-pooler.c-2.sa-east-1.aws.neon.tech");
+      expect(normalized).toContain("pgbouncer=true");
+      expect(normalized).toContain("connection_limit=1");
+      expect(normalized).toContain("pool_timeout=20");
+      expect(normalized).toContain("connect_timeout=15");
+    });
+
+    it("N5: withNeonWakeRetry absorve erro transitório P1001 de wake-up do Neon e sucede na tentativa seguinte", async () => {
+      const { withNeonWakeRetry } = await vi.importActual<typeof import("@/lib/prisma")>("@/lib/prisma");
+      let calls = 0;
+      const result = await withNeonWakeRetry(async () => {
+        calls += 1;
+        if (calls === 1) {
+          const err: any = new Error("Can't reach database server");
+          err.code = "P1001";
+          throw err;
+        }
+        return "woke-up-ok";
+      }, 2);
+
+      expect(result).toBe("woke-up-ok");
+      expect(calls).toBe(2);
     });
   });
 
@@ -294,6 +358,9 @@ describe("Otimizações de Egress, Cache & Operações no Neon PostgreSQL", () =
       expect(minuteArgs.select.physicalSignedScanData).toBeUndefined();
       expect(minuteArgs.select.participants.select.signatureData).toBeUndefined();
       expect(minuteArgs.select.participants.select.biometricStrokeData).toBeUndefined();
+      expect(minuteArgs.select.participants.select.mobileSignToken).toBeUndefined();
+      expect(minuteArgs.select.participants.select.hasSignature).toBe(true);
+      expect(minuteArgs.select.participants.select.hasActiveSignLink).toBe(true);
 
       expect(bundle?.minutes[0].hasPhysicalScan).toBe(true);
       expect(bundle?.minutes[0].physicalSignedScanData).toBeNull();

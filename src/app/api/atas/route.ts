@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
@@ -68,7 +69,7 @@ export async function GET(req: Request) {
 
     const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
 
-    const where: any = {
+    const where: Prisma.PedagogicalMinuteWhereInput = {
       schoolId: school.id,
       year,
     };
@@ -134,6 +135,7 @@ export async function GET(req: Request) {
         physicalScanSha256: true,
         physicalScanUploadedAt: true,
         physicalScanUploadedBy: true,
+        hasPhysicalScan: true,
         govBrVerified: true,
         govBrProtocol: true,
         voidedAt: true,
@@ -171,8 +173,8 @@ export async function GET(req: Request) {
             clientTimestampIso: true,
             refusalReason: true,
             witnessName: true,
-            mobileSignToken: true,
-            mobileSignExpiresAt: true,
+            hasSignature: true,
+            hasActiveSignLink: true,
             biometricVerified: true,
             biometricDeviceType: true,
             biometricAuthTime: true,
@@ -212,20 +214,30 @@ export async function GET(req: Request) {
       );
     }
 
-    const responseMinutes = minutes.map((m: any) => {
+    const responseMinutes = minutes.map((m) => {
       const allowedConfidential = canAccessConfidentialMinute(m, authCheck.session);
-      const safeParticipants = m.participants.map((p: any) => {
-        const { signatureData, mobileSignToken, ...rest } = p;
+      const safeParticipants = m.participants.map((p) => {
+        const {
+          signatureData,
+          mobileSignToken,
+          mobileSignExpiresAt,
+          ...rest
+        } = p as typeof p & {
+          signatureData?: string | null;
+          mobileSignToken?: string | null;
+          mobileSignExpiresAt?: Date | string | null;
+        };
         return {
           ...rest,
           ...(includeSignatures && allowedConfidential ? { signatureData } : {}),
-          hasSignature: Boolean(
-            signatureData ||
-              p.signedAt ||
-              p.verifiedEmail ||
-              (p.signatureMode && p.signatureMode !== "PENDING" && p.signatureMode !== "REFUSED")
-          ),
-          hasActiveSignLink: Boolean(mobileSignToken),
+          hasSignature:
+            typeof p.hasSignature === "boolean"
+              ? p.hasSignature
+              : Boolean(signatureData || p.verifiedEmail),
+          hasActiveSignLink:
+            typeof p.hasActiveSignLink === "boolean"
+              ? p.hasActiveSignLink
+              : Boolean(mobileSignToken),
         };
       });
 
@@ -244,27 +256,28 @@ export async function GET(req: Request) {
         };
       }
 
-      const hasScan = Boolean(
-        m.physicalSignedScanData ||
-          m.physicalScanStorageKey ||
-          m.physicalScanSha256 ||
-          m.physicalScanUploadedAt ||
-          m.physicalScanSizeBytes ||
-          m.physicalScanMimeType
-      );
+      const minuteWithScan = m as typeof m & { physicalSignedScanData?: string | null };
+      const hasScan =
+        typeof m.hasPhysicalScan === "boolean"
+          ? m.hasPhysicalScan
+          : Boolean(
+              minuteWithScan.physicalSignedScanData ||
+                m.physicalScanStorageKey ||
+                m.physicalScanSha256
+            );
 
       return {
         ...m,
         hasPhysicalScan: hasScan,
         physicalSignedScanData: includeSignatures
-          ? m.physicalSignedScanData ?? null
+          ? minuteWithScan.physicalSignedScanData ?? null
           : null,
         participants: safeParticipants,
       };
     });
 
     return NextResponse.json({ success: true, minutes: responseMinutes, year, school });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[GET /api/atas] Erro:", error);
     return NextResponse.json({ error: "Erro ao listar atas" }, { status: 500 });
   }
@@ -374,6 +387,8 @@ export async function POST(req: Request) {
             signatureMode: p.signatureMode || "PENDING",
             signatureData: p.signatureData || null,
             signedAt: p.signatureData ? new Date() : null,
+            hasSignature: Boolean(p.signatureData),
+            hasActiveSignLink: false,
             biometricVerified: false,
             biometricDeviceType: null,
             biometricAuthTime: null,

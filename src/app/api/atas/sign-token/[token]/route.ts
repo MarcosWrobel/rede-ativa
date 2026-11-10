@@ -244,6 +244,8 @@ export async function POST(
           biometricAuthTime: biometricVerified ? now : null,
           mobileSignToken: null, // Queima token de uso único
           mobileSignExpiresAt: null,
+          hasSignature: true,
+          hasActiveSignLink: false,
         },
       });
 
@@ -289,6 +291,8 @@ export async function POST(
       biometricAuthTime: biometricVerified ? now : null,
       mobileSignToken: null, // Queima o token de uso único atomicamente
       mobileSignExpiresAt: null,
+      hasSignature: true,
+      hasActiveSignLink: false,
     };
 
     if (typeof (prisma.pedagogicalMinuteParticipant as any).updateMany === "function") {

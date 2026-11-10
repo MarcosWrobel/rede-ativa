@@ -135,7 +135,11 @@ export async function getReportsSummary(params: ReportsFilterParams = {}): Promi
   for (const d of byDelivery) {
     if (d.deliveryStatus === "FAILED_NO_WHATSAPP") {
       failedNoWhatsappCount += d._count._all;
-    } else if (d.deliveryStatus === "LINK_OPENED") {
+    } else if (
+      d.deliveryStatus === "LINK_OPENED" ||
+      d.deliveryStatus === "QUEUED" ||
+      d.deliveryStatus === "DISPATCHING"
+    ) {
       linkOpenedCount += d._count._all;
     } else {
       confirmedCount += d._count._all;

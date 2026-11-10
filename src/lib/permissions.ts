@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Session } from "next-auth";
 import { auth } from "./auth";
 import {
   BOOTSTRAP_ADMIN_EMAIL,
@@ -21,7 +22,7 @@ export {
 
 export type AuthCheckSuccess = {
   ok: true;
-  session: any;
+  session: Session;
   userId?: string;
   email: string;
   userName: string;
@@ -49,7 +50,7 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
     };
   }
 
-  if ((session.user as any).active === false) {
+  if (session.user.active === false) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -59,14 +60,16 @@ export async function requireAuth(): Promise<AuthCheckSuccess | AuthCheckFailure
     };
   }
 
-  const role = (session.user as any).role || (isBootstrapAdminEmail(email) ? "SUPERADMIN" : "PEDAGOGA");
-  const schoolId = (session.user as any)?.schoolId || undefined;
-  const networkId = (session.user as any)?.networkId || undefined;
+  const role =
+    (session.user.role as RoleLevel | "ADMIN" | undefined) ||
+    (isBootstrapAdminEmail(email) ? "SUPERADMIN" : "PEDAGOGA");
+  const schoolId = session.user.schoolId || undefined;
+  const networkId = session.user.networkId || undefined;
 
   return {
     ok: true,
     session,
-    userId: (session.user as any).id || undefined,
+    userId: session.user.id || undefined,
     email,
     userName: session.user.name || email.split("@")[0],
     role,

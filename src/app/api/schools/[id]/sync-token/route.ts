@@ -109,6 +109,9 @@ export async function POST(
     });
 
     const syncTokenCreatedAt = updatedSchool.updatedAt.toISOString();
+    // Nota de arquitetura (N1): invalidateSchoolCache limpa o cache L1 (schoolContextCache) da instância atual.
+    // A autenticação da extensão (findSchoolBySyncToken) consulta o banco PostgreSQL diretamente sem cache em memória,
+    // de modo que a rotação ou revogação do token invalida o token anterior imediatamente em todas as instâncias serverless.
     invalidateSchoolCache(id);
 
     return NextResponse.json({
@@ -125,5 +128,67 @@ export async function POST(
   } catch (error: any) {
     console.error("[POST /api/schools/[id]/sync-token] Erro:", error);
     return NextResponse.json({ error: "Erro ao gerar chave de sincronização" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const authCheck = await requireSchoolAdmin(id);
+    if (!authCheck.ok) return authCheck.response;
+
+    const currentRecord = await prisma.school.findUnique({
+      where: { id },
+      select: { id: true, settingsJson: true },
+    });
+
+    if (!currentRecord) {
+      return NextResponse.json({ error: "Instituição não encontrada" }, { status: 404 });
+    }
+
+    let settings: Record<string, any> = {};
+    if (currentRecord.settingsJson) {
+      try {
+        settings = JSON.parse(currentRecord.settingsJson);
+      } catch {}
+    }
+    delete settings.syncTokenEncrypted;
+
+    await prisma.school.update({
+      where: { id },
+      data: {
+        syncTokenHash: null,
+        settingsJson: Object.keys(settings).length > 0 ? JSON.stringify(settings) : null,
+      },
+      select: { id: true },
+    });
+
+    await logAudit({
+      action: "UPDATE_USER",
+      entityType: "SchoolSyncToken",
+      entityId: id,
+      schoolId: id,
+      details: { action: "REVOKE_SYNC_TOKEN" },
+      user: {
+        id: authCheck.userId,
+        name: authCheck.userName,
+        email: authCheck.email,
+      },
+      req,
+    });
+
+    invalidateSchoolCache(id);
+
+    return NextResponse.json({
+      success: true,
+      configured: false,
+      message: "Chave de sincronização revogada com sucesso.",
+    });
+  } catch (error: any) {
+    console.error("[DELETE /api/schools/[id]/sync-token] Erro:", error);
+    return NextResponse.json({ error: "Erro ao revogar chave de sincronização" }, { status: 500 });
   }
 }

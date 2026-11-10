@@ -33,22 +33,24 @@ export async function POST(
     const cleanPhone = parsed.data.phone.replace(/\D/g, "");
     const { name, kinship, isPrimary, whatsappValid, notes } = parsed.data;
 
-    const created = await prisma.$transaction(async (tx) => {
-      if (isPrimary) {
-        await tx.studentContact.updateMany({
+    const batchOps: any[] = [];
+    if (isPrimary) {
+      batchOps.push(
+        prisma.studentContact.updateMany({
           where: { studentId },
           data: { isPrimary: false },
-        });
-        await tx.student.update({
+        }),
+        prisma.student.update({
           where: { id: studentId },
           data: {
             phone: cleanPhone,
             guardianName: name,
           },
-        });
-      }
-
-      return tx.studentContact.create({
+        })
+      );
+    }
+    batchOps.push(
+      prisma.studentContact.create({
         data: {
           studentId,
           name,
@@ -58,8 +60,11 @@ export async function POST(
           whatsappValid,
           notes: notes || null,
         },
-      });
-    });
+      })
+    );
+
+    const txResults = await prisma.$transaction(batchOps);
+    const created = txResults[txResults.length - 1];
 
     await logAudit({
       action: "CREATE_STUDENT_CONTACT",
@@ -122,22 +127,24 @@ export async function PUT(
     const cleanPhone = phone ? phone.replace(/\D/g, "") : existing.phone;
     const nextName = name !== undefined ? name : existing.name;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      if (isPrimary === true) {
-        await tx.studentContact.updateMany({
+    const updateOps: any[] = [];
+    if (isPrimary === true) {
+      updateOps.push(
+        prisma.studentContact.updateMany({
           where: { studentId, id: { not: contactId } },
           data: { isPrimary: false },
-        });
-        await tx.student.update({
+        }),
+        prisma.student.update({
           where: { id: studentId },
           data: {
             phone: cleanPhone,
             guardianName: nextName,
           },
-        });
-      }
-
-      return tx.studentContact.update({
+        })
+      );
+    }
+    updateOps.push(
+      prisma.studentContact.update({
         where: { id: contactId },
         data: {
           name: nextName,
@@ -147,8 +154,11 @@ export async function PUT(
           whatsappValid: whatsappValid !== undefined ? whatsappValid : existing.whatsappValid,
           notes: notes !== undefined ? notes || null : existing.notes,
         },
-      });
-    });
+      })
+    );
+
+    const updateResults = await prisma.$transaction(updateOps);
+    const updated = updateResults[updateResults.length - 1];
 
     await logAudit({
       action: "UPDATE_STUDENT_CONTACT",

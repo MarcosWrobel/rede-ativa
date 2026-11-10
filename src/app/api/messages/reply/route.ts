@@ -260,7 +260,10 @@ export async function POST(req: Request) {
 
     const shouldUpgradeDelivery =
       Boolean(guardianReplied) &&
-      (previous.deliveryStatus === "LINK_OPENED" || previous.deliveryStatus === "SENT");
+      (previous.deliveryStatus === "QUEUED" ||
+        previous.deliveryStatus === "DISPATCHING" ||
+        previous.deliveryStatus === "LINK_OPENED" ||
+        previous.deliveryStatus === "SENT");
 
     const updated = await prisma.messageLog.update({
       where: { id: logId },

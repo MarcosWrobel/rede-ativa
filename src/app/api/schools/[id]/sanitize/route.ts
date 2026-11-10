@@ -56,26 +56,26 @@ export async function POST(
       );
     }
 
-    // Executa a higienização de todos os registros em transação atômica
-    await prisma.$transaction(async (tx) => {
-      await tx.messageLog.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.absenceJustification.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.studentContact.deleteMany({ where: { student: { schoolId: id } } });
-      await tx.pedagogicalMinuteStudent.deleteMany({
+    // Executa a higienização de todos os registros em batch transaction compatível com PgBouncer
+    await prisma.$transaction([
+      prisma.messageLog.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.absenceJustification.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.studentContact.deleteMany({ where: { student: { schoolId: id } } }),
+      prisma.pedagogicalMinuteStudent.deleteMany({
         where: {
           OR: [{ minute: { schoolId: id } }, { student: { schoolId: id } }],
         },
-      });
-      await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } });
-      await tx.pedagogicalMinute.deleteMany({ where: { schoolId: id } });
-      await tx.student.deleteMany({ where: { schoolId: id } });
-      await tx.classGroup.deleteMany({ where: { schoolId: id } });
-    });
+      }),
+      prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } }),
+      prisma.pedagogicalMinute.deleteMany({ where: { schoolId: id } }),
+      prisma.student.deleteMany({ where: { schoolId: id } }),
+      prisma.classGroup.deleteMany({ where: { schoolId: id } }),
+    ]);
 
     await logAudit({
       action: "SANITIZE_SCHOOL",
