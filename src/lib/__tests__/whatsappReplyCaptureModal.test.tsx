@@ -3,6 +3,10 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import WhatsAppReplyCaptureModal, {
   isPhoneCompatible,
+  buildInitialReplyModalState,
+  clearWhatsAppPushedReplyCache,
+  shouldAcceptLiveWhatsAppPush,
+  LAST_PUSHED_REPLY_STORAGE_KEY,
 } from "@/components/whatsapp/WhatsAppReplyCaptureModal";
 
 describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
@@ -205,6 +209,181 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
       expect(isPhoneCompatible(null, "42999998888")).toBe(true);
       expect(isPhoneCompatible("42999998888", undefined)).toBe(true);
       expect(isPhoneCompatible("", "")).toBe(true);
+    });
+  });
+
+  describe("Isolamento de Estado e Limpeza entre Contatos Sequenciais", () => {
+    it("inicializa contato pendente completamente limpo sem herdar estado de contato anterior", () => {
+      const firstContact = {
+        ...mockLog,
+        id: "msg-contato-1",
+        guardianReplied: true,
+        replyCategory: "SAUDE",
+        replyNotes: "Mãe informou consulta médica do primeiro contato.",
+      };
+      const secondContact = {
+        ...mockLog,
+        id: "msg-contato-2",
+        phoneUsed: "42988881111",
+        guardianReplied: false,
+        replyCategory: null,
+        replyNotes: null,
+      };
+
+      const firstState = buildInitialReplyModalState(firstContact);
+      expect(firstState.replyCategory).toBe("SAUDE");
+      expect(firstState.replyNotes).toBe("Mãe informou consulta médica do primeiro contato.");
+      expect(firstState.rawReply).toBe("");
+
+      const secondState = buildInitialReplyModalState(secondContact);
+      expect(secondState).toEqual({
+        rawReply: "",
+        replyCategory: "",
+        replyNotes: "",
+        extractedByExtension: false,
+        extractedAtIso: null,
+        domTimestamp: null,
+        activeChatTitle: null,
+        capturedScreenshot: null,
+      });
+    });
+
+    it("renderiza segundo contato totalmente limpo após primeiro contato respondido", () => {
+      const firstHtml = renderToString(
+        <WhatsAppReplyCaptureModal
+          isOpen={true}
+          onClose={() => {}}
+          messageLog={{
+            ...mockLog,
+            id: "msg-seq-1",
+            guardianReplied: true,
+            replyCategory: "SAUDE",
+            replyNotes: "Atestado entregue pelo contato 1.",
+          }}
+          studentName="Estudante Um"
+          classNameLabel="6º Ano A"
+          onSuccess={() => {}}
+        />
+      );
+      expect(firstHtml).toContain("Atestado entregue pelo contato 1.");
+
+      const secondHtml = renderToString(
+        <WhatsAppReplyCaptureModal
+          isOpen={true}
+          onClose={() => {}}
+          messageLog={{
+            ...mockLog,
+            id: "msg-seq-2",
+            phoneUsed: "42977776666",
+            guardianReplied: false,
+            replyCategory: null,
+            replyNotes: null,
+          }}
+          studentName="Estudante Dois"
+          classNameLabel="7º Ano B"
+          onSuccess={() => {}}
+        />
+      );
+      expect(secondHtml).toContain("Estudante Dois");
+      expect(secondHtml).toContain("42977776666");
+      expect(secondHtml).not.toContain("Estudante Um");
+      expect(secondHtml).not.toContain("Atestado entregue pelo contato 1.");
+      expect(secondHtml).not.toContain("Captura assistida via extensão");
+    });
+
+    it("rejeita replays de cache de storage (fromStorageCache) e mensagens destinadas a outro contato", () => {
+      // Cache legado reenviado pelo bridge deve ser sempre ignorado
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            fromStorageCache: true,
+            rawText: "Mensagem antiga do primeiro contato",
+          },
+          "msg-contato-2",
+          "42988881111"
+        )
+      ).toBe(false);
+
+      // Push destinado a outro logId deve ser ignorado
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            logId: "msg-contato-1",
+            rawText: "Mensagem do contato 1",
+          },
+          "msg-contato-2",
+          "42988881111"
+        )
+      ).toBe(false);
+
+      // Push destinado a outro telefone deve ser ignorado
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            phone: "41911112222",
+            rawText: "Mensagem de outro telefone",
+          },
+          "msg-contato-2",
+          "42988881111"
+        )
+      ).toBe(false);
+
+      // Push ao vivo sem logId/phone (botão na janela do WhatsApp Web) é aceito enquanto este modal está aberto
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            rawText: "Bom dia, meu filho está com consulta hoje.",
+          },
+          "msg-contato-2",
+          "42988881111"
+        )
+      ).toBe(true);
+    });
+
+    it("limpa __REDEATIVA_LAST_PUSHED_REPLY__, sessionStorage e notifica extensão via postMessage", () => {
+      const originalWindow = (globalThis as any).window;
+      const originalSessionStorage = (globalThis as any).sessionStorage;
+      const postMessageMock = vi.fn();
+      const removeItemMock = vi.fn();
+
+      try {
+        (globalThis as any).window = {
+          location: { origin: "http://localhost:3001" },
+          __REDEATIVA_LAST_PUSHED_REPLY__: { rawText: "Mensagem antiga" },
+          postMessage: postMessageMock,
+        };
+        (globalThis as any).sessionStorage = {
+          removeItem: removeItemMock,
+        };
+
+        clearWhatsAppPushedReplyCache();
+
+        expect((globalThis as any).window.__REDEATIVA_LAST_PUSHED_REPLY__).toBeUndefined();
+        expect(removeItemMock).toHaveBeenCalledWith(LAST_PUSHED_REPLY_STORAGE_KEY);
+        expect(postMessageMock).toHaveBeenCalledWith(
+          { type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" },
+          "http://localhost:3001"
+        );
+      } finally {
+        if (originalWindow === undefined) {
+          delete (globalThis as any).window;
+        } else {
+          (globalThis as any).window = originalWindow;
+        }
+        if (originalSessionStorage === undefined) {
+          delete (globalThis as any).sessionStorage;
+        } else {
+          (globalThis as any).sessionStorage = originalSessionStorage;
+        }
+      }
     });
   });
 });

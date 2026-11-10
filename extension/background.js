@@ -211,10 +211,12 @@ async function ensureContentScriptInOpenWhatsAppTabs() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.remove(["leopoldina_last_captured_reply"]).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.remove(["leopoldina_last_captured_reply"]).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
 });
 
@@ -330,16 +332,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const senderTabId = sender?.tab?.id || request.tabId || null;
         const senderWinId = sender?.tab?.windowId || request.windowId || null;
 
-        const storageData = await chrome.storage.local.get(["leopoldina_active_dispatch"]);
-        const activeDispatch = storageData?.leopoldina_active_dispatch || null;
-
         const screenshotDataUrl = await captureWhatsAppTabScreenshot(senderWinId, senderTabId);
 
         const finalPayload = {
+          captureId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           success: Boolean(request.rawText?.trim() || screenshotDataUrl),
-          logId: request.logId || activeDispatch?.logId || null,
-          phone: request.phone || activeDispatch?.phone || null,
-          studentName: request.studentName || activeDispatch?.studentName || null,
+          logId: request.logId || null,
+          phone: request.phone || null,
+          studentName: request.studentName || null,
           rawText: request.rawText || "",
           selectionUsed: Boolean(request.selectionUsed),
           domTimestamp: request.domTimestamp || null,
@@ -348,9 +348,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           capturedAt: new Date().toISOString(),
         };
 
-        await chrome.storage.local.set({
-          leopoldina_last_captured_reply: finalPayload,
-        });
+        await chrome.storage.local.remove(["leopoldina_last_captured_reply"]);
 
         const relayedCount = await relayCapturedReplyToPlatformTabs(finalPayload);
         sendResponse({
@@ -364,6 +362,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           success: false,
           error: err?.message || "Falha ao enviar captura para a plataforma.",
         });
+      }
+    })();
+    return true;
+  }
+
+  // 4.1 Limpeza explícita de eventual cache residual de retorno capturado
+  if (request?.type === "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY") {
+    (async () => {
+      try {
+        await chrome.storage.local.remove(["leopoldina_last_captured_reply"]);
+        sendResponse({ success: true });
+      } catch {
+        sendResponse({ success: false });
       }
     })();
     return true;

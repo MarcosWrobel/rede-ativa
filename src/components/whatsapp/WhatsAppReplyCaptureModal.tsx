@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ModalDialog from "@/components/ModalDialog";
 import {
   extractWhatsAppReplyViaExtension,
@@ -71,6 +71,79 @@ export function isPhoneCompatible(phoneA?: string | null, phoneB?: string | null
   return tailA === tailB || digitsA.includes(tailB) || digitsB.includes(tailA);
 }
 
+export const LAST_PUSHED_REPLY_STORAGE_KEY = "redeativa_last_pushed_reply";
+
+/**
+ * Limpa quaisquer caches residuais de capturas do WhatsApp Web no cliente e na extensão
+ * para garantir que cada abertura de modal para outro contato comece sempre limpa.
+ */
+export function clearWhatsAppPushedReplyCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    delete (window as any).__REDEATIVA_LAST_PUSHED_REPLY__;
+  } catch {
+    try {
+      (window as any).__REDEATIVA_LAST_PUSHED_REPLY__ = undefined;
+    } catch {}
+  }
+  try {
+    sessionStorage.removeItem(LAST_PUSHED_REPLY_STORAGE_KEY);
+  } catch {}
+  try {
+    const targetOrigin = window.location?.origin || "*";
+    window.postMessage({ type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" }, targetOrigin);
+  } catch {}
+}
+
+/**
+ * Valida se um evento pushedFromWhatsApp deve ser aceito pelo modal atualmente aberto.
+ * Rejeita replays vindos do cache de storage (fromStorageCache) e eventos destinados a outro logId/telefone.
+ */
+export function shouldAcceptLiveWhatsAppPush(
+  data: any,
+  currentMessageLogId: string,
+  currentPhoneUsed?: string | null
+): boolean {
+  if (!data || typeof data !== "object") return false;
+  if (
+    data.type !== "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" &&
+    data.type !== "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED"
+  ) {
+    return false;
+  }
+  if (!data.pushedFromWhatsApp || data.fromStorageCache) {
+    return false;
+  }
+
+  const hasContent = Boolean(
+    (typeof data.rawText === "string" && data.rawText.trim().length > 0) ||
+      data.screenshotDataUrl
+  );
+  if (!hasContent) return false;
+
+  if (data.logId && data.logId !== currentMessageLogId) {
+    return false;
+  }
+  if (data.phone && !isPhoneCompatible(data.phone, currentPhoneUsed)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function buildInitialReplyModalState(messageLog?: MessageLogModalItem | null) {
+  return {
+    rawReply: "",
+    replyCategory: ((messageLog?.replyCategory as ReplyCategory) || "") as ReplyCategory | "",
+    replyNotes: messageLog?.replyNotes || "",
+    extractedByExtension: false,
+    extractedAtIso: null as string | null,
+    domTimestamp: null as string | null,
+    activeChatTitle: null as string | null,
+    capturedScreenshot: null as string | null,
+  };
+}
+
 export default function WhatsAppReplyCaptureModal({
   isOpen,
   onClose,
@@ -79,18 +152,58 @@ export default function WhatsAppReplyCaptureModal({
   classNameLabel,
   onSuccess,
 }: WhatsAppReplyCaptureModalProps) {
-  const [rawReply, setRawReply] = useState<string>("");
+  if (!isOpen || !messageLog) {
+    return null;
+  }
+
+  return (
+    <WhatsAppReplyCaptureModalContent
+      key={messageLog.id}
+      isOpen={isOpen}
+      onClose={onClose}
+      messageLog={messageLog}
+      studentName={studentName}
+      classNameLabel={classNameLabel}
+      onSuccess={onSuccess}
+    />
+  );
+}
+
+function WhatsAppReplyCaptureModalContent({
+  isOpen,
+  onClose,
+  messageLog,
+  studentName,
+  classNameLabel,
+  onSuccess,
+}: Omit<WhatsAppReplyCaptureModalProps, "messageLog"> & {
+  messageLog: MessageLogModalItem;
+}) {
+  const initialState = buildInitialReplyModalState(messageLog);
+  const [rawReply, setRawReply] = useState<string>(initialState.rawReply);
   const [replyCategory, setReplyCategory] = useState<ReplyCategory | "">(
-    (messageLog?.replyCategory as ReplyCategory) || ""
+    initialState.replyCategory
   );
-  const [replyNotes, setReplyNotes] = useState<string>(
-    messageLog?.replyNotes || ""
+  const [replyNotes, setReplyNotes] = useState<string>(initialState.replyNotes);
+  const [extractedByExtension, setExtractedByExtension] = useState<boolean>(
+    initialState.extractedByExtension
   );
-  const [extractedByExtension, setExtractedByExtension] = useState<boolean>(false);
-  const [extractedAtIso, setExtractedAtIso] = useState<string | null>(null);
-  const [domTimestamp, setDomTimestamp] = useState<string | null>(null);
-  const [activeChatTitle, setActiveChatTitle] = useState<string | null>(null);
-  const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
+  const [extractedAtIso, setExtractedAtIso] = useState<string | null>(
+    initialState.extractedAtIso
+  );
+  const [domTimestamp, setDomTimestamp] = useState<string | null>(
+    initialState.domTimestamp
+  );
+  const [activeChatTitle, setActiveChatTitle] = useState<string | null>(
+    initialState.activeChatTitle
+  );
+  const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(
+    initialState.capturedScreenshot
+  );
+
+  const isMountedRef = useRef<boolean>(true);
+  const aiAbortControllerRef = useRef<AbortController | null>(null);
+  const lastPushFingerprintRef = useRef<string | null>(null);
 
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionNotice, setExtractionNotice] = useState<{
@@ -129,6 +242,7 @@ export default function WhatsAppReplyCaptureModal({
         }),
       });
       const data = await res.json();
+      if (!isMountedRef.current) return;
       if (!res.ok) {
         throw new Error(data.error || "Erro ao atualizar status de entrega.");
       }
@@ -138,6 +252,7 @@ export default function WhatsAppReplyCaptureModal({
         message: "Número sinalizado com sucesso como sem WhatsApp no prontuário.",
       });
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
       const errorMsg =
         err instanceof Error ? err.message : "Erro ao marcar número como sem WhatsApp.";
       setExtractionNotice({
@@ -145,7 +260,9 @@ export default function WhatsAppReplyCaptureModal({
         message: errorMsg,
       });
     } finally {
-      setIsMarkingInvalid(false);
+      if (isMountedRef.current) {
+        setIsMarkingInvalid(false);
+      }
     }
   };
 
@@ -158,6 +275,10 @@ export default function WhatsAppReplyCaptureModal({
         );
         return;
       }
+
+      aiAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      aiAbortControllerRef.current = controller;
 
       setIsClassifyingAi(true);
       setAiError(null);
@@ -174,6 +295,7 @@ export default function WhatsAppReplyCaptureModal({
         const res = await fetch("/api/ai/classify-reply", {
           method: "POST",
           headers,
+          signal: controller.signal,
           body: JSON.stringify({
             rawReply: trimmed,
             screenshotDataUrl: screenshotDataUrl || undefined,
@@ -184,6 +306,8 @@ export default function WhatsAppReplyCaptureModal({
         });
 
         const data = await res.json();
+        if (!isMountedRef.current || controller.signal.aborted) return;
+
         if (!res.ok) {
           throw new Error(data.error || "Falha ao classificar retorno com IA.");
         }
@@ -212,16 +336,20 @@ export default function WhatsAppReplyCaptureModal({
           });
         }
       } catch (err: unknown) {
+        if (!isMountedRef.current || controller.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
         const errorMsg =
           err instanceof Error
             ? err.message
             : "Erro ao consultar serviço de inteligência pedagógica.";
         setAiError(errorMsg);
       } finally {
-        setIsClassifyingAi(false);
+        if (isMountedRef.current && !controller.signal.aborted) {
+          setIsClassifyingAi(false);
+        }
       }
     },
-    [resolvedStudentName, messageLog?.reasonTitle]
+    [resolvedStudentName, messageLog?.reasonTitle, messageLog?.student?.guardianName]
   );
 
   const applyExtractionPayload = useCallback(
@@ -235,9 +363,9 @@ export default function WhatsAppReplyCaptureModal({
       error?: string;
       message?: string;
     }, phoneUsed: string) => {
-      if (res.screenshotDataUrl) {
-        setCapturedScreenshot(res.screenshotDataUrl);
-      }
+      if (!isMountedRef.current) return;
+
+      setCapturedScreenshot(res.screenshotDataUrl || null);
 
       if (res.rawText && res.rawText.trim().length > 0) {
         const cleanedText = res.rawText.trim();
@@ -314,8 +442,10 @@ export default function WhatsAppReplyCaptureModal({
 
       try {
         const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed, targetStudentName);
+        if (!isMountedRef.current) return;
         await applyExtractionPayload(res, phoneUsed);
       } catch (err: unknown) {
+        if (!isMountedRef.current) return;
         const errorMsg =
           err instanceof Error
             ? err.message
@@ -328,103 +458,72 @@ export default function WhatsAppReplyCaptureModal({
           message: `${errorMsg} Cole o texto manualmente abaixo.`,
         });
       } finally {
-        setIsExtracting(false);
+        if (isMountedRef.current) {
+          setIsExtracting(false);
+        }
       }
     },
     [applyExtractionPayload]
   );
 
-  // Inicializa o estado ao abrir o modal, recupera capturas recentes e escuta o botão "📥 Capturar Retorno" do WhatsApp Web
+  // Inicializa o modal sempre limpo e escuta apenas capturas ao vivo disparadas enquanto este modal estiver aberto
   useEffect(() => {
-    if (!isOpen || !messageLog) {
-      return;
+    isMountedRef.current = true;
+    clearWhatsAppPushedReplyCache();
+
+    if (isExtensionActive()) {
+      setExtractionNotice({
+        type: "info",
+        message:
+          "Com a conversa aberta no WhatsApp Web, clique em 'Extrair resposta' acima (ou no botão '📥 Capturar Retorno' direto no WhatsApp).",
+      });
+    } else {
+      setExtractionNotice({
+        type: "info",
+        message:
+          "Cole a mensagem recebida abaixo ou utilize a extensão para capturar da janela do WhatsApp Web.",
+      });
     }
-
-    setRawReply("");
-    setReplyCategory((messageLog.replyCategory as ReplyCategory) || "");
-    setReplyNotes(messageLog.replyNotes || "");
-    setExtractedByExtension(false);
-    setExtractedAtIso(null);
-    setDomTimestamp(null);
-    setActiveChatTitle(null);
-    setCapturedScreenshot(null);
-    setAiTip(null);
-    setAiError(null);
-    setSaveError(null);
-    setNumberNotOnWhatsApp(false);
-    setMarkedInvalidSuccess(false);
-
-    // Recupera retorno recente em cache caso a usuária tenha capturado no WhatsApp Web antes de abrir o modal
-    let autoRecovered = false;
-    try {
-      const globalCached = typeof window !== "undefined" ? (window as any).__REDEATIVA_LAST_PUSHED_REPLY__ : null;
-      const sessionCachedStr = typeof window !== "undefined" ? sessionStorage.getItem("redeativa_last_pushed_reply") : null;
-      const cached = globalCached || (sessionCachedStr ? JSON.parse(sessionCachedStr) : null);
-
-      if (cached && (cached.rawText?.trim() || cached.screenshotDataUrl)) {
-        const receivedAt = cached.receivedAt || 0;
-        const isFresh = Date.now() - receivedAt < 10 * 60 * 1000; // Últimos 10 minutos
-        const matchesLogOrPhone =
-          (cached.logId && cached.logId === messageLog.id) ||
-          isPhoneCompatible(cached.phone, messageLog.phoneUsed);
-
-        if (isFresh && matchesLogOrPhone) {
-          void applyExtractionPayload(cached, messageLog.phoneUsed);
-          autoRecovered = true;
-        }
-      }
-    } catch {}
-
-    if (!autoRecovered) {
-      if (isExtensionActive()) {
-        setExtractionNotice({
-          type: "info",
-          message:
-            "Com a conversa aberta no WhatsApp Web, clique em 'Extrair resposta' acima (ou no botão '📥 Capturar Retorno' direto no WhatsApp).",
-        });
-      } else {
-        setExtractionNotice({
-          type: "info",
-          message:
-            "Cole a mensagem recebida abaixo ou utilize a extensão para capturar da janela do WhatsApp Web.",
-        });
-      }
-    }
-
-    // Consulta a extensão via bridge para verificar se há captura recente no storage local
-    try {
-      window.postMessage(
-        {
-          type: "REDEATIVA_GET_LAST_CAPTURED_REPLY",
-          logId: messageLog.id,
-          phone: messageLog.phoneUsed,
-        },
-        "*"
-      );
-    } catch {}
 
     const handlePushedCapture = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;
-      const data = event.data;
       if (
-        (data.type === "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" ||
-          data.type === "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED") &&
-        data.pushedFromWhatsApp
+        window.location?.origin &&
+        event.origin &&
+        event.origin !== "null" &&
+        event.origin !== window.location.origin
       ) {
-        const matchesLogOrPhone =
-          !data.phone ||
-          (data.logId && data.logId === messageLog.id) ||
-          isPhoneCompatible(data.phone, messageLog.phoneUsed);
-
-        if (matchesLogOrPhone) {
-          void applyExtractionPayload(data, messageLog.phoneUsed);
-        }
+        return;
       }
+
+      const data = event.data;
+      if (!shouldAcceptLiveWhatsAppPush(data, messageLog.id, messageLog.phoneUsed)) {
+        return;
+      }
+
+      const pushId = data.captureId || (data.receivedAt ? String(data.receivedAt) : null);
+      const fingerprint = pushId
+        ? `${pushId}|${data.rawText || ""}|${data.domTimestamp || ""}`
+        : null;
+      if (fingerprint && lastPushFingerprintRef.current === fingerprint) {
+        return;
+      }
+      if (fingerprint) {
+        lastPushFingerprintRef.current = fingerprint;
+      }
+
+      clearWhatsAppPushedReplyCache();
+      void applyExtractionPayload(data, messageLog.phoneUsed);
     };
 
     window.addEventListener("message", handlePushedCapture);
-    return () => window.removeEventListener("message", handlePushedCapture);
-  }, [isOpen, messageLog, applyExtractionPayload]);
+    return () => {
+      isMountedRef.current = false;
+      aiAbortControllerRef.current?.abort();
+      window.removeEventListener("message", handlePushedCapture);
+      clearWhatsAppPushedReplyCache();
+    };
+  }, [messageLog.id, messageLog.phoneUsed, applyExtractionPayload]);
 
   const handleManualExtractionClick = () => {
     if (!messageLog) return;
@@ -470,24 +569,25 @@ export default function WhatsAppReplyCaptureModal({
       });
 
       const data = await res.json();
+      if (!isMountedRef.current) return;
       if (!res.ok) {
         throw new Error(data.error || "Erro ao registrar retorno da família.");
       }
 
+      clearWhatsAppPushedReplyCache();
       onSuccess(data.updated);
       onClose();
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
       const errorMsg =
         err instanceof Error ? err.message : "Erro ao selar retorno.";
       setSaveError(errorMsg);
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   };
-
-  if (!isOpen || !messageLog) {
-    return null;
-  }
 
   const formattedSentAt = messageLog.sentAt
     ? new Date(messageLog.sentAt).toLocaleString("pt-BR", {

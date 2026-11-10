@@ -65,7 +65,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes passem (366 testes em 52 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `platformEditions.test.ts` e `atasArchiveUsability.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (370 testes em 52 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts` e `atasArchiveUsability.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 

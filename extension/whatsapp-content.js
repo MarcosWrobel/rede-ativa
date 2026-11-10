@@ -636,10 +636,10 @@
           }
 
           if (res.relayedCount === 0) {
-            createOrUpdateBanner("💾 Retorno salvo na extensão! Abra o prontuário no Rede Ativa", "warning");
-            syncCaptureButtonsState("💾 Salvo na Extensão", "#d97706");
+            createOrUpdateBanner("⚠️ Abra o modal 'Capturar Retorno' no Rede Ativa", "warning");
+            syncCaptureButtonsState("⚠️ Abra o Rede Ativa", "#d97706");
           } else {
-            createOrUpdateBanner("✅ Retorno enviado ao Registro!", "success");
+            createOrUpdateBanner("✅ Retorno enviado ao Rede Ativa!", "success");
             syncCaptureButtonsState("✅ Retorno Enviado!", "#059669");
           }
 

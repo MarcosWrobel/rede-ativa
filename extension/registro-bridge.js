@@ -37,6 +37,14 @@
       }
     }
 
+    // Limpa eventuais caches residuais de capturas anteriores na página
+    try {
+      sessionStorage.removeItem("redeativa_last_pushed_reply");
+    } catch {}
+    try {
+      delete window.__REDEATIVA_LAST_PUSHED_REPLY__;
+    } catch {}
+
     // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação
     if (document.documentElement) {
       document.documentElement.dataset.redeativaExtension = "true";
@@ -167,28 +175,33 @@
         return;
       }
 
-      // 3.3 Consulta ao último retorno capturado no storage local da extensão
+      // 3.3 Limpeza explícita de caches de captura do WhatsApp Web solicitada pela aplicação
+      if (
+        data.type === "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" ||
+        data.type === "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY"
+      ) {
+        try {
+          sessionStorage.removeItem("redeativa_last_pushed_reply");
+        } catch {}
+        try {
+          delete window.__REDEATIVA_LAST_PUSHED_REPLY__;
+        } catch {}
+        try {
+          chrome.runtime.sendMessage({ type: "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY" }, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch {}
+        return;
+      }
+
+      // 3.4 Consulta legada ao último retorno: não reenviar capturas antigas em cache (cada abertura começa limpa)
       if (
         data.type === "REDEATIVA_GET_LAST_CAPTURED_REPLY" ||
         data.type === "LEOPOLDINA_GET_LAST_CAPTURED_REPLY"
       ) {
-        chrome.storage.local.get(["leopoldina_last_captured_reply"], (result) => {
-          const stored = result?.leopoldina_last_captured_reply;
-          if (stored && (stored.rawText || stored.screenshotDataUrl)) {
-            const currentOrigin = window.location.origin;
-            const replyMsg = {
-              type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
-              pushedFromWhatsApp: true,
-              fromStorageCache: true,
-              ...stored,
-            };
-            window.postMessage(replyMsg, currentOrigin);
-            window.postMessage(
-              { ...replyMsg, type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED" },
-              currentOrigin
-            );
-          }
-        });
+        try {
+          chrome.storage.local.remove(["leopoldina_last_captured_reply"]);
+        } catch {}
         return;
       }
     });
@@ -216,6 +229,7 @@
         const pushedPayload = {
           type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
           pushedFromWhatsApp: true,
+          captureId: message.captureId || null,
           success: Boolean(message.success),
           logId: message.logId || null,
           phone: message.phone || null,
@@ -227,14 +241,6 @@
           screenshotDataUrl: message.screenshotDataUrl || null,
           receivedAt: Date.now(),
         };
-
-        // Cache local imediato para resiliência caso a modal ainda não esteja aberta
-        try {
-          sessionStorage.setItem("redeativa_last_pushed_reply", JSON.stringify(pushedPayload));
-        } catch {}
-        try {
-          window.__REDEATIVA_LAST_PUSHED_REPLY__ = pushedPayload;
-        } catch {}
 
         window.postMessage(pushedPayload, currentOrigin);
         window.postMessage(
