@@ -3,7 +3,8 @@ import "./globals.css";
 import AppLayoutClient from "@/components/AppLayoutClient";
 import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getCurrentSchool, getCachedDirectory, setCachedDirectory } from "@/lib/currentSchool";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { prisma } from "@/lib/prisma";
 import { isBootstrapAdminEmail } from "@/lib/roles";
 
@@ -63,27 +64,33 @@ export default async function RootLayout({
   let userSchoolsList = Array.isArray(sessionUser?.schools) ? sessionUser.schools : [];
   if (isSuper) {
     try {
-      const allActiveSchools = await prisma.school.findMany({
-        where: { active: true },
-        select: {
-          id: true,
-          name: true,
-          inepCode: true,
-          city: true,
-          network: true,
-          logoUrl: true,
-        },
-        orderBy: { name: "asc" },
-      });
-      userSchoolsList = allActiveSchools.map((s) => ({
-        schoolId: s.id,
-        name: s.name,
-        inepCode: s.inepCode,
-        city: s.city,
-        network: (s as any).network || "ESTADUAL",
-        logoUrl: s.logoUrl || null,
-        role: "SUPERADMIN",
-      }));
+      const cachedList = getCachedDirectory<any>("superadmin_schools");
+      if (cachedList) {
+        userSchoolsList = cachedList;
+      } else {
+        const allActiveSchools = await prisma.school.findMany({
+          where: { active: true },
+          select: {
+            id: true,
+            name: true,
+            inepCode: true,
+            city: true,
+            network: true,
+            updatedAt: true,
+          },
+          orderBy: { name: "asc" },
+        });
+        userSchoolsList = allActiveSchools.map((s) => ({
+          schoolId: s.id,
+          name: s.name,
+          inepCode: s.inepCode,
+          city: s.city,
+          network: (s as any).network || "ESTADUAL",
+          logoUrl: resolveSchoolLogoProxyUrl({ id: s.id, updatedAt: s.updatedAt }),
+          role: "SUPERADMIN",
+        }));
+        setCachedDirectory("superadmin_schools", userSchoolsList);
+      }
     } catch (e) {
       console.warn("[RootLayout] Falha não crítica ao buscar escolas para SuperAdmin:", e);
     }
@@ -91,33 +98,40 @@ export default async function RootLayout({
     try {
       const userNetworks = Array.isArray(sessionUser?.networks) ? sessionUser.networks : [];
       const networkIds = userNetworks.map((n: any) => n.networkId);
-      const networkSchools = await prisma.school.findMany({
-        where: {
-          active: true,
-          OR: [
-            { networkId: { in: networkIds } },
-            ...userNetworks.map((n: any) => ({ city: n.city, network: "MUNICIPAL" })),
-          ],
-        },
-        select: {
-          id: true,
-          name: true,
-          inepCode: true,
-          city: true,
-          network: true,
-          logoUrl: true,
-        },
-        orderBy: { name: "asc" },
-      });
-      userSchoolsList = networkSchools.map((s) => ({
-        schoolId: s.id,
-        name: s.name,
-        inepCode: s.inepCode,
-        city: s.city,
-        network: (s as any).network || "MUNICIPAL",
-        logoUrl: s.logoUrl || null,
-        role: "GESTAO_SECRETARIA",
-      }));
+      const cacheKey = `secretariat_schools:${networkIds.join(",")}:${userNetworks.map((n: any) => n.city || "").join(",")}`;
+      const cachedList = getCachedDirectory<any>(cacheKey);
+      if (cachedList) {
+        userSchoolsList = cachedList;
+      } else {
+        const networkSchools = await prisma.school.findMany({
+          where: {
+            active: true,
+            OR: [
+              { networkId: { in: networkIds } },
+              ...userNetworks.map((n: any) => ({ city: n.city, network: "MUNICIPAL" })),
+            ],
+          },
+          select: {
+            id: true,
+            name: true,
+            inepCode: true,
+            city: true,
+            network: true,
+            updatedAt: true,
+          },
+          orderBy: { name: "asc" },
+        });
+        userSchoolsList = networkSchools.map((s) => ({
+          schoolId: s.id,
+          name: s.name,
+          inepCode: s.inepCode,
+          city: s.city,
+          network: (s as any).network || "MUNICIPAL",
+          logoUrl: resolveSchoolLogoProxyUrl({ id: s.id, updatedAt: s.updatedAt }),
+          role: "GESTAO_SECRETARIA",
+        }));
+        setCachedDirectory(cacheKey, userSchoolsList);
+      }
     } catch (e) {
       console.warn("[RootLayout] Falha não crítica ao buscar escolas da rede municipal:", e);
     }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSchoolAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { hashSchoolSyncToken, encryptSyncToken, decryptSyncToken } from "@/lib/syncToken";
 import crypto from "crypto";
 
@@ -108,6 +109,7 @@ export async function POST(
     });
 
     const syncTokenCreatedAt = updatedSchool.updatedAt.toISOString();
+    invalidateSchoolCache(id);
 
     return NextResponse.json({
       success: true,

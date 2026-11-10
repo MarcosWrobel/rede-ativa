@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { checkIsAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import AdminEscolasClient from "./AdminEscolasClient";
@@ -25,10 +26,23 @@ export default async function AdminEscolasPage() {
 
   const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
 
-  // Fetch all registered schools with aggregate counts and recent activity
+  // Fetch all registered schools with aggregate counts and recent activity (sem logoUrl Base64)
   const schools = await prisma.school.findMany({
     orderBy: [{ network: "asc" }, { name: "asc" }],
-    include: {
+    select: {
+      id: true,
+      name: true,
+      inepCode: true,
+      nre: true,
+      network: true,
+      city: true,
+      state: true,
+      phone: true,
+      email: true,
+      settingsJson: true,
+      syncTokenHash: true,
+      createdAt: true,
+      updatedAt: true,
       _count: {
         select: {
           students: true,
@@ -73,7 +87,11 @@ export default async function AdminEscolasPage() {
       state: s.state,
       phone: s.phone,
       email: s.email,
-      logoUrl: s.logoUrl,
+      logoUrl: resolveSchoolLogoProxyUrl({
+        id: s.id,
+        logoUrl: (s as { logoUrl?: string | null }).logoUrl,
+        updatedAt: s.updatedAt,
+      }),
       settings,
       hasSyncToken: Boolean(s.syncTokenHash),
       lastSyncAt,

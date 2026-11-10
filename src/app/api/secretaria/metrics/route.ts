@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin, checkIsSecretariat } from "@/lib/permissions";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { generatePredictiveRecommendations } from "@/lib/predictiveAnalytics";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +61,18 @@ export async function GET(req: Request) {
         network: "MUNICIPAL",
         ...(requestedCity ? { city: { equals: requestedCity, mode: "insensitive" } } : {}),
       },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        inepCode: true,
+        city: true,
+        state: true,
+        nre: true,
+        phone: true,
+        email: true,
+        settingsJson: true,
+        syncTokenHash: true,
+        updatedAt: true,
         _count: {
           select: {
             students: true,
@@ -143,7 +155,11 @@ export async function GET(req: Request) {
         state: s.state,
         phone: s.phone,
         email: s.email,
-        logoUrl: s.logoUrl,
+        logoUrl: resolveSchoolLogoProxyUrl({
+          id: s.id,
+          logoUrl: (s as { logoUrl?: string | null }).logoUrl,
+          updatedAt: s.updatedAt,
+        }),
         district,
         studentsCount: s._count.students,
         classesCount: s._count.classGroups,

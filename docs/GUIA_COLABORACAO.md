@@ -135,7 +135,7 @@ flowchart LR
    - Se alterar modelos em `prisma/schema.prisma`, execute `npx prisma db push` apenas na sua **branch Neon de desenvolvimento**.
 4. **Execute a Validação Obrigatória (Portão de Qualidade):**
    ```bash
-   # 1. Executar toda a suíte Vitest (408 testes em 56 suítes, incluindo adversarialQa.test.ts, whatsappReplyCaptureModal.test.tsx, atasArchiveUsability.test.ts, ataServices.test.ts e frequenciaSync.test.ts)
+   # 1. Executar toda a suíte Vitest (418 testes em 57 suítes, incluindo adversarialQa.test.ts, whatsappReplyCaptureModal.test.tsx, atasArchiveUsability.test.ts, ataServices.test.ts, frequenciaSync.test.ts e egressAndCacheOptimization.test.ts)
    npm test
 
    # 2. Executar a compilação estrita de produção (Next.js 16 + Turbopack)

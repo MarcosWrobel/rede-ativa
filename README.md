@@ -55,7 +55,7 @@ flowchart TD
 - **Segurança, Fé Pública & Perícia**: NextAuth.js v5, Proxy de borda (`src/proxy.ts`), guarda atômica `assertTenantOwnership` (REST e SSR), validação anti-spoofing em `getCurrentSchool`, proteção contra CSV Formula Injection (CWE-1236 + RFC 4180), PIN de Fé Pública (`PBKDF2-SHA512`), captura vetorial de assinatura (`biometricStrokeData`), WebAuthn/FIDO2 e selamento `SHA-256` canônico
 - **Ingestão Poliglota (SERE/SEED-PR)**: Parser em memória com `xlsx` (`.xls` BIFF8 e `.xlsx`), `unpdf` (`.pdf`) e `.csv` (`UTF-8` / `Windows-1252`), com desduplicação de dupla matrícula técnica
 - **Extensão Universal Chrome MV3 (`v1.5.0`)**: Sincronização assistida com Power BI (*Presente na Escola*) e portal SERP/Celepar, Janela Dedicada Compacta (`480x760px`) e confirmação automática de envio no WhatsApp Web
-- **Qualidade & Confiabilidade**: **408 testes automatizados em 56 suítes Vitest (100% verdes)** cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança, isolamento de estado e integridade de retorno WhatsApp (`messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), serviços e subcomponentes de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`), usabilidade e preservação arquivística de atas (`atasArchiveUsability.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
+- **Qualidade & Confiabilidade**: **418 testes automatizados em 57 suítes Vitest (100% verdes)** cobrindo os 10 vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança, isolamento de estado e integridade de retorno WhatsApp (`messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress/cache Neon (`egressAndCacheOptimization.test.ts`), serviços e subcomponentes de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`), usabilidade e preservação arquivística de atas (`atasArchiveUsability.test.ts`), RBAC 4-tier, criptografia forense, anonimização LGPD/ECA e renderização SSR
 
 ---
 
@@ -98,8 +98,8 @@ npm run build
 ## 📖 Índice da Documentação Canônica
 
 - 👉 **[Contexto Mestre & Regras Inegociáveis para IAs (`AI_CONTEXT.md`)](AI_CONTEXT.md)** — Fonte única de verdade (SSOT) de regras de negócio, estrutura do projeto e convenções.
-- 👉 **[Arquitetura e Engenharia de Software (`docs/ARQUITETURA_E_ENGENHARIA.md`)](docs/ARQUITETURA_E_ENGENHARIA.md)** — Referência técnica unificada: diagramas C4/ERD, 20 models Prisma, 27 páginas SSR, 44 APIs REST, criptografia e segurança.
+- 👉 **[Arquitetura e Engenharia de Software (`docs/ARQUITETURA_E_ENGENHARIA.md`)](docs/ARQUITETURA_E_ENGENHARIA.md)** — Referência técnica unificada: diagramas C4/ERD, 21 models Prisma, 29 páginas SSR, 50 APIs REST, criptografia e segurança.
 - 👉 **[Guia de Colaboração & Onboarding Dev (`docs/GUIA_COLABORACAO.md`)](docs/GUIA_COLABORACAO.md)** — Passo a passo de ambiente local (`localhost:3001`), Neon Branching e fluxo Git.
 - 👉 **[Guia de Implantação e Operação Cloud (`docs/DEPLOY.md`)](docs/DEPLOY.md)** — Provisionamento na Vercel, Neon PostgreSQL, variáveis de ambiente e operação multi-escola.
-- 👉 **[Backlog Evolutivo & Roadmap (`docs/BACKLOG.md`)](docs/BACKLOG.md)** — Registro completo das Sprints 1 a 13 concluídas e planejamento técnico-jurídico futuro.
+- 👉 **[Backlog Evolutivo & Roadmap (`docs/BACKLOG.md`)](docs/BACKLOG.md)** — Registro completo das Sprints 1 a 18 concluídas e planejamento técnico-jurídico futuro.
 - 👉 **[Relatórios Históricos de Auditoria (`docs/auditorias/`)](docs/auditorias/)** — Snapshots formais de auditoria técnica, transição SaaS e bateria adversarial dos 7 vetores multi-tenant.

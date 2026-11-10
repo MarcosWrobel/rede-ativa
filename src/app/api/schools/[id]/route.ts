@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireSchoolAdmin, requireSuperAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { invalidateSchoolCache } from "@/lib/currentSchool";
+import { isProxyLogoPath, resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { z } from "zod";
 
@@ -38,7 +40,22 @@ export async function GET(
 
     const school = await prisma.school.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        inepCode: true,
+        name: true,
+        city: true,
+        state: true,
+        nre: true,
+        network: true,
+        phone: true,
+        email: true,
+        active: true,
+        syncTokenHash: true,
+        settingsJson: true,
+        networkId: true,
+        createdAt: true,
+        updatedAt: true,
         _count: {
           select: {
             students: { where: { active: true } },
@@ -69,6 +86,11 @@ export async function GET(
       success: true,
       school: {
         ...safeSchool,
+        logoUrl: resolveSchoolLogoProxyUrl({
+          id: school.id,
+          logoUrl: (school as { logoUrl?: string | null }).logoUrl,
+          updatedAt: school.updatedAt,
+        }),
         edition: resolveSchoolEdition(school),
         hasSyncToken: Boolean(syncTokenHash),
       },
@@ -128,6 +150,7 @@ export async function PUT(
           inepCode: data.inepCode,
           id: { not: id },
         },
+        select: { name: true },
       });
       if (collision) {
         return NextResponse.json(
@@ -165,6 +188,8 @@ export async function PUT(
       finalSettingsJson = JSON.stringify(currentSettingsObj);
     }
 
+    const shouldUpdateLogoUrl = data.logoUrl !== undefined && !isProxyLogoPath(data.logoUrl);
+
     const updated = await prisma.school.update({
       where: { id },
       data: {
@@ -176,10 +201,29 @@ export async function PUT(
         ...(data.network ? { network: data.network } : {}),
         ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
         ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
-        ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl?.trim() || null } : {}),
+        ...(shouldUpdateLogoUrl ? { logoUrl: data.logoUrl?.trim() || null } : {}),
         ...(finalSettingsJson !== undefined ? { settingsJson: finalSettingsJson } : {}),
       },
+      select: {
+        id: true,
+        inepCode: true,
+        name: true,
+        city: true,
+        state: true,
+        nre: true,
+        network: true,
+        phone: true,
+        email: true,
+        active: true,
+        syncTokenHash: true,
+        settingsJson: true,
+        networkId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
+
+    invalidateSchoolCache(id);
 
     await logAudit({
       action: "UPDATE_SCHOOL",
@@ -206,6 +250,11 @@ export async function PUT(
       success: true,
       school: {
         ...safeUpdated,
+        logoUrl: resolveSchoolLogoProxyUrl({
+          id: updated.id,
+          logoUrl: (updated as { logoUrl?: string | null }).logoUrl,
+          updatedAt: updated.updatedAt,
+        }),
         hasSyncToken: Boolean(updatedSyncTokenHash),
       },
     });
@@ -226,7 +275,12 @@ export async function DELETE(
     const { id } = await params;
     const target = await prisma.school.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        inepCode: true,
+        name: true,
+        network: true,
+        city: true,
         _count: {
           select: {
             students: true,
@@ -297,6 +351,8 @@ export async function DELETE(
       },
       req,
     });
+
+    invalidateSchoolCache(id);
 
     return NextResponse.json({
       success: true,

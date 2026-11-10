@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth, requireAdmin, isBootstrapAdminEmail } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { invalidateSchoolCache } from "@/lib/currentSchool";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { z } from "zod";
 
@@ -57,10 +59,25 @@ export async function GET() {
 
     let schools;
     if (isRootAdmin) {
-      // Administrador Geral tem visão ampla de todas as escolas cadastradas
+      // Administrador Geral tem visão ampla de todas as escolas cadastradas (sem payload Base64 de logoUrl)
       schools = await prisma.school.findMany({
         where: { active: true },
-        include: {
+        select: {
+          id: true,
+          inepCode: true,
+          name: true,
+          city: true,
+          state: true,
+          nre: true,
+          network: true,
+          phone: true,
+          email: true,
+          active: true,
+          syncTokenHash: true,
+          settingsJson: true,
+          networkId: true,
+          createdAt: true,
+          updatedAt: true,
           _count: {
             select: {
               students: { where: { active: true } },
@@ -78,7 +95,22 @@ export async function GET() {
         where: { userId: authCheck.userId, active: true },
         include: {
           school: {
-            include: {
+            select: {
+              id: true,
+              inepCode: true,
+              name: true,
+              city: true,
+              state: true,
+              nre: true,
+              network: true,
+              phone: true,
+              email: true,
+              active: true,
+              syncTokenHash: true,
+              settingsJson: true,
+              networkId: true,
+              createdAt: true,
+              updatedAt: true,
               _count: {
                 select: {
                   students: { where: { active: true } },
@@ -106,6 +138,11 @@ export async function GET() {
       const { syncTokenHash, userBySchools, ...safe } = s;
       return {
         ...safe,
+        logoUrl: resolveSchoolLogoProxyUrl({
+          id: s.id,
+          logoUrl: s.logoUrl,
+          updatedAt: s.updatedAt,
+        }),
         edition: resolveSchoolEdition(s),
         hasSyncToken: safe.hasSyncToken ?? Boolean(syncTokenHash),
       };
@@ -173,6 +210,7 @@ export async function POST(req: Request) {
     // 1. Verifica se já existe escola com este INEP
     const existing = await prisma.school.findUnique({
       where: { inepCode: data.inepCode },
+      select: { id: true, name: true },
     });
 
     if (existing) {
@@ -327,6 +365,8 @@ export async function POST(req: Request) {
       },
       req,
     });
+
+    invalidateSchoolCache(createdSchool.id);
 
     return NextResponse.json({ success: true, school: createdSchool }, { status: 201 });
   } catch (error: any) {

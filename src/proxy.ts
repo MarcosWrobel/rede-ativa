@@ -37,6 +37,9 @@ export async function proxy(req: NextRequest) {
   if (SELF_AUTH_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
   }
+  if (req.method === "GET" && /^\/api\/schools\/[^/]+\/logo$/.test(pathname)) {
+    return NextResponse.next();
+  }
 
   // 2. Verifica sessão JWT leve sem tocar banco de dados
   const session = await proxyAuth();

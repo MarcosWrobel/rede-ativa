@@ -247,7 +247,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                       inepCode: true,
                       city: true,
                       network: true,
-                      logoUrl: true,
+                      updatedAt: true,
                     },
                   },
                 },
@@ -262,7 +262,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                       shortName: true,
                       city: true,
                       type: true,
-                      logoUrl: true,
                     },
                   },
                 },
@@ -281,7 +280,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               inepCode: s.school.inepCode,
               city: s.school.city,
               network: (s.school as any).network || "ESTADUAL",
-              logoUrl: sanitizeJwtLogoUrl(s.school.logoUrl),
+              logoUrl: `/api/schools/${s.schoolId}/logo?v=${s.school.updatedAt ? new Date(s.school.updatedAt).getTime() : 1}`,
             }));
             token.userSchools = mappedSchools;
 
@@ -292,7 +291,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               shortName: n.network.shortName,
               city: n.network.city,
               type: n.network.type,
-              logoUrl: sanitizeJwtLogoUrl(n.network.logoUrl),
+              logoUrl: null,
             }));
             token.userNetworks = mappedNetworks;
 

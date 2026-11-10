@@ -1,7 +1,9 @@
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { checkIsSuperAdmin } from "./roles";
 import { PlatformEdition, resolveSchoolEdition } from "./platformEditions";
+import { resolveSchoolLogoProxyUrl } from "./schoolLogo";
 
 export interface SchoolContext {
   id: string;
@@ -31,6 +33,151 @@ export const DEFAULT_SCHOOL: SchoolContext = {
   edition: "PILOTO_INTEGRADA",
 };
 
+// Select enxuto: omite `logoUrl` (que pode conter SVG/imagem Base64 > 1 MB) e `syncTokenHash`
+const SCHOOL_CONTEXT_SELECT = {
+  id: true,
+  inepCode: true,
+  name: true,
+  city: true,
+  state: true,
+  nre: true,
+  network: true,
+  phone: true,
+  email: true,
+  active: true,
+  settingsJson: true,
+  networkId: true,
+  updatedAt: true,
+} as const;
+
+const SCHOOL_CACHE_TTL_MS = 60 * 1000;
+const schoolContextCache = new Map<string, { value: SchoolContext; expiresAt: number }>();
+const schoolDirectoryCache = new Map<string, { value: any[]; expiresAt: number }>();
+
+function isCacheEnabled(): boolean {
+  return process.env.VITEST !== "true" && process.env.NODE_ENV !== "test";
+}
+
+function getCachedSchool(key: string): SchoolContext | null {
+  if (!isCacheEnabled()) return null;
+  const entry = schoolContextCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    schoolContextCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCachedSchool(key: string, value: SchoolContext): void {
+  if (!isCacheEnabled()) return;
+  schoolContextCache.set(key, {
+    value,
+    expiresAt: Date.now() + SCHOOL_CACHE_TTL_MS,
+  });
+}
+
+export function getCachedDirectory<T>(key: string): T[] | null {
+  if (!isCacheEnabled()) return null;
+  const entry = schoolDirectoryCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    schoolDirectoryCache.delete(key);
+    return null;
+  }
+  return entry.value as T[];
+}
+
+export function setCachedDirectory<T>(key: string, value: T[]): void {
+  if (!isCacheEnabled()) return;
+  schoolDirectoryCache.set(key, {
+    value,
+    expiresAt: Date.now() + SCHOOL_CACHE_TTL_MS,
+  });
+}
+
+/**
+ * Invalida os caches em memória após criação/atualização/higienização de escolas.
+ */
+export function invalidateSchoolCache(schoolId?: string): void {
+  schoolDirectoryCache.clear();
+  if (schoolId) {
+    schoolContextCache.delete(schoolId);
+    schoolContextCache.delete("__first__");
+  } else {
+    schoolContextCache.clear();
+  }
+}
+
+function mapSchoolRecordToContext(school: any): SchoolContext {
+  return {
+    id: school.id,
+    inepCode: school.inepCode,
+    name: school.name,
+    city: school.city,
+    state: school.state,
+    nre: school.nre,
+    network: school.network || "ESTADUAL",
+    phone: school.phone,
+    email: school.email,
+    logoUrl: resolveSchoolLogoProxyUrl(school),
+    edition: resolveSchoolEdition(school),
+  };
+}
+
+const resolveSchoolByIdInRequest = cache(async (targetId: string): Promise<SchoolContext | null> => {
+  const cached = getCachedSchool(targetId);
+  if (cached) return cached;
+
+  try {
+    const school = await prisma.school.findUnique({
+      where: { id: targetId },
+      select: SCHOOL_CONTEXT_SELECT,
+    });
+    if (school && school.active !== false) {
+      const ctx = mapSchoolRecordToContext(school);
+      setCachedSchool(targetId, ctx);
+      return ctx;
+    }
+  } catch (err) {
+    console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
+  }
+  return null;
+});
+
+const resolveFirstActiveSchoolInRequest = cache(async (): Promise<SchoolContext> => {
+  const cached = getCachedSchool("__first__");
+  if (cached) return cached;
+
+  try {
+    const firstSchool = await prisma.school.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: "asc" },
+      select: SCHOOL_CONTEXT_SELECT,
+    });
+    if (firstSchool) {
+      const ctx = mapSchoolRecordToContext(firstSchool);
+      setCachedSchool("__first__", ctx);
+      setCachedSchool(firstSchool.id, ctx);
+      return ctx;
+    }
+
+    // Se a tabela School estiver vazia, cria a escola padrão no banco de dados para garantir que a FK exista
+    const created = await ensureDefaultSchool();
+    if (created) {
+      const ctx = mapSchoolRecordToContext(created);
+      setCachedSchool("__first__", ctx);
+      setCachedSchool(created.id, ctx);
+      return ctx;
+    }
+  } catch {
+    // Falha de conexão ou tabela ainda em processo de migração: fallback gracioso
+    return DEFAULT_SCHOOL;
+  }
+
+  return DEFAULT_SCHOOL;
+});
+
 /**
  * Obtém os dados da escola atual para emissão de documentos, cabeçalhos e disparos.
  * Prioridade:
@@ -44,27 +191,25 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
   let targetId: string | null = null;
   let sessionSchoolId: string | null = null;
 
-  // 1. Validação estrita do cookie da instituição ativa contra a sessão autenticada
+  // 1. Lê cookies antes de chamar auth() para evitar invocação desnecessária quando não há cookie nem fallback pendente
   try {
-    let session: any = null;
-    try {
-      const { auth } = await import("@/lib/auth");
-      session = await auth();
-    } catch {
-      // Fora de contexto de autenticação / CLI / testes
-    }
-
-    if (session?.user) {
-      if ((session.user as any).schoolId) {
-        sessionSchoolId = String((session.user as any).schoolId).trim();
-      }
-    }
-
     const cookieStore = await cookies();
     const cookieVal = cookieStore.get("active_school_id")?.value?.trim();
 
-    if (cookieVal) {
-      if (session?.user) {
+    if (cookieVal || !schoolId || !schoolId.trim()) {
+      let session: any = null;
+      try {
+        const { auth } = await import("@/lib/auth");
+        session = await auth();
+      } catch {
+        // Fora de contexto de autenticação / CLI / testes
+      }
+
+      if (session?.user && (session.user as any).schoolId) {
+        sessionSchoolId = String((session.user as any).schoolId).trim();
+      }
+
+      if (cookieVal && session?.user) {
         const role = (session.user as any).role;
         const isSuper = checkIsSuperAdmin(session);
         const userSchools = ((session.user as any).schools as any[]) || [];
@@ -83,6 +228,13 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
         if (!hasAccess && role === "GESTAO_SECRETARIA" && userNetworks.length > 0) {
           const candidateSchool = await prisma.school.findUnique({
             where: { id: cookieVal },
+            select: {
+              id: true,
+              active: true,
+              city: true,
+              network: true,
+              networkId: true,
+            },
           });
           if (candidateSchool && candidateSchool.active !== false) {
             const allowedNetIds = userNetworks
@@ -93,10 +245,10 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
               .filter(Boolean);
 
             const matchesNetworkId =
-              Boolean((candidateSchool as any).networkId) &&
-              allowedNetIds.includes((candidateSchool as any).networkId);
+              Boolean(candidateSchool.networkId) &&
+              allowedNetIds.includes(candidateSchool.networkId);
             const matchesMunicipalCity =
-              ((candidateSchool as any).network || "ESTADUAL") === "MUNICIPAL" &&
+              (candidateSchool.network || "ESTADUAL") === "MUNICIPAL" &&
               Boolean(candidateSchool.city) &&
               allowedCities.includes(candidateSchool.city.toLowerCase().trim());
 
@@ -130,71 +282,46 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
   }
 
   if (targetId) {
-    try {
-      const school = await prisma.school.findUnique({
-        where: { id: targetId },
-      });
-      if (school && school.active !== false) {
-        return {
-          id: school.id,
-          inepCode: school.inepCode,
-          name: school.name,
-          city: school.city,
-          state: school.state,
-          nre: school.nre,
-          network: (school as any).network || "ESTADUAL",
-          phone: school.phone,
-          email: school.email,
-          logoUrl: school.logoUrl || DEFAULT_SCHOOL.logoUrl,
-          edition: resolveSchoolEdition(school),
-        };
-      }
-    } catch (err) {
-      console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
-    }
+    const resolved = isCacheEnabled()
+      ? await resolveSchoolByIdInRequest(targetId)
+      : await (async () => {
+          try {
+            const school = await prisma.school.findUnique({
+              where: { id: targetId! },
+              select: SCHOOL_CONTEXT_SELECT,
+            });
+            if (school && school.active !== false) {
+              return mapSchoolRecordToContext(school);
+            }
+          } catch (err) {
+            console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
+          }
+          return null;
+        })();
+
+    if (resolved) return resolved;
   }
 
-  // 3. Fallback: primeira escola ativa cadastrada no banco de dados
+  // 4. Fallback: primeira escola ativa cadastrada no banco de dados
+  if (isCacheEnabled()) {
+    return resolveFirstActiveSchoolInRequest();
+  }
+
   try {
     const firstSchool = await prisma.school.findFirst({
       where: { active: true },
       orderBy: { createdAt: "asc" },
+      select: SCHOOL_CONTEXT_SELECT,
     });
     if (firstSchool) {
-      return {
-        id: firstSchool.id,
-        inepCode: firstSchool.inepCode,
-        name: firstSchool.name,
-        city: firstSchool.city,
-        state: firstSchool.state,
-        nre: firstSchool.nre,
-        network: (firstSchool as any).network || "ESTADUAL",
-        phone: firstSchool.phone,
-        email: firstSchool.email,
-        logoUrl: firstSchool.logoUrl || DEFAULT_SCHOOL.logoUrl,
-        edition: resolveSchoolEdition(firstSchool),
-      };
+      return mapSchoolRecordToContext(firstSchool);
     }
 
-    // Se a tabela School estiver vazia, cria a escola padrão no banco de dados para garantir que a FK exista
     const created = await ensureDefaultSchool();
     if (created) {
-      return {
-        id: created.id,
-        inepCode: created.inepCode,
-        name: created.name,
-        city: created.city,
-        state: created.state,
-        nre: created.nre,
-        network: (created as any).network || "ESTADUAL",
-        phone: created.phone,
-        email: created.email,
-        logoUrl: created.logoUrl || DEFAULT_SCHOOL.logoUrl,
-        edition: resolveSchoolEdition(created),
-      };
+      return mapSchoolRecordToContext(created);
     }
   } catch {
-    // Falha de conexão ou tabela ainda em processo de migração: fallback gracioso
     return DEFAULT_SCHOOL;
   }
 
@@ -244,7 +371,7 @@ export async function updateSchoolProfile(
     logoUrl?: string | null;
   }
 ) {
-  return await prisma.school.update({
+  const updated = await prisma.school.update({
     where: { id: schoolId },
     data: {
       ...(data.name?.trim() ? { name: data.name.trim() } : {}),
@@ -257,4 +384,6 @@ export async function updateSchoolProfile(
       ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl?.trim() || null } : {}),
     },
   });
+  invalidateSchoolCache(schoolId);
+  return updated;
 }

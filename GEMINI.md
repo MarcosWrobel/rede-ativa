@@ -65,7 +65,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes passem (408 testes em 56 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx` e `frequenciaSync.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes passem (418 testes em 57 suítes Vitest, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -109,11 +109,11 @@ A interface deve seguir os princípios de design de alta densidade de informaç�
 ---
 
 ## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
-- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **49 Route Handlers `route.ts`** (`src/app/api/`) e **56 suítes / 408 testes Vitest**.
+- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **50 Route Handlers `route.ts`** (`src/app/api/`) e **57 suítes / 418 testes Vitest**.
 - **Estrutura de Referência:**
   ```text
   src/
-  ├── app/                 # 29 páginas SSR + 49 Route Handlers REST (/api/*)
+  ├── app/                 # 29 páginas SSR + 50 Route Handlers REST (/api/*)
   │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
   │   ├── /login           # Login institucional Google OAuth / dev condicional
   │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))

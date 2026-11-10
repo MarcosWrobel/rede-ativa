@@ -47,7 +47,7 @@ flowchart TD
         EdgeProxy["src/proxy.ts (Perimetro JWT Edge)"]
         RSC["29 Server Components (page.tsx + assertTenantOwnership)"]
         ClientUI["Client Components (*Client.tsx + Editor Modular src/components/ata/editor/*)"]
-        APIRoutes["49 Route Handlers (/api/*)"]
+        APIRoutes["50 Route Handlers (/api/*)"]
         CronJob["Vercel Cron (/api/cron/weekly-digest)"]
     end
 
@@ -109,7 +109,7 @@ flowchart TD
 
 | Camada | Tecnologia | Versão (`package.json`) | Papel Arquitetural |
 | :--- | :--- | :---: | :--- |
-| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.3` | Renderização híbrida Server/Client (**29 páginas `page.tsx`** + **49 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), camada de serviços em [`src/services/`](../src/services), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
+| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.3` | Renderização híbrida Server/Client (**29 páginas `page.tsx`** + **50 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), camada de serviços em [`src/services/`](../src/services), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
 | **UI Runtime** | **React & React DOM** | `^19.3.1` | Painéis operacionais densos, modais baseados em `<dialog>` nativo ([`ModalDialog.tsx`](../src/components/ModalDialog.tsx)), subcomponentes tipados em [`src/components/ata/editor/`](../src/components/ata/editor) e captura vetorial/forense de traço em [`SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx). |
 | **Linguagem** | **TypeScript** | `^6.0.3` | `strict: true` em [`tsconfig.json`](../tsconfig.json) e alias `@/* -> ./src/*`, garantindo contratos estáticos ponta a ponta. |
 | **Estilização** | **Tailwind CSS v4** | `^4.3.3` | Utilitários via `@tailwindcss/postcss`, modo escuro sem *flash* (FOUC), ícones `lucide-react` (`^1.63.0`) e diagramação `@media print` A4 pericial com moldura perimétrica padronizada. |
@@ -120,7 +120,7 @@ flowchart TD
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `jspdf`, `qrcode`** | `^0.18.5` / `^1.9.1` / `^4.2.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão de Dossiês A4 e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.5.0` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta e confirmação automática de envio WhatsApp, empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-rede-ativa.zip` (`/public/extensao-leopoldina.zip` mantido automaticamente como alias de retrocompatibilidade). |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **56 suítes / 408 testes automatizados aprovados (100% verdes)** cobrindo os vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), camada de serviços e subcomponentes de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **57 suítes / 418 testes automatizados aprovados (100% verdes)** cobrindo os vetores adversariais multi-tenant (`adversarialQa.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), camada de serviços e subcomponentes de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress e cache Neon (`egressAndCacheOptimization.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), RBAC 4-tier, criptografia SHA-256, PIN forense, SERE parser e SSR. |
 
 ---
 
@@ -303,7 +303,7 @@ erDiagram
 | `/assinar/ata/[token]` | Público (Token) | Portal móvel temporário para coleta de assinatura com traço forense, WebAuthn ou OIDC `@escola`. |
 | `/validar/ata/[code]` | Público | Certidão pública cega LGPD-safe de conferência de autenticidade (`SHA-256`), adendos e averbação Gov.br. |
 
-### 5.2 Route Handlers REST (`src/app/api/*` — 49 Endpoints)
+### 5.2 Route Handlers REST (`src/app/api/*` — 50 Endpoints)
 
 | Domínio | Endpoint | Métodos Exatos | Finalidade e Guarda |
 | :--- | :--- | :---: | :--- |
@@ -312,6 +312,7 @@ erDiagram
 | **Auth & Contexto** | `/api/user/signing-pin` | `GET, POST` | Consulta de status, cadastro inicial, alteração e reset OIDC do PIN de Fé Pública. |
 | **SaaS & Redes** | `/api/schools` | `GET, POST` | Listagem e provisionamento de escolas com templates padrão (`SUPERADMIN` / `SEMEC`). |
 | **SaaS & Redes** | `/api/schools/[id]` | `GET, PUT, DELETE` | Consulta, edição cadastral e exclusão em cascata (bloqueia INEP `41042730`). |
+| **SaaS & Redes** | `/api/schools/[id]/logo` | `GET` | Proxy binário cacheado em CDN (`s-maxage=604800`, CSP SVG) para servir brasões sem egress recorrente de Base64. |
 | **SaaS & Redes** | `/api/schools/[id]/sanitize` | `POST` | Higienização transacional de dados de homologação (`SUPERADMIN`, bloqueia `41042730`). |
 | **SaaS & Redes** | `/api/schools/[id]/sync-token` | `GET, POST` | Consulta de status e rotação criptográfica do token de extensão por escola. |
 | **SaaS & Redes** | `/api/secretaria/metrics` | `GET` | Indicadores municipais consolidados e análise preditiva para SEMEC. |
@@ -357,7 +358,7 @@ erDiagram
 | **IA, Relatórios & Cron** | `/api/reports` | `GET` | Agregações SQL paralelas (`count` + `groupBy`) para o painel `/relatorios`. |
 | **IA, Relatórios & Cron** | `/api/cron/weekly-digest` | `GET, POST` | Job semanal (`CRON_SECRET` / sessão) alimentando o diagnóstico executivo `/boletim`. |
 
-*(Nota: Os endpoints lógicos acima estão implementados em exatamente **49 arquivos `route.ts`** sob `src/app/api/`).*
+*(Nota: Os endpoints lógicos acima estão implementados em exatamente **50 arquivos `route.ts`** sob `src/app/api/`).*
 
 ---
 
@@ -365,12 +366,12 @@ erDiagram
 
 A integridade arquitetural é validada continuamente via **Vitest (`npm test`)** e compilação estrita **Next.js 16 + Turbopack (`npm run build`)**:
 
-- **Volume Atual:** **56 suítes / 408 testes automatizados aprovados (100% verdes)**.
+- **Volume Atual:** **57 suítes / 418 testes automatizados aprovados (100% verdes)**.
 - **Pilares de Cobertura:**
   - **Segurança Adversarial Multi-Tenant, V3, Domínio & Mensageria (13 suítes):** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `messageReplySecurity.test.ts`, `schoolSyncToken.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`, `authGoogleCredentialsAndDomain.test.ts`, `storageKeysAndNeutralDomain.test.ts`, `platformEditions.test.ts`.
   - **Conformidade Jurídica, PIN, Serviços de Atas & Perícia Forense (15 suítes):** `securityAndLegalAuditV2.test.ts`, `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `teacherAtas.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `atasArchiveUsability.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.
   - **Privacidade LGPD/ECA & IA (3 suítes):** `aiPseudonymizer.test.ts`, `nreAtaFormalize.test.ts`, `predictiveAnalytics.test.ts`.
-  - **Operação Pedagógica, SERE, Extensão, Roteamento & SSR (25 suítes):** `sereParser.test.ts`, `studentMatcher.test.ts`, `frequenciaSync.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `clientDispatcher.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `phase5Features.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `buscaAtivaSsr.test.tsx`, `faltasPageReal.test.tsx`, `faltasSsr.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`, `rootPageRouting.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`.
+  - **Operação Pedagógica, Performance Neon, SERE, Extensão, Roteamento & SSR (26 suítes):** `sereParser.test.ts`, `studentMatcher.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `clientDispatcher.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `phase5Features.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `buscaAtivaSsr.test.tsx`, `faltasPageReal.test.tsx`, `faltasSsr.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`, `rootPageRouting.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`.
 
 ---
 

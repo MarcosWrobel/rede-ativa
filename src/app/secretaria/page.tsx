@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkIsAdmin, checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
 import { generatePredictiveRecommendations } from "@/lib/predictiveAnalytics";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import SecretariaClient from "./SecretariaClient";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +73,18 @@ export default async function SecretariaPage({ searchParams }: Props) {
       network: "MUNICIPAL",
       ...(defaultCity ? { city: { equals: defaultCity, mode: "insensitive" } } : {}),
     },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      inepCode: true,
+      city: true,
+      state: true,
+      nre: true,
+      phone: true,
+      email: true,
+      settingsJson: true,
+      syncTokenHash: true,
+      updatedAt: true,
       _count: {
         select: {
           students: true,
@@ -154,7 +166,11 @@ export default async function SecretariaPage({ searchParams }: Props) {
       state: s.state,
       phone: s.phone,
       email: s.email,
-      logoUrl: s.logoUrl,
+      logoUrl: resolveSchoolLogoProxyUrl({
+        id: s.id,
+        logoUrl: (s as { logoUrl?: string | null }).logoUrl,
+        updatedAt: s.updatedAt,
+      }),
       nre: s.nre,
       district,
       studentsCount: s._count.students,

@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 408 testes em 56 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, whatsappReplyCaptureModal.test.tsx, platformEditions.test.ts, securityAndStabilityAuditV3.test.ts, teacherAtas.test.ts, atasArchiveUsability.test.ts, ataServices.test.ts, ataEditorSubcomponents.test.tsx e frequenciaSync.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 418 testes em 57 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, whatsappReplyCaptureModal.test.tsx, platformEditions.test.ts, securityAndStabilityAuditV3.test.ts, teacherAtas.test.ts, atasArchiveUsability.test.ts, ataServices.test.ts, ataEditorSubcomponents.test.tsx, frequenciaSync.test.ts e egressAndCacheOptimization.test.ts) e que o build de produção compile sem erros (npm run build).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -97,7 +97,8 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`SAAS-ARCH-01` (`src/services/`):** Desacoplamento das regras de pareamento/provas de signatários (`ataParticipantService.ts`) e orquestração transacional da lavratura de atas (`ataFinalizationService.ts`), validados por [`ataServices.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/ataServices.test.ts).
 - **`SAAS-UI-01` (`src/components/ata/editor/`):** Eliminação de 100% das anotações `any` no [`AtaEditorModal.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/AtaEditorModal.tsx) via [`editor/types.ts`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/editor/types.ts) e extração acessível de subcomponentes (`AtaExtemporaneousBanner.tsx`, `AtaAddendumsSection.tsx`, `AtaActionItemsSection.tsx`), validados em [`ataEditorSubcomponents.test.tsx`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/ataEditorSubcomponents.test.tsx).
 - **Blindagem de Sincronização Power BI, CSV & JSON (`10/11/2026`):** Resolvido erro HTTP 500 (`P2002` na chave global `@unique` `Student.cgm`) em `/api/frequencia/sync` e `/api/serp/sync` via [`syncCgmGuard.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/syncCgmGuard.ts) (`populateGlobalTakenCgms` + `applyPendingCgmUpdatesSafely`), otimizado enriquecimento cadastral via *delta check* e `UPDATE` SQL em lote, aprimorado o parser CSV/JSON RFC 4180 de 11 colunas em [`frequencyImportParser.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](file:///home/marcoswrobel/Documents/Registro/src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br`, coberto por 12 testes em [`frequenciaSync.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/frequenciaSync.test.ts).
-- Suíte automatizada consolidada em **56 suítes / 408 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+- **Otimização de Egress, Cache & Custo no Neon PostgreSQL (`10/11/2026`):** Proxy binário cacheado em CDN `/api/schools/[id]/logo` com CSP SVG ([`schoolLogo.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/schoolLogo.ts)) eliminando a transferência recorrente de brasões Base64 (`1,14 MB`), deduplicação via React `cache()` + TTL 60s em [`currentSchool.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts), omissão estrita de `physicalSignedScanData`/`signatureData`/`biometricStrokeData` em listagens e Prontuário (`safePhase3Queries.ts`, `/api/atas`, `/atas/livro/[ano]`), `select` enxuto em `/faltas` e autenticação de extensão com leitura prévia zero-write em [`extensionSyncAuth.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/extensionSyncAuth.ts), coberto por 10 testes em [`egressAndCacheOptimization.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/egressAndCacheOptimization.test.ts).
+- Suíte automatizada consolidada em **57 suítes / 418 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
 
 ---
 
@@ -146,7 +147,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **100% da suíte Vitest deve passar (408 testes em 56 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx` e `frequenciaSync.test.ts`)**.
+  1. Execute `npm test` — **100% da suíte Vitest deve passar (418 testes em 57 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -189,7 +190,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ```text
 ├── src/
-│   ├── app/                        # 29 Páginas SSR + 49 Route Handlers (Next.js 16 App Router)
+│   ├── app/                        # 29 Páginas SSR + 50 Route Handlers (Next.js 16 App Router)
 │   │   ├── login/                  # Login institucional Google OAuth e login dev condicional
 │   │   ├── impacto/                # Redirecionamento permanente para landing pública na raiz (/)
 │   │   ├── preview-landing/        # Simulador e demonstração interativa do workflow pedagógico
@@ -213,7 +214,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── auditoria/              # Trilha de auditoria imutável escopada por escola
 │   │   ├── validar/ata/[code]/     # Portal público LGPD de validação cega de atas
 │   │   ├── assinar/ata/[token]/    # Portal móvel de assinatura com biometria e traço vetorial
-│   │   └── api/                    # 49 Route Handlers REST serverless
+│   │   └── api/                    # 50 Route Handlers REST serverless
 │   ├── services/                   # Camada de serviços de domínio e regras transacionais
 │   │   ├── ataParticipantService.ts# Sanitização de rascunhos e pareamento anti-forja de signatários
 │   │   └── ataFinalizationService.ts# Cálculo de dias úteis BRT, hash SHA-256 e lavratura atômica
@@ -260,7 +261,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 56 suítes / 408 testes)
+# Executar suíte completa de testes (Vitest — 57 suítes / 418 testes)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

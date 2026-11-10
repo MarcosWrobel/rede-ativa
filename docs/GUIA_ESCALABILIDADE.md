@@ -32,7 +32,7 @@ flowchart TD
     subgraph VERCEL ["Camada de Borda & Serverless (Vercel gru1)"]
         PROXY["src/proxy.ts (Edge JWT Guard)"]
         RL["src/lib/rateLimit.ts (Sliding Window)"]
-        API["Next.js 16 Route Handlers (49 endpoints)"]
+        API["Next.js 16 Route Handlers (50 endpoints)"]
     end
 
     subgraph CACHE ["Perímetro de Cache & Rate Limit (Opcional)"]
@@ -135,15 +135,19 @@ Recomendamos o **Cloudflare R2** devido a:
 
 ---
 
-### Etapa 3: Dimensionamento do Neon PostgreSQL
-*Objetivo: Ajustar a capacidade computacional para suportar alta concorrência de escriturações simultâneas.*
+### Etapa 3: Dimensionamento e Otimização de Custo no Neon PostgreSQL (Plano Launch)
+*Objetivo: Minimizar ao máximo o consumo de Compute Units (CU-hours) e Network Transfer na operação piloto sem perder disponibilidade.*
 
-No plano gratuito do Neon, a computação escala até 0.25 Compute Units (CU). Para redes com mais de 30 escolas ativas:
-1. No console do Neon, faça upgrade para o plano **Launch** ou **Scale**.
-2. Configure o **Autoscaling** de Compute:
-   - **Mínimo:** `0.5 CU`
-   - **Máximo:** `2 CU` a `4 CU` (para picos de fechamento de trimestre letivo ou sincronização em massa via SERE).
-3. Mantenha sempre ativado o pool de conexões (PgBouncer) na string de conexão do arquivo de ambiente:
+1. **Otimizações Nativas em Código (`PERF-01`):**
+   - **Brasões em CDN (`/api/schools/[id]/logo`):** `School.logoUrl` (~1,14 MB Base64 na unidade piloto) foi omitido das consultas SSR, de `getCurrentSchool()`, da revalidação JWT em `auth.ts` e das listagens `/api/schools` e `/api/secretaria/metrics`, sendo servido por rota binária cacheada (`s-maxage=604800`) com CSP SVG.
+   - **Cache Multi-Camadas (`currentSchool.ts`):** React `cache()` por requisição combinado a TTL in-memory de 60s com invalidação imediata em mutações (`PUT`, `DELETE`, `sanitize`, `sync-token`).
+   - **Projeção Estrita de Anexos e Assinaturas:** Listagens de atas (`/api/atas`, `/atas/livro/[ano]`) e o Prontuário 360º (`safePhase3Queries.ts`) omitem `physicalSignedScanData`, `signatureData` e `biometricStrokeData`, carregando documentos binários apenas sob demanda.
+   - **Zero Escritas Ociosas na Extensão (`extensionSyncAuth.ts`):** Tokens válidos fazem apenas leitura pontual de `getRateLimitStatus`, evitando dois `INSERT/DELETE` em `RateLimitBucket` a cada sync.
+2. **Configurações Recomendadas no Console Neon Launch (Fase Piloto sem Receita):**
+   - **Autoscaling Mínimo em `0.25 CU`:** Mantenha o limite mínimo em `0.25 CU` (e teto entre `0.5 CU` e `1.0 CU`) em vez de computação alta contínua.
+   - **Scale to Zero Ativo (5 minutos de inatividade):** **Nunca deixe *Always-on compute* ligado** no piloto; com *suspend timeout* em `5 minutes`, o banco dorme à noite, aos fins de semana e entre turnos, reduzindo o custo mensal de computação em >80%.
+   - **Branch de Desenvolvimento Isolada no `.env` Local:** Crie uma *branch* `dev` no Neon para apontar `DATABASE_URL` no `.env` local (onde rodam `npm run dev` e `rateLimitDistributed.test.ts`), evitando acordar a computação `main` de produção durante sessões de código.
+3. **Pool de Conexões (PgBouncer):** Mantenha sempre o endpoint `-pooler` em `DATABASE_URL` e conexão direta em `DIRECT_URL`:
    ```env
    DATABASE_URL="postgresql://user:pass@ep-delicate-leaf-b6hzdz3t-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
    DIRECT_URL="postgresql://user:pass@ep-delicate-leaf-b6hzdz3t.sa-east-1.aws.neon.tech/neondb?sslmode=require"

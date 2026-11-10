@@ -13,15 +13,10 @@ import {
   normalizeStudentName,
 } from "@/lib/studentMatcher";
 import { getCurrentSchool } from "@/lib/currentSchool";
-import { findSchoolBySyncToken, safeCompareStrings } from "@/lib/syncToken";
 import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
-import { checkRateLimit, resetRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
+import { authenticateExtensionSyncToken } from "@/lib/extensionSyncAuth";
 
 export const maxDuration = 60;
-
-function verifySyncToken(provided: string, expected: string): boolean {
-  return safeCompareStrings(provided, expected);
-}
 
 export async function OPTIONS(req: Request) {
   return new NextResponse(null, {
@@ -49,58 +44,16 @@ export async function POST(req: Request) {
       userId = (session.user as any).id;
       targetSchoolId = (session.user as any).schoolId;
     } else {
-      const configuredToken = (process.env.SYNC_API_TOKEN || "").trim();
-      const authHeader = req.headers.get("authorization") || "";
-      const customTokenHeader = req.headers.get("x-sync-token") || "";
-      const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-      const providedToken = bearerToken || customTokenHeader.trim();
-
-      // Trava Anti-Brute-Force contra adivinhação de Token da Extensão (SEC-08)
-      const syncLockKey = getPublicIpRateLimitKey("sync-fail", req);
-      const syncRateCheck = await checkRateLimit(syncLockKey, RATE_LIMIT_POLICIES.EXTENSION_SYNC_AUTH);
-      if (!syncRateCheck.success) {
-        return NextResponse.json(
-          {
-            error: `Muitas tentativas com token inválido. Acesso bloqueado por ${syncRateCheck.retryAfterSeconds} segundos.`,
-            retryAfter: syncRateCheck.retryAfterSeconds,
-          },
-          { status: 429, headers: corsHeaders }
-        );
+      const tokenAuth = await authenticateExtensionSyncToken({
+        req,
+        corsHeaders,
+        label: "Extensão SERP",
+      });
+      if (!tokenAuth.ok) {
+        return tokenAuth.response;
       }
-
-      if (!providedToken) {
-        return NextResponse.json(
-          {
-            error:
-              "Não autorizado. Forneça o token de sincronização da instituição no cabeçalho Authorization: Bearer <TOKEN>.",
-          },
-          { status: 401, headers: corsHeaders }
-        );
-      }
-
-      // 1.1 Procura se é a chave de sincronização de uma escola específica (SHA-256 ou fallback legado)
-      const schoolByToken = await findSchoolBySyncToken(prisma, providedToken);
-
-      if (schoolByToken) {
-        targetSchoolId = schoolByToken.id;
-        userName = `Extensão SERP (${schoolByToken.name})`;
-        await resetRateLimit(syncLockKey);
-      } else if (configuredToken && verifySyncToken(providedToken, configuredToken)) {
-        // 1.2 Token global: vincula à escola especificada em header/query ou escola sede padrão
-        const { searchParams } = new URL(req.url);
-        const reqSchoolId = searchParams.get("schoolId") || req.headers.get("x-school-id");
-        const resolved = await getCurrentSchool(reqSchoolId);
-        targetSchoolId = resolved.id;
-        await resetRateLimit(syncLockKey);
-      } else {
-        return NextResponse.json(
-          {
-            error:
-              "Chave de sincronização inválida. Copie a chave atualizada no painel da sua escola e cole na Extensão.",
-          },
-          { status: 401, headers: corsHeaders }
-        );
-      }
+      targetSchoolId = tokenAuth.targetSchoolId;
+      userName = tokenAuth.userName;
     }
 
     const currentSchool = await getCurrentSchool(targetSchoolId);

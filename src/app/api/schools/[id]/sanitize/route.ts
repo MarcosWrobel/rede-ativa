@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { invalidateSchoolCache } from "@/lib/currentSchool";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,10 @@ export async function POST(
     const { id } = await params;
     const target = await prisma.school.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        inepCode: true,
+        name: true,
         _count: {
           select: {
             students: true,
@@ -92,6 +96,8 @@ export async function POST(
       },
       req,
     });
+
+    invalidateSchoolCache(id);
 
     return NextResponse.json({
       success: true,

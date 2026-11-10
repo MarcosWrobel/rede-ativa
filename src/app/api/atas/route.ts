@@ -94,6 +94,8 @@ export async function GET(req: Request) {
       ];
     }
 
+    const includeSignatures = searchParams.get("includeSignatures") === "true";
+
     const minutes = await prisma.pedagogicalMinute.findMany({
       where,
       orderBy: [
@@ -101,7 +103,47 @@ export async function GET(req: Request) {
         { ataNumber: "desc" },
         { attendedAt: "desc" },
       ],
-      include: {
+      select: {
+        id: true,
+        schoolId: true,
+        year: true,
+        ataNumber: true,
+        status: true,
+        category: true,
+        isConfidential: true,
+        attendedAt: true,
+        subject: true,
+        rawNotes: true,
+        summary: true,
+        agreementsSummary: true,
+        authorId: true,
+        authorName: true,
+        authorEmail: true,
+        authorRole: true,
+        authorIp: true,
+        finalizedAt: true,
+        contentHash: true,
+        verificationCode: true,
+        pdfArchiveSha256: true,
+        pdfArchiveGeneratedAt: true,
+        ...(includeSignatures ? { physicalSignedScanData: true } : {}),
+        physicalScanStorageKey: true,
+        physicalScanProvider: true,
+        physicalScanMimeType: true,
+        physicalScanSizeBytes: true,
+        physicalScanSha256: true,
+        physicalScanUploadedAt: true,
+        physicalScanUploadedBy: true,
+        govBrVerified: true,
+        govBrProtocol: true,
+        voidedAt: true,
+        voidedByName: true,
+        voidedByEmail: true,
+        voidReason: true,
+        isExtemporaneous: true,
+        extemporaneousReason: true,
+        createdAt: true,
+        updatedAt: true,
         students: {
           include: {
             student: {
@@ -109,7 +151,39 @@ export async function GET(req: Request) {
             },
           },
         },
-        participants: true,
+        participants: {
+          select: {
+            id: true,
+            minuteId: true,
+            role: true,
+            studentId: true,
+            name: true,
+            kinship: true,
+            documentType: true,
+            documentNumber: true,
+            documentVerifiedByStaff: true,
+            phone: true,
+            signatureMode: true,
+            ...(includeSignatures ? { signatureData: true } : {}),
+            signedAt: true,
+            signerIp: true,
+            signerUserAgent: true,
+            clientTimestampIso: true,
+            refusalReason: true,
+            witnessName: true,
+            mobileSignToken: true,
+            mobileSignExpiresAt: true,
+            biometricVerified: true,
+            biometricDeviceType: true,
+            biometricAuthTime: true,
+            expectedEmail: true,
+            verifiedEmail: true,
+            verifiedGoogleSub: true,
+            verifiedGoogleName: true,
+            emailVerifiedAt: true,
+            createdAt: true,
+          },
+        },
         addendums: {
           orderBy: { createdAt: "asc" },
         },
@@ -138,16 +212,19 @@ export async function GET(req: Request) {
       );
     }
 
-    const includeSignatures = searchParams.get("includeSignatures") === "true";
-
-    const responseMinutes = minutes.map((m) => {
+    const responseMinutes = minutes.map((m: any) => {
       const allowedConfidential = canAccessConfidentialMinute(m, authCheck.session);
-      const safeParticipants = m.participants.map((p) => {
-        const { signatureData, mobileSignToken, ...rest } = p as any;
+      const safeParticipants = m.participants.map((p: any) => {
+        const { signatureData, mobileSignToken, ...rest } = p;
         return {
           ...rest,
           ...(includeSignatures && allowedConfidential ? { signatureData } : {}),
-          hasSignature: Boolean(signatureData),
+          hasSignature: Boolean(
+            signatureData ||
+              p.signedAt ||
+              p.verifiedEmail ||
+              (p.signatureMode && p.signatureMode !== "PENDING" && p.signatureMode !== "REFUSED")
+          ),
           hasActiveSignLink: Boolean(mobileSignToken),
         };
       });
@@ -167,13 +244,20 @@ export async function GET(req: Request) {
         };
       }
 
-      const hasScan = Boolean(m.physicalSignedScanData || m.physicalScanStorageKey);
+      const hasScan = Boolean(
+        m.physicalSignedScanData ||
+          m.physicalScanStorageKey ||
+          m.physicalScanSha256 ||
+          m.physicalScanUploadedAt ||
+          m.physicalScanSizeBytes ||
+          m.physicalScanMimeType
+      );
 
       return {
         ...m,
         hasPhysicalScan: hasScan,
         physicalSignedScanData: includeSignatures
-          ? m.physicalSignedScanData
+          ? m.physicalSignedScanData ?? null
           : null,
         participants: safeParticipants,
       };

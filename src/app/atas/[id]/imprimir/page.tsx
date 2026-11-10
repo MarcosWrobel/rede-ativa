@@ -6,7 +6,88 @@ import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { generateQrCodeSvg, getAtaValidationUrl, getRequestOrigin } from "@/lib/qrCode";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import PrintPageClient from "./PrintPageClient";
+
+const PRINT_MINUTE_SELECT = {
+  id: true,
+  schoolId: true,
+  year: true,
+  ataNumber: true,
+  status: true,
+  category: true,
+  isConfidential: true,
+  attendedAt: true,
+  subject: true,
+  rawNotes: true,
+  summary: true,
+  agreementsSummary: true,
+  authorId: true,
+  authorName: true,
+  authorEmail: true,
+  authorRole: true,
+  finalizedAt: true,
+  contentHash: true,
+  verificationCode: true,
+  pdfArchiveSha256: true,
+  pdfArchiveGeneratedAt: true,
+  physicalScanStorageKey: true,
+  physicalScanSha256: true,
+  physicalScanUploadedAt: true,
+  govBrVerified: true,
+  govBrProtocol: true,
+  voidedAt: true,
+  voidedByName: true,
+  voidedByEmail: true,
+  voidReason: true,
+  isExtemporaneous: true,
+  extemporaneousReason: true,
+  createdAt: true,
+  updatedAt: true,
+  school: {
+    select: {
+      id: true,
+      inepCode: true,
+      name: true,
+      city: true,
+      state: true,
+      nre: true,
+      network: true,
+      phone: true,
+      email: true,
+      settingsJson: true,
+      updatedAt: true,
+    },
+  },
+  students: true,
+  participants: {
+    select: {
+      id: true,
+      minuteId: true,
+      role: true,
+      studentId: true,
+      name: true,
+      kinship: true,
+      documentType: true,
+      documentNumber: true,
+      documentVerifiedByStaff: true,
+      phone: true,
+      signatureMode: true,
+      signatureData: true,
+      signedAt: true,
+      biometricVerified: true,
+      biometricDeviceType: true,
+      biometricAuthTime: true,
+      verifiedEmail: true,
+      verifiedGoogleName: true,
+      emailVerifiedAt: true,
+      refusalReason: true,
+      witnessName: true,
+    },
+  },
+  addendums: { orderBy: { createdAt: "asc" as const } },
+  actionItems: { orderBy: { createdAt: "asc" as const } },
+};
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -20,15 +101,9 @@ export default async function AtaPrintPage({ params }: Props) {
     redirect("/login");
   }
 
-  let minute = await prisma.pedagogicalMinute.findUnique({
+  let minute: any = await prisma.pedagogicalMinute.findUnique({
     where: { id },
-    include: {
-      school: true,
-      students: true,
-      participants: true,
-      addendums: { orderBy: { createdAt: "asc" } },
-      actionItems: { orderBy: { createdAt: "asc" } },
-    },
+    select: PRINT_MINUTE_SELECT,
   });
 
   if (!minute) {
@@ -52,18 +127,26 @@ export default async function AtaPrintPage({ params }: Props) {
       minute = await prisma.pedagogicalMinute.update({
         where: { id: minute.id },
         data: { verificationCode: newCode },
-        include: {
-          school: true,
-          students: true,
-          participants: true,
-          addendums: { orderBy: { createdAt: "asc" } },
-          actionItems: { orderBy: { createdAt: "asc" } },
-        },
+        select: PRINT_MINUTE_SELECT,
       });
     } catch (err) {
       console.warn("[AtaPrintPage] Falha ao persistir verificationCode legado:", err);
       minute.verificationCode = newCode;
     }
+  }
+
+  if (minute?.school) {
+    minute = {
+      ...minute,
+      school: {
+        ...minute.school,
+        logoUrl: resolveSchoolLogoProxyUrl({
+          id: minute.school.id,
+          logoUrl: (minute.school as { logoUrl?: string | null }).logoUrl,
+          updatedAt: minute.school.updatedAt,
+        }),
+      },
+    };
   }
 
   const reqHeaders = await headers();

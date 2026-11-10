@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { checkIsSuperAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
+import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import AdminClient from "./AdminClient";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +55,14 @@ export default async function AdminPage() {
       }),
       prisma.school.findMany({
         where: { active: true },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          inepCode: true,
+          city: true,
+          network: true,
+          settingsJson: true,
+          updatedAt: true,
           educationNetwork: { select: { name: true } },
           _count: { select: { students: { where: { active: true } }, classGroups: true } },
         },
@@ -101,7 +109,11 @@ export default async function AdminPage() {
       networkName: s.educationNetwork?.name || null,
       studentsCount: s._count.students,
       classesCount: s._count.classGroups,
-      logoUrl: s.logoUrl,
+      logoUrl: resolveSchoolLogoProxyUrl({
+        id: s.id,
+        logoUrl: (s as { logoUrl?: string | null }).logoUrl,
+        updatedAt: s.updatedAt,
+      }),
       edition: resolveSchoolEdition(s),
     }));
 
