@@ -11,37 +11,69 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-describe("Landing Page de Vendas & Playground Interativo (/impacto)", () => {
-  it("renderiza o cabeçalho executivo com botão Acessar Plataforma para /login", () => {
-    const html = renderToString(<ImpactoClient />);
+const FORBIDDEN_PRODUCTION_UI_TERMS = [
+  "Fé Pública",
+  "fé pública",
+  "100% LGPD",
+  "+38%",
+  "80%",
+  "5542999999999",
+  "Leopoldina",
+  "Lei 14.063/2020",
+  "Lei nº 14.063/2020",
+  "ECA Art. 56",
+  "ISO 19005-1",
+  "SHA-256",
+  "PBKDF2",
+  "Sim, plenamente",
+  "total respaldo",
+  "Imutabilidade",
+  "imutável",
+  "Inviolável",
+  "Impossível rasurar",
+  "Dossiê Oficial",
+  "Certidão",
+  "Workflow Operacional",
+] as const;
 
-    expect(html).toContain("Rede Ativa");
-    expect(html).toContain("Acessar Plataforma");
+describe("Landing Page de Produção (/) & Redirecionamento (/impacto)", () => {
+  it("renderiza a landing de produção com logo oficial, paleta do Hero, sem barra de preview e com CTA para /login", () => {
+    const html = renderToString(<ImpactoClient />);
+    const plainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+    expect(html).not.toContain("Ambiente de Demonstração / Preview Landing Page");
+    expect(html).toContain('href="/"');
     expect(html).toContain('href="/login"');
-    expect(html).toContain("Lei 14.063/2020");
-    expect(html).toContain("ECA Art. 56");
-    expect(html).toContain("ISO 19005-1");
-    expect(html).toContain("Horas Semanais Gastas com Burocracia Mecânica");
+    expect(html).toContain("Acessar sistema");
+    expect(html).toContain('src="/logo.svg"');
+    expect(html).toContain('src="/logo-symbol.svg"');
+    expect(html).toContain("from-emerald-600 via-teal-600 to-sky-600");
+    expect(plainText).toContain(
+      "Conecte os contatos com as famílias, os atendimentos e as atas em um único fluxo."
+    );
   });
 
-  it("renderiza a bancada interativa do playground com as 3 abas essenciais", () => {
+  it("renderiza os cards enxutos do Hero, simulação demonstrativa rotulada e colunas operacionais", () => {
     const html = renderToString(<ImpactoClient />);
 
-    expect(html).toContain("Bancada Interativa");
-    expect(html).toContain("Experimente o Fluxo da Sua Escola na Prática");
-    expect(html).toContain("1. Busca Ativa &amp; WhatsApp Protegido");
-    expect(html).toContain("2. Livro de Atas &amp; QR Code do Pai");
-    expect(html).toContain("3. Dossiê ECA em 1 Clique");
+    expect(html).toContain("Mensagem pronta em 1 clique");
+    expect(html).toContain("Atas padronizadas e prontas em instantes");
+    expect(html).toContain("Redução da exposição de conversas na tela");
+    expect(html).toContain("Relatório de contatos e intervenções");
+    expect(html).toContain("Simulação demonstrativa • Dados fictícios");
+    expect(html).toContain("Fluxo completo");
+    expect(html).toContain("Contatos com famílias");
+    expect(html).toContain("Menos retrabalho na busca ativa e nas atas");
+    expect(html).toContain("Acompanhamento escolar e registro pedagógico.");
   });
 
-  it("renderiza o simulador de Busca Ativa com estudantes de exemplo e proteção de privacidade", () => {
+  it("garante conformidade com Modo Claro e ausência de termos proibidos pela Seção 10 do GEMINI.md", () => {
     const html = renderToString(<ImpactoClient />);
+    expect(html.match(/dark:[a-zA-Z0-9_-]+/g)).toBeNull();
 
-    expect(html).toContain("Simulador de Busca Ativa Humanizada");
-    expect(html).toContain("Lucas Mendes da Silva");
-    expect(html).toContain("Mariana Costa Ribeiro");
-    expect(html).toContain("Janela Protegida (Rede Ativa)");
-    expect(html).toContain("Disparar Mensagem de Busca Ativa");
+    for (const forbidden of FORBIDDEN_PRODUCTION_UI_TERMS) {
+      expect(html).not.toContain(forbidden);
+    }
   });
 
   it("redireciona a rota legada /impacto permanentemente (308) para a raiz /", () => {

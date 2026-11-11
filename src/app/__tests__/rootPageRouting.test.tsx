@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import RootDispatcherPage from "../page";
+import RootDispatcherPage, { metadata as rootMetadata } from "../page";
 
 // Mocks do Next.js e Auth
 const mockRedirect = vi.fn((url: string) => {
@@ -95,7 +95,7 @@ describe("Roteamento Inteligente da Raiz (src/app/page.tsx)", () => {
   });
 
   describe("Cenário 3: Usuárias Não-Autenticadas no Domínio Oficial e Localhost", () => {
-    it("renderiza a Landing Page oficial com o botão Acessar Plataforma quando acessado por redeativa.app.br", async () => {
+    it("renderiza a Landing Page oficial com o botão Acessar sistema quando acessado por redeativa.app.br", async () => {
       mockSession = null;
       mockHostHeader = "redeativa.app.br";
 
@@ -103,7 +103,7 @@ describe("Roteamento Inteligente da Raiz (src/app/page.tsx)", () => {
       const html = renderToString(pageComponent as React.ReactElement);
 
       expect(html).toContain("Rede Ativa");
-      expect(html).toContain("Acessar Plataforma");
+      expect(html).toContain("Acessar sistema");
       expect(html).toContain('href="/login"');
     });
 
@@ -115,7 +115,7 @@ describe("Roteamento Inteligente da Raiz (src/app/page.tsx)", () => {
       const html = renderToString(pageComponent as React.ReactElement);
 
       expect(html).toContain("Rede Ativa");
-      expect(html).toContain("Acessar Plataforma");
+      expect(html).toContain("Acessar sistema");
     });
 
     it("renderiza a Landing Page oficial em ambiente de desenvolvimento local (localhost)", async () => {
@@ -126,7 +126,15 @@ describe("Roteamento Inteligente da Raiz (src/app/page.tsx)", () => {
       const html = renderToString(pageComponent as React.ReactElement);
 
       expect(html).toContain("Rede Ativa");
-      expect(html).toContain("Acessar Plataforma");
+      expect(html).toContain("Acessar sistema");
+    });
+
+    it("mantém metadados da raiz livres de promessas absolutas e jargões da Seção 10", () => {
+      expect(rootMetadata.title).toContain("Rede Ativa");
+      expect(String(rootMetadata.description)).toContain("supervisão humana");
+      expect(String(rootMetadata.description)).not.toContain("80%");
+      expect(String(rootMetadata.description)).not.toContain("Fé Pública");
+      expect(String(rootMetadata.description)).not.toContain("14.063");
     });
   });
 });

@@ -8,13 +8,13 @@ import ImpactoClient from "./impacto/ImpactoClient";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Rede Ativa SaaS — Plataforma Educacional de Busca Ativa & Livro de Atas",
+  title: "Rede Ativa — Busca Ativa e Atas Pedagógicas",
   description:
-    "A plataforma educacional desenhada no chão de escola que devolve até 80% do tempo da equipe pedagógica, automatiza a busca ativa e formaliza o Livro de Atas com Fé Pública (Lei nº 14.063/2020).",
+    "Conecte os contatos com as famílias, os atendimentos e as atas em um único fluxo. Preparo de mensagens com supervisão humana e histórico contínuo por estudante.",
   openGraph: {
-    title: "Rede Ativa SaaS — Busca Ativa Escolar & Gestão Pedagógica",
+    title: "Rede Ativa — Busca Ativa e Atas Pedagógicas",
     description:
-      "Simulador interativo de impacto pedagógico, busca ativa inteligente e conformidade legal com o ECA para redes de ensino.",
+      "Ajuda a equipe pedagógica a preparar e enviar mensagens com supervisão humana, registrar intervenções e consultar o histórico de cada estudante.",
     type: "website",
   },
 };

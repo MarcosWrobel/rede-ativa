@@ -4,13 +4,13 @@ import PreviewLandingClient from './PreviewLandingClient';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Rede Ativa SaaS — Demonstração & Workflow Interativo',
+  title: 'Rede Ativa — Demonstração Interativa',
   description:
-    'Demonstração interativa do fluxo assistido da Rede Ativa SaaS: Busca Ativa no WhatsApp, confirmação probatória com recibo SHA-256 e prontuário 360º sob a Lei nº 14.063/2020.',
+    'Simulação demonstrativa com dados fictícios: preparo de mensagens com revisão humana, registro de atas com confirmação de autoria e histórico do estudante.',
   openGraph: {
-    title: 'Rede Ativa SaaS — Demonstração do Workflow Pedagógico',
+    title: 'Rede Ativa — Demonstração do Fluxo Pedagógico',
     description:
-      'Simulador visual do fluxo de trabalho operacional: Do alerta de infrequência ao prontuário oficial com Fé Pública.',
+      'Simulação demonstrativa do acompanhamento escolar: contato com a família, ata de atendimento e relatório de histórico.',
     type: 'website',
   },
 };

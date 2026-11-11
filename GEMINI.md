@@ -37,20 +37,22 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ---
 
-## 4. Fé Pública & Imutabilidade do Livro de Atas (Lei nº 14.063/2020)
-- Atas no status `FINALIZED` **nunca sofrem edição de texto in loco**.
-- A lavratura oficial exige verificação do PIN de Fé Pública do servidor (`signingPin.ts`) e justificativa de lavratura extemporânea (`extemporaneousReason`) quando `attendedAt` exceder 5 dias úteis.
-- Retificações ou complementações devem ser lavradas obrigatoriamente através de **Termo Aditivo (*"Em tempo"* - `PedagogicalMinuteAddendum`)** com *hash-chaining* criptográfico.
-- Cancelamentos devem manter o registro histórico marcado como `VOIDED` com justificativa legal expressa (`voidReason`), sem apagar a ata.
-- Exclusão física atômica de atas é estritamente restrita a administradores gerais e exclusiva para minutas de teste.
-- **Integridade Criptográfica Bipartida da Mensageria (SHA-256):** Qualquer rotina que crie, atualize, retifique ou receba respostas de mensagens (`/reply`, `/manage`, `/webhooks`) **DEVE** preservar e atualizar deterministicamente o hash SHA-256 (`computeMessageContentHash`) com a regra bipartida (7 chaves no disparo inicial + 4 chaves condicionais quando `guardianReplied === true`), garantindo que `verifyMessageIntegrity` permaneça 100% íntegro.
+## 4. Autoria, Histórico e Integridade do Livro de Atas
+- Atas no status `FINALIZED` **têm a edição direta do texto bloqueada pela aplicação**.
+- A finalização exige confirmação de autoria por PIN do servidor (`signingPin.ts`) e justificativa de registro extemporâneo (`extemporaneousReason`) quando `attendedAt` exceder 5 dias úteis.
+- Retificações ou complementações após a confirmação devem ser registradas obrigatoriamente por **complemento vinculado (*"Em tempo"* - `PedagogicalMinuteAddendum`)** com encadeamento de hashes (`hash-chaining`), preservando integralmente o histórico anterior.
+- Cancelamentos devem manter o registro histórico marcado como `VOIDED` com justificativa expressa (`voidReason`), sem apagar o registro do banco.
+- Exclusão física atômica de atas é estritamente restrita a administradores gerais e exclusiva para rascunhos/minutas de teste.
+- Enquadramentos normativos da instituição ou rede contratante devem constar exclusivamente na documentação técnica/jurídica (`docs/`), nunca como promessa jurídica absoluta na interface.
+- **Integridade Bipartida da Mensageria (`SHA-256` interno):** Qualquer rotina de backend que crie, atualize, retifique ou receba respostas de mensagens (`/reply`, `/manage`, `/webhooks`) **DEVE** preservar e atualizar deterministicamente o hash `SHA-256` (`computeMessageContentHash`) com a regra bipartida (7 chaves no registro inicial + 4 chaves condicionais quando `guardianReplied === true`), mantendo `verifyMessageIntegrity` íntegro.
 
 ---
 
-## 5. Conformidade com LGPD e ECA (Arts. 17 e 143)
-- Nomes e informações identificáveis de estudantes menores de idade e seus responsáveis legais **nunca** devem ser enviados diretamente a APIs de inteligência artificial externas (Google Gemini). Utilize sempre o pseudonimizador `src/lib/aiPseudonymizer.ts`, garantindo mascaramento insensível a acentos (ex.: "Joao" e "João") e sanitização absoluta de mensagens de erro HTTP 500 sem vazar `error.message`.
-- No portal público de conferência via QR Code (`/validar/ata/[code]`), exiba apenas a Certidão Cega com nomes e documentos mascarados, sem expor o texto da ata ou dados sensíveis.
-- No Dossiê Oficial em PDF (`/alunos/[id]/dossie`), aplique anonimização automática por iniciais a outros menores citados em ocorrências conjuntas.
+## 5. Privacidade, Proteção de Dados e Controle em Chamadas de IA
+- Nomes e informações identificáveis de estudantes e responsáveis **nunca** devem ser enviados diretamente a APIs de inteligência artificial externas (Google Gemini). Utilize sempre `src/lib/aiPseudonymizer.ts`, garantindo mascaramento de nomes conhecidos (insensível a acentos, ex.: "Joao" e "João") e padrões de CPF/e-mail/telefone, além de sanitização absoluta de mensagens de erro HTTP 500 sem vazar `error.message`.
+- A saída assistida por IA (`formalize-ata`) produz **apenas uma minuta editável**, sempre sujeita à conferência, eventual desativação pela equipe e aprovação humana antes da confirmação da ata.
+- No portal público de conferência por código (`/validar/ata/[code]`), exiba apenas visualização com dados reduzidos (nomes e documentos mascarados), sem expor o conteúdo do atendimento ou dados pessoais adicionais.
+- No relatório de acompanhamento em PDF (`/alunos/[id]/dossie`), aplique mascaramento automático por iniciais a outros estudantes mencionados em registros conjuntos.
 
 ---
 
@@ -91,20 +93,53 @@ Antes de dar qualquer tarefa como concluída ou commitar:
 
 ---
 
-## 10. Padrão de UX Writing & Microcopy Operacional (Léxico Pedagógico Brasileiro)
-A interface deve seguir os princípios de design de alta densidade de informação e concisão operacional (padrão Linear, Stripe, Notion):
+## 10. Padrão de UX Writing, Veracidade Operacional e Limpeza de Interface
+A interface deve seguir os princípios de alta clareza operacional, concisão cotidiana e rigor factual absoluto (padrão Linear, Stripe, Notion), aplicando as seguintes camadas obrigatórias de guardrails em **toda nova interface, landing page, modal, simulação ou revisão de tela**:
 
-- **Deleção de Redundâncias (Zero Vibecoding):** Se um `<h1/h2/h3>` ou título de Card/Modal já é autoexplicativo (ex.: *"Histórico de Contatos"*), **nunca adicione** um elemento `<p>` ou subtítulo abaixo dele que apenas repita a mesma ideia com palavras a mais. Remova a tag inteira para manter o layout limpo e direto.
-- **Corte Rígido de Enchimento de IA:** É estritamente proibido o uso de termos vazios corporativos como *otimizar, potencializar, gerenciar de forma eficiente, ecossistema, jornada, insights, holístico, integrado, facilmente, centralizado, em um só lugar*.
-- **Léxico Pedagógico Operacional:**
-  - **PROIBIDO USAR:** *Cliente, Usuário* (quando se referir ao aluno ou responsáveis), *Lead, Ticket, Chamado, Ocorrência genérica, Pipeline, Log* (na interface visível).
-  - **OBRIGATÓRIO USAR:** *Estudante / Aluno, Responsável legal, Família, Busca Ativa, Infrequência, Evasão, Abandono, Faltas consecutivas / alternadas, Tentativa de contato, Registro de atendimento, Encaminhamento (Rede de Proteção, Conselho Tutelar, CRAS/CREAS), Ata pedagógica, Conselho de classe, Justificativa / Atestado, Turma, Turno, Equipe pedagógica*.
-- **Concisão Operacional:**
-  - **Botões de Ação:** Máximo de 2 a 3 palavras no infinitivo/imperativo direto (*"Registrar contato"*, *"Nova ata"*, *"Encaminhar"*, *"Acessar"*, *"Imprimir"*).
-  - **Badges/Status:** 1 a 2 palavras (*"Pendente"*, *"Em acompanhamento"*, *"Sem retorno"*, *"Concluído"*, *"Conselho Tutelar"*).
-  - **Placeholders:** Objetivos e diretos (*"Buscar por estudante ou CGM..."* em vez de *"Digite aqui o nome do aluno que você deseja encontrar..."*).
-  - **Toasts e Alertas:** Factuais e curtos (*"Ata registrada."* em vez de *"A sua ata foi salva com sucesso no banco de dados!"*).
-- **Preservação de Acessibilidade & Testes SSR:** Quando testes legados de renderização exigirem strings descritivas para asserção de integridade, utilize atributos de acessibilidade (`aria-label="..."`) no elemento, mantendo a interface visual limpa, acessível para leitores de tela e 100% compatível com a suíte de testes.
+- **1. Expurgo de "Fé Pública", Afirmações Jurídicas e Atestados de Órgãos:**
+  - **O termo `"fé pública"` (e variações como `"PIN de Fé Pública"`, `"Fé Pública Administrativa"`, `"Fé Pública Digital"`, `"Fé Pública Probatória"`) DEVE ser expurgado das interfaces.**
+  - **PROIBIDO na UI (telas, modais, landing pages, metas SEO, badges e rodapés):** afirmações jurídicas amplas ou conclusões normativas sem lastro específico (*"Assinatura Eletrônica Avançada"* como selo promocional, *"Sim, plenamente"*, *"com total respaldo"*, *"validade jurídica garantida"*, *"100% LGPD"*, *"cadeia de custódia inquestionável"*, citar artigos de lei como `Lei nº 14.063/2020`, `ECA Art. 56`, `Art. 143` ou normas como `ISO 19005-1` como selos publicitários de validação).
+  - **PROIBIDO mencionar órgãos públicos ou privados como atestados de validação:** nunca afirmar ou insinuar que Conselhos Tutelares, Ministério Público, Secretarias de Educação ou outros órgãos aceitam automaticamente documentos gerados pela plataforma. Ao tratar de encaminhamentos, informar que o arquivo exportável subsidia o envio conforme os procedimentos da rede e do órgão destinatário.
+
+- **2. Proibição de Poluição Técnica na Interface (Restrição à Documentação):**
+  - Toda interface deve ser clara, objetiva e livre de poluição com nomes técnicos, siglas de infraestrutura ou termos de implementação (`SHA-256`, `PBKDF2`, `SHA-512`, `PDF/A-1b`, `hash-chaining`, `bipartido`, `webhook`, `API`, `gateway`, `database`, rotas internas na UI como `/busca-ativa`, `ISO`, `Turbopack`).
+  - Tecnologias e tecnicidades só podem aparecer em locais **estritamente necessários** para a operação direta do usuário (por exemplo, rótulo objetivo de formato no botão de download).
+  - **Toda justificativa técnica, explicação arquitetural, criptográfica ou enquadramento jurídico deve ficar estritamente restrita à documentação do projeto (`docs/`)**, jamais em cards, tooltips promocionais, simuladores ou textos de tela.
+
+- **3. Mecanismos Concretos no Lugar de Garantias Absolutas:**
+  - **PROIBIDO usar:** *"impossível rasurar"*, *"inviolável"*, *"imutável"*, *"sem risco de vazamento"*, *"à prova de falhas"*, *"zero extravio garantido"*, *"100% atualizado/seguro"*.
+  - **OBRIGATÓRIO descrever apenas o comportamento verificável do sistema:**
+    - Autoria e confirmação: usar **"Confirmação de autoria por PIN"** (diferenciando claramente confirmação da servidora, registro do responsável e verificação de integridade).
+    - Pós-confirmação da ata: **"Após a confirmação, alterações são registradas em complemento vinculado à ata, preservando o histórico."**
+    - Privacidade em tela: usar **"Redução da exposição de conversas na tela"** em vez de *"100% LGPD"* ou *"tela blindada"*.
+    - Documento consolidado exportável: preferir **"Histórico de acompanhamento pedagógico"** ou **"Relatório de contatos e intervenções"** no lugar de *"Dossiê Oficial"* ou *"Certidão"*, identificando fonte, data e autoria de cada registro e separando fatos registrados de relatos/justificativas.
+
+- **4. Controle Humano Explícito (Mensageria e Apoio de IA):**
+  - Nunca sugerir envio automático sem revisão humana nem autoria autônoma pela IA (*"automatiza a busca ativa"*, *"disparar sem revisão"*, *"redigir ata com IA"* como texto definitivo).
+  - Explicitar sempre o papel humano: o sistema **prepara a mensagem com os dados do estudante** ou **gera uma minuta a partir do que foi registrado**; a equipe pedagógica **confere destinatário e conteúdo antes de enviar ou confirmar a ata**. Preferir ações como **"Revisar e enviar"**.
+
+- **5. Transparência sobre WhatsApp, Fontes de Dados e Preservação:**
+  - **WhatsApp:** informar com clareza qual integração está em uso (abertura assistida via `wa.me` / WhatsApp Web com envio pela equipe vs. eventuais integrações configuradas), se o número pertence à escola e quais estados são tecnicamente verificáveis (distinguindo *abertura do chat / tentativa registrada* de *envio, entrega e leitura confirmada*).
+  - **Frequência / SERE:** usar **"importação de arquivos compatíveis com relatórios"** (CSV/planilha), separando importação de matrículas de atualização de faltas e evitando prazos absolutos sem condição de referência (*"em menos de 2 minutos"*).
+  - **Preservação documental:** distinguir claramente **formato do arquivo exportado** de **política de guarda, backups e exportação ao encerramento do contrato**.
+
+- **6. Rigor em Métricas, Calculadoras, Simuladores, Estudos de Caso e Dados Comerciais:**
+  - **Proibição de métricas sem lastro:** nunca exibir ganhos não comprovados (ex.: *"+38% de retenção escolar"*, *"devolve 80% do tempo"*, *"~14 horas para 5s"*).
+  - **Calculadoras:** devem exibir premissas transparentes em **"Como calculamos"**, permitir ajuste de quantidades (contatos, atendimentos, atas) e separar economia estimada de economia medida.
+  - **Simuladores e Demos:** devem indicar explicitamente **"Simulação demonstrativa"** e **"Dados fictícios"**, separando funcionalidades disponíveis do que está em desenvolvimento.
+  - **Estudos de Caso e Citações a Escolas:** nunca citar nominalmente escolas reais (como a unidade piloto) nem atribuir métricas operacionais sem autorização formal documentada, período observado, recorte amostral e metodologia descrita, evitando adjetivos vagos (*"comprovado"*).
+  - **Hierarquia da Proposta de Valor & Placeholders Comerciais:** em landing pages, colocar o trabalho cotidiano da equipe pedagógica no centro (continuidade entre contato com famílias, atendimentos, atas e acompanhamento do estudante) antes de detalhes de arquivo/segurança; **nunca exibir telefones placeholder (`5542999999999`), CNPJ/razão social fictícios ou ofertas de precificação/contratação ainda não implementadas** (manter formulários/configurações preparados para ativação posterior).
+
+- **7. Concisão Operacional, Léxico Pedagógico e Deleção de Redundâncias (Zero Vibecoding):**
+  - **Deleção de Redundâncias:** se um `<h1/h2/h3>` ou título de Card/Modal já é autoexplicativo (ex.: *"Histórico de Contatos"*), **nunca adicione** um `<p>` ou subtítulo abaixo dele repetindo a mesma ideia.
+  - **Corte Rígido de Enchimento de IA:** proibido usar termos vazios corporativos como *otimizar, potencializar, gerenciar de forma eficiente, ecossistema, jornada, insights, holístico, integrado, facilmente, centralizado, em um só lugar, robusto, revolucionário, inquestionável, workflow*.
+  - **Léxico Pedagógico Operacional:**
+    - **PROIBIDO USAR:** *Cliente, Usuário* (quando se referir ao aluno ou responsáveis), *Lead, Ticket, Chamado, Ocorrência genérica, Pipeline, Log* (na interface visível).
+    - **OBRIGATÓRIO USAR:** *Estudante / Aluno, Responsável legal, Família, Busca Ativa, Infrequência, Evasão, Abandono, Faltas consecutivas / alternadas, Tentativa de contato, Registro de atendimento, Encaminhamento, Ata pedagógica, Conselho de classe, Justificativa / Atestado, Turma, Turno, Equipe pedagógica*.
+  - **Botões, Badges, Placeholders e Toasts:** botões com no máximo 2 a 3 palavras no infinitivo/imperativo direto (*"Revisar e enviar"*, *"Nova ata"*, *"Confirmar PIN"*, *"Gerar relatório"*); badges com 1 a 2 palavras (*"Pendente"*, *"Confirmada"*, *"Registrado"*); placeholders objetivos (*"Buscar por estudante ou matrícula..."*); toasts factuais e curtos (*"Ata registrada."*).
+
+- **8. Preservação de Acessibilidade & Testes SSR:**
+  - Não depender apenas de cores para comunicar estados; garantir contraste adequado, navegação por teclado e associação de rótulos (`aria-label="..."` / `<label>`) consistentes com os testes e leitores de tela (sem reinserir nos `aria-label` termos proibidos acima).
 
 ---
 

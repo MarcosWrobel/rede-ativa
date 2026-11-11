@@ -17,8 +17,6 @@ import {
   RotateCcw,
   Sparkles,
   Building2,
-  Lock,
-  FileCheck,
 } from 'lucide-react';
 
 export interface WorkflowTab {
@@ -31,20 +29,20 @@ export interface WorkflowTab {
 const WORKFLOW_TABS: readonly WorkflowTab[] = [
   {
     id: 0,
-    label: '1. Busca Ativa',
-    tagline: 'Disparo 1-Clique sem digitação',
+    label: '1. Preparar mensagem',
+    tagline: 'Conferir destinatário e texto',
     targetPhase: 0,
   },
   {
     id: 1,
-    label: '2. Confirmação & Fé Pública',
-    tagline: 'Selo SHA-256 em trânsito',
+    label: '2. Registrar envio',
+    tagline: 'Abertura assistida e horário',
     targetPhase: 2,
   },
   {
     id: 2,
-    label: '3. Prontuário 360º',
-    tagline: 'Encaixe no Prontuário 360º',
+    label: '3. Histórico do aluno',
+    tagline: 'Continuidade do acompanhamento',
     targetPhase: 3,
   },
 ] as const;
@@ -54,7 +52,7 @@ interface PhaseConfig {
   stepIndex: number;
   duration: number; // ms
   name: string;
-  route: string;
+  moduleLabel: string;
 }
 
 // Timeline contínua de 9.0s dividida em 5 micro-fases coreografadas
@@ -63,36 +61,36 @@ const PHASES: readonly PhaseConfig[] = [
     phase: 0,
     stepIndex: 0,
     duration: 1500,
-    name: 'Fase 1/5 • Busca Ativa',
-    route: '/busca-ativa',
+    name: 'Fase 1/5 • Mensagem preparada',
+    moduleLabel: 'Contatos com famílias',
   },
   {
     phase: 1,
     stepIndex: 0,
     duration: 1100,
-    name: 'Fase 2/5 • Ação de 1 Clique',
-    route: '/busca-ativa',
+    name: 'Fase 2/5 • Revisão humana',
+    moduleLabel: 'Contatos com famílias',
   },
   {
     phase: 2,
     stepIndex: 1,
     duration: 1900,
-    name: 'Fase 3/5 • Voo & Selo SHA-256',
-    route: 'SHA-256 & Fé Pública',
+    name: 'Fase 3/5 • Registro salvo',
+    moduleLabel: 'Registro de envio',
   },
   {
     phase: 3,
     stepIndex: 2,
     duration: 1500,
-    name: 'Fase 4/5 • Morphing & Encaixe',
-    route: '/alunos/104829-3',
+    name: 'Fase 4/5 • Encaixe no histórico',
+    moduleLabel: 'Histórico do estudante',
   },
   {
     phase: 4,
     stepIndex: 2,
     duration: 3000,
-    name: 'Fase 5/5 • Prontuário Consolidado',
-    route: '/alunos/104829-3',
+    name: 'Fase 5/5 • Histórico atualizado',
+    moduleLabel: 'Histórico do estudante',
   },
 ] as const;
 
@@ -134,7 +132,7 @@ export default function WorkflowAnimation() {
 
   return (
     <div className="w-full max-w-5xl mx-auto rounded-2xl bg-white border border-slate-200 shadow-xl overflow-hidden flex flex-col transition-all">
-      {/* Keyframes customizados em tag interna para animações vetoriais e efeitos */}
+      {/* Keyframes customizados para animações vetoriais e feixes luminosos */}
       <style>{`
         @keyframes cursorRipple {
           0% { transform: scale(0.6); opacity: 1; }
@@ -172,13 +170,9 @@ export default function WorkflowAnimation() {
         <div className="flex items-center gap-2">
           <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100" />
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">
-            Simulador de Workflow Operacional
+            Simulação demonstrativa • Dados fictícios
           </span>
-          <span className="hidden sm:inline-block text-xs text-slate-400">|</span>
-          <span className="hidden sm:inline-block text-xs font-mono text-slate-500">
-            {currentPhaseConfig.route}
-          </span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
             {currentPhaseConfig.name}
           </span>
         </div>
@@ -193,7 +187,7 @@ export default function WorkflowAnimation() {
           >
             {isPlaying ? (
               <>
-                <Pause className="w-3.5 h-3.5 text-blue-600" />
+                <Pause className="w-3.5 h-3.5 text-emerald-700" />
                 <span>Pausar</span>
               </>
             ) : (
@@ -207,14 +201,14 @@ export default function WorkflowAnimation() {
           <button
             type="button"
             onClick={handleRestart}
-            aria-label="Reiniciar animação a partir da primeira etapa"
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 bg-white transition-colors shadow-xs cursor-pointer"
-            title="Reiniciar ciclo"
+            aria-label="Reiniciar simulação"
+            className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 bg-white transition-colors shadow-xs cursor-pointer"
+            title="Reiniciar"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          <span className="text-xs font-mono text-slate-500 px-2 py-1 bg-white border border-slate-200 rounded-md">
+          <span className="text-xs font-mono text-slate-600 px-2 py-1 bg-white border border-slate-200 rounded-md">
             {`Etapa ${activeStep + 1}/3`}
           </span>
         </div>
@@ -242,23 +236,23 @@ export default function WorkflowAnimation() {
                 <span
                   className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold ${
                     isActive
-                      ? 'bg-blue-600 text-white'
-                      : isPassed
                       ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-200 text-slate-600'
+                      : isPassed
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-slate-200 text-slate-700'
                   }`}
                 >
                   {isPassed ? <Check className="w-3 h-3 stroke-[3]" /> : idx + 1}
                 </span>
                 <span
                   className={`text-xs sm:text-sm font-semibold truncate ${
-                    isActive ? 'text-blue-900' : 'text-slate-700'
+                    isActive ? 'text-emerald-950' : 'text-slate-700'
                   }`}
                 >
                   {tab.label}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 truncate hidden sm:block">
+              <p className="text-[11px] text-slate-600 truncate hidden sm:block">
                 {tab.tagline}
               </p>
 
@@ -267,7 +261,7 @@ export default function WorkflowAnimation() {
                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-200 overflow-hidden">
                   <div
                     key={`${animKey}-tab-${idx}-${phase}`}
-                    className="h-full bg-blue-600 transition-all duration-300 w-full"
+                    className="h-full bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 transition-all duration-300 w-full"
                   />
                 </div>
               )}
@@ -279,10 +273,7 @@ export default function WorkflowAnimation() {
       {/* Palco Principal Coreografado (Physical Stage com Transições Fluidas) */}
       <div className="p-4 sm:p-6 lg:p-8 bg-slate-50/50 min-h-[520px] sm:min-h-[500px] flex items-center justify-center relative overflow-hidden">
         {/* =========================================================================
-            CAMADA 1: PAINEL DE BUSCA ATIVA (/busca-ativa)
-            Fases 0 e 1: Centro do palco
-            Fase 2: Recua, diminui e desfoca
-            Fases 3 e 4: Desvanece completamente
+            CAMADA 1: PREPARO E CONFERÊNCIA DE MENSAGEM
             ========================================================================= */}
         <div
           className={`absolute inset-x-4 sm:inset-x-8 max-w-3xl mx-auto top-6 sm:top-8 transition-all duration-700 ease-out ${
@@ -293,36 +284,36 @@ export default function WorkflowAnimation() {
               : 'opacity-0 scale-90 -translate-y-8 pointer-events-none z-0'
           }`}
         >
-          {/* Barra do Navegador Simulado */}
-          <div className="flex items-center justify-between text-xs text-slate-500 pb-2 border-b border-slate-200 mb-3">
+          {/* Barra Superior Simulada */}
+          <div className="flex items-center justify-between text-xs text-slate-600 pb-2 border-b border-slate-200 mb-3">
             <div className="flex items-center gap-1.5 font-medium text-slate-700">
-              <Building2 className="w-3.5 h-3.5 text-blue-600" />
-              <span>Colégio Estadual Modelo • Frequência & Infrequência</span>
+              <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Escola Exemplo • Busca Ativa</span>
             </div>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700 border border-blue-200 font-medium">
-              Filtro: 1º Ano B • Faltas ≥ 5 dias
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium">
+              Turma: 1º Ano B
             </span>
           </div>
 
-          {/* Card Principal do Aluno em Risco */}
+          {/* Card Principal do Estudante */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm border border-blue-200 shrink-0">
+                <div className="w-11 h-11 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200 shrink-0">
                   LM
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h4 className="font-semibold text-slate-900 text-base">Lucas M.</h4>
-                    <span className="text-xs text-slate-500 font-mono">CGM: 104.829-3</span>
+                    <span className="text-xs text-slate-500 font-mono">Matrícula: 104.829-3</span>
                   </div>
                   <p className="text-xs text-slate-600">
-                    1º Ano B • Ensino Médio • Responsável: Marlene M. (Mãe)
+                    1º Ano B • Turno Matutino • Responsável legal: Marlene M. (Mãe)
                   </p>
                 </div>
               </div>
 
-              {/* Badges de Frequência e Alerta */}
+              {/* Badges de Frequência e Faltas */}
               <div className="flex items-center gap-2">
                 <div className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-center">
                   <span className="block text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
@@ -332,43 +323,42 @@ export default function WorkflowAnimation() {
                 </div>
                 <div className="px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-center">
                   <span className="block text-[10px] text-rose-600 uppercase tracking-wider font-semibold flex items-center justify-center gap-1">
-                    <AlertCircle className="w-2.5 h-2.5" /> Alerta
+                    <AlertCircle className="w-2.5 h-2.5" /> Faltas
                   </span>
                   <span className="text-xs font-bold text-rose-700">7 faltas seguidas</span>
                 </div>
               </div>
             </div>
 
-            {/* Caixa de Mensagem Pré-formatada (WhatsApp) */}
+            {/* Caixa de Mensagem Preparada para Revisão */}
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3.5 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-slate-700 flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                  Modelo: Notificação de Infrequência Escolar
+                  Modelo: Aviso de Infrequência Escolar
                 </span>
-                <span className="text-[11px] text-slate-400">Canal WhatsApp Oficial</span>
+                <span className="text-[11px] text-slate-500">Abertura assistida (WhatsApp)</span>
               </div>
 
-              <div className="bg-white rounded-lg p-3 border border-slate-200 text-xs text-slate-700 shadow-2xs font-sans leading-relaxed relative">
+              <div className="bg-white rounded-lg p-3 border border-slate-200 text-xs text-slate-700 font-sans leading-relaxed relative">
                 <div className="absolute top-2 left-[-6px] w-2 h-2 bg-white border-l border-t border-slate-200 rotate-[-45deg]" />
                 <p>
                   <span className="font-semibold text-slate-900">Olá Marlene</span>,
                   identificamos que o estudante <span className="font-semibold text-slate-900">Lucas M.</span> acumulou
                   7 faltas consecutivas no 1º Ano B. Solicitamos contato com a equipe pedagógica
-                  para acolhimento, justificativa e regularização da frequência escolar.
+                  para atendimento e justificativa das ausências.
                 </p>
               </div>
             </div>
 
-            {/* Botão de Disparo + Cursor Vetorial Animado */}
+            {/* Ação com Supervisão Humana + Cursor Vetorial Animado */}
             <div className="pt-1 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                <span>Sem digitação manual • Disparo assistido em 1 clique</span>
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Texto preenchido • A equipe confere destinatário e conteúdo antes do envio</span>
               </div>
 
               <div className="relative w-full sm:w-auto">
-                {/* Botão com efeito de clique na Phase 1 */}
                 <button
                   type="button"
                   onClick={() => setPhase(1)}
@@ -379,7 +369,7 @@ export default function WorkflowAnimation() {
                   }`}
                 >
                   <Send className="w-4 h-4" />
-                  <span>Disparar Notificação WhatsApp</span>
+                  <span>Revisar e enviar</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-1 opacity-70" />
                 </button>
 
@@ -391,12 +381,10 @@ export default function WorkflowAnimation() {
                       : 'opacity-0 translate-x-8 translate-y-8 scale-75'
                   }`}
                 >
-                  {/* Onda de Ripple no Clique */}
                   {phase === 1 && (
                     <span className="absolute -left-1 -top-1 w-6 h-6 rounded-full border-2 border-emerald-500 animate-ripple" />
                   )}
 
-                  {/* Ponteiro de Mouse SVG */}
                   <svg
                     width="26"
                     height="26"
@@ -414,9 +402,8 @@ export default function WorkflowAnimation() {
                     />
                   </svg>
 
-                  {/* Badge Flutuante "1 clique" */}
                   <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-bold shadow-md tracking-wider flex items-center gap-1">
-                    1 clique
+                    Revisado
                   </span>
                 </div>
               </div>
@@ -425,9 +412,7 @@ export default function WorkflowAnimation() {
         </div>
 
         {/* =========================================================================
-            CAMADA 2: BALÃO HÍBRIDO EM VOO & SELO SHA-256
-            Fase 2: O balão ganha destaque no centro, recebe feixe luminoso e selo imutável
-            Fase 3: Começa o morphing e encaixe no documento
+            CAMADA 2: REGISTRO OPERACIONAL DO CONTATO (SEM POLUIÇÃO TÉCNICA)
             ========================================================================= */}
         <div
           className={`absolute inset-x-4 sm:inset-x-8 max-w-2xl mx-auto top-12 z-30 transition-all duration-700 ease-out ${
@@ -439,12 +424,12 @@ export default function WorkflowAnimation() {
           }`}
         >
           <div className="bg-white rounded-2xl border border-emerald-300 shadow-2xl p-4 sm:p-5 ring-4 ring-emerald-100 relative overflow-hidden animate-scan-glow">
-            {/* Feixe luminoso vetorial passando sobre a mensagem */}
+            {/* Feixe luminoso passando sobre o cartão */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
               <div className="w-1/2 h-full bg-gradient-to-r from-transparent via-emerald-400/20 to-transparent transform -skew-x-12 animate-laser" />
             </div>
 
-            {/* Cabeçalho do Balão */}
+            {/* Cabeçalho do Cartão */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-3">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
@@ -452,43 +437,40 @@ export default function WorkflowAnimation() {
                 </div>
                 <div>
                   <span className="text-xs font-bold text-slate-900 block leading-tight">
-                    Notificação de Infrequência Escolar
+                    Aviso de Infrequência Escolar
                   </span>
-                  <span className="text-[10px] text-slate-500">Destinatário: Marlene M. (Mãe)</span>
+                  <span className="text-[10px] text-slate-500">Destinatário conferido: Marlene M. (Mãe)</span>
                 </div>
               </div>
 
-              {/* Badge Dinâmico de Entrega */}
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
                 <CheckCheck className="w-4 h-4 text-emerald-600" />
-                <span>Entregue • Check Duplo</span>
+                <span>Registrado</span>
               </span>
             </div>
 
-            {/* Texto da Mensagem */}
+            {/* Texto da Mensagem Conferida */}
             <p className="text-xs text-slate-700 leading-relaxed mb-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
               <span className="font-semibold text-slate-900">Olá Marlene</span>,
               identificamos que o estudante <span className="font-semibold text-slate-900">Lucas M.</span> acumulou
-              7 faltas consecutivas no 1º Ano B. Solicitamos comparecimento à escola ou contato com a equipe pedagógica.
+              7 faltas consecutivas no 1º Ano B. Solicitamos contato com a equipe pedagógica para atendimento e justificativa.
             </p>
 
-            {/* Selo Probatório SHA-256 Carimbado ao Vivo */}
-            <div className="bg-slate-900 rounded-xl p-3 text-slate-100 text-[11px] font-mono space-y-1.5 shadow-inner">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-sans border-b border-slate-800 pb-1">
-                <span className="flex items-center gap-1.5 text-emerald-400 font-bold uppercase tracking-wider">
-                  <Lock className="w-3.5 h-3.5" /> Selo Criptográfico Imutável (SHA-256)
-                </span>
-                <span className="text-slate-400">Lei nº 14.063/2020</span>
+            {/* Comprovante Operacional Claro em Modo Claro */}
+            <div className="bg-emerald-50/70 rounded-xl p-3 border border-emerald-200 text-slate-700 text-[11px] space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-bold text-emerald-900 border-b border-emerald-200/70 pb-1">
+                <span>Registro de Tentativa de Contato</span>
+                <span className="text-emerald-700">Helena D.</span>
               </div>
-              <div className="break-all font-mono text-emerald-300 text-[11px] py-0.5 select-all">
-                e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-              </div>
-              <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800">
+              <p className="text-slate-700 leading-relaxed">
+                Chat aberto no WhatsApp pela equipe após conferência do destinatário, com horário salvo na linha do tempo.
+              </p>
+              <div className="text-[10px] text-slate-600 flex items-center justify-between pt-1 border-t border-emerald-200/70">
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400" /> Registrado hoje às 14:32:08 (UTC-3)
+                  <Clock className="w-3 h-3 text-emerald-700" /> Hoje às 14:32
                 </span>
-                <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                  <Check className="w-3 h-3" /> Integridade Probatória Válida
+                <span className="text-emerald-800 font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Incluído no histórico
                 </span>
               </div>
             </div>
@@ -496,10 +478,7 @@ export default function WorkflowAnimation() {
         </div>
 
         {/* =========================================================================
-            CAMADA 3: FOLHA OFICIAL DO PRONTUÁRIO 360º (/alunos/[id])
-            Fases 0 a 2: Repousa abaixo da tela
-            Fase 3: Desliza para o centro e acolhe a mensagem no primeiro slot
-            Fase 4: Consolidação total com brilho verde e dossiê 100% atualizado
+            CAMADA 3: HISTÓRICO DE ACOMPANHAMENTO DO ESTUDANTE
             ========================================================================= */}
         <div
           className={`absolute inset-x-4 sm:inset-x-8 max-w-3xl mx-auto top-4 sm:top-6 transition-all duration-700 ease-out ${
@@ -511,53 +490,52 @@ export default function WorkflowAnimation() {
           }`}
         >
           <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 space-y-4">
-            {/* Cabeçalho do Prontuário */}
+            {/* Cabeçalho do Estudante */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-base shadow-sm shrink-0">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-600 to-teal-600 text-white font-bold flex items-center justify-center text-base shadow-sm shrink-0">
                   <User className="w-6 h-6 text-white" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h4 className="font-bold text-slate-900 text-base">Lucas M.</h4>
-                    <span className="px-2 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
-                      Acompanhamento Ativo
+                    <span className="px-2 py-0.5 rounded-full text-[11px] bg-teal-50 text-teal-800 border border-teal-200 font-semibold">
+                      Em acompanhamento
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    CGM: 104.829-3 • 1º Ano B • Ensino Médio • Turno Matutino
+                  <p className="text-xs text-slate-600">
+                    Matrícula: 104.829-3 • 1º Ano B • Turno Matutino
                   </p>
                 </div>
               </div>
 
-              {/* Indicador de Respaldo Probatório */}
               <div className="flex items-center gap-3 text-xs">
                 <div className="text-right">
-                  <span className="block text-slate-400 text-[10px] uppercase font-semibold">
+                  <span className="block text-slate-600 text-[10px] uppercase font-semibold">
                     Frequência Escolar
                   </span>
                   <span className="font-bold text-slate-800">68% (7 faltas seguidas)</span>
                 </div>
                 <div className="text-right pl-3 border-l border-slate-200">
-                  <span className="block text-slate-400 text-[10px] uppercase font-semibold">
-                    Dossiê Probatório
+                  <span className="block text-slate-600 text-[10px] uppercase font-semibold">
+                    Histórico
                   </span>
                   <span className="font-bold text-emerald-700 flex items-center gap-1 justify-end">
-                    <ShieldCheck className="w-3.5 h-3.5" /> 100% Atualizado
+                    <ShieldCheck className="w-3.5 h-3.5" /> Atualizado
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Linha do Tempo Pedagógica Unificada (Timeline 360º) */}
+            {/* Linha do Tempo Unificada */}
             <div className="space-y-3">
               <h5 className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-blue-600" />
-                Linha do Tempo de Intervenções e Atendimentos
+                <Clock className="w-3.5 h-3.5 text-teal-600" />
+                Linha do Tempo de Contatos e Atendimentos
               </h5>
 
               <div className="relative pl-6 space-y-3 border-l-2 border-slate-200 ml-2">
-                {/* SLOT 1: Onde a mensagem recém-enviada e carimbada se encaixa perfeitamente */}
+                {/* SLOT 1: Registro do contato recém-enviado */}
                 <div
                   className={`relative transition-all duration-500 ease-out ${
                     phase >= 3 ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
@@ -570,77 +548,71 @@ export default function WorkflowAnimation() {
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-emerald-900 flex items-center gap-1.5">
                         <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
-                        Notificação WhatsApp de Busca Ativa (Entregue)
+                        Tentativa de contato via WhatsApp
                       </span>
                       <span className="text-[11px] text-emerald-800 font-mono font-semibold bg-emerald-100 px-2 py-0.5 rounded-md">
-                        Hoje, 14:32:08
+                        Hoje, 14:32
                       </span>
                     </div>
                     <p className="text-slate-700 text-[11px] leading-relaxed">
-                      Mensagem entregue à responsável Marlene M. Recibo criptográfico #REC-849201
-                      comprovado com hash SHA-256 e fé pública formalizada.
+                      Mensagem conferida por Helena D. para a responsável legal Marlene M., com registro de abertura assistida no histórico.
                     </p>
-                    <div className="text-[10px] font-mono text-emerald-800 flex items-center gap-1 pt-0.5">
-                      <Lock className="w-3 h-3" />
-                      <span>SHA-256: e3b0c442...b855 (Lei nº 14.063/2020)</span>
-                    </div>
                   </div>
                 </div>
 
                 {/* SLOT 2: Ata Pedagógica Prévia */}
                 <div className="relative">
-                  <span className="absolute -left-[31px] top-0 flex h-4 w-4 rounded-full bg-blue-600 ring-4 ring-blue-100 items-center justify-center text-white">
+                  <span className="absolute -left-[31px] top-0 flex h-4 w-4 rounded-full bg-sky-600 ring-4 ring-sky-100 items-center justify-center text-white">
                     <FileText className="w-2.5 h-2.5" />
                   </span>
                   <div className="bg-white rounded-lg p-3 border border-slate-200 text-xs space-y-1 shadow-2xs">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-slate-900 flex items-center gap-1.5">
-                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <FileText className="w-3.5 h-3.5 text-sky-600" />
                         Ata de Atendimento Pedagógico nº 042/2026
                       </span>
-                      <span className="text-[11px] text-slate-500 font-mono">03/11/2026</span>
+                      <span className="text-[11px] text-slate-600 font-mono">03/11/2026</span>
                     </div>
                     <p className="text-slate-600 text-[11px] leading-relaxed">
-                      Reunião presencial de alinhamento com a equipe pedagógica. Registrado plano
-                      de acolhimento e compromisso familiar de assiduidade.
+                      Reunião presencial com a família. Registrados os encaminhamentos de acompanhamento e justificativas apresentadas.
                     </p>
                   </div>
                 </div>
 
                 {/* SLOT 3: Alerta Preventivo */}
                 <div className="relative">
-                  <span className="absolute -left-[31px] top-0 flex h-4 w-4 rounded-full bg-slate-400 ring-4 ring-slate-100 items-center justify-center text-white">
+                  <span className="absolute -left-[31px] top-0 flex h-4 w-4 rounded-full bg-slate-500 ring-4 ring-slate-100 items-center justify-center text-white">
                     <Clock className="w-2.5 h-2.5" />
                   </span>
                   <div className="bg-white rounded-lg p-3 border border-slate-200 text-xs space-y-1 shadow-2xs">
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">
-                        Identificação de Infrequência Alternada
+                        Registro de Infrequência Alternada
                       </span>
-                      <span className="text-[11px] text-slate-500 font-mono">27/10/2026</span>
+                      <span className="text-[11px] text-slate-600 font-mono">27/10/2026</span>
                     </div>
-                    <p className="text-slate-500 text-[11px]">
-                      Primeiro alerta preventivo gerado antes do atingimento do teto crítico do ECA.
+                    <p className="text-slate-600 text-[11px]">
+                      Primeiro aviso preventivo gerado para acompanhamento pela equipe pedagógica.
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Barra de Ações do Documento Oficial */}
+            {/* Barra de Ações do Histórico */}
             <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-slate-500">
-                Prontuário probatório consolidado para emissão oficial.
+              <span className="text-xs text-slate-600">
+                Contatos, atas e justificativas reunidos em um só histórico.
               </span>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleRestart}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>Reiniciar Demonstração</span>
+                  <span>Reiniciar</span>
                 </button>
               </div>
             </div>
@@ -649,13 +621,13 @@ export default function WorkflowAnimation() {
       </div>
 
       {/* Rodapé Informativo da Animação */}
-      <div className="border-t border-slate-200 bg-white px-4 py-2.5 sm:px-6 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+      <div className="border-t border-slate-200 bg-white px-4 py-2.5 sm:px-6 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-          <span>Fé Pública amparada na Lei nº 14.063/2020 e Arts. 17 e 143 do ECA.</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Controle humano antes de enviar cada mensagem.</span>
         </div>
-        <span className="font-mono text-slate-400">
-          Coreografia Contínua ~9s • Zero Digitação Manual
+        <span className="font-mono text-slate-600">
+          Fluxo demonstrativo
         </span>
       </div>
     </div>
