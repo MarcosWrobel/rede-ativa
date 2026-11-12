@@ -129,6 +129,7 @@ export default function AtaEditorModal({
   const [refusalDraftReason, setRefusalDraftReason] = useState("");
   const [refusalDraftWitness, setRefusalDraftWitness] = useState("Equipe Pedagógica");
   const [qrModalInfo, setQrModalInfo] = useState<{
+    participantId: string;
     url: string;
     name: string;
     expiresInMinutes: number;
@@ -428,29 +429,130 @@ export default function AtaEditorModal({
     setParticipants((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  // Polling para detectar assinatura no celular via QR Code
+  // Polling enxuto para detectar assinatura no celular via QR Code (sem trafegar binários por tick)
   useEffect(() => {
     if (!qrModalInfo || !minuteId) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/atas/${minuteId}`);
-        const data = (await res.json()) as { minute?: { participants?: AtaParticipantDraft[] } };
-        if (data.minute?.participants) {
-          setParticipants(data.minute.participants);
-          const currentPart = data.minute.participants.find(
-            (p) => p.name === qrModalInfo.name || Boolean(p.signatureData) || Boolean(p.verifiedEmail)
-          );
-          if (currentPart?.signatureData || currentPart?.verifiedEmail) {
-            setQrModalInfo(null);
-          }
-        }
-      } catch (err) {
-        console.warn("Polling de assinatura falhou:", err);
-      }
-    }, 2500);
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let inFlightController: AbortController | null = null;
+    let isPolling = false;
 
-    return () => clearInterval(interval);
+    const scheduleNext = (delayMs = 2500) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (!cancelled && !document.hidden) {
+        timeoutId = setTimeout(() => {
+          void runPoll();
+        }, delayMs);
+      }
+    };
+
+    const runPoll = async () => {
+      if (cancelled || isPolling || document.hidden) return;
+      isPolling = true;
+      inFlightController = new AbortController();
+      let shouldReschedule = true;
+
+      try {
+        const res = await fetch(`/api/atas/${minuteId}?poll=1`, {
+          signal: inFlightController.signal,
+        });
+
+        if (!res.ok) {
+          // Para definitivamente em erros de autorização, ausência do registro ou link inválido
+          if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410) {
+            cancelled = true;
+            shouldReschedule = false;
+            return;
+          }
+          scheduleNext(5000);
+          shouldReschedule = false;
+          return;
+        }
+
+        const data = (await res.json()) as {
+          participants?: Array<{
+            participantId: string;
+            role: string;
+            signatureMode: string;
+            hasSignature: boolean;
+            hasActiveSignLink: boolean;
+            institutionalVerificationComplete: boolean;
+            linkExpired: boolean;
+          }>;
+        };
+
+        const currentPart = data.participants?.find(
+          (p) => p.participantId === qrModalInfo.participantId
+        );
+
+        if (!currentPart || currentPart.linkExpired) {
+          cancelled = true;
+          shouldReschedule = false;
+          return;
+        }
+
+        const isCompleted =
+          currentPart.signatureMode === "ESCOLA_OAUTH"
+            ? currentPart.hasSignature && currentPart.institutionalVerificationComplete
+            : currentPart.hasSignature;
+
+        if (isCompleted) {
+          cancelled = true;
+          shouldReschedule = false;
+          const fullRes = await fetch(`/api/atas/${minuteId}`, {
+            signal: inFlightController.signal,
+          });
+          if (fullRes.ok) {
+            const fullData = (await fullRes.json()) as {
+              minute?: { participants?: AtaParticipantDraft[] };
+            };
+            if (fullData.minute?.participants) {
+              setParticipants(fullData.minute.participants);
+            }
+          }
+          setQrModalInfo(null);
+          return;
+        }
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name === "AbortError") {
+          shouldReschedule = false;
+          return;
+        }
+        console.warn("Polling de assinatura falhou:", err);
+      } finally {
+        isPolling = false;
+        inFlightController = null;
+        if (shouldReschedule && !cancelled) {
+          scheduleNext(2500);
+        }
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (cancelled) return;
+      if (document.hidden) {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      } else {
+        void runPoll();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    scheduleNext(2500);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      inFlightController?.abort();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [qrModalInfo, minuteId]);
 
   // Ditado por voz nativo pt-BR
@@ -865,6 +967,7 @@ export default function AtaEditorModal({
 
       setMinuteId(saved.id);
       setQrModalInfo({
+        participantId: part.id,
         url: data.signUrl,
         name: part.name,
         expiresInMinutes: durationMinutes,

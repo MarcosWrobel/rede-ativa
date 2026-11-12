@@ -73,6 +73,72 @@ export async function GET(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await params;
+    const isPollMode = new URL(req.url).searchParams.get("poll") === "1";
+
+    if (isPollMode) {
+      const pollMinute = await prisma.pedagogicalMinute.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          schoolId: true,
+          status: true,
+          isConfidential: true,
+          authorEmail: true,
+          participants: {
+            select: {
+              id: true,
+              role: true,
+              signatureMode: true,
+              hasSignature: true,
+              hasActiveSignLink: true,
+              verifiedEmail: true,
+              mobileSignExpiresAt: true,
+            },
+          },
+        },
+      });
+
+      if (!pollMinute) {
+        return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+      }
+
+      const currentSchool = await getCurrentSchool(authCheck.schoolId);
+      if (!assertTenantOwnership(pollMinute.schoolId, currentSchool.id, authCheck.session)) {
+        return NextResponse.json(
+          { error: "Acesso negado a registro de outra instituição de ensino." },
+          { status: 403 }
+        );
+      }
+
+      if (!canAccessConfidentialMinute(pollMinute, authCheck.session)) {
+        return NextResponse.json(
+          { error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor." },
+          { status: 403 }
+        );
+      }
+
+      const nowMs = Date.now();
+      return NextResponse.json({
+        success: true,
+        poll: true,
+        minuteId: pollMinute.id,
+        status: pollMinute.status,
+        participants: (pollMinute.participants || []).map((p) => ({
+          participantId: p.id,
+          role: p.role,
+          signatureMode: p.signatureMode,
+          hasSignature: Boolean(p.hasSignature),
+          hasActiveSignLink: Boolean(p.hasActiveSignLink),
+          institutionalVerificationComplete: Boolean(p.verifiedEmail),
+          linkExpired: Boolean(
+            p.hasActiveSignLink &&
+              p.mobileSignExpiresAt &&
+              p.mobileSignExpiresAt.getTime() <= nowMs
+          ),
+        })),
+      });
+    }
+
     const minute = await prisma.pedagogicalMinute.findUnique({
       where: { id },
       include: {

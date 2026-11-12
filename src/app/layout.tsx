@@ -46,7 +46,9 @@ export default async function RootLayout({
   try {
     session = await auth();
     const sessionUser = session?.user as any;
-    currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+    if (session?.user) {
+      currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+    }
   } catch (err: any) {
     if (err?.digest === "DYNAMIC_SERVER_USAGE" || err?.message?.includes("Dynamic server usage")) {
       throw err;
