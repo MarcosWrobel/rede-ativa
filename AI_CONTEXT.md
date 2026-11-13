@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que todos os testes passem (npm test — 418 testes em 57 suítes, incluindo adversarialQa.test.ts, messageReplySecurity.test.ts, whatsappReplyCaptureModal.test.tsx, platformEditions.test.ts, securityAndStabilityAuditV3.test.ts, teacherAtas.test.ts, atasArchiveUsability.test.ts, ataServices.test.ts, ataEditorSubcomponents.test.tsx, frequenciaSync.test.ts e egressAndCacheOptimization.test.ts) e que o build de produção compile sem erros (npm run build).
+6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 65 arquivos: 63 aprovados, 2 `skipIf` de banco isolado pré-existentes; 586 aprovados e 2 ignorados, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`) e que o build de produção compile sem erros (`npm run build`).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -98,7 +98,10 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 - **`SAAS-UI-01` (`src/components/ata/editor/`):** Eliminação de 100% das anotações `any` no [`AtaEditorModal.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/AtaEditorModal.tsx) via [`editor/types.ts`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/editor/types.ts) e extração acessível de subcomponentes (`AtaExtemporaneousBanner.tsx`, `AtaAddendumsSection.tsx`, `AtaActionItemsSection.tsx`), validados em [`ataEditorSubcomponents.test.tsx`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/ataEditorSubcomponents.test.tsx).
 - **Blindagem de Sincronização Power BI, CSV & JSON (`10/11/2026`):** Resolvido erro HTTP 500 (`P2002` na chave global `@unique` `Student.cgm`) em `/api/frequencia/sync` e `/api/serp/sync` via [`syncCgmGuard.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/syncCgmGuard.ts) (`populateGlobalTakenCgms` + `applyPendingCgmUpdatesSafely`), otimizado enriquecimento cadastral via *delta check* e `UPDATE` SQL em lote, aprimorado o parser CSV/JSON RFC 4180 de 11 colunas em [`frequencyImportParser.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](file:///home/marcoswrobel/Documents/Registro/src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br`, coberto por 12 testes em [`frequenciaSync.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/frequenciaSync.test.ts).
 - **Otimização de Egress, Cache & Custo no Neon PostgreSQL (`10/11/2026`):** Proxy binário cacheado em CDN `/api/schools/[id]/logo` com CSP SVG ([`schoolLogo.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/schoolLogo.ts)) eliminando a transferência recorrente de brasões Base64 (`1,14 MB`), deduplicação via React `cache()` + TTL 60s em [`currentSchool.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/currentSchool.ts), omissão estrita de `physicalSignedScanData`/`signatureData`/`biometricStrokeData` em listagens e Prontuário (`safePhase3Queries.ts`, `/api/atas`, `/atas/livro/[ano]`), `select` enxuto em `/faltas` e autenticação de extensão com leitura prévia zero-write em [`extensionSyncAuth.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/extensionSyncAuth.ts), coberto por 10 testes em [`egressAndCacheOptimization.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/egressAndCacheOptimization.test.ts).
-- Suíte automatizada consolidada em **57 suítes / 418 testes Vitest (100% verdes)** e 0 erros de compilação Turbopack.
+- **Acompanhamento Resiliente de Assinatura QR Code & Despertar Seletivo do Banco (`12/11/2026`):**
+  - `src/app/layout.tsx` passa a ignorar `getCurrentSchool()` quando `!session?.user` e `GET /api/atas/[id]` ganha o modo reduzido `?poll=1` (projeção leve apenas do estado dos signatários; durante o acompanhamento automático, busca o estado reduzido e carrega a ata completa após a confirmação, e a atualização manual `refreshMinute()` também pode solicitar os dados completos), validados em [`src/lib/__tests__/dbWakeAndPollOptimization.test.ts`](src/lib/__tests__/dbWakeAndPollOptimization.test.ts) (4 testes).
+  - Separação da lógica de polling no controller puro [`src/components/ata/editor/qrPollController.ts`](src/components/ata/editor/qrPollController.ts), ciclo de vida React em [`src/components/ata/editor/useQrSignaturePolling.ts`](src/components/ata/editor/useQrSignaturePolling.ts) e feedback acessível em [`src/components/ata/editor/AtaQrPollStatusBanner.tsx`](src/components/ata/editor/AtaQrPollStatusBanner.tsx), com pausa por visibilidade (`isHidden`), bloqueio de consultas simultâneas com retomada segura no `finally`, identificação estrita por `participantId`, descarte de respostas antigas (`executionId` + `pollRequestSeq`), timeouts cobrindo leitura do corpo JSON (`8s`/`12s`), validação de contrato (`SUPPORTED_SIGNATURE_MODES`), máximo de 3 chamadas na busca completa por operação (1 inicial + 2 retentativas), tratamento de `429` respeitando `Retry-After`, estados explícitos (`expired` — com `expiredReason: "expired"` ou `"inactive"` —, `participant_removed`, `unauthorized`, `forbidden`, `not_found` e `sync_error`) e recuperação (`retryFinalSync` com `signatureConfirmed` preservado vs. `refreshMinute()` explícito), cobertos por 37 testes (`30` em [`src/lib/__tests__/qrPollController.test.ts`](src/lib/__tests__/qrPollController.test.ts) + `7` em [`src/lib/__tests__/ataQrPollStatusBanner.test.tsx`](src/lib/__tests__/ataQrPollStatusBanner.test.tsx)) e validação em Chromium headless dos módulos extraídos via [`scripts/validate_qr_poll_browser.mjs`](scripts/validate_qr_poll_browser.mjs).
+- Suíte reproduzida em `12/11/2026` (`npx vitest run --maxWorkers=4`): **63 arquivos aprovados e 2 ignorados pré-existentes (65 arquivos)**; **586 testes aprovados e 2 ignorados (588 testes)**; `tsc --noEmit` e `ENABLE_DEV_AUTH=false npm run build` com **0 erros**.
 
 ---
 
@@ -147,7 +150,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — **100% da suíte Vitest deve passar (418 testes em 57 suítes, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
+  1. Execute `npm test` — todos os testes ativos da suíte Vitest devem passar sem falhas (em `12/11/2026`, `npx vitest run --maxWorkers=4` executou **63 arquivos aprovados | 2 ignorados pré-existentes (65)** e **586 testes aprovados | 2 ignorados (588)**, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`; `buscaAtivaPageReal.test.tsx` e `faltasPageReal.test.tsx` são ignorados por `describe.skipIf(!hasIsolatedDb)` sem banco sintético local).
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -219,7 +222,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── ataParticipantService.ts# Sanitização de rascunhos e pareamento anti-forja de signatários
 │   │   └── ataFinalizationService.ts# Cálculo de dias úteis BRT, hash SHA-256 e lavratura atômica
 │   ├── components/                 # Componentes React reutilizáveis
-│   │   ├── ata/                    # Editor widescreen (editor/* tipado), PIN modal, scan físico, canvas
+│   │   ├── ata/                    # Editor widescreen (editor/* tipado, qrPollController, hook e banner QR), PIN modal, scan físico, canvas
 │   │   └── whatsapp/               # Modal de retorno assistido e alternador de Janela Dedicada Compacta
 │   ├── lib/                        # Regras de negócio, segurança, criptografia e integrações
 │   │   ├── auth.ts / auth.config.ts# Configuração NextAuth v5 (Edge + Prisma)
@@ -244,7 +247,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 ├── prisma/
 │   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (21 models)
 ├── extension/                      # Extensão Chrome MV3 (v1.5.0) — Power BI, SERP e WhatsApp
-├── scripts/                        # Scripts ativos (package_extension.cjs, vercel_db_push.cjs, seed.cjs)
+├── scripts/                        # Scripts ativos (package_extension.cjs, vercel_db_push.cjs, seed.cjs, validate_qr_poll_browser.mjs)
 │   └── legacy/                     # Utilitários históricos arquivados
 └── docs/                           # Documentação canônica (ARQUITETURA_E_ENGENHARIA, BACKLOG, DEPLOY, GUIA_COLABORACAO)
     └── auditorias/                 # Relatórios históricos point-in-time de auditoria
@@ -261,7 +264,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 57 suítes / 418 testes)
+# Executar suíte completa de testes (Vitest — 65 arquivos: 63 aprovados, 2 skipIf banco isolado)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

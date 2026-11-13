@@ -44,6 +44,8 @@ import {
 import AtaExtemporaneousBanner from "./editor/AtaExtemporaneousBanner";
 import AtaAddendumsSection from "./editor/AtaAddendumsSection";
 import AtaActionItemsSection from "./editor/AtaActionItemsSection";
+import AtaQrPollStatusBanner from "./editor/AtaQrPollStatusBanner";
+import { useQrSignaturePolling } from "./editor/useQrSignaturePolling";
 import type {
   AtaStudentOption,
   AtaParticipantDraft,
@@ -134,6 +136,7 @@ export default function AtaEditorModal({
     name: string;
     expiresInMinutes: number;
     participantRole: string;
+    openId: string;
   } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [signDurationOption, setSignDurationOption] = useState<number>(20); // 20 min ou 1440 (24h)
@@ -429,131 +432,22 @@ export default function AtaEditorModal({
     setParticipants((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  // Polling enxuto para detectar assinatura no celular via QR Code (sem trafegar binários por tick)
-  useEffect(() => {
-    if (!qrModalInfo || !minuteId) return;
-
-    let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let inFlightController: AbortController | null = null;
-    let isPolling = false;
-
-    const scheduleNext = (delayMs = 2500) => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      if (!cancelled && !document.hidden) {
-        timeoutId = setTimeout(() => {
-          void runPoll();
-        }, delayMs);
-      }
-    };
-
-    const runPoll = async () => {
-      if (cancelled || isPolling || document.hidden) return;
-      isPolling = true;
-      inFlightController = new AbortController();
-      let shouldReschedule = true;
-
-      try {
-        const res = await fetch(`/api/atas/${minuteId}?poll=1`, {
-          signal: inFlightController.signal,
-        });
-
-        if (!res.ok) {
-          // Para definitivamente em erros de autorização, ausência do registro ou link inválido
-          if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410) {
-            cancelled = true;
-            shouldReschedule = false;
-            return;
-          }
-          scheduleNext(5000);
-          shouldReschedule = false;
-          return;
-        }
-
-        const data = (await res.json()) as {
-          participants?: Array<{
-            participantId: string;
-            role: string;
-            signatureMode: string;
-            hasSignature: boolean;
-            hasActiveSignLink: boolean;
-            institutionalVerificationComplete: boolean;
-            linkExpired: boolean;
-          }>;
-        };
-
-        const currentPart = data.participants?.find(
-          (p) => p.participantId === qrModalInfo.participantId
-        );
-
-        if (!currentPart || currentPart.linkExpired) {
-          cancelled = true;
-          shouldReschedule = false;
-          return;
-        }
-
-        const isCompleted =
-          currentPart.signatureMode === "ESCOLA_OAUTH"
-            ? currentPart.hasSignature && currentPart.institutionalVerificationComplete
-            : currentPart.hasSignature;
-
-        if (isCompleted) {
-          cancelled = true;
-          shouldReschedule = false;
-          const fullRes = await fetch(`/api/atas/${minuteId}`, {
-            signal: inFlightController.signal,
-          });
-          if (fullRes.ok) {
-            const fullData = (await fullRes.json()) as {
-              minute?: { participants?: AtaParticipantDraft[] };
-            };
-            if (fullData.minute?.participants) {
-              setParticipants(fullData.minute.participants);
-            }
-          }
-          setQrModalInfo(null);
-          return;
-        }
-      } catch (err: unknown) {
-        if ((err as { name?: string })?.name === "AbortError") {
-          shouldReschedule = false;
-          return;
-        }
-        console.warn("Polling de assinatura falhou:", err);
-      } finally {
-        isPolling = false;
-        inFlightController = null;
-        if (shouldReschedule && !cancelled) {
-          scheduleNext(2500);
-        }
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (cancelled) return;
-      if (document.hidden) {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-      } else {
-        void runPoll();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    scheduleNext(2500);
-
-    return () => {
-      cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      inFlightController?.abort();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [qrModalInfo, minuteId]);
+  // Hook resiliente de polling para detecção de assinatura via QR Code
+  const {
+    uiState: qrUiState,
+    handleRetryAction: handleQrRetryAction,
+    refreshMinute: refreshQrMinute,
+  } = useQrSignaturePolling({
+    minuteId,
+    qrModalInfo,
+    onParticipantsSynced: (newParts) => {
+      setParticipants(newParts);
+    },
+    onCompletedClose: () => {
+      setQrModalInfo(null);
+    },
+    onSaved,
+  });
 
   // Ditado por voz nativo pt-BR
   const toggleSpeechRecognition = () => {
@@ -972,6 +866,7 @@ export default function AtaEditorModal({
         name: part.name,
         expiresInMinutes: durationMinutes,
         participantRole: currentLocal?.role || "PARTICIPANTE",
+        openId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `open-${Date.now()}-${Math.random()}`,
       });
       onSaved();
     } catch (err: unknown) {
@@ -2864,6 +2759,21 @@ export default function AtaEditorModal({
                 {/* Painel de Assinatura Móvel: QR Code, Link Direto e WhatsApp */}
                 {qrModalInfo && (
                   <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl space-y-3 shadow-sm">
+                    {/* Banner de Status, Alertas e Recuperação */}
+                    <AtaQrPollStatusBanner
+                      state={qrUiState}
+                      onRetry={() => void handleQrRetryAction()}
+                      onClose={() => setQrModalInfo(null)}
+                      onRenewLink={() => {
+                        const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
+                        if (pIdx >= 0) {
+                          void handleGenerateMobileSign(pIdx, qrModalInfo.expiresInMinutes || 20);
+                        } else {
+                          void refreshQrMinute();
+                        }
+                      }}
+                    />
+
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200/80 pb-2">
                       <div>
                         <h4 className="font-extrabold text-sky-950 text-sm">
@@ -2888,8 +2798,12 @@ export default function AtaEditorModal({
                           type="button"
                           onClick={() => {
                             setSignDurationOption(20);
-                            const pIdx = participants.findIndex((p) => p.name === qrModalInfo.name);
-                            if (pIdx >= 0) handleGenerateMobileSign(pIdx, 20);
+                            const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
+                            if (pIdx >= 0) {
+                              void handleGenerateMobileSign(pIdx, 20);
+                            } else {
+                              void refreshQrMinute();
+                            }
                           }}
                           className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition ${
                             qrModalInfo.expiresInMinutes === 20
@@ -2903,8 +2817,12 @@ export default function AtaEditorModal({
                           type="button"
                           onClick={() => {
                             setSignDurationOption(1440);
-                            const pIdx = participants.findIndex((p) => p.name === qrModalInfo.name);
-                            if (pIdx >= 0) handleGenerateMobileSign(pIdx, 1440);
+                            const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
+                            if (pIdx >= 0) {
+                              void handleGenerateMobileSign(pIdx, 1440);
+                            } else {
+                              void refreshQrMinute();
+                            }
                           }}
                           className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition ${
                             qrModalInfo.expiresInMinutes === 1440
@@ -2917,7 +2835,10 @@ export default function AtaEditorModal({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                    {(qrUiState.status === "waiting" ||
+                      (qrUiState.status === "sync_error" &&
+                        qrUiState.pendingRecoveryAction === "resumePolling")) && (
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
                       <div className="md:col-span-4 flex justify-center">
                         <div className="p-2 bg-white rounded-xl border border-sky-200 shadow-2xs flex items-center justify-center">
                           <AtaQrCode
@@ -2995,6 +2916,7 @@ export default function AtaEditorModal({
                         </p>
                       </div>
                     </div>
+                    )}
 
                     <div className="flex justify-end pt-1">
                       <button

@@ -34,6 +34,8 @@ export interface AtaParticipantDraft {
   biometricVerified?: boolean;
   biometricDeviceType?: string | null;
   biometricAuthTime?: string | Date | null;
+  hasSignature?: boolean;
+  hasActiveSignLink?: boolean;
   clearSignature?: boolean;
   refusalReason?: string | null;
   witnessName?: string | null;
