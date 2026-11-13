@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
 import AtaQrCode from "./AtaQrCode";
@@ -46,6 +46,8 @@ import AtaAddendumsSection from "./editor/AtaAddendumsSection";
 import AtaActionItemsSection from "./editor/AtaActionItemsSection";
 import AtaQrPollStatusBanner from "./editor/AtaQrPollStatusBanner";
 import { useQrSignaturePolling } from "./editor/useQrSignaturePolling";
+import { getParticipantSignatureSummary } from "./editor/signatureState";
+import { formatSignLinkValidity } from "./editor/signLinkValidity";
 import type {
   AtaStudentOption,
   AtaParticipantDraft,
@@ -135,14 +137,33 @@ export default function AtaEditorModal({
     url: string;
     name: string;
     expiresInMinutes: number;
+    expiresAt?: string | null;
     participantRole: string;
     openId: string;
   } | null>(null);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+  const [validityNowMs, setValidityNowMs] = useState<number>(() => Date.now());
+  const [isHydratingMinute, setIsHydratingMinute] = useState(false);
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const [hydrationRetryKey, setHydrationRetryKey] = useState(0);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [signDurationOption, setSignDurationOption] = useState<number>(20); // 20 min ou 1440 (24h)
   const [finalizedAta, setFinalizedAta] = useState<AtaMinuteRecord | null>(null);
   const [minuteId, setMinuteId] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+
+  const editorOpenIdRef = useRef(0);
+  const localRevisionRef = useRef(0);
+  const qrGenerationInFlightRef = useRef(false);
+  const qrRequestSeqRef = useRef(0);
+  const qrPanelContextRef = useRef<{ isOpen: boolean; participantId: string | null }>({
+    isOpen: false,
+    participantId: null,
+  });
+
+  const markLocalEdit = () => {
+    localRevisionRef.current += 1;
+  };
 
   // Estados de Conformidade Jurídica (PIN de Fé Pública e Lavratura Extemporânea)
   const [extemporaneousReason, setExtemporaneousReason] = useState(
@@ -224,13 +245,29 @@ export default function AtaEditorModal({
 
   // Inicializa / reseta o modal sempre que abrir ou trocar de ata
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      qrRequestSeqRef.current += 1;
+      qrGenerationInFlightRef.current = false;
+      qrPanelContextRef.current = { isOpen: false, participantId: null };
+      setIsGeneratingQr(false);
+      setIsHydratingMinute(false);
+      setHydrationError(null);
+      return;
+    }
+
+    editorOpenIdRef.current += 1;
+    localRevisionRef.current = 0;
+    qrRequestSeqRef.current += 1;
+    qrGenerationInFlightRef.current = false;
+    qrPanelContextRef.current = { isOpen: false, participantId: null };
+    setIsGeneratingQr(false);
 
     setFinalizeError(null);
     setStep1Error(null);
     setAiError(null);
     setAiSuccessMsg(null);
     setDraftSavedMsg(null);
+    setHydrationError(null);
     setQrModalInfo(null);
     setActiveSignParticipantIndex(null);
     setActiveRefusalIndex(null);
@@ -320,6 +357,108 @@ export default function AtaEditorModal({
       }
     }
   }, [isOpen, existingMinute, preSelectedStudentId, availableStudents]);
+
+  // Hidratação completa ao abrir ata existente (listagem GET /api/atas omite signatureData e itens detalhados)
+  useEffect(() => {
+    if (!isOpen || !existingMinute?.id) {
+      setIsHydratingMinute(false);
+      setHydrationError(null);
+      return;
+    }
+
+    const openIdAtStart = editorOpenIdRef.current;
+    const revisionAtStart = localRevisionRef.current;
+    const controller = new AbortController();
+    let active = true;
+
+    setIsHydratingMinute(true);
+    setHydrationError(null);
+
+    fetch(`/api/atas/${existingMinute.id}`, { signal: controller.signal })
+      .then(async (res) => {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          minute?: AtaMinuteRecord;
+        };
+        if (!active || controller.signal.aborted || openIdAtStart !== editorOpenIdRef.current) {
+          return;
+        }
+        if (!res.ok || !data.minute) {
+          setHydrationError(data.error || "Não foi possível carregar os detalhes completos da ata.");
+          return;
+        }
+        if (localRevisionRef.current !== revisionAtStart) {
+          return;
+        }
+
+        const hydrated = data.minute;
+        if (hydrated.status === "FINALIZED" || hydrated.status === "VOIDED") {
+          setViewMinuteData(hydrated);
+          setMinuteId(hydrated.id);
+          return;
+        }
+
+        setMinuteId(hydrated.id);
+        setSelectedStudentIds(hydrated.students ? hydrated.students.map((s) => s.studentId) : []);
+        setCategory(hydrated.category || "ACOMPANHAMENTO_PEDAGOGICO");
+        setIsConfidential(Boolean(hydrated.isConfidential));
+        setSubject(hydrated.subject || "Atendimento Pedagógico e Alinhamento de Frequência");
+        setRawNotes(hydrated.rawNotes || "");
+        setSummary(hydrated.summary || "");
+        setAgreementsSummary(hydrated.agreementsSummary || "");
+        setParticipants(hydrated.participants || []);
+        setExtemporaneousReason(hydrated.extemporaneousReason || "");
+        setActionItems(
+          hydrated.actionItems
+            ? hydrated.actionItems.map((a) => ({
+                id: a.id,
+                description: a.description,
+                responsible: a.responsible,
+                dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : "",
+                status: a.status || "PENDING",
+              }))
+            : []
+        );
+      })
+      .catch((err: unknown) => {
+        if (!active || controller.signal.aborted || openIdAtStart !== editorOpenIdRef.current) {
+          return;
+        }
+        if ((err as { name?: string })?.name === "AbortError") return;
+        setHydrationError("Falha de conexão ao carregar os detalhes completos da ata.");
+      })
+      .finally(() => {
+        if (active && !controller.signal.aborted && openIdAtStart === editorOpenIdRef.current) {
+          setIsHydratingMinute(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isOpen, existingMinute?.id, hydrationRetryKey]);
+
+  // Atualiza referência síncrona do painel QR e contador informativo de validade
+  useEffect(() => {
+    qrPanelContextRef.current = {
+      isOpen: Boolean(isOpen && qrModalInfo),
+      participantId: qrModalInfo?.participantId || null,
+    };
+
+    if (!isOpen || !qrModalInfo?.expiresAt) {
+      return;
+    }
+
+    setValidityNowMs(Date.now());
+    const interval = setInterval(() => {
+      setValidityNowMs(Date.now());
+    }, 15_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isOpen, qrModalInfo?.openId, qrModalInfo?.participantId, qrModalInfo?.expiresAt]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -432,6 +571,14 @@ export default function AtaEditorModal({
     setParticipants((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  const closeQrPanel = () => {
+    qrRequestSeqRef.current += 1;
+    qrGenerationInFlightRef.current = false;
+    qrPanelContextRef.current = { isOpen: false, participantId: null };
+    setIsGeneratingQr(false);
+    setQrModalInfo(null);
+  };
+
   // Hook resiliente de polling para detecção de assinatura via QR Code
   const {
     uiState: qrUiState,
@@ -444,7 +591,7 @@ export default function AtaEditorModal({
       setParticipants(newParts);
     },
     onCompletedClose: () => {
-      setQrModalInfo(null);
+      closeQrPanel();
     },
     onSaved,
   });
@@ -638,7 +785,11 @@ export default function AtaEditorModal({
     const cleanSubject = subject.trim().length >= 2 ? subject.trim() : "Atendimento Pedagógico";
 
     const cleanParticipants = participants
-      .filter((p) => p && (p.name?.trim() || p.signatureData || p.signatureMode === "REFUSED" || p.id))
+      .filter((p) => {
+        if (!p) return false;
+        const sig = getParticipantSignatureSummary(p);
+        return Boolean(p.name?.trim() || sig.hasPersistedSignature || sig.isRefused || p.id);
+      })
       .map((p) => {
         const trimmedName = (p.name || "").trim();
         return {
@@ -699,6 +850,7 @@ export default function AtaEditorModal({
 
   // Botão "Salvar Rascunho"
   const handleSaveDraft = async () => {
+    if (isHydratingMinute || hydrationError) return null;
     const hasPart = participants.length > 0;
     if (selectedStudentIds.length === 0 && !hasPart) {
       setStep(1);
@@ -733,6 +885,7 @@ export default function AtaEditorModal({
 
   // Botão "Lavrar Ata Oficial (Imutável)" — com validação de PIN de Fé Pública e Extemporaneidade
   const handleFinalize = async (overridePin?: string) => {
+    if (isHydratingMinute || hydrationError) return;
     setFinalizeError(null);
     setDraftSavedMsg(null);
 
@@ -820,7 +973,13 @@ export default function AtaEditorModal({
   };
 
   // Gerar QR Code ou Link remoto para participante assinar
-  const handleGenerateMobileSign = async (index: number, durationMinutes = signDurationOption) => {
+  const handleGenerateMobileSign = async (
+    index: number,
+    durationMinutes = signDurationOption,
+    expectedOpenParticipantId?: string
+  ) => {
+    if (isHydratingMinute || hydrationError || qrGenerationInFlightRef.current) return;
+
     setFinalizeError(null);
     const currentLocal = participants[index];
     if (!currentLocal?.name?.trim()) {
@@ -834,14 +993,29 @@ export default function AtaEditorModal({
       return;
     }
 
+    qrGenerationInFlightRef.current = true;
+    const reqSeq = ++qrRequestSeqRef.current;
+    const openIdAtStart = editorOpenIdRef.current;
+    const isRenewal = Boolean(expectedOpenParticipantId);
+
+    setIsGeneratingQr(true);
     setSaving(true);
     try {
       // Sempre sincroniza o rascunho para garantir que o participante exista no banco
       const saved = await saveDraftInternal();
-      if (!saved) return;
+      if (!saved || reqSeq !== qrRequestSeqRef.current || openIdAtStart !== editorOpenIdRef.current) {
+        return;
+      }
+      if (
+        isRenewal &&
+        (!qrPanelContextRef.current.isOpen ||
+          qrPanelContextRef.current.participantId !== expectedOpenParticipantId)
+      ) {
+        return;
+      }
 
-      const currentLocal = participants[index];
       const part =
+        saved.participants?.find((p) => currentLocal.id && p.id === currentLocal.id) ||
         saved.participants?.[index] ||
         saved.participants?.find((p) => p.name === currentLocal?.name);
       if (!part?.id) {
@@ -856,23 +1030,51 @@ export default function AtaEditorModal({
           expiresInMinutes: durationMinutes,
         }),
       });
-      const data = (await res.json()) as { error?: string; signUrl: string };
+      const data = (await res.json()) as {
+        error?: string;
+        signUrl: string;
+        expiresAt?: string;
+        expiresInMinutes?: number;
+      };
       if (!res.ok) throw new Error(data.error || "Falha ao gerar token de assinatura");
 
+      if (reqSeq !== qrRequestSeqRef.current || openIdAtStart !== editorOpenIdRef.current) {
+        return;
+      }
+      if (
+        isRenewal &&
+        (!qrPanelContextRef.current.isOpen ||
+          qrPanelContextRef.current.participantId !== expectedOpenParticipantId)
+      ) {
+        return;
+      }
+
       setMinuteId(saved.id);
-      setQrModalInfo({
+      const nextInfo = {
         participantId: part.id,
         url: data.signUrl,
         name: part.name,
-        expiresInMinutes: durationMinutes,
+        expiresInMinutes: data.expiresInMinutes || durationMinutes,
+        expiresAt: data.expiresAt || null,
         participantRole: currentLocal?.role || "PARTICIPANTE",
-        openId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `open-${Date.now()}-${Math.random()}`,
-      });
+        openId:
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `open-${Date.now()}-${Math.random()}`,
+      };
+      qrPanelContextRef.current = { isOpen: true, participantId: nextInfo.participantId };
+      setQrModalInfo(nextInfo);
       onSaved();
     } catch (err: unknown) {
-      setFinalizeError(getErrorMessage(err, "Erro ao gerar link de assinatura móvel."));
+      if (reqSeq === qrRequestSeqRef.current && openIdAtStart === editorOpenIdRef.current) {
+        setFinalizeError(getErrorMessage(err, "Erro ao gerar link de assinatura móvel."));
+      }
     } finally {
-      setSaving(false);
+      if (reqSeq === qrRequestSeqRef.current) {
+        qrGenerationInFlightRef.current = false;
+        setIsGeneratingQr(false);
+        setSaving(false);
+      }
     }
   };
 
@@ -1318,23 +1520,35 @@ export default function AtaEditorModal({
                           {p.verifiedEmail ? ` • ${p.verifiedEmail}` : ""}
                         </p>
                       </div>
-                      {p.verifiedEmail ? (
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold text-[11px]">
-                          ✓ @escola.pr.gov.br
-                        </span>
-                      ) : p.signatureData ? (
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
-                          {p.biometricVerified ? "✓ Biometria" : "✓ Assinado"}
-                        </span>
-                      ) : p.signatureMode === "REFUSED" ? (
-                        <span className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold text-[11px]">
-                          Recusa registrada
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold text-[11px]">
-                          Presença atestada
-                        </span>
-                      )}
+                      {(() => {
+                        const sig = getParticipantSignatureSummary(p);
+                        if (sig.isInstitutionalVerified && sig.hasPersistedSignature) {
+                          return (
+                            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold text-[11px]">
+                              ✓ @escola.pr.gov.br
+                            </span>
+                          );
+                        }
+                        if (sig.hasPersistedSignature) {
+                          return (
+                            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
+                              {p.biometricVerified ? "✓ Biometria" : "✓ Assinado"}
+                            </span>
+                          );
+                        }
+                        if (sig.isRefused) {
+                          return (
+                            <span className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold text-[11px]">
+                              Recusa registrada
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold text-[11px]">
+                            Presença atestada
+                          </span>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -1663,6 +1877,32 @@ export default function AtaEditorModal({
           </span>
         </div>
 
+        {isHydratingMinute && (
+          <div
+            role="status"
+            className="p-3 rounded-2xl bg-sky-50 border border-sky-200 text-sky-800 text-xs font-semibold flex items-center space-x-2"
+          >
+            <Clock className="w-4 h-4 text-sky-600 shrink-0 animate-spin" />
+            <span>Carregando dados completos da ata...</span>
+          </div>
+        )}
+
+        {hydrationError && (
+          <div
+            role="alert"
+            className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex flex-wrap items-center justify-between gap-2"
+          >
+            <span className="font-semibold">{hydrationError}</span>
+            <button
+              type="button"
+              onClick={() => setHydrationRetryKey((k) => k + 1)}
+              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
         {/* ============================================================== */}
         {/* ETAPA 1: SELEÇÃO AMPLA E BUSCA DE ALUNOS + PAUTA E CATEGORIA   */}
         {/* ============================================================== */}
@@ -1739,7 +1979,10 @@ export default function AtaEditorModal({
                     <input
                       type="text"
                       value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
+                      onChange={(e) => {
+                        markLocalEdit();
+                        setSubject(e.target.value);
+                      }}
                       placeholder="Ex.: Comparecimento da família para alinhamento pedagógico e faltas"
                       className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm focus:outline-sky-500 shadow-2xs"
                     />
@@ -2377,7 +2620,10 @@ export default function AtaEditorModal({
                   <textarea
                     rows={3}
                     value={rawNotes}
-                    onChange={(e) => setRawNotes(e.target.value)}
+                    onChange={(e) => {
+                      markLocalEdit();
+                      setRawNotes(e.target.value);
+                    }}
                     placeholder="Anotações dos fatos para redação da ata..."
                     className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs"
                   />
@@ -2410,7 +2656,10 @@ export default function AtaEditorModal({
                   <input
                     type="text"
                     value={agreementsSummary}
-                    onChange={(e) => setAgreementsSummary(e.target.value)}
+                    onChange={(e) => {
+                      markLocalEdit();
+                      setAgreementsSummary(e.target.value);
+                    }}
                     placeholder="Ex.: Responsável apresentará atestado e estudante realizará compensação pedagógica."
                     className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 text-xs shadow-2xs"
                   />
@@ -2571,43 +2820,51 @@ export default function AtaEditorModal({
                           </div>
 
                           <div className="flex items-center space-x-1.5">
-                            {p.verifiedEmail || p.signatureData ? (
-                              <div className="flex items-center space-x-1.5">
-                                <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>
-                                    {p.verifiedEmail
-                                      ? `✓ @escola (${p.verifiedEmail})`
-                                      : p.biometricVerified
-                                      ? "✓ Assinado com Biometria"
-                                      : "✓ Assinado Digitalmente"}
-                                  </span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const copy = [...participants];
-                                    copy[idx] = {
-                                      ...copy[idx],
-                                      signatureData: null,
-                                      signatureMode: "PENDING",
-                                      verifiedEmail: null,
-                                      verifiedGoogleSub: null,
-                                      verifiedGoogleName: null,
-                                      biometricVerified: false,
-                                      clearSignature: true,
-                                    };
-                                    setParticipants(copy);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
-                                  title="Refazer assinatura"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ) : p.signatureMode === "REFUSED" ? (
-                              <div className="flex items-center space-x-1.5">
-                                <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
+                            {(() => {
+                              const sig = getParticipantSignatureSummary(p);
+                              if (sig.hasPersistedSignature) {
+                                return (
+                                  <div className="flex items-center space-x-1.5">
+                                    <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>
+                                        {sig.isInstitutionalVerified
+                                          ? `✓ @escola (${p.verifiedEmail})`
+                                          : p.biometricVerified
+                                          ? "✓ Assinado com Biometria"
+                                          : "✓ Assinado Digitalmente"}
+                                      </span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        markLocalEdit();
+                                        const copy = [...participants];
+                                        copy[idx] = {
+                                          ...copy[idx],
+                                          signatureData: null,
+                                          hasSignature: false,
+                                          signatureMode: "PENDING",
+                                          verifiedEmail: null,
+                                          verifiedGoogleSub: null,
+                                          verifiedGoogleName: null,
+                                          biometricVerified: false,
+                                          clearSignature: true,
+                                        };
+                                        setParticipants(copy);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                                      title="Refazer assinatura"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              if (sig.isRefused) {
+                                return (
+                                  <div className="flex items-center space-x-1.5">
+                                    <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
                                   <AlertCircle className="w-3.5 h-3.5" />
                                   <span>Recusou-se a assinar</span>
                                 </span>
@@ -2630,7 +2887,9 @@ export default function AtaEditorModal({
                                   <RotateCcw className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                            ) : (
+                                );
+                              }
+                              return (
                               <>
                                 <button
                                   type="button"
@@ -2647,7 +2906,7 @@ export default function AtaEditorModal({
                                 <button
                                   type="button"
                                   onClick={() => handleGenerateMobileSign(idx)}
-                                  disabled={saving}
+                                  disabled={saving || isGeneratingQr || isHydratingMinute}
                                   className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                                 >
                                   <QrCode className="w-3.5 h-3.5" />
@@ -2666,7 +2925,8 @@ export default function AtaEditorModal({
                                   Recusa
                                 </button>
                               </>
-                            )}
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -2721,7 +2981,7 @@ export default function AtaEditorModal({
                         )}
 
                         {/* Canvas de Assinatura em tela */}
-                        {activeSignParticipantIndex === idx && !p.signatureData && (
+                        {activeSignParticipantIndex === idx && !getParticipantSignatureSummary(p).hasPersistedSignature && (
                           <div className="pt-2">
                             <SignatureCanvas
                               signerName={p.name || "Participante"}
@@ -2763,11 +3023,15 @@ export default function AtaEditorModal({
                     <AtaQrPollStatusBanner
                       state={qrUiState}
                       onRetry={() => void handleQrRetryAction()}
-                      onClose={() => setQrModalInfo(null)}
+                      onClose={() => closeQrPanel()}
                       onRenewLink={() => {
                         const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
                         if (pIdx >= 0) {
-                          void handleGenerateMobileSign(pIdx, qrModalInfo.expiresInMinutes || 20);
+                          void handleGenerateMobileSign(
+                            pIdx,
+                            qrModalInfo.expiresInMinutes || 20,
+                            qrModalInfo.participantId
+                          );
                         } else {
                           void refreshQrMinute();
                         }
@@ -2786,52 +3050,73 @@ export default function AtaEditorModal({
                             ? "O(A) docente pode assinar em 1 clique conectando sua conta institucional @escola.pr.gov.br ou na tela do celular."
                             : "Aguardando assinatura em tempo real..."}
                         </p>
+                        {(() => {
+                          const validity = formatSignLinkValidity(qrModalInfo.expiresAt, validityNowMs);
+                          if (!validity) return null;
+                          return (
+                            <p
+                              className={`text-[11px] font-semibold mt-1 flex items-center space-x-1 ${
+                                validity.isLocallyElapsed ? "text-amber-700" : "text-sky-900"
+                              }`}
+                            >
+                              <Clock className="w-3 h-3 shrink-0" />
+                              <span>{validity.label}</span>
+                            </p>
+                          );
+                        })()}
                       </div>
 
                       {/* Seletor de Validade do Token */}
-                      <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-sky-200 text-xs">
-                        <span className="text-[10px] text-slate-400 font-bold px-1.5 flex items-center space-x-1">
-                          <Clock className="w-3 h-3 text-sky-600" />
-                          <span>Validade:</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-sky-200 text-xs">
+                          <span className="text-[10px] text-slate-400 font-bold px-1.5 flex items-center space-x-1">
+                            <Clock className="w-3 h-3 text-sky-600" />
+                            <span>{isGeneratingQr ? "Atualizando..." : "Validade:"}</span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={saving || isGeneratingQr || isHydratingMinute}
+                            onClick={() => {
+                              setSignDurationOption(20);
+                              const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
+                              if (pIdx >= 0) {
+                                void handleGenerateMobileSign(pIdx, 20, qrModalInfo.participantId);
+                              } else {
+                                void refreshQrMinute();
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                              qrModalInfo.expiresInMinutes === 20
+                                ? "bg-sky-600 text-white"
+                                : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            20 min (Presencial)
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving || isGeneratingQr || isHydratingMinute}
+                            onClick={() => {
+                              setSignDurationOption(1440);
+                              const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
+                              if (pIdx >= 0) {
+                                void handleGenerateMobileSign(pIdx, 1440, qrModalInfo.participantId);
+                              } else {
+                                void refreshQrMinute();
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                              qrModalInfo.expiresInMinutes === 1440
+                                ? "bg-sky-600 text-white"
+                                : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            24 horas (Remoto)
+                          </button>
+                        </div>
+                        <span className="text-[10px] text-slate-500">
+                          Alterar a validade gera um novo QR Code e invalida o link anterior.
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSignDurationOption(20);
-                            const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
-                            if (pIdx >= 0) {
-                              void handleGenerateMobileSign(pIdx, 20);
-                            } else {
-                              void refreshQrMinute();
-                            }
-                          }}
-                          className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition ${
-                            qrModalInfo.expiresInMinutes === 20
-                              ? "bg-sky-600 text-white"
-                              : "text-slate-600 hover:bg-slate-100"
-                          }`}
-                        >
-                          20 min (Presencial)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSignDurationOption(1440);
-                            const pIdx = participants.findIndex((p) => p.id === qrModalInfo.participantId);
-                            if (pIdx >= 0) {
-                              void handleGenerateMobileSign(pIdx, 1440);
-                            } else {
-                              void refreshQrMinute();
-                            }
-                          }}
-                          className={`px-2 py-0.5 rounded-lg font-bold text-[11px] cursor-pointer transition ${
-                            qrModalInfo.expiresInMinutes === 1440
-                              ? "bg-sky-600 text-white"
-                              : "text-slate-600 hover:bg-slate-100"
-                          }`}
-                        >
-                          24 horas (Remoto)
-                        </button>
                       </div>
                     </div>
 
@@ -2921,7 +3206,7 @@ export default function AtaEditorModal({
                     <div className="flex justify-end pt-1">
                       <button
                         type="button"
-                        onClick={() => setQrModalInfo(null)}
+                        onClick={() => closeQrPanel()}
                         className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer transition"
                       >
                         Fechar Painel de Assinatura
@@ -2975,7 +3260,7 @@ export default function AtaEditorModal({
                 <button
                   type="button"
                   onClick={handleSaveDraft}
-                  disabled={saving || savingFinal}
+                  disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
                 >
                   {saving ? "Salvando..." : "Salvar Rascunho"}
@@ -2984,7 +3269,7 @@ export default function AtaEditorModal({
                 <button
                   type="button"
                   onClick={() => handleFinalize()}
-                  disabled={saving || savingFinal}
+                  disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
                   className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
                 >
                   <FileCheck2 className="w-4 h-4 text-emerald-200" />

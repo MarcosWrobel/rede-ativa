@@ -451,98 +451,104 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
   });
 
   it("[JUR-01 & JUR-03] bloqueia lavratura sem PIN cadastrado (signingPinHash === null), preserva biometricStrokeData no PATCH e sela no SHA-256", async () => {
-    hoisted.state.db.minutes.push({
-      id: "ata-1",
-      schoolId: "escola-a",
-      year: 2026,
-      status: "DRAFT",
-      category: "BUSCA_ATIVA_FALTAS",
-      isConfidential: false,
-      attendedAt: new Date("2026-11-05T14:00:00.000Z"),
-      subject: "Reunião de Frequência",
-      summary: "Aos cinco dias de novembro, realizou-se atendimento com a família.",
-      authorName: "Pedagoga Ana",
-      authorEmail: "ana@escola-a.pr.gov.br",
-      authorRole: "PEDAGOGA",
-    });
-    hoisted.state.db.minuteStudents.push({
-      id: "ms-1",
-      minuteId: "ata-1",
-      studentId: "stu-a1",
-      studentNameSnapshot: "Lucas Mendes",
-    });
-    hoisted.state.db.minuteParticipants.push({
-      id: "mp-1",
-      minuteId: "ata-1",
-      role: "RESPONSAVEL",
-      studentId: "stu-a1",
-      name: "Mãe do Lucas",
-      signatureMode: "MOBILE_QR",
-      signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA",
-      biometricStrokeData: JSON.stringify([{ x: 10, y: 20, t: 100, p: 0.8 }]),
-      signerUserAgent: "Mozilla/5.0 Android",
-      signedAt: new Date("2026-11-05T14:05:00.000Z"),
-    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-10T14:00:00.000Z"));
+    try {
+      hoisted.state.db.minutes.push({
+        id: "ata-1",
+        schoolId: "escola-a",
+        year: 2026,
+        status: "DRAFT",
+        category: "BUSCA_ATIVA_FALTAS",
+        isConfidential: false,
+        attendedAt: new Date("2026-11-05T14:00:00.000Z"),
+        subject: "Reunião de Frequência",
+        summary: "Aos cinco dias de novembro, realizou-se atendimento com a família.",
+        authorName: "Pedagoga Ana",
+        authorEmail: "ana@escola-a.pr.gov.br",
+        authorRole: "PEDAGOGA",
+      });
+      hoisted.state.db.minuteStudents.push({
+        id: "ms-1",
+        minuteId: "ata-1",
+        studentId: "stu-a1",
+        studentNameSnapshot: "Lucas Mendes",
+      });
+      hoisted.state.db.minuteParticipants.push({
+        id: "mp-1",
+        minuteId: "ata-1",
+        role: "RESPONSAVEL",
+        studentId: "stu-a1",
+        name: "Mãe do Lucas",
+        signatureMode: "MOBILE_QR",
+        signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA",
+        biometricStrokeData: JSON.stringify([{ x: 10, y: 20, t: 100, p: 0.8 }]),
+        signerUserAgent: "Mozilla/5.0 Android",
+        signedAt: new Date("2026-11-05T14:05:00.000Z"),
+      });
 
-    // 1. Salvamento de rascunho via PATCH NÃO apaga biometricStrokeData nem signerUserAgent
-    const patchRes = await patchAta(
-      new Request("http://localhost:3000/api/atas/ata-1", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: "Reunião de Frequência Escolar",
-          participants: [{ id: "mp-1", role: "RESPONSAVEL", name: "Mãe do Lucas", signatureMode: "MOBILE_QR" }],
+      // 1. Salvamento de rascunho via PATCH NÃO apaga biometricStrokeData nem signerUserAgent
+      const patchRes = await patchAta(
+        new Request("http://localhost:3000/api/atas/ata-1", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Reunião de Frequência Escolar",
+            participants: [{ id: "mp-1", role: "RESPONSAVEL", name: "Mãe do Lucas", signatureMode: "MOBILE_QR" }],
+          }),
         }),
-      }),
-      { params: Promise.resolve({ id: "ata-1" }) }
-    );
-    expect(patchRes.status).toBe(200);
-    expect(hoisted.state.db.minuteParticipants[0].biometricStrokeData).toContain('"p":0.8');
-    expect(hoisted.state.db.minuteParticipants[0].signerUserAgent).toBe("Mozilla/5.0 Android");
+        { params: Promise.resolve({ id: "ata-1" }) }
+      );
+      expect(patchRes.status).toBe(200);
+      expect(hoisted.state.db.minuteParticipants[0].biometricStrokeData).toContain('"p":0.8');
+      expect(hoisted.state.db.minuteParticipants[0].signerUserAgent).toBe("Mozilla/5.0 Android");
 
-    // 2. Tentativa de lavrar com signingPinHash === null é BLOQUEADA com 401 PIN_REQUIRED
-    const noPinSetupRes = await finalizeAta(
-      new Request("http://localhost:3000/api/atas/ata-1/finalize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-      { params: Promise.resolve({ id: "ata-1" }) }
-    );
-    expect(noPinSetupRes.status).toBe(401);
-    const noPinBody = await noPinSetupRes.json();
-    expect(noPinBody.error).toContain("PIN_REQUIRED");
+      // 2. Tentativa de lavrar com signingPinHash === null é BLOQUEADA com 401 PIN_REQUIRED
+      const noPinSetupRes = await finalizeAta(
+        new Request("http://localhost:3000/api/atas/ata-1/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }),
+        { params: Promise.resolve({ id: "ata-1" }) }
+      );
+      expect(noPinSetupRes.status).toBe(401);
+      const noPinBody = await noPinSetupRes.json();
+      expect(noPinBody.error).toContain("PIN_REQUIRED");
 
-    // 3. Cadastra PIN e lavra oficialmente
-    hoisted.state.db.users[0].signingPinHash = await hashPin("7392");
-    const okFin = await finalizeAta(
-      new Request("http://localhost:3000/api/atas/ata-1/finalize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signingPin: "7392" }),
-      }),
-      { params: Promise.resolve({ id: "ata-1" }) }
-    );
-    expect(okFin.status).toBe(200);
-    const finData = await okFin.json();
-    const verCode = finData.minute.verificationCode;
+      // 3. Cadastra PIN e lavra oficialmente
+      hoisted.state.db.users[0].signingPinHash = await hashPin("7392");
+      const okFin = await finalizeAta(
+        new Request("http://localhost:3000/api/atas/ata-1/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signingPin: "7392" }),
+        }),
+        { params: Promise.resolve({ id: "ata-1" }) }
+      );
+      expect(okFin.status).toBe(200);
+      const finData = await okFin.json();
+      const verCode = finData.minute.verificationCode;
 
-    // 4. [JUR-02] Certidão pública valida o hash em tempo real (Autêntica)
-    const pubOk = await getPublicAta(
-      new Request(`http://localhost:3000/api/atas/public/${verCode}`),
-      { params: Promise.resolve({ code: verCode }) }
-    );
-    const pubOkJson = await pubOk.json();
-    expect(pubOkJson.data.isAuthentic).toBe(true);
+      // 4. [JUR-02] Certidão pública valida o hash em tempo real (Autêntica)
+      const pubOk = await getPublicAta(
+        new Request(`http://localhost:3000/api/atas/public/${verCode}`),
+        { params: Promise.resolve({ code: verCode }) }
+      );
+      const pubOkJson = await pubOk.json();
+      expect(pubOkJson.data.isAuthentic).toBe(true);
 
-    // 5. Adulterar biometricStrokeData ou summary direto no banco faz Certidão Pública acusar fraude (isAuthentic: false)!
-    hoisted.state.db.minuteParticipants[0].biometricStrokeData = JSON.stringify([{ x: 99, y: 99, t: 1, p: 0.1 }]);
-    const pubTamperedStroke = await getPublicAta(
-      new Request(`http://localhost:3000/api/atas/public/${verCode}`),
-      { params: Promise.resolve({ code: verCode }) }
-    );
-    const pubTamperedJson = await pubTamperedStroke.json();
-    expect(pubTamperedJson.data.isAuthentic).toBe(false);
+      // 5. Adulterar biometricStrokeData ou summary direto no banco faz Certidão Pública acusar fraude (isAuthentic: false)!
+      hoisted.state.db.minuteParticipants[0].biometricStrokeData = JSON.stringify([{ x: 99, y: 99, t: 1, p: 0.1 }]);
+      const pubTamperedStroke = await getPublicAta(
+        new Request(`http://localhost:3000/api/atas/public/${verCode}`),
+        { params: Promise.resolve({ code: verCode }) }
+      );
+      const pubTamperedJson = await pubTamperedStroke.json();
+      expect(pubTamperedJson.data.isAuthentic).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("[JUR-01 & JUR-04] restringe VOID_ATA e DELETE /physical-scan em ata FINALIZED à Direção Escolar + PIN", async () => {

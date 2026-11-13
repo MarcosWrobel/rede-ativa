@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp } from "@/lib/audit";
 import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
+import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import { z } from "zod";
 import {
   verifyEscolaGoogleIdToken,
@@ -62,17 +63,34 @@ export async function GET(
     });
 
     if (!participant) {
-      return NextResponse.json({ error: "Link de assinatura inválido ou expirado." }, { status: 404 });
+      console.warn("[GET /api/atas/sign-token] Acesso recusado:", { reason: "token_not_found" });
+      return NextResponse.json(
+        { error: "Link de assinatura inválido, substituído, revogado ou já utilizado." },
+        { status: 404 }
+      );
     }
 
     if (participant.minute.status !== "DRAFT") {
+      console.warn("[GET /api/atas/sign-token] Acesso recusado:", {
+        reason: "minute_not_draft",
+        minuteId: participant.minute.id,
+        participantId: participant.id,
+      });
       return NextResponse.json(
         { error: "Esta ata pedagógica já foi finalizada ou cancelada." },
         { status: 410 }
       );
     }
 
-    if (participant.mobileSignExpiresAt && new Date() > participant.mobileSignExpiresAt) {
+    const nowMs = Date.now();
+    if (isSignTokenExpired(participant.mobileSignExpiresAt, nowMs)) {
+      console.warn("[GET /api/atas/sign-token] Acesso recusado:", {
+        reason: "expired",
+        minuteId: participant.minute.id,
+        participantId: participant.id,
+        nowIso: new Date(nowMs).toISOString(),
+        expiresAtIso: participant.mobileSignExpiresAt?.toISOString() || null,
+      });
       return NextResponse.json({ error: "Este link de assinatura expirou. Solicite um novo link à equipe escolar." }, { status: 410 });
     }
 
@@ -139,17 +157,34 @@ export async function POST(
     });
 
     if (!participant) {
-      return NextResponse.json({ error: "Link de assinatura inválido ou expirado." }, { status: 404 });
+      console.warn("[POST /api/atas/sign-token] Submissão recusada:", { reason: "token_not_found" });
+      return NextResponse.json(
+        { error: "Link de assinatura inválido, substituído, revogado ou já utilizado." },
+        { status: 404 }
+      );
     }
 
     if (participant.minute.status !== "DRAFT") {
+      console.warn("[POST /api/atas/sign-token] Submissão recusada:", {
+        reason: "minute_not_draft",
+        minuteId: participant.minute.id,
+        participantId: participant.id,
+      });
       return NextResponse.json(
         { error: "Esta ata pedagógica já foi finalizada ou cancelada." },
         { status: 410 }
       );
     }
 
-    if (participant.mobileSignExpiresAt && new Date() > participant.mobileSignExpiresAt) {
+    const postNowMs = Date.now();
+    if (isSignTokenExpired(participant.mobileSignExpiresAt, postNowMs)) {
+      console.warn("[POST /api/atas/sign-token] Submissão recusada:", {
+        reason: "expired",
+        minuteId: participant.minute.id,
+        participantId: participant.id,
+        nowIso: new Date(postNowMs).toISOString(),
+        expiresAtIso: participant.mobileSignExpiresAt?.toISOString() || null,
+      });
       return NextResponse.json({ error: "Este link de assinatura expirou." }, { status: 410 });
     }
 

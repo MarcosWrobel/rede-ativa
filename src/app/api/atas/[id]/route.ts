@@ -5,6 +5,7 @@ import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import {
   mergeParticipantSignatures,
   sanitizeMinutePayload,
@@ -131,9 +132,7 @@ export async function GET(
           hasActiveSignLink: Boolean(p.hasActiveSignLink),
           institutionalVerificationComplete: Boolean(p.verifiedEmail),
           linkExpired: Boolean(
-            p.hasActiveSignLink &&
-              p.mobileSignExpiresAt &&
-              p.mobileSignExpiresAt.getTime() <= nowMs
+            p.hasActiveSignLink && isSignTokenExpired(p.mobileSignExpiresAt, nowMs)
           ),
         })),
       });

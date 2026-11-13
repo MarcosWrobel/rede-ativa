@@ -69,6 +69,13 @@ export async function POST(
     const proto = req.headers.get("x-forwarded-proto") || "http";
     const signUrl = `${proto}://${host}/assinar/ata/${token}`;
 
+    console.info("[POST /api/atas/[id]/sign-token] Link emitido:", {
+      minuteId: id,
+      participantId,
+      validMinutes,
+      expiresAt: expiresAt.toISOString(),
+    });
+
     return NextResponse.json({
       success: true,
       token,

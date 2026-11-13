@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
+import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import MobileSignClient from "./MobileSignClient";
 
 interface Props {
@@ -25,9 +26,9 @@ export default async function AssinarAtaPage({ params }: Props) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center space-y-3">
-          <h1 className="text-lg font-black text-slate-900">Link Expirado ou Inválido</h1>
+          <h1 className="text-lg font-black text-slate-900">Link Inválido, Substituído ou Já Utilizado</h1>
           <p className="text-xs text-slate-500">
-            Este link de assinatura digital já foi utilizado ou ultrapassou a validade temporária. Solicite à equipe escolar para gerar um novo link ou QR Code.
+            Este link de assinatura digital não está mais ativo porque já foi utilizado, foi substituído por um novo QR Code ou foi revogado. Solicite à equipe escolar um link atualizado.
           </p>
         </div>
       </div>
@@ -47,7 +48,7 @@ export default async function AssinarAtaPage({ params }: Props) {
     );
   }
 
-  if (participant.mobileSignExpiresAt && new Date() > participant.mobileSignExpiresAt) {
+  if (isSignTokenExpired(participant.mobileSignExpiresAt)) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center space-y-3">
