@@ -6,6 +6,7 @@ import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { sanitizeMinutePayload } from "@/services/ataParticipantService";
+import { sanitizeKinshipForRole } from "@/lib/participantKinship";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -361,11 +362,13 @@ export async function POST(req: Request) {
           })),
         },
         participants: {
-          create: participants.map((p) => ({
-            role: p.role,
-            studentId: p.studentId || null,
-            name: p.name,
-            kinship: p.kinship || null,
+          create: participants.map((p) => {
+            const isSigned = Boolean(p.signatureData || p.verifiedEmail || p.biometricVerified);
+            return {
+              role: p.role,
+              studentId: p.studentId || null,
+              name: p.name,
+              kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
             documentType: p.documentType || null,
             documentNumber: p.documentNumber || null,
             documentVerifiedByStaff: p.documentVerifiedByStaff,
@@ -385,7 +388,7 @@ export async function POST(req: Request) {
             emailVerifiedAt: null,
             refusalReason: p.refusalReason || null,
             witnessName: p.witnessName || null,
-          })),
+          }; }),
         },
         actionItems: {
           create: actionItems.map((a) => ({

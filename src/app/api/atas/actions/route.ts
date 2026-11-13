@@ -12,7 +12,7 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const statusParam = searchParams.get("status") || "ALL"; // ALL | PENDING | OVERDUE | COMPLETED
-    const responsible = searchParams.get("responsible") || "ALL"; // ALL | FAMILIA | ESTUDANTE | ESCOLA | REDE_PROTECAO
+    const responsible = searchParams.get("responsible") || "ALL"; // ALL | FAMILIA | ESTUDANTE | ESCOLA | DOCENTE | REDE_PROTECAO
     const search = searchParams.get("q")?.trim();
     const classGroupId = searchParams.get("classGroupId");
     const limit = Math.min(Number(searchParams.get("limit") || 150), 300);

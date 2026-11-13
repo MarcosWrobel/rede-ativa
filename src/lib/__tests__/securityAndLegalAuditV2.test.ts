@@ -214,8 +214,25 @@ vi.mock("@/lib/prisma", () => {
         const minute = buildMinute(hoisted.state.db.minutes.find((m) => m.id === p.minuteId));
         return { ...p, minute };
       }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        const p = hoisted.state.db.minuteParticipants.find(
+          (item) =>
+            (where.id ? item.id === where.id : true) &&
+            (where.minuteId ? item.minuteId === where.minuteId : true) &&
+            (where.mobileSignToken ? item.mobileSignToken === where.mobileSignToken : true)
+        );
+        if (!p) return null;
+        const minute = buildMinute(hoisted.state.db.minutes.find((m) => m.id === p.minuteId));
+        return { ...p, minute };
+      }),
       findMany: vi.fn(async ({ where }: any) => {
         return hoisted.state.db.minuteParticipants.filter((p) => p.minuteId === where.minuteId);
+      }),
+      update: vi.fn(async ({ where, data }: any) => {
+        const p = hoisted.state.db.minuteParticipants.find((item) => item.id === where.id);
+        if (!p) throw new Error("Not found");
+        Object.assign(p, data);
+        return p;
       }),
       deleteMany: vi.fn(async ({ where }: any) => {
         hoisted.state.db.minuteParticipants = hoisted.state.db.minuteParticipants.filter(

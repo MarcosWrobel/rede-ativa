@@ -10,6 +10,7 @@ import {
   mergeParticipantSignatures,
   sanitizeMinutePayload,
 } from "@/services/ataParticipantService";
+import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -264,6 +265,27 @@ export async function PATCH(
         : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
 
     const updated = await runTx(async (tx) => {
+      await acquireMinuteWriteLock(tx, id);
+
+      const lockedMinute = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+        include: { participants: true },
+      });
+
+      if (!lockedMinute) {
+        throw new Error("NOT_FOUND:Ata não encontrada");
+      }
+
+      if (!assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, authCheck.session)) {
+        throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
+      }
+
+      if (lockedMinute.status !== "DRAFT") {
+        throw new Error(
+          "IMMUTABLE:Ata já lavrada e imutável juridicamente (Lei nº 14.063/2020). Qualquer retificação deve ser feita via Adendo ('Em tempo'), Despacho de Cancelamento ou anexo auditado em /physical-scan."
+        );
+      }
+
       // Se informou studentIds, valida e atualiza vínculos garantindo isolamento multi-tenant
       if (data.studentIds !== undefined) {
         const uniqueStudentIds = Array.from(new Set(data.studentIds));
@@ -275,7 +297,7 @@ export async function PATCH(
               ? data.participants.length
               : tx.pedagogicalMinuteParticipant?.count
                 ? await tx.pedagogicalMinuteParticipant.count({ where: { minuteId: id } })
-                : (existing.participants || []).length;
+                : (lockedMinute.participants || []).length;
 
           if (participantsCount === 0) {
             throw new Error(
@@ -286,7 +308,7 @@ export async function PATCH(
           await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
         } else {
           const studentsDb = await tx.student.findMany({
-            where: { id: { in: uniqueStudentIds }, schoolId: existing.schoolId },
+            where: { id: { in: uniqueStudentIds }, schoolId: lockedMinute.schoolId },
             include: { classGroup: true },
           });
 
@@ -313,7 +335,7 @@ export async function PATCH(
       if (data.participants) {
         const existingParticipants = tx.pedagogicalMinuteParticipant?.findMany
           ? await tx.pedagogicalMinuteParticipant.findMany({ where: { minuteId: id } })
-          : existing.participants || [];
+          : lockedMinute.participants || [];
 
         const participantsToCreate = mergeParticipantSignatures(
           data.participants,
@@ -360,8 +382,8 @@ export async function PATCH(
                 ? {
                     hasPhysicalScan: Boolean(
                       data.physicalSignedScanData ||
-                        existing.physicalScanStorageKey ||
-                        existing.physicalScanSha256
+                        lockedMinute.physicalScanStorageKey ||
+                        lockedMinute.physicalScanSha256
                     ),
                   }
                 : {}),
@@ -393,6 +415,15 @@ export async function PATCH(
     return NextResponse.json({ success: true, minute: updated });
   } catch (error: any) {
     const msg = error?.message || "";
+    if (msg.startsWith("NOT_FOUND:")) {
+      return NextResponse.json({ error: msg.replace("NOT_FOUND:", "") }, { status: 404 });
+    }
+    if (msg.startsWith("FORBIDDEN:") || msg.startsWith("IMMUTABLE:")) {
+      return NextResponse.json({ error: msg.replace(/^(FORBIDDEN|IMMUTABLE):/, "") }, { status: 403 });
+    }
+    if (msg.startsWith("CONFLICT:")) {
+      return NextResponse.json({ error: msg.replace("CONFLICT:", "") }, { status: 409 });
+    }
     if (msg.startsWith("VALIDATION:")) {
       return NextResponse.json({ error: msg.replace("VALIDATION:", "") }, { status: 400 });
     }

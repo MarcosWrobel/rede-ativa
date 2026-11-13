@@ -213,6 +213,7 @@ vi.mock("@/lib/prisma", () => {
         return null;
       }),
     },
+    $executeRaw: vi.fn(async () => 1),
     $transaction: vi.fn(async (cb: any) => {
       return cb(mockPrisma);
     }),

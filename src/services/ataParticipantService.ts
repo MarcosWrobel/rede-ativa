@@ -1,3 +1,8 @@
+import {
+  hasProtectedParticipantIdentityChanged,
+  sanitizeKinshipForRole,
+} from "@/lib/participantKinship";
+
 export interface IncomingMinuteParticipant {
   id?: string;
   role?: string;
@@ -12,10 +17,13 @@ export interface IncomingMinuteParticipant {
   signatureData?: string | null;
   signedAt?: string | Date | null;
   clearSignature?: boolean;
+  hasSignature?: boolean;
   signerUserAgent?: string | null;
   biometricStrokeData?: string | null;
   clientTimestampIso?: string | null;
   expectedEmail?: string | null;
+  verifiedEmail?: string | null;
+  biometricVerified?: boolean;
   refusalReason?: string | null;
   witnessName?: string | null;
 }
@@ -25,21 +33,28 @@ export interface ExistingMinuteParticipant {
   role?: string;
   studentId?: string | null;
   name: string;
+  kinship?: string | null;
+  documentType?: string | null;
+  documentNumber?: string | null;
   signatureMode?: string;
   signatureData?: string | null;
   signedAt?: Date | string | null;
+  hasSignature?: boolean;
   signerIp?: string | null;
   signerUserAgent?: string | null;
   biometricStrokeData?: string | null;
   clientTimestampIso?: string | null;
   mobileSignToken?: string | null;
   mobileSignExpiresAt?: Date | string | null;
+  hasActiveSignLink?: boolean;
   biometricVerified?: boolean;
   biometricDeviceType?: string | null;
   biometricAuthTime?: Date | string | null;
   expectedEmail?: string | null;
   verifiedEmail?: string | null;
   verifiedGoogleSub?: string | null;
+  refusalReason?: string | null;
+  witnessName?: string | null;
   verifiedGoogleName?: string | null;
   emailVerifiedAt?: Date | string | null;
 }
@@ -113,9 +128,13 @@ export function sanitizeMinutePayload<T>(rawBody: T, mode: "CREATE" | "UPDATE"):
       )
       .map((p: any) => {
         const trimmedName = (p.name || "").trim();
+        const isSigned = Boolean(
+          p.signatureData || p.hasSignature || p.verifiedEmail || p.biometricVerified
+        );
         return {
           ...p,
           name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
+          kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
         };
       });
   }
@@ -181,6 +200,49 @@ export function mergeParticipantSignatures(
 
     const shouldClear = Boolean(p.clearSignature);
     const isRefused = p.signatureMode === "REFUSED";
+    const matchHasSigned = Boolean(
+      match &&
+        (match.hasSignature ||
+          match.signatureData ||
+          match.verifiedEmail ||
+          match.biometricVerified)
+    );
+
+    const effectiveRole = p.role || "RESPONSAVEL";
+    const resolvedStudentId =
+      p.studentId !== undefined ? p.studentId || null : (match?.studentId ?? null);
+    const resolvedDocumentType =
+      p.documentType !== undefined ? p.documentType || null : (match?.documentType ?? null);
+    const resolvedDocumentNumber =
+      p.documentNumber !== undefined ? p.documentNumber || null : (match?.documentNumber ?? null);
+    const resolvedExpectedEmail =
+      p.expectedEmail !== undefined ? p.expectedEmail || null : (match?.expectedEmail ?? null);
+    const resolvedRawKinship = p.kinship !== undefined ? p.kinship : match?.kinship;
+
+    const sanitizedIncomingKinship = sanitizeKinshipForRole(
+      effectiveRole,
+      resolvedRawKinship,
+      { isSigned: matchHasSigned && !shouldClear && !isRefused }
+    );
+
+    const identityChanged = Boolean(
+      match &&
+        hasProtectedParticipantIdentityChanged(match, {
+          role: effectiveRole,
+          name: finalName,
+          studentId: resolvedStudentId,
+          documentType: resolvedDocumentType,
+          documentNumber: resolvedDocumentNumber,
+          expectedEmail: resolvedExpectedEmail,
+          kinship: sanitizedIncomingKinship,
+        })
+    );
+
+    if (matchHasSigned && identityChanged && !shouldClear && !isRefused) {
+      throw new Error(
+        "CONFLICT:Este participante já possui assinatura ou verificação registrada no servidor. Refaça a assinatura antes de alterar identidade ou função."
+      );
+    }
 
     const sigData = shouldClear || isRefused ? null : (p.signatureData || match?.signatureData || null);
     const sigMode = isRefused
@@ -214,19 +276,20 @@ export function mergeParticipantSignatures(
         : sigMode;
 
     const shouldBurnToken =
-      options.clearMobileTokens || Boolean(sigData || verifiedEmail || shouldClear || isRefused);
+      options.clearMobileTokens ||
+      Boolean(sigData || verifiedEmail || shouldClear || isRefused || identityChanged);
     const finalMobileSignToken = shouldBurnToken ? null : (match?.mobileSignToken || null);
     const finalMobileSignExpiresAt = shouldBurnToken ? null : toNullableDate(match?.mobileSignExpiresAt);
 
     return {
       ...(match?.id ? { id: match.id } : {}),
       ...(options.minuteId ? { minuteId: options.minuteId } : {}),
-      role: p.role || "RESPONSAVEL",
-      studentId: p.studentId || null,
+      role: effectiveRole,
+      studentId: resolvedStudentId,
       name: finalName,
-      kinship: p.kinship || null,
-      documentType: p.documentType || null,
-      documentNumber: p.documentNumber || null,
+      kinship: sanitizedIncomingKinship,
+      documentType: resolvedDocumentType,
+      documentNumber: resolvedDocumentNumber,
       documentVerifiedByStaff: Boolean(p.documentVerifiedByStaff),
       phone: p.phone || null,
       signatureMode: effectiveSigMode,
@@ -246,13 +309,21 @@ export function mergeParticipantSignatures(
       biometricVerified: bioVerified,
       biometricDeviceType: bioDevice,
       biometricAuthTime: bioTime,
-      expectedEmail: p.expectedEmail !== undefined ? p.expectedEmail : (match?.expectedEmail || null),
+      expectedEmail: resolvedExpectedEmail,
       verifiedEmail,
       verifiedGoogleSub,
       verifiedGoogleName,
       emailVerifiedAt,
-      refusalReason: isRefused ? (p.refusalReason || null) : null,
-      witnessName: isRefused ? (p.witnessName || null) : null,
+      refusalReason: isRefused
+        ? p.refusalReason !== undefined
+          ? p.refusalReason || null
+          : match?.refusalReason || null
+        : null,
+      witnessName: isRefused
+        ? p.witnessName !== undefined
+          ? p.witnessName || null
+          : match?.witnessName || null
+        : null,
     };
   });
 }

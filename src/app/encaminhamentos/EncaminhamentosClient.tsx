@@ -99,11 +99,18 @@ const RESPONSIBLE_CONFIG: Record<
     icon: User,
   },
   ESCOLA: {
-    label: "Escola / Docentes",
+    label: "Escola / Equipe",
     bg: "bg-emerald-50 dark:bg-emerald-950/40",
     text: "text-emerald-700 dark:text-emerald-300",
     border: "border-emerald-200 dark:border-emerald-800/60",
     icon: Building2,
+  },
+  DOCENTE: {
+    label: "Docente / Professor",
+    bg: "bg-indigo-50 dark:bg-indigo-950/40",
+    text: "text-indigo-700 dark:text-indigo-300",
+    border: "border-indigo-200 dark:border-indigo-800/60",
+    icon: User,
   },
   REDE_PROTECAO: {
     label: "Rede de Proteção",
@@ -335,7 +342,7 @@ export default function EncaminhamentosClient({
       return {
         type: "NO_DATE",
         badge: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700",
-        label: "Sem prazo fixado",
+        label: "Sem prazo definido",
         subLabel: null,
       };
     }
@@ -680,7 +687,8 @@ export default function EncaminhamentosClient({
               <option value="ALL">Todos os Responsáveis</option>
               <option value="FAMILIA">Família / Responsáveis</option>
               <option value="ESTUDANTE">Estudante</option>
-              <option value="ESCOLA">Escola / Docentes</option>
+              <option value="DOCENTE">Docente / Professor</option>
+              <option value="ESCOLA">Escola / Equipe</option>
               <option value="REDE_PROTECAO">Rede de Proteção</option>
             </select>
           </div>
@@ -885,7 +893,9 @@ export default function EncaminhamentosClient({
                         onClick={() => {
                           const student = item.minute.students[0];
                           const desc = item.description;
-                          const due = item.dueDate ? new Date(item.dueDate).toLocaleDateString("pt-BR") : "breve";
+                          const due = item.dueDate
+                            ? new Date(item.dueDate).toLocaleDateString("pt-BR")
+                            : "sem prazo definido";
                           const text = `Olá! Entramos em contato da Equipe Pedagógica a respeito do combinado firmado em ata pedagógica referente ao estudante ${student.studentNameSnapshot}: "${desc}". Lembrando que o prazo pactuado é até ${due}. Estamos à disposição na secretaria escolar!`;
                           const url = `https://web.whatsapp.com/send?text=${encodeURIComponent(text)}`;
                           window.open(url, "_blank");

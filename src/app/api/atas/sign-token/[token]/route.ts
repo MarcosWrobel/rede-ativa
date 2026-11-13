@@ -9,6 +9,7 @@ import {
   verifyParticipantIdentityMatch,
 } from "@/lib/escolaGoogleVerify";
 import { enforceRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
+import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 
 export const dynamic = "force-dynamic";
 
@@ -258,37 +259,93 @@ export async function POST(
       }
 
       const now = new Date();
+      const targetMinuteId = participant.minuteId || participant.minute.id;
+      const runTx =
+        typeof prisma.$transaction === "function"
+          ? prisma.$transaction.bind(prisma)
+          : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
 
-      // Grava assinatura institucional em 1 clique
-      await prisma.pedagogicalMinuteParticipant.update({
-        where: { id: participant.id },
-        data: {
-          signatureMode: "ESCOLA_OAUTH",
+      const txResult = await runTx(async (tx) => {
+        await acquireMinuteWriteLock(tx, targetMinuteId);
+
+        const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
+          where: { id: participant.id, mobileSignToken: token },
+          include: { minute: true },
+        });
+
+        if (!freshParticipant) {
+          return { ok: false as const, status: 404, error: "Link de assinatura inválido, substituído, revogado ou já utilizado." };
+        }
+        if (freshParticipant.minute.status !== "DRAFT") {
+          return { ok: false as const, status: 410, error: "Esta ata pedagógica já foi finalizada ou cancelada." };
+        }
+        if (isSignTokenExpired(freshParticipant.mobileSignExpiresAt, Date.now())) {
+          return { ok: false as const, status: 410, error: "Este link de assinatura expirou." };
+        }
+        if (
+          freshParticipant.signedAt ||
+          freshParticipant.signatureData ||
+          freshParticipant.verifiedEmail ||
+          freshParticipant.hasSignature
+        ) {
+          return {
+            ok: false as const,
+            status: 409,
+            error: "Esta assinatura já foi registrada anteriormente. Solicite um novo link caso precise assinar novamente.",
+          };
+        }
+
+        // Revalida titularidade contra o registro mais recente sob lock transacional
+        const freshMatchCheck = verifyParticipantIdentityMatch({
+          participantName: freshParticipant.name,
+          expectedEmail: freshParticipant.expectedEmail,
           verifiedEmail,
-          verifiedGoogleName: verifiedGoogleName || null,
-          verifiedGoogleSub: verifiedGoogleSub || null,
-          emailVerifiedAt: now,
-          signedAt: now,
-          signerIp: ip,
-          signerUserAgent: userAgent,
-          signatureData: signatureData || null, // Se o usuário também desenhou opcionalmente
-          biometricStrokeData: signatureData ? (biometricStrokeData || null) : null,
-          clientTimestampIso: clientTimestampIso || now.toISOString(),
-          biometricVerified: biometricVerified || false,
-          biometricDeviceType: biometricDeviceType || null,
-          biometricAuthTime: biometricVerified ? now : null,
-          mobileSignToken: null, // Queima token de uso único
-          mobileSignExpiresAt: null,
-          hasSignature: true,
-          hasActiveSignLink: false,
-        },
+          verifiedName: verifiedGoogleName,
+        });
+        if (!freshMatchCheck.match) {
+          return {
+            ok: false as const,
+            status: 403,
+            error: freshMatchCheck.reason || "A conta Google conectada não corresponde ao participante desta ata.",
+          };
+        }
+
+        await tx.pedagogicalMinuteParticipant.update({
+          where: { id: freshParticipant.id },
+          data: {
+            signatureMode: "ESCOLA_OAUTH",
+            verifiedEmail,
+            verifiedGoogleName: verifiedGoogleName || null,
+            verifiedGoogleSub: verifiedGoogleSub || null,
+            emailVerifiedAt: now,
+            signedAt: now,
+            signerIp: ip,
+            signerUserAgent: userAgent,
+            signatureData: signatureData || null, // Se o usuário também desenhou opcionalmente
+            biometricStrokeData: signatureData ? (biometricStrokeData || null) : null,
+            clientTimestampIso: clientTimestampIso || now.toISOString(),
+            biometricVerified: biometricVerified || false,
+            biometricDeviceType: biometricDeviceType || null,
+            biometricAuthTime: biometricVerified ? now : null,
+            mobileSignToken: null, // Queima token de uso único
+            mobileSignExpiresAt: null,
+            hasSignature: true,
+            hasActiveSignLink: false,
+          },
+        });
+
+        return { ok: true as const, studentId: freshParticipant.studentId };
       });
 
+      if (!txResult.ok) {
+        return NextResponse.json({ error: txResult.error }, { status: txResult.status });
+      }
+
       // Se houver studentId vinculado e o e-mail no cadastro do aluno estiver vazio, atualiza automaticamente
-      if (participant.studentId) {
+      if (txResult.studentId) {
         try {
           await prisma.student.updateMany({
-            where: { id: participant.studentId, email: null },
+            where: { id: txResult.studentId, email: null },
             data: { email: verifiedEmail },
           });
         } catch (err) {
@@ -330,26 +387,70 @@ export async function POST(
       hasActiveSignLink: false,
     };
 
-    if (typeof (prisma.pedagogicalMinuteParticipant as any).updateMany === "function") {
-      const atomicRes = await prisma.pedagogicalMinuteParticipant.updateMany({
-        where: {
-          id: participant.id,
-          mobileSignToken: token,
-          signedAt: null,
-        },
-        data: updateData,
+    const targetMinuteId = participant.minuteId || participant.minute.id;
+    const runTx =
+      typeof prisma.$transaction === "function"
+        ? prisma.$transaction.bind(prisma)
+        : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
+
+    const txResult = await runTx(async (tx) => {
+      await acquireMinuteWriteLock(tx, targetMinuteId);
+
+      const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
+        where: { id: participant.id, mobileSignToken: token },
+        include: { minute: true },
       });
-      if (atomicRes.count === 0) {
-        return NextResponse.json(
-          { error: "Este link de assinatura já foi utilizado em outra requisição simultânea." },
-          { status: 409 }
-        );
+
+      if (!freshParticipant) {
+        return { ok: false as const, status: 404, error: "Link de assinatura inválido, substituído, revogado ou já utilizado." };
       }
-    } else {
-      await prisma.pedagogicalMinuteParticipant.update({
-        where: { id: participant.id },
-        data: updateData,
-      });
+      if (freshParticipant.minute.status !== "DRAFT") {
+        return { ok: false as const, status: 410, error: "Esta ata pedagógica já foi finalizada ou cancelada." };
+      }
+      if (isSignTokenExpired(freshParticipant.mobileSignExpiresAt, Date.now())) {
+        return { ok: false as const, status: 410, error: "Este link de assinatura expirou." };
+      }
+      if (
+        freshParticipant.signedAt ||
+        freshParticipant.signatureData ||
+        freshParticipant.verifiedEmail ||
+        freshParticipant.hasSignature
+      ) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: "Este link de assinatura já foi utilizado em outra requisição simultânea.",
+        };
+      }
+
+      if (typeof (tx.pedagogicalMinuteParticipant as any).updateMany === "function") {
+        const atomicRes = await tx.pedagogicalMinuteParticipant.updateMany({
+          where: {
+            id: freshParticipant.id,
+            mobileSignToken: token,
+            signedAt: null,
+          },
+          data: updateData,
+        });
+        if (atomicRes.count === 0) {
+          return {
+            ok: false as const,
+            status: 409,
+            error: "Este link de assinatura já foi utilizado em outra requisição simultânea.",
+          };
+        }
+      } else {
+        await tx.pedagogicalMinuteParticipant.update({
+          where: { id: freshParticipant.id },
+          data: updateData,
+        });
+      }
+
+      return { ok: true as const };
+    });
+
+    if (!txResult.ok) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.status });
     }
 
     return NextResponse.json({

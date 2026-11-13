@@ -7,6 +7,10 @@ import {
   mergeParticipantSignatures,
   type IncomingMinuteParticipant,
 } from "./ataParticipantService";
+import {
+  acquireMinuteWriteLock,
+  acquireSchoolYearSeqLock,
+} from "@/lib/minuteLock";
 
 const BRASILIA_TIMEZONE = "America/Sao_Paulo";
 
@@ -244,6 +248,9 @@ export async function executeMinuteFinalization(
     try {
       finalized = await runTx(
         async (tx: any) => {
+          // Ordem global acíclica de locks: 1) ata -> 2) sequência anual escola/ano
+          await acquireMinuteWriteLock(tx, minuteId);
+
           const minute = await tx.pedagogicalMinute.findUnique({
             where: { id: minuteId },
             include: {
@@ -273,13 +280,7 @@ export async function executeMinuteFinalization(
           }
 
           // Lock transacional exclusivo por tenant e ano (Lei 14.063/2020)
-          try {
-            await tx.$executeRaw`
-              SELECT pg_advisory_xact_lock(hashtext('seq_ata_' || ${minute.schoolId} || '_' || ${currentYear}::text));
-            `;
-          } catch {
-            // Tolerância em ambientes de teste sem Postgres Advisory Locks
-          }
+          await acquireSchoolYearSeqLock(tx, minute.schoolId, currentYear);
 
           if (rawBody && typeof rawBody === "object") {
             if (Array.isArray(rawBody.studentIds)) {

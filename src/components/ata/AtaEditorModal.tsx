@@ -48,6 +48,13 @@ import AtaQrPollStatusBanner from "./editor/AtaQrPollStatusBanner";
 import { useQrSignaturePolling } from "./editor/useQrSignaturePolling";
 import { getParticipantSignatureSummary } from "./editor/signatureState";
 import { formatSignLinkValidity } from "./editor/signLinkValidity";
+import {
+  applyPendingAiActionItemsDecision,
+  applyRoleChangeToUnsignedParticipant,
+  isParticipantQrActive,
+  isParticipantSignatureLocked,
+  resetParticipantSignatureWithServer,
+} from "./editor/participantIdentity";
 import type {
   AtaStudentOption,
   AtaParticipantDraft,
@@ -114,6 +121,12 @@ export default function AtaEditorModal({
   const [agreementsSummary, setAgreementsSummary] = useState("");
   const [participants, setParticipants] = useState<AtaParticipantDraft[]>([]);
   const [actionItems, setActionItems] = useState<AtaActionItemDraft[]>([]);
+  const actionItemsRef = useRef<AtaActionItemDraft[]>(actionItems);
+  actionItemsRef.current = actionItems;
+  const [pendingSuggestedActions, setPendingSuggestedActions] = useState<AtaActionItemDraft[] | null>(null);
+  const [cancelingQrIndex, setCancelingQrIndex] = useState<number | null>(null);
+  const [resettingSigIndex, setResettingSigIndex] = useState<number | null>(null);
+  const [signatureResetNotices, setSignatureResetNotices] = useState<Record<number, string>>({});
 
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -296,6 +309,9 @@ export default function AtaEditorModal({
       setSummary(existingMinute.summary || "");
       setAgreementsSummary(existingMinute.agreementsSummary || "");
       setParticipants(existingMinute.participants || []);
+      setPendingSuggestedActions(null);
+      setSignatureResetNotices({});
+      setCancelingQrIndex(null);
       setActionItems(
         existingMinute.actionItems
           ? existingMinute.actionItems.map((a) => ({
@@ -325,6 +341,9 @@ export default function AtaEditorModal({
       setRawNotes("");
       setSummary("");
       setAgreementsSummary("");
+      setPendingSuggestedActions(null);
+      setSignatureResetNotices({});
+      setCancelingQrIndex(null);
       setActionItems([]);
 
       if (preSelectedStudentId) {
@@ -335,7 +354,7 @@ export default function AtaEditorModal({
             {
               role: "RESPONSAVEL",
               name: stud.guardianName,
-              kinship: "Mãe/Pai",
+              kinship: "",
               documentType: "CPF",
               documentNumber: "",
               documentVerifiedByStaff: true,
@@ -518,7 +537,7 @@ export default function AtaEditorModal({
           {
             role: "RESPONSAVEL",
             name: guardianName,
-            kinship: "Mãe/Pai",
+            kinship: "",
             documentType: "CPF",
             documentNumber: "",
             documentVerifiedByStaff: true,
@@ -707,16 +726,6 @@ export default function AtaEditorModal({
         if (data.result.actionItems && Array.isArray(data.result.actionItems) && data.result.actionItems.length > 0) {
           const suggested: AtaActionItemDraft[] = data.result.actionItems
             .map((a) => {
-              const days =
-                typeof a === "object" && a !== null
-                  ? Number(a.suggestedDaysToComplete || a.prazoDias || a.prazo || a.days)
-                  : NaN;
-              let dueDate = "";
-              if (days && !isNaN(days) && days > 0) {
-                const d = new Date();
-                d.setDate(d.getDate() + days);
-                dueDate = d.toISOString().slice(0, 10);
-              }
               const desc =
                 typeof a === "string"
                   ? a
@@ -734,13 +743,22 @@ export default function AtaEditorModal({
               return {
                 description: String(desc || "").trim(),
                 responsible: resp,
-                dueDate,
+                dueDate: "",
               };
             })
             .filter((item) => item.description.length > 0);
 
           if (suggested.length > 0) {
-            setActionItems(suggested);
+            const decision = applyPendingAiActionItemsDecision(
+              actionItemsRef.current,
+              suggested
+            );
+            if (decision.pendingSuggestions) {
+              setPendingSuggestedActions(decision.pendingSuggestions);
+            } else {
+              setActionItems(decision.nextItems);
+              setPendingSuggestedActions(null);
+            }
           }
         }
 
@@ -781,10 +799,11 @@ export default function AtaEditorModal({
   };
 
   // Monta payload limpo e higienizado para envio à API
-  const buildSanitizedPayload = () => {
+  const buildSanitizedPayload = (overrideParticipants?: AtaParticipantDraft[]) => {
     const cleanSubject = subject.trim().length >= 2 ? subject.trim() : "Atendimento Pedagógico";
+    const sourceParticipants = overrideParticipants ?? participants;
 
-    const cleanParticipants = participants
+    const cleanParticipants = sourceParticipants
       .filter((p) => {
         if (!p) return false;
         const sig = getParticipantSignatureSummary(p);
@@ -1050,6 +1069,11 @@ export default function AtaEditorModal({
       }
 
       setMinuteId(saved.id);
+      setParticipants((prev) =>
+        prev.map((item) =>
+          item.id === part.id ? { ...item, hasActiveSignLink: true } : item
+        )
+      );
       const nextInfo = {
         participantId: part.id,
         url: data.signUrl,
@@ -1075,6 +1099,137 @@ export default function AtaEditorModal({
         setIsGeneratingQr(false);
         setSaving(false);
       }
+    }
+  };
+
+  // Cancelamento direcionado de link QR pendente (antes da assinatura) com sincronização imediata no servidor
+  const handleCancelParticipantQr = async (index: number, nextRoleAfterCancel?: string) => {
+    const target = participants[index];
+    if (!target || cancelingQrIndex !== null) return;
+
+    const activeMinuteId = minuteId || existingMinute?.id;
+    closeQrPanel();
+
+    if (!target.id || !activeMinuteId) {
+      markLocalEdit();
+      setParticipants((prev) =>
+        prev.map((item, i) => {
+          if (i !== index) return item;
+          const cleared = { ...item, hasActiveSignLink: false };
+          return nextRoleAfterCancel
+            ? applyRoleChangeToUnsignedParticipant(cleared, nextRoleAfterCancel)
+            : cleared;
+        })
+      );
+      return;
+    }
+
+    setCancelingQrIndex(index);
+    setFinalizeError(null);
+    try {
+      const res = await fetch(`/api/atas/${activeMinuteId}/sign-token`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantId: target.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+
+      if (res.status === 409) {
+        setFinalizeError(
+          data.error ||
+            "Este participante já concluiu a assinatura no celular. A alteração não foi aplicada."
+        );
+        try {
+          const freshRes = await fetch(`/api/atas/${activeMinuteId}`, { cache: "no-store" });
+          if (freshRes.ok) {
+            const freshData = (await freshRes.json()) as { minute?: AtaMinuteRecord };
+            if (freshData.minute?.participants) {
+              setParticipants(freshData.minute.participants);
+            }
+          }
+        } catch {
+          // Mantém erro visível mesmo se recarga auxiliar falhar
+        }
+        return;
+      }
+
+      if (!res.ok) {
+        setFinalizeError(
+          data.error ||
+            "Não foi possível cancelar o link QR no servidor. A alteração não foi aplicada."
+        );
+        return;
+      }
+
+      markLocalEdit();
+      setParticipants((prev) =>
+        prev.map((item, i) => {
+          if (i !== index) return item;
+          const cleared = { ...item, hasActiveSignLink: false };
+          return nextRoleAfterCancel
+            ? applyRoleChangeToUnsignedParticipant(cleared, nextRoleAfterCancel)
+            : cleared;
+        })
+      );
+      onSaved();
+    } catch {
+      setFinalizeError(
+        "Falha de conexão ao cancelar o link QR no servidor. A alteração não foi aplicada."
+      );
+    } finally {
+      setCancelingQrIndex(null);
+    }
+  };
+
+  // Remoção explícita de assinatura/recusa com confirmação obrigatória no servidor antes de liberar identidade
+  const handleResetParticipantSignature = async (index: number) => {
+    if (resettingSigIndex !== null || cancelingQrIndex !== null) return;
+    const target = participants[index];
+    if (!target) return;
+
+    const sigSummary = getParticipantSignatureSummary(target);
+    const activeMinuteId = minuteId || existingMinute?.id;
+    setResettingSigIndex(index);
+    setFinalizeError(null);
+
+    try {
+      const result = await resetParticipantSignatureWithServer({
+        minuteId: activeMinuteId,
+        participantIndex: index,
+        participants,
+        buildPayload: (nextParts) => buildSanitizedPayload(nextParts),
+      });
+
+      if (!result.ok) {
+        setFinalizeError(
+          result.error ||
+            "Não foi possível remover a assinatura no servidor. A assinatura anterior foi mantida."
+        );
+        return;
+      }
+
+      markLocalEdit();
+      if (target.id && qrModalInfo?.participantId === target.id) {
+        closeQrPanel();
+      }
+      if (activeSignParticipantIndex === index) {
+        setActiveSignParticipantIndex(null);
+      }
+      setParticipants(result.participants);
+
+      if (sigSummary.hasPersistedSignature) {
+        setSignatureResetNotices((prev) => ({
+          ...prev,
+          [index]:
+            "Assinatura anterior removida. Os campos foram liberados e será necessária uma nova assinatura.",
+        }));
+      }
+
+      if (result.persistedOnServer) {
+        onSaved();
+      }
+    } finally {
+      setResettingSigIndex(null);
     }
   };
 
@@ -2670,20 +2825,33 @@ export default function AtaEditorModal({
               <div className="lg:col-span-6 space-y-4 mt-4 lg:mt-0">
                 <AtaActionItemsSection
                   actionItems={actionItems}
-                  onAdd={() =>
+                  pendingSuggestions={pendingSuggestedActions}
+                  onAcceptPendingSuggestions={() => {
+                    if (!pendingSuggestedActions) return;
+                    markLocalEdit();
+                    setActionItems(pendingSuggestedActions);
+                    setPendingSuggestedActions(null);
+                  }}
+                  onDiscardPendingSuggestions={() => {
+                    setPendingSuggestedActions(null);
+                  }}
+                  onAdd={() => {
+                    markLocalEdit();
                     setActionItems((prev) => [
                       ...prev,
                       { description: "", responsible: "FAMILIA", dueDate: "" },
-                    ])
-                  }
-                  onUpdate={(index, patch) =>
+                    ]);
+                  }}
+                  onUpdate={(index, patch) => {
+                    markLocalEdit();
                     setActionItems((prev) =>
                       prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item))
-                    )
-                  }
-                  onRemove={(index) =>
-                    setActionItems((prev) => prev.filter((_, i) => i !== index))
-                  }
+                    );
+                  }}
+                  onRemove={(index) => {
+                    markLocalEdit();
+                    setActionItems((prev) => prev.filter((_, i) => i !== index));
+                  }}
                 />
 
                 {/* Participantes & Coleta de Assinatura */}
@@ -2708,13 +2876,14 @@ export default function AtaEditorModal({
                       )}
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          markLocalEdit();
                           setParticipants((prev) => [
                             ...prev,
                             {
                               role: "RESPONSAVEL",
                               name: "",
-                              kinship: "Mãe/Pai",
+                              kinship: "",
                               documentType: "CPF",
                               documentNumber: "",
                               documentVerifiedByStaff: true,
@@ -2724,8 +2893,8 @@ export default function AtaEditorModal({
                               refusalReason: "",
                               witnessName: "",
                             },
-                          ])
-                        }
+                          ]);
+                        }}
                         className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
@@ -2735,21 +2904,52 @@ export default function AtaEditorModal({
                   </div>
 
                   <div className="space-y-3">
-                    {participants.map((p, idx) => (
+                    {participants.map((p, idx) => {
+                      const isLockedBySignature = isParticipantSignatureLocked(p);
+                      const isQrActive = isParticipantQrActive(p, qrModalInfo?.participantId);
+                      const isIdentityDisabled =
+                        isLockedBySignature ||
+                        isQrActive ||
+                        cancelingQrIndex === idx ||
+                        resettingSigIndex === idx;
+                      const kinshipPlaceholder =
+                        p.role === "RESPONSAVEL"
+                          ? "Parentesco (opcional, ex.: Mãe, Pai)"
+                          : p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR"
+                          ? "Função / Disciplina (opcional)"
+                          : "Vínculo / Órgão (opcional)";
+
+                      return (
                       <div
-                        key={idx}
+                        key={p.id || idx}
                         className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 shadow-2xs"
                       >
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
                           <div className="md:col-span-4">
                             <select
+                              aria-label={`Papel do participante ${idx + 1}`}
                               value={p.role}
+                              disabled={
+                                isLockedBySignature ||
+                                cancelingQrIndex === idx ||
+                                resettingSigIndex === idx
+                              }
                               onChange={(e) => {
-                                const copy = [...participants];
-                                copy[idx].role = e.target.value;
-                                setParticipants(copy);
+                                const nextRole = e.target.value;
+                                if (isQrActive) {
+                                  void handleCancelParticipantQr(idx, nextRole);
+                                  return;
+                                }
+                                markLocalEdit();
+                                setParticipants((prev) =>
+                                  prev.map((item, i) =>
+                                    i === idx
+                                      ? applyRoleChangeToUnsignedParticipant(item, nextRole)
+                                      : item
+                                  )
+                                );
                               }}
-                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-semibold text-xs"
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-semibold text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             >
                               <option value="RESPONSAVEL">Responsável Legal</option>
                               <option value="ESTUDANTE">Estudante</option>
@@ -2763,42 +2963,137 @@ export default function AtaEditorModal({
                           <div className="md:col-span-4">
                             <input
                               type="text"
+                              aria-label={`Nome completo do participante ${idx + 1}`}
                               placeholder="Nome completo..."
                               value={p.name}
+                              disabled={isIdentityDisabled}
                               onChange={(e) => {
-                                const copy = [...participants];
-                                copy[idx].name = e.target.value;
-                                setParticipants(copy);
+                                markLocalEdit();
+                                const nextName = e.target.value;
+                                setParticipants((prev) =>
+                                  prev.map((item, i) =>
+                                    i === idx ? { ...item, name: nextName } : item
+                                  )
+                                );
                               }}
-                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs"
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             />
                           </div>
 
                           <div className="md:col-span-3">
                             <input
                               type="text"
+                              aria-label={`Documento do participante ${idx + 1}`}
                               placeholder="Nº Doc (CPF / RG)..."
                               value={p.documentNumber || ""}
+                              disabled={isIdentityDisabled}
                               onChange={(e) => {
-                                const copy = [...participants];
-                                copy[idx].documentNumber = e.target.value;
-                                setParticipants(copy);
+                                markLocalEdit();
+                                const nextDoc = e.target.value;
+                                setParticipants((prev) =>
+                                  prev.map((item, i) =>
+                                    i === idx ? { ...item, documentNumber: nextDoc } : item
+                                  )
+                                );
                               }}
-                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs"
+                              className="w-full p-2 border border-slate-300 rounded-lg bg-white font-medium text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             />
                           </div>
 
                           <div className="md:col-span-1 flex items-center justify-end">
                             <button
                               type="button"
-                              onClick={() => setParticipants((prev) => prev.filter((_, i) => i !== idx))}
-                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md cursor-pointer"
-                              title="Remover participante"
+                              disabled={isIdentityDisabled}
+                              onClick={() => {
+                                markLocalEdit();
+                                setParticipants((prev) => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={
+                                isLockedBySignature
+                                  ? "Refaça a assinatura antes de remover"
+                                  : isQrActive
+                                  ? "Cancele o link QR antes de remover"
+                                  : "Remover participante"
+                              }
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                          {p.role !== "ESTUDANTE" && (
+                            <div className="md:col-span-6">
+                              <input
+                                type="text"
+                                aria-label={`Vínculo ou função do participante ${idx + 1}`}
+                                placeholder={kinshipPlaceholder}
+                                value={p.kinship || ""}
+                                disabled={isIdentityDisabled}
+                                onChange={(e) => {
+                                  markLocalEdit();
+                                  const nextKinship = e.target.value;
+                                  setParticipants((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, kinship: nextKinship } : item
+                                    )
+                                  );
+                                }}
+                                className="w-full p-1.5 border border-slate-200 rounded-lg bg-slate-50/70 text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                              />
+                            </div>
+                          )}
+                          <div className={p.role !== "ESTUDANTE" ? "md:col-span-6" : "md:col-span-12"}>
+                            <input
+                              type="text"
+                              aria-label={`Telefone de contato do participante ${idx + 1}`}
+                              placeholder="Telefone de contato (opcional)"
+                              value={p.phone || ""}
+                              onChange={(e) => {
+                                markLocalEdit();
+                                const nextPhone = e.target.value;
+                                setParticipants((prev) =>
+                                  prev.map((item, i) =>
+                                    i === idx ? { ...item, phone: nextPhone } : item
+                                  )
+                                );
+                              }}
+                              className="w-full p-1.5 border border-slate-200 rounded-lg bg-slate-50/70 text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        {isLockedBySignature && (
+                          <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                            Identidade e função bloqueadas após assinatura. Para alterar esses dados, use &ldquo;Refazer assinatura&rdquo;.
+                          </p>
+                        )}
+
+                        {isQrActive && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-sky-900 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">
+                            <span className="font-semibold">
+                              Link QR ativo aguardando assinatura. Cancele o link antes de alterar nome, documento ou função.
+                            </span>
+                            <button
+                              type="button"
+                              disabled={cancelingQrIndex !== null}
+                              onClick={() => void handleCancelParticipantQr(idx)}
+                              className="px-2 py-0.5 rounded bg-white border border-sky-300 text-sky-800 font-bold hover:bg-sky-100 transition cursor-pointer disabled:opacity-50"
+                            >
+                              {cancelingQrIndex === idx ? "Cancelando..." : "Cancelar link QR e editar"}
+                            </button>
+                          </div>
+                        )}
+
+                        {signatureResetNotices[idx] && (
+                          <p
+                            role="status"
+                            className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5"
+                          >
+                            {signatureResetNotices[idx]}
+                          </p>
+                        )}
 
                         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
                           <div className="flex items-center space-x-2">
@@ -2806,10 +3101,17 @@ export default function AtaEditorModal({
                               <input
                                 type="checkbox"
                                 checked={Boolean(p.documentVerifiedByStaff)}
+                                disabled={isIdentityDisabled}
                                 onChange={(e) => {
-                                  const copy = [...participants];
-                                  copy[idx].documentVerifiedByStaff = e.target.checked;
-                                  setParticipants(copy);
+                                  markLocalEdit();
+                                  const checked = e.target.checked;
+                                  setParticipants((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx
+                                        ? { ...item, documentVerifiedByStaff: checked }
+                                        : item
+                                    )
+                                  );
                                 }}
                                 className="rounded border-slate-300 text-sky-600"
                               />
@@ -2837,26 +3139,15 @@ export default function AtaEditorModal({
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        markLocalEdit();
-                                        const copy = [...participants];
-                                        copy[idx] = {
-                                          ...copy[idx],
-                                          signatureData: null,
-                                          hasSignature: false,
-                                          signatureMode: "PENDING",
-                                          verifiedEmail: null,
-                                          verifiedGoogleSub: null,
-                                          verifiedGoogleName: null,
-                                          biometricVerified: false,
-                                          clearSignature: true,
-                                        };
-                                        setParticipants(copy);
-                                      }}
-                                      className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                                      disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
+                                      onClick={() => void handleResetParticipantSignature(idx)}
+                                      className="p-1 text-slate-500 hover:text-slate-800 rounded cursor-pointer flex items-center space-x-1 text-[11px] font-semibold disabled:opacity-50"
                                       title="Refazer assinatura"
                                     >
                                       <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>
+                                        {resettingSigIndex === idx ? "Removendo..." : "Refazer assinatura"}
+                                      </span>
                                     </button>
                                   </div>
                                 );
@@ -2870,18 +3161,9 @@ export default function AtaEditorModal({
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    const copy = [...participants];
-                                    copy[idx] = {
-                                      ...copy[idx],
-                                      signatureMode: "PENDING",
-                                      refusalReason: "",
-                                      witnessName: "",
-                                      clearSignature: true,
-                                    };
-                                    setParticipants(copy);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                                  disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
+                                  onClick={() => void handleResetParticipantSignature(idx)}
+                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer disabled:opacity-50"
                                   title="Cancelar recusa"
                                 >
                                   <RotateCcw className="w-3.5 h-3.5" />
@@ -2906,7 +3188,13 @@ export default function AtaEditorModal({
                                 <button
                                   type="button"
                                   onClick={() => handleGenerateMobileSign(idx)}
-                                  disabled={saving || isGeneratingQr || isHydratingMinute}
+                                  disabled={
+                                    saving ||
+                                    isGeneratingQr ||
+                                    isHydratingMinute ||
+                                    cancelingQrIndex !== null ||
+                                    resettingSigIndex !== null
+                                  }
                                   className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                                 >
                                   <QrCode className="w-3.5 h-3.5" />
@@ -3012,7 +3300,8 @@ export default function AtaEditorModal({
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 

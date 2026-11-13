@@ -48,6 +48,7 @@ const { mockPrisma, mockAuthState } = vi.hoisted(() => {
     auditLog: {
       create: vi.fn(),
     },
+    $executeRaw: vi.fn(async () => 1),
     $transaction: vi.fn(async (fn: (tx: any) => Promise<any>) => fn(mockPrisma)),
   };
 
@@ -87,8 +88,14 @@ import { getParticipantSignatureSummary } from "@/components/ata/editor/signatur
 import { formatSignLinkValidity } from "@/components/ata/editor/signLinkValidity";
 import { mergeParticipantSignatures } from "@/services/ataParticipantService";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
-import { GET as getMinuteHandler, PATCH as patchMinuteHandler } from "@/app/api/atas/[id]/route";
-import { POST as createSignTokenHandler } from "@/app/api/atas/[id]/sign-token/route";
+import {
+  GET as getMinuteHandler,
+  PATCH as patchMinuteHandler,
+} from "@/app/api/atas/[id]/route";
+import {
+  POST as createSignTokenHandler,
+  DELETE as deleteSignTokenHandler,
+} from "@/app/api/atas/[id]/sign-token/route";
 import {
   GET as getPublicSignTokenHandler,
   POST as postPublicSignTokenHandler,
@@ -344,10 +351,35 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         isConfidential: false,
         authorEmail: "pedagoga@escola.pr.gov.br",
       });
-      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValue({
+      const buildStoredParticipant = () => ({
         id: "part-1",
         minuteId: "min-1",
         name: "Mãe",
+        role: "RESPONSAVEL",
+        studentId: null,
+        expectedEmail: null,
+        signatureData: storedSignatureData,
+        signedAt: storedSignedAt,
+        hasSignature: Boolean(storedSignatureData),
+        verifiedEmail: null,
+        mobileSignToken: storedToken,
+        mobileSignExpiresAt: storedExpiry,
+        minute: {
+          id: "min-1",
+          status: "DRAFT",
+          subject: "Atendimento",
+          summary: "Resumo",
+          agreementsSummary: null,
+          attendedAt: t0,
+          school: { name: "Escola Teste" },
+          students: [],
+        },
+      });
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockImplementation(async ({ where }: any) => {
+        if (where?.mobileSignToken !== undefined && where.mobileSignToken !== storedToken) {
+          return null;
+        }
+        return buildStoredParticipant();
       });
       mockPrisma.pedagogicalMinuteParticipant.update.mockImplementation(async ({ data }: any) => {
         if (data.mobileSignToken !== undefined) storedToken = data.mobileSignToken;
@@ -358,28 +390,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       });
       mockPrisma.pedagogicalMinuteParticipant.findUnique.mockImplementation(async ({ where }: any) => {
         if (!storedToken || where.mobileSignToken !== storedToken) return null;
-        return {
-          id: "part-1",
-          name: "Mãe",
-          role: "RESPONSAVEL",
-          studentId: null,
-          expectedEmail: null,
-          signatureData: storedSignatureData,
-          signedAt: storedSignedAt,
-          verifiedEmail: null,
-          mobileSignToken: storedToken,
-          mobileSignExpiresAt: storedExpiry,
-          minute: {
-            id: "min-1",
-            status: "DRAFT",
-            subject: "Atendimento",
-            summary: "Resumo",
-            agreementsSummary: null,
-            attendedAt: t0,
-            school: { name: "Escola Teste" },
-            students: [],
-          },
-        };
+        return buildStoredParticipant();
       });
       mockPrisma.pedagogicalMinuteParticipant.updateMany.mockImplementation(async ({ where, data }: any) => {
         if (where.mobileSignToken !== storedToken || storedSignedAt !== null) {
@@ -589,6 +600,225 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         { params: Promise.resolve({ id: "min-other" }) }
       );
       expect(getRes.status).toBe(403);
+    });
+  });
+
+  describe("8. Cancelamento direcionado de QR (DELETE) e concorrência transacional", () => {
+    it("DELETE /api/atas/[id]/sign-token cancela link pendente sem apagar assinatura existente (409 se já assinado)", async () => {
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
+        id: "min-1",
+        status: "DRAFT",
+        schoolId: "school-a",
+        isConfidential: false,
+        authorEmail: "pedagoga@escola.pr.gov.br",
+      });
+
+      // Cenário 1: participante ainda sem assinatura -> cancela token e retorna 200
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce({
+        id: "part-1",
+        minuteId: "min-1",
+        name: "Responsável Teste",
+        signatureData: null,
+        signedAt: null,
+        verifiedEmail: null,
+        hasSignature: false,
+        biometricVerified: false,
+        mobileSignToken: "tok-active",
+      });
+      mockPrisma.pedagogicalMinuteParticipant.update.mockResolvedValueOnce({
+        id: "part-1",
+        mobileSignToken: null,
+        hasActiveSignLink: false,
+      });
+
+      const cancelOkRes = await deleteSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-1/sign-token", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-1" }),
+        }),
+        { params: Promise.resolve({ id: "min-1" }) }
+      );
+      expect(cancelOkRes.status).toBe(200);
+      expect(mockPrisma.pedagogicalMinuteParticipant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "part-1" },
+          data: {
+            mobileSignToken: null,
+            mobileSignExpiresAt: null,
+            hasActiveSignLink: false,
+          },
+        })
+      );
+
+      // Cenário 2: celular assinou milissegundos antes do DELETE -> retorna 409 e nunca limpa assinatura
+      mockPrisma.pedagogicalMinuteParticipant.update.mockClear();
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce({
+        id: "part-1",
+        minuteId: "min-1",
+        name: "Responsável Teste",
+        signatureData: "data:image/png;base64,MOBILE",
+        signedAt: new Date(),
+        verifiedEmail: null,
+        hasSignature: true,
+        biometricVerified: false,
+        mobileSignToken: null,
+      });
+
+      const cancelConflictRes = await deleteSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-1/sign-token", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-1" }),
+        }),
+        { params: Promise.resolve({ id: "min-1" }) }
+      );
+      expect(cancelConflictRes.status).toBe(409);
+      expect(mockPrisma.pedagogicalMinuteParticipant.update).not.toHaveBeenCalled();
+
+      // Cenário 3: bloqueia outra escola (403), ata sigilosa por outro servidor (403) e participante de outra ata/inexistente (404)
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValueOnce({
+        id: "min-other-school",
+        status: "DRAFT",
+        schoolId: "school-b",
+        isConfidential: false,
+        authorEmail: "pedagoga@escola.pr.gov.br",
+      });
+      const otherSchoolDeleteRes = await deleteSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-other-school/sign-token", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-1" }),
+        }),
+        { params: Promise.resolve({ id: "min-other-school" }) }
+      );
+      expect(otherSchoolDeleteRes.status).toBe(403);
+
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValueOnce({
+        id: "min-secret",
+        status: "DRAFT",
+        schoolId: "school-a",
+        isConfidential: true,
+        authorId: "user-2",
+        authorEmail: "outra.autora@escola.pr.gov.br",
+      });
+      const secretDeleteRes = await deleteSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-secret/sign-token", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-1" }),
+        }),
+        { params: Promise.resolve({ id: "min-secret" }) }
+      );
+      expect(secretDeleteRes.status).toBe(403);
+
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValueOnce({
+        id: "min-1",
+        status: "DRAFT",
+        schoolId: "school-a",
+        isConfidential: false,
+        authorId: "user-1",
+        authorEmail: "pedagoga@escola.pr.gov.br",
+      });
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce(null);
+      const foreignParticipantDeleteRes = await deleteSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-1/sign-token", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-de-outra-ata" }),
+        }),
+        { params: Promise.resolve({ id: "min-1" }) }
+      );
+      expect(foreignParticipantDeleteRes.status).toBe(404);
+    });
+
+    it("POST /api/atas/sign-token/[token] revalida estado atual dentro do lock e rejeita token invalidado/assinado com 404/409", async () => {
+      mockPrisma.pedagogicalMinuteParticipant.findUnique.mockResolvedValueOnce({
+        id: "part-1",
+        minuteId: "min-1",
+        name: "Responsável",
+        role: "RESPONSAVEL",
+        signatureData: null,
+        signedAt: null,
+        hasSignature: false,
+        verifiedEmail: null,
+        mobileSignToken: "tok-race",
+        mobileSignExpiresAt: new Date(Date.now() + 600_000),
+        minute: { id: "min-1", status: "DRAFT" },
+      });
+      // Dentro do lock transacional, o token já havia sido cancelado por outro request
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce(null);
+
+      const raceRes = await postPublicSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/sign-token/tok-race", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA" }),
+        }),
+        { params: Promise.resolve({ token: "tok-race" }) }
+      );
+      expect(raceRes.status).toBe(404);
+    });
+
+    it("PATCH /api/atas/[id] mantém ata FINALIZED imutável (403) e bloqueia alteração de identidade assinada (409)", async () => {
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
+        id: "min-fin",
+        status: "FINALIZED",
+        schoolId: "school-a",
+        isConfidential: false,
+        authorEmail: "pedagoga@escola.pr.gov.br",
+        participants: [],
+      });
+      const finalizedRes = await patchMinuteHandler(
+        new Request("http://localhost:3001/api/atas/min-fin", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject: "Tentativa" }),
+        }),
+        { params: Promise.resolve({ id: "min-fin" }) }
+      );
+      expect(finalizedRes.status).toBe(403);
+
+      const signedDraftParticipants = [
+        {
+          id: "part-signed",
+          role: "RESPONSAVEL",
+          name: "Ana Original",
+          kinship: "Mãe",
+          signatureData: "data:image/png;base64,SIGNED",
+          hasSignature: true,
+          signedAt: new Date(),
+        },
+      ];
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
+        id: "min-draft",
+        status: "DRAFT",
+        schoolId: "school-a",
+        isConfidential: false,
+        authorEmail: "pedagoga@escola.pr.gov.br",
+        participants: signedDraftParticipants,
+      });
+      mockPrisma.pedagogicalMinuteParticipant.findMany.mockResolvedValueOnce(signedDraftParticipants);
+      const conflictRes = await patchMinuteHandler(
+        new Request("http://localhost:3001/api/atas/min-draft", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Atendimento",
+            summary: "Resumo válido com mais de dez caracteres.",
+            participants: [
+              {
+                id: "part-signed",
+                role: "RESPONSAVEL",
+                name: "Pessoa Substituída",
+                kinship: "Mãe",
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ id: "min-draft" }) }
+      );
+      expect(conflictRes.status).toBe(409);
     });
   });
 });

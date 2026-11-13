@@ -4,6 +4,14 @@ import {
   mergeParticipantSignatures,
 } from "@/services/ataParticipantService";
 import {
+  acquireMinuteWriteLock,
+  acquireSchoolYearSeqLock,
+} from "@/lib/minuteLock";
+import {
+  sanitizeKinshipForRole,
+  hasProtectedParticipantIdentityChanged,
+} from "@/lib/participantKinship";
+import {
   calculateBusinessDaysDiff,
   evaluateExtemporaneousFinalization,
   buildCanonicalMinutePayload,
@@ -137,9 +145,9 @@ describe("ataParticipantService - Sanitização e Pareamento de Signatários", (
       },
     ];
 
-    // Fallback posicional 1-para-1 mantém id e provas verificadas no banco
+    // Fallback posicional 1-para-1 mantém id e provas verificadas no banco quando identidade e vínculo permanecem iguais
     const preserved = mergeParticipantSignatures(
-      [{ role: "RESPONSAVEL", name: "João Corrigido" }],
+      [{ role: "RESPONSAVEL", name: "João Antigo" }],
       existing,
       { clearMobileTokens: false, minuteId: "ata-2" }
     );
@@ -154,6 +162,15 @@ describe("ataParticipantService - Sanitização e Pareamento de Signatários", (
       signerIp: "200.150.10.2",
       mobileSignToken: null, // já assinou/verificou email -> token queimado
     });
+
+    // Bloqueia troca de nome/identidade em participante já assinado sem clearSignature
+    expect(() =>
+      mergeParticipantSignatures(
+        [{ role: "RESPONSAVEL", name: "João Corrigido" }],
+        existing,
+        { clearMobileTokens: false, minuteId: "ata-2" }
+      )
+    ).toThrow(/^CONFLICT:/);
 
     // Recusa formal limpa assinaturas e provas biométricas/OIDC
     const refused = mergeParticipantSignatures(
@@ -299,6 +316,7 @@ describe("ataFinalizationService - Regras de Lavratura e Fuso America/Sao_Paulo"
     };
 
     const mockPrisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: any) => fn(mockPrisma)),
       pedagogicalMinute: {
         findUnique: vi.fn().mockResolvedValue(finalizedMinute),
@@ -437,5 +455,220 @@ describe("ataFinalizationService - Regras de Lavratura e Fuso America/Sao_Paulo"
     expect(result.minute.status).toBe("FINALIZED");
     expect(typeof result.minute.contentHash).toBe("string");
     expect(result.minute.contentHash.length).toBe(64);
+  });
+
+  it("rejeita CONFLICT em alteração de role, name, studentId, documentType, documentNumber, expectedEmail ou kinship de participante assinado, mas permite phone e diferença de maiúsculas no e-mail", () => {
+    const baseExisting = [
+      {
+        id: "mp-signed",
+        role: "RESPONSAVEL",
+        studentId: "stu-1",
+        name: "Maria Responsável",
+        kinship: "Mãe",
+        documentType: "RG",
+        documentNumber: "12.345.678-9",
+        expectedEmail: "maria@escola.pr.gov.br",
+        phone: "42999990000",
+        signatureMode: "SCREEN_CANVAS",
+        signatureData: "data:image/png;base64,ABC",
+        hasSignature: true,
+        signedAt: new Date("2026-11-10T10:00:00Z"),
+      },
+    ];
+
+    // Alteração apenas de telefone ou caixa de e-mail mantém provas intactas
+    const phoneAndEmailCaseUpdated = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-signed",
+          role: "RESPONSAVEL",
+          studentId: "stu-1",
+          name: "Maria Responsável",
+          kinship: "Mãe",
+          documentType: "RG",
+          documentNumber: "12.345.678-9",
+          expectedEmail: "Maria@Escola.pr.gov.br",
+          phone: "42988887777",
+        },
+      ],
+      baseExisting,
+      { clearMobileTokens: false, minuteId: "ata-1" }
+    );
+    expect(phoneAndEmailCaseUpdated[0].phone).toBe("42988887777");
+    expect(phoneAndEmailCaseUpdated[0].hasSignature).toBe(true);
+
+    const forbiddenChanges: Array<[string, Record<string, any>]> = [
+      ["role", { role: "PROFESSOR" }],
+      ["name", { name: "Outro Responsável" }],
+      ["studentId", { studentId: "stu-2" }],
+      ["documentType", { documentType: "CPF" }],
+      ["documentNumber", { documentNumber: "123456789" }],
+      ["expectedEmail", { expectedEmail: "outra@escola.pr.gov.br" }],
+      ["kinship", { kinship: "Tia" }],
+    ];
+
+    for (const [label, patch] of forbiddenChanges) {
+      expect(
+        () =>
+          mergeParticipantSignatures(
+            [
+              {
+                id: "mp-signed",
+                role: "RESPONSAVEL",
+                studentId: "stu-1",
+                name: "Maria Responsável",
+                kinship: "Mãe",
+                documentType: "RG",
+                documentNumber: "12.345.678-9",
+                expectedEmail: "maria@escola.pr.gov.br",
+                ...patch,
+              },
+            ],
+            baseExisting,
+            { clearMobileTokens: false, minuteId: "ata-1" }
+          ),
+        `Esperava CONFLICT para campo ${label}`
+      ).toThrow(/^CONFLICT:/);
+    }
+  });
+
+  it("sanitiza termos parentais em kinship para não-responsáveis apenas quando não assinado e queima token QR ao alterar identidade de não assinado", () => {
+    expect(sanitizeKinshipForRole("EQUIPE_ESCOLAR", " mãe / pai ", { isSigned: false })).toBeNull();
+    expect(sanitizeKinshipForRole("PROFESSOR", "  Responsável   Legal ", { isSigned: false })).toBeNull();
+    expect(sanitizeKinshipForRole("PROFESSOR", "Docente — Filosofia", { isSigned: false })).toBe(
+      "Docente — Filosofia"
+    );
+    // Participante já assinado preserva kinship legado intacto para revisão explícita
+    expect(sanitizeKinshipForRole("EQUIPE_ESCOLAR", "Mãe/Pai", { isSigned: true })).toBe("Mãe/Pai");
+
+    expect(
+      hasProtectedParticipantIdentityChanged(
+        { expectedEmail: "Ana@Escola.pr.gov.br", kinship: "Mãe" },
+        { expectedEmail: "ana@escola.pr.gov.br", kinship: "Mãe" }
+      )
+    ).toBe(false);
+    expect(
+      hasProtectedParticipantIdentityChanged(
+        { expectedEmail: "ana@escola.pr.gov.br", kinship: "Mãe" },
+        { expectedEmail: "outra@escola.pr.gov.br", kinship: "Mãe" }
+      )
+    ).toBe(true);
+
+    const existingUnsignedWithToken = [
+      {
+        id: "mp-qr",
+        role: "RESPONSAVEL",
+        name: "Carlos Pai",
+        kinship: "Pai",
+        mobileSignToken: "tok-qr-active",
+        mobileSignExpiresAt: new Date("2026-11-15T12:00:00Z"),
+        hasSignature: false,
+      },
+    ];
+
+    const phoneOnlyChanged = mergeParticipantSignatures(
+      [{ id: "mp-qr", role: "RESPONSAVEL", name: "Carlos Pai", kinship: "Pai", phone: "42911112222" }],
+      existingUnsignedWithToken,
+      { clearMobileTokens: false, minuteId: "ata-qr" }
+    );
+    expect(phoneOnlyChanged[0].mobileSignToken).toBe("tok-qr-active");
+    expect(phoneOnlyChanged[0].hasActiveSignLink).toBe(true);
+
+    const nameChangedBurnsToken = mergeParticipantSignatures(
+      [{ id: "mp-qr", role: "RESPONSAVEL", name: "Carlos Outro", kinship: "Pai" }],
+      existingUnsignedWithToken,
+      { clearMobileTokens: false, minuteId: "ata-qr" }
+    );
+    expect(nameChangedBurnsToken[0].mobileSignToken).toBeNull();
+    expect(nameChangedBurnsToken[0].hasActiveSignLink).toBe(false);
+  });
+
+  it("minuteLock exige $executeRaw ativo sem fallback silencioso", async () => {
+    await expect(acquireMinuteWriteLock({} as any, "min-1")).rejects.toThrow(
+      /Lock transacional indisponível/
+    );
+    await expect(acquireSchoolYearSeqLock({} as any, "school-1", 2026)).rejects.toThrow(
+      /Lock transacional indisponível/
+    );
+  });
+
+  it("preserva motivo e testemunha ao registrar recusa (REFUSED) e em atualizações subsequentes", () => {
+    const firstSave = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          signatureMode: "REFUSED",
+          refusalReason: "Não concorda com a advertência.",
+          witnessName: "Prof. Helena",
+        },
+      ],
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          signatureMode: "SCREEN_CANVAS",
+          signatureData: "data:image/png;base64,OLD",
+          hasSignature: true,
+          signedAt: new Date("2026-11-10T10:00:00Z"),
+        },
+      ],
+      { clearMobileTokens: false, minuteId: "ata-ref" }
+    );
+
+    expect(firstSave[0]).toMatchObject({
+      signatureMode: "REFUSED",
+      signatureData: null,
+      hasSignature: false,
+      refusalReason: "Não concorda com a advertência.",
+      witnessName: "Prof. Helena",
+    });
+
+    // Reenvio subsequente mantém motivo e testemunha mesmo se omitidos no patch parcial
+    const partialResave = mergeParticipantSignatures(
+      [{ id: "mp-ref", role: "RESPONSAVEL", name: "Marcos Responsável", signatureMode: "REFUSED" }],
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          signatureMode: "REFUSED",
+          refusalReason: "Não concorda com a advertência.",
+          witnessName: "Prof. Helena",
+        },
+      ],
+      { clearMobileTokens: false, minuteId: "ata-ref" }
+    );
+    expect(partialResave[0].refusalReason).toBe("Não concorda com a advertência.");
+    expect(partialResave[0].witnessName).toBe("Prof. Helena");
+
+    // Cancelar recusa (PENDING + clearSignature) limpa motivo e testemunha
+    const clearedRefusal = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          signatureMode: "PENDING",
+          clearSignature: true,
+        },
+      ],
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          signatureMode: "REFUSED",
+          refusalReason: "Não concorda com a advertência.",
+          witnessName: "Prof. Helena",
+        },
+      ],
+      { clearMobileTokens: false, minuteId: "ata-ref" }
+    );
+    expect(clearedRefusal[0].signatureMode).toBe("PENDING");
+    expect(clearedRefusal[0].refusalReason).toBeNull();
+    expect(clearedRefusal[0].witnessName).toBeNull();
   });
 });

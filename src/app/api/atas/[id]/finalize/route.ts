@@ -114,6 +114,9 @@ export async function POST(
     if (msg.startsWith("FORBIDDEN:")) {
       return NextResponse.json({ error: msg.replace("FORBIDDEN:", "") }, { status: 403 });
     }
+    if (msg.startsWith("CONFLICT:")) {
+      return NextResponse.json({ error: msg.replace("CONFLICT:", "") }, { status: 409 });
+    }
     if (msg.startsWith("STATUS_INVALID:") || msg.startsWith("VALIDATION:")) {
       return NextResponse.json({ error: msg.replace(/^(STATUS_INVALID|VALIDATION):/, "") }, { status: 400 });
     }
