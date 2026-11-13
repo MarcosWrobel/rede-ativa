@@ -15,13 +15,15 @@ function isParticipantAlreadySigned(participant: {
   signatureData?: string | null;
   verifiedEmail?: string | null;
   biometricVerified?: boolean | null;
+  signatureMode?: string | null;
 }): boolean {
   return Boolean(
     participant.signedAt ||
       participant.hasSignature ||
       participant.signatureData ||
       participant.verifiedEmail ||
-      participant.biometricVerified
+      participant.biometricVerified ||
+      participant.signatureMode === "REFUSED"
   );
 }
 

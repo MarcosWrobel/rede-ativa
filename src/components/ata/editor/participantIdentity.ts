@@ -2,15 +2,17 @@ import type { AtaActionItemDraft, AtaParticipantDraft } from "./types";
 import { sanitizeKinshipForRole } from "@/lib/participantKinship";
 
 /**
- * Indica se o participante já possui assinatura ou verificação OIDC/biométrica
- * que bloqueia alterações diretas em identidade e informação documental.
+ * Indica se o participante já possui assinatura, verificação OIDC/biométrica
+ * ou registro formal de recusa (`REFUSED`) que bloqueia alterações diretas em
+ * identidade e informação documental.
  */
 export function isParticipantSignatureLocked(participant: AtaParticipantDraft): boolean {
   return Boolean(
     participant.verifiedEmail ||
       participant.signatureData ||
       participant.hasSignature ||
-      participant.biometricVerified
+      participant.biometricVerified ||
+      participant.signatureMode === "REFUSED"
   );
 }
 
@@ -181,7 +183,9 @@ export async function resetParticipantSignatureWithServer(params: {
         participants,
         error:
           data.error ||
-          "Não foi possível remover a assinatura no servidor. A assinatura anterior foi mantida.",
+          (target.signatureMode === "REFUSED"
+            ? "Não foi possível cancelar a recusa no servidor. O registro anterior foi mantido."
+            : "Não foi possível remover a assinatura no servidor. A assinatura anterior foi mantida."),
       };
     }
 
@@ -197,7 +201,9 @@ export async function resetParticipantSignatureWithServer(params: {
       persistedOnServer: false,
       participants,
       error:
-        "Falha de conexão ao remover a assinatura no servidor. A assinatura anterior foi mantida.",
+        target.signatureMode === "REFUSED"
+          ? "Falha de conexão ao cancelar a recusa no servidor. O registro anterior foi mantido."
+          : "Falha de conexão ao remover a assinatura no servidor. A assinatura anterior foi mantida.",
     };
   }
 }

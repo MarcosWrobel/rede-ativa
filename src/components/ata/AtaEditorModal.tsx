@@ -127,6 +127,7 @@ export default function AtaEditorModal({
   const [cancelingQrIndex, setCancelingQrIndex] = useState<number | null>(null);
   const [resettingSigIndex, setResettingSigIndex] = useState<number | null>(null);
   const [signatureResetNotices, setSignatureResetNotices] = useState<Record<number, string>>({});
+  const [signatureResetErrors, setSignatureResetErrors] = useState<Record<number, string>>({});
 
   // Estados de IA, Gravação e Salvamento
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -1191,6 +1192,12 @@ export default function AtaEditorModal({
     const activeMinuteId = minuteId || existingMinute?.id;
     setResettingSigIndex(index);
     setFinalizeError(null);
+    setSignatureResetErrors((prev) => {
+      if (!(index in prev)) return prev;
+      const copy = { ...prev };
+      delete copy[index];
+      return copy;
+    });
 
     try {
       const result = await resetParticipantSignatureWithServer({
@@ -1201,10 +1208,16 @@ export default function AtaEditorModal({
       });
 
       if (!result.ok) {
-        setFinalizeError(
+        const errMsg =
           result.error ||
-            "Não foi possível remover a assinatura no servidor. A assinatura anterior foi mantida."
-        );
+          (sigSummary.isRefused
+            ? "Não foi possível cancelar a recusa no servidor. O registro anterior foi mantido."
+            : "Não foi possível remover a assinatura no servidor. A assinatura anterior foi mantida.");
+        setFinalizeError(errMsg);
+        setSignatureResetErrors((prev) => ({
+          ...prev,
+          [index]: errMsg,
+        }));
         return;
       }
 
@@ -1222,6 +1235,11 @@ export default function AtaEditorModal({
           ...prev,
           [index]:
             "Assinatura anterior removida. Os campos foram liberados e será necessária uma nova assinatura.",
+        }));
+      } else if (sigSummary.isRefused) {
+        setSignatureResetNotices((prev) => ({
+          ...prev,
+          [index]: "Registro de recusa cancelado. Os campos foram liberados.",
         }));
       }
 
@@ -3065,8 +3083,25 @@ export default function AtaEditorModal({
                         </div>
 
                         {isLockedBySignature && (
-                          <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-                            Identidade e função bloqueadas após assinatura. Para alterar esses dados, use &ldquo;Refazer assinatura&rdquo;.
+                          <p
+                            className={`text-[11px] rounded-lg px-2.5 py-1.5 border ${
+                              p.signatureMode === "REFUSED"
+                                ? "text-rose-900 bg-rose-50 border-rose-200"
+                                : "text-emerald-800 bg-emerald-50 border-emerald-200"
+                            }`}
+                          >
+                            {p.signatureMode === "REFUSED"
+                              ? 'Identidade e função bloqueadas após registro de recusa. Para alterar esses dados, use "Cancelar recusa".'
+                              : 'Identidade e função bloqueadas após assinatura. Para alterar esses dados, use "Refazer assinatura".'}
+                          </p>
+                        )}
+
+                        {signatureResetErrors[idx] && (
+                          <p
+                            role="alert"
+                            className="text-[11px] text-rose-900 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 font-medium"
+                          >
+                            {signatureResetErrors[idx]}
                           </p>
                         )}
 
@@ -3156,19 +3191,23 @@ export default function AtaEditorModal({
                                 return (
                                   <div className="flex items-center space-x-1.5">
                                     <span className="inline-flex items-center space-x-1 text-rose-600 font-bold text-xs bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
-                                  <AlertCircle className="w-3.5 h-3.5" />
-                                  <span>Recusou-se a assinar</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
-                                  onClick={() => void handleResetParticipantSignature(idx)}
-                                  className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer disabled:opacity-50"
-                                  title="Cancelar recusa"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                                      <AlertCircle className="w-3.5 h-3.5" />
+                                      <span>Recusou-se a assinar</span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
+                                      onClick={() => void handleResetParticipantSignature(idx)}
+                                      className="p-1 text-slate-500 hover:text-slate-800 rounded cursor-pointer flex items-center space-x-1 text-[11px] font-semibold disabled:opacity-50"
+                                      title="Cancelar recusa"
+                                      aria-label="Cancelar recusa"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>
+                                        {resettingSigIndex === idx ? "Cancelando..." : "Cancelar recusa"}
+                                      </span>
+                                    </button>
+                                  </div>
                                 );
                               }
                               return (
@@ -3249,11 +3288,29 @@ export default function AtaEditorModal({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  markLocalEdit();
+                                  const targetParticipant = participants[idx];
+                                  if (targetParticipant?.id && qrModalInfo?.participantId === targetParticipant.id) {
+                                    closeQrPanel();
+                                  }
+                                  setSignatureResetNotices((prev) => {
+                                    if (!(idx in prev)) return prev;
+                                    const next = { ...prev };
+                                    delete next[idx];
+                                    return next;
+                                  });
+                                  setSignatureResetErrors((prev) => {
+                                    if (!(idx in prev)) return prev;
+                                    const next = { ...prev };
+                                    delete next[idx];
+                                    return next;
+                                  });
                                   const copy = [...participants];
                                   copy[idx] = {
                                     ...copy[idx],
                                     signatureMode: "REFUSED",
                                     signatureData: null,
+                                    hasActiveSignLink: false,
                                     refusalReason: refusalDraftReason.trim() || "Recusou-se a assinar presencialmente",
                                     witnessName: refusalDraftWitness.trim() || "Equipe Pedagógica",
                                   };

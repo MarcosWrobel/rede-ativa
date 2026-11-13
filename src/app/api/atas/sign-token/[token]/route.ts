@@ -95,6 +95,13 @@ export async function GET(
       return NextResponse.json({ error: "Este link de assinatura expirou. Solicite um novo link à equipe escolar." }, { status: 410 });
     }
 
+    if (participant.signatureMode === "REFUSED") {
+      return NextResponse.json(
+        { error: "Este participante possui registro de recusa na ata. Solicite um novo link à equipe após cancelar a recusa." },
+        { status: 409 }
+      );
+    }
+
     const linkedStudents = ((participant.minute as any).students || []).map((s: any) => ({
       id: s.studentId,
       name: s.studentNameSnapshot || "",
@@ -286,12 +293,13 @@ export async function POST(
           freshParticipant.signedAt ||
           freshParticipant.signatureData ||
           freshParticipant.verifiedEmail ||
-          freshParticipant.hasSignature
+          freshParticipant.hasSignature ||
+          freshParticipant.signatureMode === "REFUSED"
         ) {
           return {
             ok: false as const,
             status: 409,
-            error: "Esta assinatura já foi registrada anteriormente. Solicite um novo link caso precise assinar novamente.",
+            error: "Esta assinatura ou registro de recusa já foi registrado anteriormente. Solicite um novo link caso precise assinar novamente.",
           };
         }
 
@@ -414,12 +422,13 @@ export async function POST(
         freshParticipant.signedAt ||
         freshParticipant.signatureData ||
         freshParticipant.verifiedEmail ||
-        freshParticipant.hasSignature
+        freshParticipant.hasSignature ||
+        freshParticipant.signatureMode === "REFUSED"
       ) {
         return {
           ok: false as const,
           status: 409,
-          error: "Este link de assinatura já foi utilizado em outra requisição simultânea.",
+          error: "Este link de assinatura já foi utilizado ou o participante possui registro de recusa.",
         };
       }
 

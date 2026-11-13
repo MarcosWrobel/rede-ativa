@@ -128,13 +128,17 @@ export function sanitizeMinutePayload<T>(rawBody: T, mode: "CREATE" | "UPDATE"):
       )
       .map((p: any) => {
         const trimmedName = (p.name || "").trim();
-        const isSigned = Boolean(
-          p.signatureData || p.hasSignature || p.verifiedEmail || p.biometricVerified
+        const isProtected = Boolean(
+          p.signatureData ||
+            p.hasSignature ||
+            p.verifiedEmail ||
+            p.biometricVerified ||
+            p.signatureMode === "REFUSED"
         );
         return {
           ...p,
           name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
-          kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
+          kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned: isProtected }),
         };
       });
   }
@@ -199,7 +203,6 @@ export function mergeParticipantSignatures(
     }
 
     const shouldClear = Boolean(p.clearSignature);
-    const isRefused = p.signatureMode === "REFUSED";
     const matchHasSigned = Boolean(
       match &&
         (match.hasSignature ||
@@ -207,6 +210,9 @@ export function mergeParticipantSignatures(
           match.verifiedEmail ||
           match.biometricVerified)
     );
+    const matchIsRefused = Boolean(match && match.signatureMode === "REFUSED");
+    const matchIsProtected = matchHasSigned || matchIsRefused;
+    const isRefused = !shouldClear && (p.signatureMode === "REFUSED" || matchIsRefused);
 
     const effectiveRole = p.role || "RESPONSAVEL";
     const resolvedStudentId =
@@ -222,7 +228,7 @@ export function mergeParticipantSignatures(
     const sanitizedIncomingKinship = sanitizeKinshipForRole(
       effectiveRole,
       resolvedRawKinship,
-      { isSigned: matchHasSigned && !shouldClear && !isRefused }
+      { isSigned: matchIsProtected && !shouldClear }
     );
 
     const identityChanged = Boolean(
@@ -238,9 +244,9 @@ export function mergeParticipantSignatures(
         })
     );
 
-    if (matchHasSigned && identityChanged && !shouldClear && !isRefused) {
+    if (matchIsProtected && identityChanged && !shouldClear) {
       throw new Error(
-        "CONFLICT:Este participante já possui assinatura ou verificação registrada no servidor. Refaça a assinatura antes de alterar identidade ou função."
+        "CONFLICT:Este participante já possui assinatura, verificação ou registro de recusa no servidor. Utilize 'Refazer assinatura' ou 'Cancelar recusa' antes de alterar identidade ou função."
       );
     }
 
@@ -315,14 +321,18 @@ export function mergeParticipantSignatures(
       verifiedGoogleName,
       emailVerifiedAt,
       refusalReason: isRefused
-        ? p.refusalReason !== undefined
-          ? p.refusalReason || null
-          : match?.refusalReason || null
+        ? matchIsRefused && !shouldClear
+          ? match?.refusalReason ?? null
+          : p.refusalReason !== undefined
+            ? p.refusalReason || null
+            : match?.refusalReason || null
         : null,
       witnessName: isRefused
-        ? p.witnessName !== undefined
-          ? p.witnessName || null
-          : match?.witnessName || null
+        ? matchIsRefused && !shouldClear
+          ? match?.witnessName ?? null
+          : p.witnessName !== undefined
+            ? p.witnessName || null
+            : match?.witnessName || null
         : null,
     };
   });

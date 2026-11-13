@@ -820,5 +820,171 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       );
       expect(conflictRes.status).toBe(409);
     });
+
+    it("PATCH /api/atas/[id] e POST sign-token protegem participante em REFUSED (409) até Cancelar recusa, mantendo telefone editável", async () => {
+      const refusedDbParticipants = [
+        {
+          id: "part-refused",
+          role: "RESPONSAVEL",
+          name: "Marcos Original",
+          kinship: "Pai",
+          phone: "42999000001",
+          signatureMode: "REFUSED",
+          signatureData: null,
+          hasSignature: false,
+          refusalReason: "Recusa formal presencial",
+          witnessName: "Diretora Júlia",
+        },
+      ];
+
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
+        id: "min-refused",
+        status: "DRAFT",
+        schoolId: "school-a",
+        isConfidential: false,
+        authorEmail: "pedagoga@escola.pr.gov.br",
+        participants: refusedDbParticipants,
+      });
+
+      // 1. Tentativa direta no servidor de alterar nome/função sem Cancelar recusa retorna 409 Conflict
+      mockPrisma.pedagogicalMinuteParticipant.findMany.mockResolvedValueOnce(refusedDbParticipants);
+      const conflictIdentityRes = await patchMinuteHandler(
+        new Request("http://localhost:3001/api/atas/min-refused", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Atendimento",
+            summary: "Resumo válido com mais de dez caracteres.",
+            participants: [
+              {
+                id: "part-refused",
+                role: "PROFESSOR",
+                name: "Pessoa Trocada",
+                kinship: "Filosofia",
+                signatureMode: "REFUSED",
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ id: "min-refused" }) }
+      );
+      expect(conflictIdentityRes.status).toBe(409);
+
+      // 2. Edição exclusiva de telefone é aceita e preserva REFUSED, motivo e testemunha
+      mockPrisma.pedagogicalMinuteParticipant.findMany.mockResolvedValueOnce(refusedDbParticipants);
+      mockPrisma.pedagogicalMinute.update.mockResolvedValueOnce({
+        id: "min-refused",
+        participants: [{ ...refusedDbParticipants[0], phone: "42988887777" }],
+      });
+      const phoneOnlyRes = await patchMinuteHandler(
+        new Request("http://localhost:3001/api/atas/min-refused", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Atendimento",
+            summary: "Resumo válido com mais de dez caracteres.",
+            participants: [
+              {
+                id: "part-refused",
+                role: "RESPONSAVEL",
+                name: "Marcos Original",
+                kinship: "Pai",
+                phone: "42988887777",
+                signatureMode: "REFUSED",
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ id: "min-refused" }) }
+      );
+      expect(phoneOnlyRes.status).toBe(200);
+      const phoneCreateManyArgs = mockPrisma.pedagogicalMinuteParticipant.createMany.mock.calls.at(-1)?.[0] as any;
+      const savedRefusedPart = phoneCreateManyArgs?.data?.[0];
+      expect(savedRefusedPart.signatureMode).toBe("REFUSED");
+      expect(savedRefusedPart.refusalReason).toBe("Recusa formal presencial");
+      expect(savedRefusedPart.witnessName).toBe("Diretora Júlia");
+      expect(savedRefusedPart.phone).toBe("42988887777");
+
+      // 3. Emitir QR link para participante em REFUSED é bloqueado com 409
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce(refusedDbParticipants[0]);
+      const qrConflictRes = await createSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-refused/sign-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-refused" }),
+        }),
+        { params: Promise.resolve({ id: "min-refused" }) }
+      );
+      expect(qrConflictRes.status).toBe(409);
+
+      // 3b. Tentativa de envio via sign-token móvel para participante em REFUSED é bloqueada com 409
+      const futureExpires = new Date(Date.now() + 10 * 60 * 1000);
+      mockPrisma.pedagogicalMinuteParticipant.findUnique.mockResolvedValueOnce({
+        ...refusedDbParticipants[0],
+        minuteId: "min-refused",
+        mobileSignToken: "tok-refused-race",
+        mobileSignExpiresAt: futureExpires,
+        minute: { id: "min-refused", status: "DRAFT" },
+      });
+      mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce({
+        ...refusedDbParticipants[0],
+        minuteId: "min-refused",
+        mobileSignToken: "tok-refused-race",
+        mobileSignExpiresAt: futureExpires,
+        minute: { id: "min-refused", status: "DRAFT" },
+      });
+      const mobileRefusedRaceRes = await postPublicSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/sign-token/tok-refused-race", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
+          }),
+        }),
+        { params: Promise.resolve({ token: "tok-refused-race" }) }
+      );
+      expect(mobileRefusedRaceRes.status).toBe(409);
+
+      // 4. Cancelar recusa (clearSignature: true) limpa recusa e permite edição posterior
+      mockPrisma.pedagogicalMinuteParticipant.findMany.mockResolvedValueOnce(refusedDbParticipants);
+      mockPrisma.pedagogicalMinute.update.mockResolvedValueOnce({
+        id: "min-refused",
+        participants: [
+          {
+            ...refusedDbParticipants[0],
+            signatureMode: "PENDING",
+            refusalReason: null,
+            witnessName: null,
+          },
+        ],
+      });
+      const cancelRefusalRes = await patchMinuteHandler(
+        new Request("http://localhost:3001/api/atas/min-refused", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Atendimento",
+            summary: "Resumo válido com mais de dez caracteres.",
+            participants: [
+              {
+                id: "part-refused",
+                role: "RESPONSAVEL",
+                name: "Marcos Original",
+                kinship: "Pai",
+                signatureMode: "PENDING",
+                clearSignature: true,
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ id: "min-refused" }) }
+      );
+      expect(cancelRefusalRes.status).toBe(200);
+      const cancelCreateManyArgs = mockPrisma.pedagogicalMinuteParticipant.createMany.mock.calls.at(-1)?.[0] as any;
+      const clearedPart = cancelCreateManyArgs?.data?.[0];
+      expect(clearedPart.signatureMode).toBe("PENDING");
+      expect(clearedPart.refusalReason).toBeNull();
+      expect(clearedPart.witnessName).toBeNull();
+    });
   });
 });

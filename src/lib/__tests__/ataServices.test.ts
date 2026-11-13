@@ -172,12 +172,30 @@ describe("ataParticipantService - Sanitização e Pareamento de Signatários", (
       )
     ).toThrow(/^CONFLICT:/);
 
-    // Recusa formal limpa assinaturas e provas biométricas/OIDC
+    // Bloqueia troca de nome/identidade em participante já assinado mesmo se tentar enviar REFUSED sem clearSignature
+    expect(() =>
+      mergeParticipantSignatures(
+        [
+          {
+            id: "mp-oidc",
+            role: "RESPONSAVEL",
+            name: "João Corrigido",
+            signatureMode: "REFUSED",
+            refusalReason: "Tentativa indevida com troca de nome",
+            witnessName: "Prof. Carla",
+          },
+        ],
+        existing,
+        { clearMobileTokens: false, minuteId: "ata-2" }
+      )
+    ).toThrow(/^CONFLICT:/);
+
+    // Recusa formal com mesma identidade limpa assinaturas e provas biométricas/OIDC
     const refused = mergeParticipantSignatures(
       [
         {
           id: "mp-oidc",
-          name: "João Corrigido",
+          name: "João Antigo",
           signatureMode: "REFUSED",
           refusalReason: "Recusou assinar na presença da testemunha",
           witnessName: "Prof. Carla",
@@ -643,6 +661,66 @@ describe("ataFinalizationService - Regras de Lavratura e Fuso America/Sao_Paulo"
     );
     expect(partialResave[0].refusalReason).toBe("Não concorda com a advertência.");
     expect(partialResave[0].witnessName).toBe("Prof. Helena");
+
+    // Participante em REFUSED bloqueia alteração de identidade/papel/função sem clearSignature
+    expect(() =>
+      mergeParticipantSignatures(
+        [
+          {
+            id: "mp-ref",
+            role: "PROFESSOR",
+            name: "Outro Nome",
+            signatureMode: "REFUSED",
+          },
+        ],
+        [
+          {
+            id: "mp-ref",
+            role: "RESPONSAVEL",
+            name: "Marcos Responsável",
+            kinship: "Pai",
+            signatureMode: "REFUSED",
+            refusalReason: "Não concorda com a advertência.",
+            witnessName: "Prof. Helena",
+          },
+        ],
+        { clearMobileTokens: false, minuteId: "ata-ref" }
+      )
+    ).toThrow(/^CONFLICT:/);
+
+    // Permite editar apenas telefone mantendo REFUSED, motivo e testemunha (mesmo sem reenviar refusalReason/signatureMode)
+    const phoneOnlyRefused = mergeParticipantSignatures(
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          kinship: "Pai",
+          phone: "42999887766",
+          signatureMode: "PENDING",
+          refusalReason: "Tentativa de sobrescrever motivo",
+          witnessName: "Outra Testemunha",
+        },
+      ],
+      [
+        {
+          id: "mp-ref",
+          role: "RESPONSAVEL",
+          name: "Marcos Responsável",
+          kinship: "Pai",
+          signatureMode: "REFUSED",
+          refusalReason: "Não concorda com a advertência.",
+          witnessName: "Prof. Helena",
+        },
+      ],
+      { clearMobileTokens: false, minuteId: "ata-ref" }
+    );
+    expect(phoneOnlyRefused[0]).toMatchObject({
+      phone: "42999887766",
+      signatureMode: "REFUSED",
+      refusalReason: "Não concorda com a advertência.",
+      witnessName: "Prof. Helena",
+    });
 
     // Cancelar recusa (PENDING + clearSignature) limpa motivo e testemunha
     const clearedRefusal = mergeParticipantSignatures(

@@ -300,4 +300,81 @@ describe("AtaEditor Subcomponents (SAAS-UI-01)", () => {
     expect(capturedBody?.participants?.[0]?.clearSignature).toBe(true);
     expect(isParticipantSignatureLocked(okResult.participants[0])).toBe(false);
   });
+
+  it("trata signatureMode === 'REFUSED' como estado protegido na UI até confirmação de 'Cancelar recusa' no servidor", async () => {
+    const refusedParticipant = {
+      id: "part-refused-1",
+      role: "RESPONSAVEL",
+      name: "Carlos Responsável",
+      kinship: "Pai",
+      phone: "42999112233",
+      signatureMode: "REFUSED",
+      signatureData: null,
+      hasSignature: false,
+      verifiedEmail: null,
+      biometricVerified: false,
+      refusalReason: "Discordou do encaminhamento",
+      witnessName: "Pedagoga Marta",
+    };
+
+    expect(isParticipantSignatureLocked(refusedParticipant)).toBe(true);
+    expect(isParticipantQrActive(refusedParticipant, "part-refused-1")).toBe(false);
+    expect(applyRoleChangeToUnsignedParticipant(refusedParticipant, "PROFESSOR")).toBe(
+      refusedParticipant
+    );
+
+    // Falha de rede ao cancelar recusa mantém REFUSED, motivo, testemunha e campos bloqueados
+    const networkFailResult = await resetParticipantSignatureWithServer({
+      minuteId: "min-ref",
+      participantIndex: 0,
+      participants: [refusedParticipant],
+      buildPayload: (next) => ({ participants: next }),
+      fetcher: (async () => {
+        throw new Error("Network down");
+      }) as unknown as typeof fetch,
+    });
+
+    expect(networkFailResult.ok).toBe(false);
+    expect(networkFailResult.error).toContain("cancelar a recusa");
+    expect(isParticipantSignatureLocked(networkFailResult.participants[0])).toBe(true);
+    expect(networkFailResult.participants[0].signatureMode).toBe("REFUSED");
+    expect(networkFailResult.participants[0].refusalReason).toBe("Discordou do encaminhamento");
+    expect(networkFailResult.participants[0].witnessName).toBe("Pedagoga Marta");
+
+    // Sucesso no servidor envia clearSignature: true e libera campos após confirmação
+    let sentClearFlag = false;
+    const cancelOkResult = await resetParticipantSignatureWithServer({
+      minuteId: "min-ref",
+      participantIndex: 0,
+      participants: [refusedParticipant],
+      buildPayload: (next) => ({ participants: next }),
+      fetcher: (async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body || "{}"));
+        sentClearFlag = Boolean(body?.participants?.[0]?.clearSignature);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            minute: {
+              id: "min-ref",
+              participants: [
+                {
+                  ...refusedParticipant,
+                  signatureMode: "PENDING",
+                  refusalReason: null,
+                  witnessName: null,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }) as typeof fetch,
+    });
+
+    expect(cancelOkResult.ok).toBe(true);
+    expect(cancelOkResult.persistedOnServer).toBe(true);
+    expect(sentClearFlag).toBe(true);
+    expect(isParticipantSignatureLocked(cancelOkResult.participants[0])).toBe(false);
+    expect(cancelOkResult.participants[0].signatureMode).toBe("PENDING");
+  });
 });
