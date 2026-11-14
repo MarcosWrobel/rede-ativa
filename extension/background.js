@@ -2,23 +2,130 @@
  * Background Service Worker — Sincronizador Rede Ativa (Manifest V3)
  * 1. Abre o WhatsApp Web em Janela Dedicada Compacta (tipo 'popup' minimalista)
  *    posicionada no canto direito da tela, reutilizando a mesma janela durante todo o fluxo.
- * 2. Gerencia o contexto de despacho da Busca Ativa (aluno, telefone, logId) com Auto-Send ativo por padrão.
- * 3. Faz o relay bidirecional de eventos de confirmação do WhatsApp Web para a plataforma.
- * 4. Faz a ponte de extração de retornos (Texto Selecionado / DOM + Captura Visual OCR via captureVisibleTab).
+ * 2. Gerencia operações pendentes (CAPTURE, DISPATCH, EXTRACT) indexadas por requestId (sem contexto global único sobrescrito).
+ * 3. Exige correlação válida (requestId / logId / phone), expiração (TTL 2 min) e consumo único por operação (sem fallback para último contexto e sem substituir identificadores).
+ * 4. Valida origem e remetente por operação (bloqueando subdomínios *.vercel.app de terceiros e origens não autorizadas).
  */
 
 const POPUP_WIDTH = 480;
 const POPUP_HEIGHT = 760;
+const DISPATCH_CONTEXT_TTL_MS = 120 * 1000; // 2 minutos estritos
+const CONSUMED_RETENTION_TTL_MS = 10 * 60 * 1000; // 10 minutos de retenção anti-replay
 
-const PLATFORM_TARGET_URLS = [
-  "https://*.vercel.app/*",
-  "https://redeativa.app.br/*",
-  "https://*.redeativa.app.br/*",
-  "https://redeativa.com.br/*",
-  "https://*.redeativa.com.br/*",
-  "http://localhost/*",
-  "http://127.0.0.1/*",
-];
+const PENDING_OPERATIONS_STORAGE_KEY = "redeativa_pending_operations";
+const CONSUMED_OPERATIONS_STORAGE_KEY = "redeativa_consumed_operations";
+
+const EXACT_TRUSTED_HTTPS_HOSTS = new Set([
+  "redeativa.app.br",
+  "www.redeativa.app.br",
+  "app.redeativa.app.br",
+  "redeativa.com.br",
+  "www.redeativa.com.br",
+  "app.redeativa.com.br",
+  "registro-leopoldina.vercel.app",
+  "busca-ativa-leopoldina.vercel.app",
+]);
+
+// Fila de serialização em memória para impedir condições de corrida (read-modify-write) entre abas simultâneas
+let operationStoreMutex = Promise.resolve();
+
+function withOperationStoreLock(taskFn) {
+  const next = operationStoreMutex.then(() => taskFn(), () => taskFn());
+  operationStoreMutex = next.catch(() => {});
+  return next;
+}
+
+function normalizeOrigin(urlOrOrigin) {
+  if (!urlOrOrigin || typeof urlOrOrigin !== "string") return null;
+  try {
+    const parsed = new URL(urlOrOrigin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorizedPlatformOriginSync(urlOrOrigin) {
+  if (!urlOrOrigin || typeof urlOrOrigin !== "string") return false;
+  try {
+    const parsed = new URL(urlOrOrigin);
+    const protocol = parsed.protocol;
+    const host = parsed.hostname.toLowerCase();
+
+    if (protocol === "https:" && EXACT_TRUSTED_HTTPS_HOSTS.has(host)) {
+      return true;
+    }
+
+    if (protocol === "http:" && (host === "localhost" || host === "127.0.0.1")) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function validatePlatformSender(sender) {
+  if (!sender || (sender.id && chrome?.runtime?.id && sender.id !== chrome.runtime.id)) {
+    return { ok: false, error: "UNAUTHORIZED_SENDER" };
+  }
+  const tabId = sender?.tab?.id;
+  const rawUrl = sender?.url || sender?.tab?.url;
+  if (!tabId || !rawUrl || !sender.documentId || sender.frameId !== 0) {
+    return { ok: false, error: "UNAUTHORIZED_ORIGIN" };
+  }
+
+  if (!isAuthorizedPlatformOriginSync(rawUrl)) {
+    return { ok: false, error: "UNAUTHORIZED_ORIGIN" };
+  }
+
+  const origin = normalizeOrigin(rawUrl);
+  if (!origin) {
+    return { ok: false, error: "UNAUTHORIZED_ORIGIN" };
+  }
+
+  return {
+    ok: true,
+    tabId,
+    documentId: sender.documentId,
+    windowId: sender?.tab?.windowId || null,
+    origin,
+  };
+}
+
+function traceLocalOperation(senderCheck, enabled, stage) {
+  if (!enabled || !senderCheck?.ok) return;
+  try {
+    const url = new URL(senderCheck.origin);
+    if (url.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(url.hostname)) return;
+    chrome.tabs.sendMessage(senderCheck.tabId, { type: "REDEATIVA_EXTENSION_DIAGNOSTIC", stage }, { documentId: senderCheck.documentId }).catch(() => {});
+  } catch {}
+}
+
+function validateWhatsAppSender(sender) {
+  if (!sender || (sender.id && chrome?.runtime?.id && sender.id !== chrome.runtime.id)) {
+    return { ok: false, error: "UNAUTHORIZED_SENDER" };
+  }
+  const tabId = sender?.tab?.id;
+  const rawUrl = sender?.url || sender?.tab?.url;
+  if (!tabId || !rawUrl) {
+    return { ok: false, error: "UNAUTHORIZED_WHATSAPP_SENDER" };
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol === "https:" && parsed.hostname.toLowerCase() === "web.whatsapp.com") {
+      return {
+        ok: true,
+        tabId,
+        windowId: sender?.tab?.windowId || null,
+        url: rawUrl,
+      };
+    }
+  } catch {}
+  return { ok: false, error: "UNAUTHORIZED_WHATSAPP_SENDER" };
+}
 
 function isAllowedWhatsAppUrl(urlStr) {
   try {
@@ -41,6 +148,217 @@ function sanitizeWhatsAppPhone(phone) {
     return "55" + digits;
   }
   return digits;
+}
+
+function arePhonesCompatible(phoneA, phoneB) {
+  const cleanA = sanitizeWhatsAppPhone(phoneA);
+  const cleanB = sanitizeWhatsAppPhone(phoneB);
+  if (!cleanA || !cleanB) return false;
+  return cleanA.length >= 10 && cleanA === cleanB;
+}
+
+/**
+ * Carrega e higieniza os mapas de operações pendentes e já consumidas em storage.local.
+ * Deve ser chamado sempre dentro de withOperationStoreLock.
+ */
+async function loadOperationMapsUnlocked(now = Date.now()) {
+  const data = await chrome.storage.local.get([
+    PENDING_OPERATIONS_STORAGE_KEY,
+    CONSUMED_OPERATIONS_STORAGE_KEY,
+  ]);
+
+  const rawPending = data?.[PENDING_OPERATIONS_STORAGE_KEY];
+  const rawConsumed = data?.[CONSUMED_OPERATIONS_STORAGE_KEY];
+
+  const pending =
+    rawPending && typeof rawPending === "object" && !Array.isArray(rawPending)
+      ? { ...rawPending }
+      : {};
+  const consumed =
+    rawConsumed && typeof rawConsumed === "object" && !Array.isArray(rawConsumed)
+      ? { ...rawConsumed }
+      : {};
+
+  // Limpa registros de consumo com mais de 10 minutos
+  for (const [reqId, ts] of Object.entries(consumed)) {
+    if (typeof ts !== "number" || now - ts > CONSUMED_RETENTION_TTL_MS) {
+      delete consumed[reqId];
+    }
+  }
+
+  return { pending, consumed };
+}
+
+async function saveOperationMapsUnlocked(pending, consumed) {
+  await chrome.storage.local.set({
+    [PENDING_OPERATIONS_STORAGE_KEY]: pending,
+    [CONSUMED_OPERATIONS_STORAGE_KEY]: consumed,
+  });
+}
+
+/**
+ * Registra uma operação individual (CAPTURE, DISPATCH ou EXTRACT) indexada por requestId,
+ * sem sobrescrever operações pendentes de outras abas ou atendimentos.
+ */
+async function registerPendingOperation(params) {
+  return withOperationStoreLock(async () => {
+    const now = Date.now();
+    const requestId = typeof params.requestId === "string" ? params.requestId.trim() : "";
+    const logId = typeof params.logId === "string" ? params.logId.trim() : "";
+
+    if (!requestId || !logId) {
+      return { ok: false, error: "MISSING_CORRELATION_ID" };
+    }
+
+    const { pending, consumed } = await loadOperationMapsUnlocked(now);
+
+    // Purga operações expiradas antes de validar
+    for (const [id, op] of Object.entries(pending)) {
+      if (!op || typeof op.expiresAt !== "number" || now > op.expiresAt) {
+        delete pending[id];
+      }
+    }
+
+    if (consumed[requestId] || pending[requestId]) {
+      await saveOperationMapsUnlocked(pending, consumed);
+      return { ok: false, error: "OPERATION_ALREADY_CONSUMED" };
+    }
+
+    const entry = {
+      requestId,
+      kind: params.kind, // "CAPTURE" | "DISPATCH" | "EXTRACT"
+      originTabId: params.originTabId,
+      originDocumentId: params.originDocumentId,
+      originOrigin: params.originOrigin,
+      targetTabId: params.targetTabId || null,
+      logId,
+      phone: sanitizeWhatsAppPhone(params.phone) || null,
+      studentName: params.studentName ? String(params.studentName).slice(0, 80) : null,
+      intendedText: params.intendedText ? String(params.intendedText).slice(0, 2000) : null,
+      autoSend: Boolean(params.autoSend),
+      createdAt: now,
+      expiresAt: now + DISPATCH_CONTEXT_TTL_MS,
+    };
+
+    pending[requestId] = entry;
+    await saveOperationMapsUnlocked(pending, consumed);
+    return { ok: true, operation: entry };
+  });
+}
+
+/**
+ * Resolve e consome atomicamente uma operação pendente com validação estrita de correlação e expiração.
+ * NUNCA usa "último contexto" como fallback e NUNCA substitui os identificadores informados na captura/resposta.
+ */
+async function resolveAndConsumeOperation(expectedKind, correlation) {
+  return withOperationStoreLock(async () => {
+    const now = Date.now();
+    const reqId =
+      typeof correlation?.requestId === "string" ? correlation.requestId.trim() : "";
+    const logId =
+      typeof correlation?.logId === "string" ? correlation.logId.trim() : "";
+    const cleanPhone = sanitizeWhatsAppPhone(correlation?.phone) || "";
+    const senderTabId = correlation?.senderTabId || null;
+
+    const { pending, consumed } = await loadOperationMapsUnlocked(now);
+
+    // Caso 1: requestId explícito informado
+    if (reqId) {
+      if (consumed[reqId]) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "OPERATION_ALREADY_CONSUMED" };
+      }
+
+      const op = pending[reqId];
+      if (!op) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "UNKNOWN_OPERATION_CONTEXT" };
+      }
+
+      if (typeof op.expiresAt !== "number" || now > op.expiresAt) {
+        delete pending[reqId];
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "OPERATION_CONTEXT_EXPIRED" };
+      }
+
+      if (op.kind !== expectedKind) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "INVALID_OPERATION_KIND" };
+      }
+
+      if (expectedKind === "DISPATCH" && op.targetTabId && senderTabId && op.targetTabId !== senderTabId) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "UNAUTHORIZED_WHATSAPP_TAB" };
+      }
+
+      // Valida que os identificadores informados na resposta/captura não divergem da operação registrada
+      if (logId && logId !== op.logId) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "CORRELATION_MISMATCH" };
+      }
+      if (cleanPhone && op.phone && !arePhonesCompatible(cleanPhone, op.phone)) {
+        await saveOperationMapsUnlocked(pending, consumed);
+        return { ok: false, error: "CORRELATION_MISMATCH" };
+      }
+
+      // Consome a operação (uso único)
+      delete pending[reqId];
+      consumed[reqId] = now;
+      await saveOperationMapsUnlocked(pending, consumed);
+      return { ok: true, operation: op };
+    }
+
+    // Eventos finais precisam manter o identificador obtido antes da captura.
+    if (expectedKind === "CAPTURE" || expectedKind === "DISPATCH") {
+      return { ok: false, error: "MISSING_CORRELATION_ID" };
+    }
+
+    // Compatibilidade para os demais tipos.
+    if (!logId && !cleanPhone) {
+      await saveOperationMapsUnlocked(pending, consumed);
+      return { ok: false, error: "MISSING_CORRELATION_ID" };
+    }
+
+    let expiredMatched = false;
+    const validCandidates = [];
+
+    for (const [id, op] of Object.entries(pending)) {
+      if (!op || op.kind !== expectedKind) continue;
+
+      const matchesLog = logId ? op.logId === logId : true;
+      const matchesPhone = cleanPhone
+        ? Boolean(op.phone) && arePhonesCompatible(cleanPhone, op.phone)
+        : true;
+
+      if (matchesLog && matchesPhone) {
+        if (typeof op.expiresAt !== "number" || now > op.expiresAt) {
+          delete pending[id];
+          expiredMatched = true;
+        } else {
+          validCandidates.push(op);
+        }
+      }
+    }
+
+    if (validCandidates.length === 0) {
+      await saveOperationMapsUnlocked(pending, consumed);
+      return {
+        ok: false,
+        error: expiredMatched ? "OPERATION_CONTEXT_EXPIRED" : "UNKNOWN_OPERATION_CONTEXT",
+      };
+    }
+
+    if (validCandidates.length > 1) {
+      await saveOperationMapsUnlocked(pending, consumed);
+      return { ok: false, error: "AMBIGUOUS_OPERATION_CONTEXT" };
+    }
+
+    const matchedOp = validCandidates[0];
+    delete pending[matchedOp.requestId];
+    consumed[matchedOp.requestId] = now;
+    await saveOperationMapsUnlocked(pending, consumed);
+    return { ok: true, operation: matchedOp };
+  });
 }
 
 function waitForTabLoad(tabId, timeoutMs = 10000) {
@@ -80,122 +398,53 @@ async function getPopupCoordinates() {
 }
 
 /**
- * Captura um screenshot JPEG rápido da janela visível do WhatsApp Web para OCR Multimodal.
+ * captureVisibleTab captura a aba ativa da janela, não a aba identificada por tabId.
+ * Sem uma API de captura vinculada à aba, retornar imagem poderia expor outra conversa.
+ * A extração textual continua disponível; OCR visual fica desativado até haver vínculo seguro.
  */
-async function captureWhatsAppTabScreenshot(windowId, tabId) {
-  try {
-    if (tabId) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: true });
-        await new Promise((r) => setTimeout(r, 60));
-      } catch {}
-    }
-
-    const dataUrl = await chrome.tabs.captureVisibleTab(windowId || null, {
-      format: "jpeg",
-      quality: 85,
-    });
-
-    if (tabId) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: false });
-      } catch {}
-    }
-
-    return typeof dataUrl === "string" && dataUrl.startsWith("data:image/") ? dataUrl : null;
-  } catch (err) {
-    if (tabId) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PREPARE_SCREENSHOT", hide: false });
-      } catch {}
-    }
-    console.warn("[Background] Não foi possível capturar screenshot da aba:", err?.message || err);
-    return null;
-  }
+async function captureWhatsAppTabScreenshot() {
+  return null;
 }
 
 /**
- * Localiza todas as abas abertas da plataforma Rede Ativa (seja em localhost:3000,
- * localhost:3001, rede local ou domínios em nuvem Vercel/oficial).
- * Elimina a limitação da API chrome.tabs.query com portas não-padrão (ex.: localhost:3001).
+ * Verifica se a aba de origem registrada ainda existe e permanece exatamente na mesma origem autorizada.
  */
-async function queryPlatformTabs() {
+async function verifyOriginTabStillMatches(originTabId, expectedOrigin) {
+  if (!originTabId || !expectedOrigin) return false;
   try {
+    if (!isAuthorizedPlatformOriginSync(expectedOrigin)) {
+      return false;
+    }
+
+    if (typeof chrome.tabs.get === "function") {
+      const tab = await chrome.tabs.get(originTabId);
+      if (!tab || !tab.id || !tab.url) return false;
+      return normalizeOrigin(tab.url) === expectedOrigin;
+    }
+
     const allTabs = await chrome.tabs.query({});
-    return allTabs.filter((tab) => {
-      if (!tab?.id || !tab.url || typeof tab.url !== "string") return false;
-      try {
-        const parsed = new URL(tab.url);
-        const host = parsed.hostname.toLowerCase();
-        const protocol = parsed.protocol;
-        if (protocol === "http:" || protocol === "https:") {
-          // Descarte de domínios externos e governamentais
-          if (
-            host === "web.whatsapp.com" ||
-            host === "wa.me" ||
-            host === "api.whatsapp.com" ||
-            host === "app.powerbi.com" ||
-            host.includes("seed.pr.gov.br")
-          ) {
-            return false;
-          }
-          // Aceita localhost em qualquer porta, IPs de LAN e domínios da aplicação
-          if (
-            host === "localhost" ||
-            host === "127.0.0.1" ||
-            host === "0.0.0.0" ||
-            host.startsWith("192.168.") ||
-            host.startsWith("10.") ||
-            host.endsWith(".local") ||
-            host.endsWith(".vercel.app") ||
-            host === "redeativa.app.br" ||
-            host.endsWith(".redeativa.app.br") ||
-            host === "redeativa.com.br" ||
-            host.endsWith(".redeativa.com.br")
-          ) {
-            return true;
-          }
-        }
-        return false;
-      } catch {
-        return false;
-      }
-    });
-  } catch (err) {
-    console.warn("[Background] Falha ao consultar abas da plataforma:", err);
-    return [];
+    const matchingTab = allTabs.find((t) => t.id === originTabId);
+    if (!matchingTab || !matchingTab.url) return false;
+    return normalizeOrigin(matchingTab.url) === expectedOrigin;
+  } catch {
+    return false;
   }
 }
 
 /**
- * Retransmite um retorno capturado no WhatsApp Web para todas as abas abertas da plataforma.
- */
-async function relayCapturedReplyToPlatformTabs(payload) {
-  const tabs = await queryPlatformTabs();
-  let relayedCount = 0;
-  for (const tab of tabs) {
-    if (tab.id) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: "LEOPOLDINA_WHATSAPP_REPLY_PUSH_RELAY",
-          ...payload,
-        });
-        relayedCount++;
-      } catch {}
-    }
-  }
-  return relayedCount;
-}
-
-/**
- * Garante que todas as abas abertas do WhatsApp Web tenham o content script mais recente injetado,
- * mesmo sem precisar dar F5 manual após atualizar ou recarregar a extensão.
+ * Garante que as abas abertas do WhatsApp Web tenham o content script ativo sem reinjetar desnecessariamente.
  */
 async function ensureContentScriptInOpenWhatsAppTabs() {
   try {
     const waTabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
     for (const tab of waTabs) {
       if (!tab.id) continue;
+      try {
+        const pingRes = await chrome.tabs.sendMessage(tab.id, { type: "LEOPOLDINA_PING" });
+        if (pingRes && (pingRes.pong || pingRes.ok)) {
+          continue;
+        }
+      } catch {}
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -211,12 +460,26 @@ async function ensureContentScriptInOpenWhatsAppTabs() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.remove(["leopoldina_last_captured_reply"]).catch(() => {});
+  withOperationStoreLock(() => chrome.storage.local
+    .remove([
+      "leopoldina_last_captured_reply",
+      "leopoldina_active_dispatch",
+      "leopoldina_capture_context",
+      PENDING_OPERATIONS_STORAGE_KEY,
+      CONSUMED_OPERATIONS_STORAGE_KEY,
+    ])).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.remove(["leopoldina_last_captured_reply"]).catch(() => {});
+  withOperationStoreLock(() => chrome.storage.local
+    .remove([
+      "leopoldina_last_captured_reply",
+      "leopoldina_active_dispatch",
+      "leopoldina_capture_context",
+      PENDING_OPERATIONS_STORAGE_KEY,
+      CONSUMED_OPERATIONS_STORAGE_KEY,
+    ])).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
 });
 
@@ -234,112 +497,362 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // 1. Despacho de WhatsApp da aplicação Registro para a janela dedicada
-  if (request?.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && request.url) {
-    if (!isAllowedWhatsAppUrl(request.url)) {
-      sendResponse({ success: false, error: "URL de destino não permitida. Apenas domínios WhatsApp são aceitos." });
-      return false;
-    }
-
+  // 0. Registro explícito de contexto de captura pelo modal ativo na aba autorizada (por operação, sem sobrescrever outras abas)
+  if (request?.type === "LEOPOLDINA_REGISTER_CAPTURE_CONTEXT") {
     (async () => {
+      const senderCheck = await validatePlatformSender(sender);
+      if (!senderCheck.ok) {
+        sendResponse({ success: false, error: senderCheck.error });
+        return;
+      }
+
+      const reg = await registerPendingOperation({
+        requestId: request.requestId,
+        kind: "CAPTURE",
+        originTabId: senderCheck.tabId,
+        originDocumentId: senderCheck.documentId,
+        originOrigin: senderCheck.origin,
+        logId: request.logId,
+        phone: request.phone,
+        studentName: request.studentName,
+      });
+
+      if (!reg.ok) {
+        sendResponse({ success: false, error: reg.error });
+        return;
+      }
+
+      sendResponse({
+        success: true,
+        requestId: reg.operation.requestId,
+        logId: reg.operation.logId,
+      });
+    })();
+    return true;
+  }
+
+  // 1. Despacho de WhatsApp da aplicação Rede Ativa para a janela dedicada
+  if (request?.type === "LEOPOLDINA_DISPATCH_WHATSAPP" && request.url) {
+    (async () => {
+      let senderCheck;
       try {
-        // Por padrão, o Auto-Send assistido fica ATIVO (a menos que explicitamente desativado em opt_whatsapp_auto_send === false)
+        senderCheck = await validatePlatformSender(sender);
+        if (!senderCheck.ok) {
+          sendResponse({
+            success: false,
+            error: senderCheck.error,
+            message: "Origem ou aba não autorizada para despachar mensagens.",
+          });
+          return;
+        }
+
+        if (!isAllowedWhatsAppUrl(request.url)) {
+          sendResponse({
+            success: false,
+            error: "URL de destino não permitida. Apenas domínios WhatsApp são aceitos.",
+          });
+          return;
+        }
+
         const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
         const autoSendPref = storageRes?.opt_whatsapp_auto_send !== false;
 
-        const dispatchPayload = {
-          logId: request.logId || null,
-          studentId: request.studentId || null,
-          studentName: request.studentName || null,
-          phone: request.phone || null,
-          autoSend: request.autoSend !== undefined ? Boolean(request.autoSend) : autoSendPref,
-          dispatchedAt: Date.now(),
-        };
+        let intendedText = "";
+        try {
+          const parsedDispatchUrl = new URL(request.url);
+          intendedText = (parsedDispatchUrl.searchParams.get("text") || "").trim();
+        } catch {}
 
-        await chrome.storage.local.set({
-          leopoldina_active_dispatch: dispatchPayload,
+        const reg = await registerPendingOperation({
+          requestId: request.requestId,
+          kind: "DISPATCH",
+          originTabId: senderCheck.tabId,
+          originDocumentId: senderCheck.documentId,
+          originOrigin: senderCheck.origin,
+          logId: request.logId,
+          phone: request.phone,
+          studentName: request.studentName,
+          intendedText: request.text || intendedText || null,
+          autoSend: request.autoSend !== undefined ? Boolean(request.autoSend) : autoSendPref,
         });
 
-        const result = await handleWhatsAppDispatch(request.url);
-        sendResponse({ success: true, ...result });
+        if (!reg.ok) {
+          sendResponse({
+            success: false,
+            requestId: request.requestId || null,
+            error: reg.error,
+          });
+          return;
+        }
+
+        traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.registered");
+        traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.opening");
+
+        const result = await handleWhatsAppDispatch(request.url, request.reuseTab !== false);
+        if (result && result.tabId) {
+          await withOperationStoreLock(async () => {
+            const { pending, consumed } = await loadOperationMapsUnlocked(Date.now());
+            const existingOp = pending[reg.operation.requestId];
+            if (existingOp) {
+              existingOp.targetTabId = result.tabId;
+              await saveOperationMapsUnlocked(pending, consumed);
+            }
+          });
+        }
+        traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.opened");
+        sendResponse({
+          success: true,
+          requestId: reg.operation.requestId,
+          logId: reg.operation.logId,
+          ...result,
+        });
       } catch (err) {
+        traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.error");
         sendResponse({ success: false, error: err?.message || String(err) });
       }
     })();
     return true;
   }
 
-  // 2. Consulta de contexto ativo feita pelo content script do WhatsApp Web
+  // 2. Consulta de contexto de despacho pelo content script do WhatsApp Web (correlacionado por requestId, aba autorizada e phone da URL)
   if (request?.type === "LEOPOLDINA_GET_ACTIVE_DISPATCH") {
     (async () => {
       try {
-        const data = await chrome.storage.local.get(["leopoldina_active_dispatch", "opt_whatsapp_auto_send"]);
-        const dispatch = data?.leopoldina_active_dispatch;
-        const autoSendPref = data?.opt_whatsapp_auto_send !== false;
+        const waCheck = validateWhatsAppSender(sender);
+        if (!waCheck.ok) {
+          sendResponse({ activeDispatch: null, error: waCheck.error });
+          return;
+        }
 
-        // Se o despacho tiver menos de 5 minutos, considera ativo
-        if (dispatch && Date.now() - dispatch.dispatchedAt < 300000) {
+        const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
+        const autoSendPref = storageRes?.opt_whatsapp_auto_send !== false;
+
+        let urlPhone = "";
+        try {
+          const parsedUrl = new URL(waCheck.url);
+          urlPhone = sanitizeWhatsAppPhone(parsedUrl.searchParams.get("phone")) || "";
+        } catch {}
+
+        const reqId = typeof request.requestId === "string" ? request.requestId.trim() : "";
+        const reqPhone = sanitizeWhatsAppPhone(request.phone) || urlPhone;
+
+        const matchedDispatch = await withOperationStoreLock(async () => {
+          const now = Date.now();
+          const { pending, consumed } = await loadOperationMapsUnlocked(now);
+          let changed = false;
+
+          for (const [id, op] of Object.entries(pending)) {
+            if (!op || typeof op.expiresAt !== "number" || now > op.expiresAt) {
+              delete pending[id];
+              changed = true;
+            }
+          }
+          if (changed) {
+            await saveOperationMapsUnlocked(pending, consumed);
+          }
+
+          if (reqId) {
+            const op = pending[reqId];
+            if (!op || op.kind !== "DISPATCH") return null;
+            if (op.targetTabId && waCheck.tabId && op.targetTabId !== waCheck.tabId) return null;
+            return op;
+          }
+
+          if (!reqPhone) {
+            return null;
+          }
+
+          const candidates = Object.values(pending).filter(
+            (op) =>
+              op &&
+              op.kind === "DISPATCH" &&
+              (!op.targetTabId || !waCheck.tabId || op.targetTabId === waCheck.tabId) &&
+              op.phone &&
+              arePhonesCompatible(reqPhone, op.phone)
+          );
+          if (candidates.length === 0) return null;
+          candidates.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          return candidates[0];
+        });
+
+        if (matchedDispatch) {
           sendResponse({
             activeDispatch: {
-              ...dispatch,
-              autoSend: dispatch.autoSend !== undefined ? Boolean(dispatch.autoSend) : autoSendPref,
+              requestId: matchedDispatch.requestId,
+              logId: matchedDispatch.logId,
+              studentName: matchedDispatch.studentName || null,
+              phone: matchedDispatch.phone || null,
+              text: matchedDispatch.intendedText || null,
+              autoSend: matchedDispatch.autoSend,
+              dispatchedAt: matchedDispatch.createdAt,
             },
           });
         } else {
           sendResponse({ activeDispatch: null, autoSendDefault: autoSendPref });
         }
-      } catch (err) {
+      } catch {
         sendResponse({ activeDispatch: null, autoSendDefault: true });
       }
     })();
     return true;
   }
 
-  // 3. Resultado de envio emitido pelo content script do WhatsApp Web
+  // Consulta sem consumir: captura humana associa o clique à operação vigente antes de ler o conteúdo.
+  if (request?.type === "LEOPOLDINA_GET_CAPTURE_CONTEXT") {
+    (async () => {
+      const waCheck = validateWhatsAppSender(sender);
+      const phone = sanitizeWhatsAppPhone(request.phone);
+      if (!waCheck.ok || !phone) {
+        sendResponse({ success: false, error: waCheck.error || "MISSING_CORRELATION_ID" });
+        return;
+      }
+      const result = await withOperationStoreLock(async () => {
+        const { pending } = await loadOperationMapsUnlocked();
+        const candidates = Object.values(pending).filter((op) =>
+          op?.kind === "CAPTURE" && op.expiresAt > Date.now() && op.phone && arePhonesCompatible(phone, op.phone)
+        );
+        if (candidates.length !== 1) return { success: false, error: candidates.length ? "AMBIGUOUS_OPERATION_CONTEXT" : "UNKNOWN_OPERATION_CONTEXT" };
+        const op = candidates[0];
+        return { success: true, requestId: op.requestId, logId: op.logId, phone: op.phone };
+      });
+      sendResponse(result);
+    })().catch(() => sendResponse({ success: false }));
+    return true;
+  }
+
+  // 3. Resultado de envio emitido pelo content script do WhatsApp Web (exige correlação válida e uso único)
   if (request?.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME") {
     (async () => {
       try {
-        console.log("[Sincronizador Rede Ativa] Resultado de envio recebido:", request.outcome, request.logId);
-
-        const tabs = await queryPlatformTabs();
-        for (const tab of tabs) {
-          if (tab.id) {
-            chrome.tabs.sendMessage(tab.id, {
-              type: "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY",
-              outcome: request.outcome,
-              logId: request.logId,
-              phone: request.phone,
-              studentName: request.studentName,
-              timestamp: request.timestamp || Date.now(),
-            }).catch(() => {});
-          }
+        const waCheck = validateWhatsAppSender(sender);
+        if (!waCheck.ok) {
+          sendResponse({ success: false, relayedCount: 0, error: waCheck.error });
+          return;
         }
 
-        // Limpa o despacho pendente
-        await chrome.storage.local.remove(["leopoldina_active_dispatch"]);
-        sendResponse({ success: true });
+        const resolved = await resolveAndConsumeOperation("DISPATCH", {
+          requestId: request.requestId,
+          logId: request.logId,
+          phone: request.phone,
+          senderTabId: waCheck.tabId,
+        });
+
+        if (!resolved.ok) {
+          sendResponse({
+            success: false,
+            relayedCount: 0,
+            error: resolved.error,
+          });
+          return;
+        }
+
+        const op = resolved.operation;
+        const isSameOriginTab = await verifyOriginTabStillMatches(
+          op.originTabId,
+          op.originOrigin
+        );
+        if (!isSameOriginTab) {
+          sendResponse({
+            success: false,
+            relayedCount: 0,
+            error: "ORIGIN_TAB_UNAVAILABLE",
+          });
+          return;
+        }
+
+        const now = Date.now();
+        await chrome.tabs.sendMessage(op.originTabId, {
+          type: "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME_RELAY",
+          outcome: request.outcome,
+          requestId: request.requestId || op.requestId,
+          logId: request.logId || op.logId,
+          phone: sanitizeWhatsAppPhone(request.phone) || op.phone,
+          studentName: request.studentName || op.studentName || null,
+          timestamp: request.timestamp || now,
+        }, { documentId: op.originDocumentId });
+
+        sendResponse({
+          success: true,
+          relayedCount: 1,
+          requestId: op.requestId,
+          logId: op.logId,
+        });
       } catch (err) {
-        sendResponse({ success: false, error: err?.message });
+        sendResponse({ success: false, relayedCount: 0, error: err?.message });
       }
     })();
     return true;
   }
 
-  // 4. Push ativo disparado pelo botão humano dentro do WhatsApp Web ("📥 Capturar Retorno")
+  // 4. Push ativo disparado pelo WhatsApp Web ("📥 Capturar Retorno")
+  // Exige correlação válida, expiração e consumo único por operação; nunca usa último contexto como fallback nem substitui identificadores.
   if (request?.type === "LEOPOLDINA_PUSH_CAPTURED_REPLY") {
     (async () => {
       try {
-        const senderTabId = sender?.tab?.id || request.tabId || null;
-        const senderWinId = sender?.tab?.windowId || request.windowId || null;
+        const waCheck = validateWhatsAppSender(sender);
+        if (!waCheck.ok) {
+          sendResponse({ success: false, relayedCount: 0, error: waCheck.error });
+          return;
+        }
 
+        let urlPhone = "";
+        try {
+          const parsedUrl = new URL(waCheck.url);
+          urlPhone = sanitizeWhatsAppPhone(parsedUrl.searchParams.get("phone")) || "";
+        } catch {}
+
+        const effectivePhone = sanitizeWhatsAppPhone(request.phone) || urlPhone || null;
+
+        const resolved = await resolveAndConsumeOperation("CAPTURE", {
+          requestId: request.requestId,
+          logId: request.logId,
+          phone: effectivePhone,
+        });
+
+        if (!resolved.ok) {
+          sendResponse({
+            success: false,
+            relayedCount: 0,
+            error: resolved.error,
+          });
+          return;
+        }
+
+        const op = resolved.operation;
+        const isSameOriginTab = await verifyOriginTabStillMatches(
+          op.originTabId,
+          op.originOrigin
+        );
+        if (!isSameOriginTab) {
+          sendResponse({
+            success: false,
+            relayedCount: 0,
+            error: "ORIGIN_TAB_UNAVAILABLE",
+          });
+          return;
+        }
+
+        const senderTabId = waCheck.tabId;
+        const senderWinId = waCheck.windowId;
         const screenshotDataUrl = await captureWhatsAppTabScreenshot(senderWinId, senderTabId);
+
+        const correlatedRequestId =
+          typeof request.requestId === "string" && request.requestId.trim()
+            ? request.requestId.trim()
+            : op.requestId;
+        const correlatedLogId =
+          typeof request.logId === "string" && request.logId.trim()
+            ? request.logId.trim()
+            : op.logId;
+        const correlatedPhone = effectivePhone || op.phone || null;
 
         const finalPayload = {
           captureId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           success: Boolean(request.rawText?.trim() || screenshotDataUrl),
-          logId: request.logId || null,
-          phone: request.phone || null,
-          studentName: request.studentName || null,
+          requestId: correlatedRequestId,
+          logId: correlatedLogId,
+          phone: correlatedPhone,
+          studentName: request.studentName || op.studentName || null,
           rawText: request.rawText || "",
           selectionUsed: Boolean(request.selectionUsed),
           domTimestamp: request.domTimestamp || null,
@@ -350,16 +863,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         await chrome.storage.local.remove(["leopoldina_last_captured_reply"]);
 
-        const relayedCount = await relayCapturedReplyToPlatformTabs(finalPayload);
+        await chrome.tabs.sendMessage(op.originTabId, {
+          type: "LEOPOLDINA_WHATSAPP_REPLY_PUSH_RELAY",
+          ...finalPayload,
+        }, { documentId: op.originDocumentId });
+
         sendResponse({
           success: Boolean(request.rawText?.trim() || screenshotDataUrl),
-          relayedCount,
+          relayedCount: 1,
+          requestId: correlatedRequestId,
+          logId: correlatedLogId,
+          phone: correlatedPhone,
           hasText: Boolean(request.rawText?.trim()),
           hasScreenshot: Boolean(screenshotDataUrl),
         });
       } catch (err) {
         sendResponse({
           success: false,
+          relayedCount: 0,
           error: err?.message || "Falha ao enviar captura para a plataforma.",
         });
       }
@@ -367,11 +888,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 4.1 Limpeza explícita de eventual cache residual de retorno capturado
+  // 4.1 Limpeza explícita de eventual cache residual de retorno capturado (restrita à operação específica da aba solicitante)
   if (request?.type === "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY") {
     (async () => {
       try {
+        const senderCheck = await validatePlatformSender(sender);
         await chrome.storage.local.remove(["leopoldina_last_captured_reply"]);
+        if (senderCheck.ok && typeof request.requestId === "string" && request.requestId.trim()) {
+          const reqIdToClear = request.requestId.trim();
+          await withOperationStoreLock(async () => {
+            const { pending, consumed } = await loadOperationMapsUnlocked(Date.now());
+            const existing = pending[reqIdToClear];
+            if (existing && existing.originTabId === senderCheck.tabId && existing.originDocumentId === senderCheck.documentId) {
+              delete pending[reqIdToClear];
+              consumed[reqIdToClear] = Date.now();
+              await saveOperationMapsUnlocked(pending, consumed);
+            }
+          });
+        }
         sendResponse({ success: true });
       } catch {
         sendResponse({ success: false });
@@ -384,11 +918,188 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.type === "LEOPOLDINA_EXTRACT_WHATSAPP_REPLY") {
     (async () => {
       try {
-        const cleanPhone = sanitizeWhatsAppPhone(request.phone);
+        const senderCheck = await validatePlatformSender(sender);
+        if (!senderCheck.ok) {
+          sendResponse({
+            success: false,
+            requestId: request.requestId || null,
+            error: senderCheck.error,
+            message: "Origem ou aba não autorizada para extrair conversas.",
+          });
+          return;
+        }
+
+        const reg = await registerPendingOperation({
+          requestId: request.requestId,
+          kind: "EXTRACT",
+          originTabId: senderCheck.tabId,
+          originDocumentId: senderCheck.documentId,
+          originOrigin: senderCheck.origin,
+          logId: request.logId,
+          phone: request.phone,
+          studentName: request.studentName,
+        });
+
+        if (!reg.ok) {
+          sendResponse({
+            success: false,
+            requestId: request.requestId || null,
+            error: reg.error,
+            message: "Solicitação de extração sem correlação válida ou já consumida.",
+          });
+          return;
+        }
+
+        const op = reg.operation;
+        const requestId = op.requestId;
+        const cleanPhone = op.phone;
+        const diagnostics = request.diagnostics === true && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(senderCheck.origin);
+        traceLocalOperation(senderCheck, diagnostics, "background.extract.registered");
+
+        const finalizeExtract = async (rawReplyResult, screenshotDataUrl, fallbackError) => {
+          // Nunca consuma uma operação indicada por uma resposta diferente da solicitada.
+          if (rawReplyResult && (
+            (rawReplyResult.requestId && rawReplyResult.requestId !== op.requestId) ||
+            (rawReplyResult.logId && rawReplyResult.logId !== op.logId) ||
+            (rawReplyResult.phone && op.phone && !arePhonesCompatible(rawReplyResult.phone, op.phone))
+          )) {
+            sendResponse({ success: false, requestId: op.requestId, logId: op.logId, error: "CORRELATION_MISMATCH" });
+            return;
+          }
+          const resolved = await resolveAndConsumeOperation("EXTRACT", {
+            requestId: op.requestId,
+            logId: op.logId,
+            phone: op.phone,
+          });
+
+          if (!resolved.ok) {
+            sendResponse({
+              success: false,
+              requestId: op.requestId,
+              logId: op.logId,
+              error: resolved.error,
+              message: "Operação de extração expirada, já consumida ou com correlação divergente.",
+            });
+            return;
+          }
+
+          if (rawReplyResult && typeof rawReplyResult === "object") {
+            if (rawReplyResult.requestId && rawReplyResult.requestId !== op.requestId) {
+              sendResponse({
+                success: false,
+                requestId: op.requestId,
+                logId: op.logId,
+                error: "CORRELATION_MISMATCH",
+              });
+              return;
+            }
+            if (rawReplyResult.logId && rawReplyResult.logId !== op.logId) {
+              sendResponse({
+                success: false,
+                requestId: op.requestId,
+                logId: op.logId,
+                error: "CORRELATION_MISMATCH",
+              });
+              return;
+            }
+            if (
+              rawReplyResult.phone &&
+              op.phone &&
+              !arePhonesCompatible(rawReplyResult.phone, op.phone)
+            ) {
+              sendResponse({
+                success: false,
+                requestId: op.requestId,
+                logId: op.logId,
+                error: "CORRELATION_MISMATCH",
+              });
+              return;
+            }
+          }
+
+          const isSameOriginTab = await verifyOriginTabStillMatches(
+            op.originTabId,
+            op.originOrigin
+          );
+          if (!isSameOriginTab) {
+            sendResponse({
+              success: false,
+              requestId: op.requestId,
+              logId: op.logId,
+              error: "ORIGIN_TAB_UNAVAILABLE",
+            });
+            return;
+          }
+
+          if (fallbackError) {
+            sendResponse({
+              success: false,
+              requestId: op.requestId,
+              logId: op.logId,
+              phone: op.phone,
+              ...fallbackError,
+            });
+            return;
+          }
+
+          if (
+            rawReplyResult &&
+            (rawReplyResult.success ||
+              rawReplyResult.error === "NUMBER_NOT_ON_WHATSAPP" ||
+              rawReplyResult.error === "CHAT_PHONE_UNAVAILABLE" ||
+              rawReplyResult.error === "CHAT_MISMATCH")
+          ) {
+            sendResponse({
+              ...rawReplyResult,
+              requestId: op.requestId,
+              logId: op.logId,
+              phone: op.phone,
+              screenshotDataUrl: rawReplyResult.error === "CHAT_MISMATCH" || rawReplyResult.error === "CHAT_PHONE_UNAVAILABLE" ? null : screenshotDataUrl || null,
+            });
+            return;
+          }
+
+          if (screenshotDataUrl) {
+            sendResponse({
+              ...(rawReplyResult || {}),
+              requestId: op.requestId,
+              logId: op.logId,
+              phone: op.phone,
+              success: Boolean(rawReplyResult?.rawText),
+              screenshotDataUrl,
+              error: rawReplyResult?.error || "DOM_EMPTY_WITH_SCREENSHOT",
+              message:
+                rawReplyResult?.message ||
+                "Imagem da conversa capturada para leitura inteligente (OCR).",
+            });
+            return;
+          }
+
+          sendResponse(
+            rawReplyResult
+              ? {
+                  ...rawReplyResult,
+                  requestId: op.requestId,
+                  logId: op.logId,
+                  phone: op.phone,
+                }
+              : {
+                  success: false,
+                  requestId: op.requestId,
+                  logId: op.logId,
+                  phone: op.phone,
+                  error: "EMPTY_RESPONSE",
+                  message: "Resposta vazia da aba do WhatsApp Web.",
+                }
+          );
+        };
+
         const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
+        if (tabs?.length > 1) traceLocalOperation(senderCheck, diagnostics, "background.extract.multiple_tabs");
 
         // Caso nenhuma aba do WhatsApp Web esteja aberta no momento
         if (!tabs || tabs.length === 0) {
+          traceLocalOperation(senderCheck, diagnostics, "background.extract.no_tab");
           let targetUrl = "https://web.whatsapp.com";
           if (cleanPhone && cleanPhone.length >= 10) {
             targetUrl = `https://web.whatsapp.com/send/?phone=${cleanPhone}`;
@@ -410,8 +1121,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           const createdTab = newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0] : null;
           if (!createdTab || !createdTab.id) {
-            sendResponse({
-              success: false,
+            await finalizeExtract(null, null, {
               error: "WINDOW_CREATION_FAILED",
               message: "Não foi possível abrir a janela do WhatsApp Web.",
             });
@@ -425,11 +1135,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             replyResult = await chrome.tabs.sendMessage(createdTab.id, {
               type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-              logId: request.logId,
-              phone: request.phone,
-              studentName: request.studentName,
+              requestId,
+              logId: op.logId,
+              phone: op.phone,
+              studentName: op.studentName,
+              diagnostics,
             });
-          } catch (firstCommErr) {
+          } catch {
             try {
               await chrome.scripting.executeScript({
                 target: { tabId: createdTab.id },
@@ -437,13 +1149,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               });
               replyResult = await chrome.tabs.sendMessage(createdTab.id, {
                 type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-                logId: request.logId,
-                phone: request.phone,
-                studentName: request.studentName,
+                requestId,
+                logId: op.logId,
+                phone: op.phone,
+                studentName: op.studentName,
+                diagnostics,
               });
-            } catch (injectErr) {
-              sendResponse({
-                success: false,
+            } catch {
+              await finalizeExtract(null, null, {
                 error: "TAB_COMMUNICATION_ERROR",
                 message: "Não foi possível comunicar com a janela recém-aberta do WhatsApp Web.",
               });
@@ -451,15 +1164,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
 
+          traceLocalOperation(senderCheck, diagnostics, "background.extract.reply_received");
           const screenshotDataUrl = await captureWhatsAppTabScreenshot(newWindow.id, createdTab.id);
-
-          sendResponse({
-            ...(replyResult || {
-              success: Boolean(screenshotDataUrl),
-              logId: request.logId,
-            }),
-            screenshotDataUrl: screenshotDataUrl || null,
-          });
+          await finalizeExtract(replyResult, screenshotDataUrl, null);
           return;
         }
 
@@ -480,15 +1187,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         if (!targetTab || !targetTab.id) {
-          sendResponse({
-            success: false,
+          await finalizeExtract(null, null, {
             error: "WHATSAPP_TAB_NOT_FOUND",
             message: "Abra o WhatsApp Web antes de capturar o retorno.",
           });
           return;
         }
+        traceLocalOperation(senderCheck, diagnostics, "background.extract.tab_selected");
 
-        // Traz a aba e janela do WhatsApp para o foco imediato SEM RECARREGAR (Zero F5)
         if (targetTab.windowId) {
           try {
             await chrome.windows.update(targetTab.windowId, { focused: true });
@@ -500,19 +1206,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } catch {}
         }
 
-        // Breve pausa para garantir renderização da janela focada antes do screenshot
         await new Promise((r) => setTimeout(r, 150));
 
-        // Solicita extração ao content script da aba ativa
         let replyResult = null;
         try {
           replyResult = await chrome.tabs.sendMessage(targetTab.id, {
             type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-            logId: request.logId,
-            phone: request.phone,
-            studentName: request.studentName,
+            requestId,
+            logId: op.logId,
+            phone: op.phone,
+            studentName: op.studentName,
+            diagnostics,
           });
-        } catch (commErr) {
+        } catch {
           try {
             await chrome.scripting.executeScript({
               target: { tabId: targetTab.id },
@@ -520,55 +1226,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
             replyResult = await chrome.tabs.sendMessage(targetTab.id, {
               type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
-              logId: request.logId,
-              phone: request.phone,
-              studentName: request.studentName,
+              requestId,
+              logId: op.logId,
+              phone: op.phone,
+              studentName: op.studentName,
+              diagnostics,
             });
           } catch (injectErr) {
             console.warn("[Background] Content script indisponível, tentando captura visual pura:", injectErr);
           }
         }
 
-        // Captura screenshot da aba visível do WhatsApp Web para OCR no servidor caso necessário
+        traceLocalOperation(senderCheck, diagnostics, "background.extract.reply_received");
         const screenshotDataUrl = await captureWhatsAppTabScreenshot(targetTab.windowId, targetTab.id);
-
-        if (replyResult && (replyResult.success || replyResult.error === "NUMBER_NOT_ON_WHATSAPP" || replyResult.error === "CHAT_MISMATCH")) {
-          sendResponse({
-            ...replyResult,
-            screenshotDataUrl: screenshotDataUrl || null,
-          });
-          return;
-        }
-
-        if (screenshotDataUrl) {
-          sendResponse({
-            ...(replyResult || {}),
-            success: Boolean(replyResult?.rawText),
-            logId: request.logId,
-            phone: request.phone,
-            screenshotDataUrl,
-            error: replyResult?.error || "DOM_EMPTY_WITH_SCREENSHOT",
-            message:
-              replyResult?.message ||
-              "Imagem da conversa capturada para leitura inteligente (OCR).",
-          });
-          return;
-        }
-
-        sendResponse(
-          replyResult || {
-            success: false,
-            error: "EMPTY_RESPONSE",
-            message: "Resposta vazia da aba do WhatsApp Web.",
-          }
-        );
+        await finalizeExtract(replyResult, screenshotDataUrl, null);
       } catch (err) {
         sendResponse({
           success: false,
+          requestId: request?.requestId || null,
           error: "TAB_COMMUNICATION_ERROR",
           message:
             err?.message ||
-            "Não foi possível comunicar com a aba do WhatsApp Web.",
+            "Falha ao comunicar com a aba do WhatsApp Web. Recarregue a página do WhatsApp (F5) e tente novamente.",
         });
       }
     })();
@@ -577,53 +1256,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 /**
- * Localiza qualquer janela/aba aberta do WhatsApp Web e a atualiza/foca.
- * Se nenhuma estiver aberta, cria uma Janela Dedicada Compacta (Popup Minimalista)
- * posicionada no lado direito da tela.
+ * Abre ou reutiliza uma janela dedicada compacta do WhatsApp Web.
  */
-async function handleWhatsAppDispatch(targetUrl) {
-  try {
-    const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
+async function handleWhatsAppDispatch(targetUrl, reuseTab = true) {
+  if (!isAllowedWhatsAppUrl(targetUrl)) {
+    throw new Error("URL de destino não permitida.");
+  }
 
-    if (tabs && tabs.length > 0) {
-      const existingTab = tabs[0];
-      const windowId = existingTab.windowId;
+  if (!reuseTab) {
+    const tab = await chrome.tabs.create({ url: targetUrl, active: true });
+    return { reusedTab: false, tabId: tab.id };
+  }
 
-      await chrome.tabs.update(existingTab.id, {
-        url: targetUrl,
-        active: true,
-      });
+  const tabs = await chrome.tabs.query({ url: "*://web.whatsapp.com/*" });
 
-      if (windowId) {
-        await chrome.windows.update(windowId, { focused: true });
-      }
+  if (tabs && tabs.length > 0) {
+    let targetTab = null;
 
-      return {
-        reusedTab: true,
-        windowId,
-        tabId: existingTab.id,
-      };
+    for (const tab of tabs) {
+      try {
+        const win = await chrome.windows.get(tab.windowId);
+        if (win && win.type === "popup") {
+          targetTab = tab;
+          break;
+        }
+      } catch {}
     }
 
-    const { left, top } = await getPopupCoordinates();
+    if (!targetTab) {
+      targetTab = tabs[0];
+    }
 
-    const newWindow = await chrome.windows.create({
+    const updatedTab = await chrome.tabs.update(targetTab.id, {
       url: targetUrl,
-      type: "popup",
-      width: POPUP_WIDTH,
-      height: POPUP_HEIGHT,
-      left,
-      top,
-      focused: true,
+      active: true,
     });
 
-    return {
-      reusedTab: false,
-      windowId: newWindow.id,
-      tabId: newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0].id : null,
-    };
-  } catch (error) {
-    console.error("[Sincronizador Rede Ativa] Erro ao despachar WhatsApp:", error);
-    throw error;
+    if (updatedTab && updatedTab.windowId) {
+      try {
+        await chrome.windows.update(updatedTab.windowId, { focused: true });
+      } catch {}
+    }
+
+    return { reusedTab: true, tabId: targetTab.id };
   }
+
+  const { left, top } = await getPopupCoordinates();
+  const newWindow = await chrome.windows.create({
+    url: targetUrl,
+    type: "popup",
+    width: POPUP_WIDTH,
+    height: POPUP_HEIGHT,
+    left,
+    top,
+    focused: true,
+  });
+
+  const createdTabId = newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0].id : null;
+  return { reusedTab: false, windowId: newWindow.id, tabId: createdTabId };
 }

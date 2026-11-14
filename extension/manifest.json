@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sincronizador Rede Ativa (Power BI & SERP)",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Extrai dados de frequência do Power BI, fichas SERP e gerencia a confirmação automática de envio do WhatsApp Web para a Busca Ativa.",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,11 +25,14 @@
     "*://web.whatsapp.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*",
-    "https://*.vercel.app/*",
     "https://redeativa.app.br/*",
-    "https://*.redeativa.app.br/*",
+    "https://www.redeativa.app.br/*",
+    "https://app.redeativa.app.br/*",
     "https://redeativa.com.br/*",
-    "https://*.redeativa.com.br/*"
+    "https://www.redeativa.com.br/*",
+    "https://app.redeativa.com.br/*",
+    "https://registro-leopoldina.vercel.app/*",
+    "https://busca-ativa-leopoldina.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -71,11 +74,14 @@
     },
     {
       "matches": [
-        "https://*.vercel.app/*",
         "https://redeativa.app.br/*",
-        "https://*.redeativa.app.br/*",
+        "https://www.redeativa.app.br/*",
+        "https://app.redeativa.app.br/*",
         "https://redeativa.com.br/*",
-        "https://*.redeativa.com.br/*",
+        "https://www.redeativa.com.br/*",
+        "https://app.redeativa.com.br/*",
+        "https://registro-leopoldina.vercel.app/*",
+        "https://busca-ativa-leopoldina.vercel.app/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],

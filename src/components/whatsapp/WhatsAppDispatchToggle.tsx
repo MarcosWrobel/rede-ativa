@@ -28,24 +28,23 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
       if (e?.detail) setMode(e.detail);
     };
 
-    const handleExtensionReady = () => {
-      setHasExtension(true);
-    };
-
-    window.addEventListener("redeativa_whatsapp_preference_changed", handlePreferenceChanged);
-    window.addEventListener("leopoldina_whatsapp_preference_changed", handlePreferenceChanged);
-    window.addEventListener("message", (event) => {
+    const handleWindowMessage = (event: MessageEvent) => {
       if (
         event.data?.type === "REDEATIVA_EXTENSION_READY" ||
         event.data?.type === "LEOPOLDINA_EXTENSION_READY"
       ) {
         setHasExtension(true);
       }
-    });
+    };
+
+    window.addEventListener("redeativa_whatsapp_preference_changed", handlePreferenceChanged);
+    window.addEventListener("leopoldina_whatsapp_preference_changed", handlePreferenceChanged);
+    window.addEventListener("message", handleWindowMessage);
 
     return () => {
       window.removeEventListener("redeativa_whatsapp_preference_changed", handlePreferenceChanged);
       window.removeEventListener("leopoldina_whatsapp_preference_changed", handlePreferenceChanged);
+      window.removeEventListener("message", handleWindowMessage);
     };
   }, []);
 

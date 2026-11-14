@@ -39,7 +39,7 @@
           }
         }
       } catch (e) {}
-    });
+    }, { once: true });
     return originalSend.apply(this, arguments);
   };
 

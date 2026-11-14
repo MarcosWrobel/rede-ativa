@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           await chrome.tabs.sendMessage(targetWaTab.id, {
             type: 'LEOPOLDINA_TRIGGER_HUMAN_CAPTURE',
           });
-          statusEl.textContent = 'Retorno e captura de tela enviados à plataforma!';
+          statusEl.textContent = 'Solicitação enviada. Confira o resultado na janela do WhatsApp.';
           statusEl.style.color = '#10b981';
         } catch {
           statusEl.textContent = 'Recarregue a janela do WhatsApp Web e tente novamente.';
@@ -91,6 +91,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const saveSettings = async () => {
       const serverUrl = inputCfgUrl?.value?.trim() || 'https://www.redeativa.app.br';
       const syncToken = inputCfgToken?.value?.trim() || '';
+      let supported = false;
+      try {
+        const url = new URL(serverUrl);
+        const officialHosts = ['redeativa.app.br', 'www.redeativa.app.br', 'app.redeativa.app.br', 'redeativa.com.br', 'www.redeativa.com.br', 'app.redeativa.com.br', 'registro-leopoldina.vercel.app', 'busca-ativa-leopoldina.vercel.app'];
+        supported = (url.protocol === 'https:' && officialHosts.includes(url.hostname)) ||
+          (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname));
+      } catch {}
+      if (!supported) {
+        statusEl.textContent = 'Origem personalizada não é suportada pela integração WhatsApp. Use um endereço oficial ou localhost.';
+        statusEl.style.color = '#ef4444';
+        return;
+      }
       await chrome.storage.local.set({
         leopoldina_server_url: serverUrl,
         leopoldina_sync_token: syncToken,

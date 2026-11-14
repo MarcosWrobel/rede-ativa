@@ -608,6 +608,7 @@ export default function BuscaAtivaClient({
   // Escuta confirmações automáticas vindas da Extensão Sincronizadora (whatsapp-content.js)
   useEffect(() => {
     let lastProcessedKey = "";
+    let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
     const handleExtensionConfirmation = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;
@@ -616,7 +617,8 @@ export default function BuscaAtivaClient({
         event.data.type === "LEOPOLDINA_WHATSAPP_CONFIRMED"
       ) {
         const { outcome, logId, studentName, timestamp } = event.data;
-        const dedupeKey = `${logId || "nolog"}_${outcome}_${timestamp || ""}`;
+        if (!logId) return;
+        const dedupeKey = `${logId}_${outcome}_${timestamp || ""}`;
         if (lastProcessedKey === dedupeKey) return;
         lastProcessedKey = dedupeKey;
 
@@ -630,24 +632,29 @@ export default function BuscaAtivaClient({
               : `⚠️ Alerta Automático: Telefone sem WhatsApp ativo detectado para ${studentName || "o estudante"}.`,
           type: targetStatus === "SENT" ? "success" : "warning",
         });
-        setTimeout(() => setAutoConfirmationToast(null), 4500);
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toastTimer = null;
+          setAutoConfirmationToast(null);
+        }, 4500);
 
         // Modo Individual
-        if (lastSentSuccess && (!logId || lastSentSuccess.logId === logId)) {
+        if (lastSentSuccess && lastSentSuccess.logId === logId) {
           handleUpdateIndividualStatus(targetStatus);
         }
 
         // Modo Fila
-        if (dispatchMode === "fila" && currentQueueItem) {
-          if (!logId || currentQueueItem.logId === logId) {
-            handleQueueResolveAndNext(targetStatus);
-          }
+        if (dispatchMode === "fila" && currentQueueItem && currentQueueItem.logId === logId) {
+          handleQueueResolveAndNext(targetStatus);
         }
       }
     };
 
     window.addEventListener("message", handleExtensionConfirmation);
-    return () => window.removeEventListener("message", handleExtensionConfirmation);
+    return () => {
+      window.removeEventListener("message", handleExtensionConfirmation);
+      if (toastTimer) clearTimeout(toastTimer);
+    };
   }, [lastSentSuccess, dispatchMode, currentQueueItem]);
 
   return (
