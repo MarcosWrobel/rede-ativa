@@ -1,5 +1,5 @@
 // whatsapp-content.js - Captura Assistida de Retornos e Confirmação Verificada de Envio (WhatsApp Web)
-// Versão 1.6.0 — Ciclo de vida idempotente, observação escopada e verificação estrita de despacho
+// Versão 1.6.1 — Ciclo de vida idempotente, observação escopada, proteção anti-microfone e verificação estrita de despacho
 
 if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   try {
@@ -8,7 +8,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 }
 
 (function () {
-  const EXTENSION_VERSION = "1.6.0";
+  const EXTENSION_VERSION = "1.6.1";
 
   let isInstanceDisposed = false;
   let dispatchGeneration = 0;

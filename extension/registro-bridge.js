@@ -106,14 +106,14 @@
     // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação autorizada
     if (document.documentElement) {
       document.documentElement.dataset.redeativaExtension = "true";
-      document.documentElement.dataset.redeativaExtensionVersion = "1.6.0";
+      document.documentElement.dataset.redeativaExtensionVersion = "1.6.1";
       document.documentElement.dataset.leopoldinaExtension = "true";
-      document.documentElement.dataset.leopoldinaExtensionVersion = "1.6.0";
+      document.documentElement.dataset.leopoldinaExtensionVersion = "1.6.1";
     }
 
     // 2. Anúncio via postMessage restrito à origem exata da página
     const readyPayload = {
-      version: "1.6.0",
+      version: "1.6.1",
       capabilities: [
         "WHATSAPP_TAB_REUSE",
         "WHATSAPP_AUTO_SEND",

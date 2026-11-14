@@ -459,6 +459,29 @@ async function ensureContentScriptInOpenWhatsAppTabs() {
   }
 }
 
+/**
+ * Garante que as abas já abertas da plataforma Rede Ativa tenham o registro-bridge.js ativo
+ * imediatamente após instalar, atualizar ou recarregar a extensão em chrome://extensions.
+ */
+async function ensureBridgeInOpenPlatformTabs() {
+  try {
+    const allTabs = await chrome.tabs.query({});
+    for (const tab of allTabs) {
+      if (!tab.id || !tab.url || !isAuthorizedPlatformOriginSync(tab.url)) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["registro-bridge.js"],
+        });
+      } catch (e) {
+        console.warn("[Background] Aviso ao injetar bridge na aba Rede Ativa:", tab.id, e?.message || e);
+      }
+    }
+  } catch (err) {
+    console.warn("[Background] Falha ao varrer abas da plataforma:", err);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   withOperationStoreLock(() => chrome.storage.local
     .remove([
@@ -469,6 +492,7 @@ chrome.runtime.onInstalled.addListener(() => {
       CONSUMED_OPERATIONS_STORAGE_KEY,
     ])).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
+  ensureBridgeInOpenPlatformTabs();
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -481,6 +505,7 @@ chrome.runtime.onStartup.addListener(() => {
       CONSUMED_OPERATIONS_STORAGE_KEY,
     ])).catch(() => {});
   ensureContentScriptInOpenWhatsAppTabs();
+  ensureBridgeInOpenPlatformTabs();
 });
 
 function buildActiveDispatchPayload(op) {

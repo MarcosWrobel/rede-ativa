@@ -1,7 +1,9 @@
 import { WA_ME_REUSABLE_WINDOW_NAME } from "./whatsappProvider";
+import { extensionDiagnosticsEnabled, traceExtensionStep } from "./extensionDiagnostics";
 
 export const WHATSAPP_DISPATCH_STORAGE_KEY = "redeativa_whatsapp_dispatch_mode";
 export const LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
+export const EXPECTED_EXTENSION_VERSION = "1.6.1";
 export type WhatsAppDispatchMode = "extension" | "native";
 
 declare global {
@@ -71,6 +73,18 @@ export function isExtensionActive(): boolean {
   );
 }
 
+/**
+ * Retorna a versão instalada da Extensão Sincronizadora anunciada pela bridge na aba atual.
+ */
+export function getInstalledExtensionVersion(): string | null {
+  if (typeof window === "undefined") return null;
+  const v =
+    document.documentElement.dataset.redeativaExtensionVersion ||
+    document.documentElement.dataset.leopoldinaExtensionVersion ||
+    "";
+  return v.trim() || null;
+}
+
 export interface DispatchWhatsAppMetadata {
   logId?: string;
   studentId?: string;
@@ -99,9 +113,11 @@ export function dispatchWhatsAppToBrowser(
   }
 
   const preference = getWhatsAppDispatchPreference();
+  traceExtensionStep("app.send.start");
 
   // Modo Convencional explicitamente escolhido pelo usuário:
   if (preference === "native") {
+    traceExtensionStep("app.send.native");
     if (!window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME)) metadata?.onDispatchFailure?.();
     return { dispatchedVia: "WINDOW_OPEN" };
   }
@@ -112,6 +128,8 @@ export function dispatchWhatsAppToBrowser(
       type: "LEOPOLDINA_DISPATCH_WHATSAPP",
       url: targetUrl,
     };
+    if (extensionDiagnosticsEnabled()) payload.diagnostics = true;
+    traceExtensionStep("app.send.extension");
     if (metadata?.logId) payload.logId = metadata.logId;
     if (metadata?.studentId) payload.studentId = metadata.studentId;
     if (metadata?.studentName) payload.studentName = metadata.studentName;
@@ -128,11 +146,15 @@ export function dispatchWhatsAppToBrowser(
         clearTimeout(timer);
         window.removeEventListener("message", handleAck);
         if (event.data.response?.success !== true) {
+          traceExtensionStep("app.send.error");
           onFailure();
+        } else {
+          traceExtensionStep("app.send.ack");
         }
       };
       const timer = setTimeout(() => {
         window.removeEventListener("message", handleAck);
+        traceExtensionStep("app.send.timeout");
         onFailure();
       }, 6000);
       window.addEventListener("message", handleAck);
@@ -144,6 +166,7 @@ export function dispatchWhatsAppToBrowser(
   }
 
   // Fallback nativo: janela nomeada síncrona
+  traceExtensionStep("app.send.native");
   if (!window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME)) metadata?.onDispatchFailure?.();
   return { dispatchedVia: "WINDOW_OPEN" };
 }
@@ -194,6 +217,7 @@ export function extractWhatsAppReplyViaExtension(
     let isSettled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const requestId = createExtensionRequestId();
+    traceExtensionStep("app.extract.start");
 
     const cleanup = () => {
       if (timer) {
@@ -262,11 +286,12 @@ export function extractWhatsAppReplyViaExtension(
     timer = setTimeout(() => {
       if (isSettled) return;
       isSettled = true;
+      traceExtensionStep("app.extract.timeout");
       cleanup();
       resolve({
         success: false,
         requestId,
-        error: "EXTENSION_TIMEOUT",
+         error: "EXTENSION_TIMEOUT",
         message:
           "A extensão não respondeu a tempo. Verifique se ela está ativa ou cole o texto manualmente.",
       });
@@ -280,6 +305,7 @@ export function extractWhatsAppReplyViaExtension(
         logId,
         phone,
         studentName,
+        ...(extensionDiagnosticsEnabled() ? { diagnostics: true } : {}),
       },
       targetOrigin
     );

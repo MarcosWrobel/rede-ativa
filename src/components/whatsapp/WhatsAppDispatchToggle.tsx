@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import {
+  EXPECTED_EXTENSION_VERSION,
+  getInstalledExtensionVersion,
   getWhatsAppDispatchPreference,
   setWhatsAppDispatchPreference,
   isExtensionActive,
   type WhatsAppDispatchMode,
 } from "@/lib/clientDispatcher";
-import { Zap, ExternalLink, Check, Info } from "lucide-react";
+import { Zap, ExternalLink, Check, Info, AlertTriangle } from "lucide-react";
 
 interface Props {
   className?: string;
@@ -17,12 +19,14 @@ interface Props {
 export default function WhatsAppDispatchToggle({ className = "", compact = false }: Props) {
   const [mode, setMode] = useState<WhatsAppDispatchMode>("extension");
   const [hasExtension, setHasExtension] = useState<boolean>(false);
+  const [installedVersion, setInstalledVersion] = useState<string | null>(null);
   const [mounted, setMounted] = useState<boolean>(false);
 
   useEffect(() => {
     setMounted(true);
     setMode(getWhatsAppDispatchPreference());
     setHasExtension(isExtensionActive());
+    setInstalledVersion(getInstalledExtensionVersion());
 
     const handlePreferenceChanged = (e: any) => {
       if (e?.detail) setMode(e.detail);
@@ -34,6 +38,11 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
         event.data?.type === "LEOPOLDINA_EXTENSION_READY"
       ) {
         setHasExtension(true);
+        const ver =
+          typeof event.data?.version === "string" && event.data.version.trim()
+            ? event.data.version.trim()
+            : getInstalledExtensionVersion();
+        if (ver) setInstalledVersion(ver);
       }
     };
 
@@ -56,26 +65,47 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
     setMode(nextMode);
   };
 
+  const isVersionCurrent =
+    hasExtension && installedVersion === EXPECTED_EXTENSION_VERSION;
+  const compactExtensionWarning =
+    mode === "extension" && (!hasExtension || !isVersionCurrent);
+
   if (compact) {
     return (
       <button
         type="button"
         onClick={toggleMode}
         title={
-          mode === "extension"
-            ? "Disparo via extensão. Clique para alternar."
-            : "Disparo em nova aba. Clique para alternar."
+          mode !== "extension"
+            ? "Disparo em nova aba. Clique para alternar."
+            : !hasExtension
+            ? `Extensão não detectada nesta aba (esperada v${EXPECTED_EXTENSION_VERSION}). Recarregue a página ou clique para alternar.`
+            : !isVersionCurrent
+            ? `Extensão v${installedVersion || "?"} desatualizada (esperada v${EXPECTED_EXTENSION_VERSION}). Atualize em chrome://extensions.`
+            : `Extensão v${installedVersion} ativa nesta aba. Clique para alternar.`
         }
         className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer shadow-2xs ${
           mode === "extension"
-            ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+            ? compactExtensionWarning
+              ? "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100"
+              : "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
             : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
         } ${className}`}
       >
         {mode === "extension" ? (
           <>
-            <Zap className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600" />
-            <span>Extensão</span>
+            {compactExtensionWarning ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            ) : (
+              <Zap className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600" />
+            )}
+            <span>
+              {!hasExtension
+                ? "Extensão (F5)"
+                : !isVersionCurrent
+                ? `Extensão v${installedVersion || "?"} ≠ v${EXPECTED_EXTENSION_VERSION}`
+                : `Extensão v${installedVersion}`}
+            </span>
           </>
         ) : (
           <>

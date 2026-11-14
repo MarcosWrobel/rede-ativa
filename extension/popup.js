@@ -3,6 +3,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const countEl = document.getElementById('popup-count');
   const statusEl = document.getElementById('popup-status');
   const subtitleEl = document.getElementById('popup-mode-subtitle');
+  const versionEl = document.getElementById('popup-version');
+  if (versionEl && chrome?.runtime?.getManifest) {
+    try {
+      const ver = chrome.runtime.getManifest().version;
+      if (ver) versionEl.textContent = `v${ver}`;
+    } catch {}
+  }
   const btnScan = document.getElementById('btn-popup-autoscroll');
   const toggleWhatsAppTab = document.getElementById('toggle-whatsapp-tab');
   const toggleWhatsAppAutoSend = document.getElementById('toggle-whatsapp-auto-send');

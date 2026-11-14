@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { EXPECTED_EXTENSION_VERSION } from "@/lib/clientDispatcher";
 
 const ROOT_DIR = path.resolve(__dirname, "../../..");
 const WA_CONTENT_PATH = path.join(ROOT_DIR, "extension/whatsapp-content.js");
@@ -698,7 +699,7 @@ function createWhatsAppContentHarness(options?: {
   };
 }
 
-describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.0)", () => {
+describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.1)", () => {
   it("1. Reinjeção 1x, 5x e 10x de whatsapp-content.js não acumula listeners, timers, observers nem barras duplicadas", () => {
     const h = createWhatsAppContentHarness();
 
@@ -716,7 +717,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     const pingResponses = h.sendRuntimeToContent({ type: "LEOPOLDINA_PING" });
     expect(pingResponses).toHaveLength(1);
-    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.0" });
+    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.1" });
   });
 
   it("2. __REDEATIVA_WA_CLEANUP__ remove todos os listeners, cancela timers pendentes e impede confirmação posterior", () => {
@@ -1210,7 +1211,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     expect(winListeners).toHaveLength(1);
     expect(runtimeListeners).toHaveLength(1);
-    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.0");
+    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.1");
   });
 
   it("12. WhatsAppDispatchToggle e BuscaAtivaClient removem todos os listeners e timers no cleanup de useEffect", () => {
@@ -1229,9 +1230,10 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(buscaAtivaSource).toContain("if (toastTimer) clearTimeout(toastTimer)");
   });
 
-  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.0", () => {
+  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.1 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
-    expect(manifest.version).toBe("1.6.0");
+    expect(manifest.version).toBe("1.6.1");
+    expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version);
 
     expect(fs.existsSync(ZIP_REDE_ATIVA_PATH)).toBe(true);
     expect(fs.existsSync(ZIP_LEOPOLDINA_PATH)).toBe(true);
@@ -1469,5 +1471,77 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
       logId: "log-no-mic-1",
       phone: "5542999991111",
     });
+  });
+
+  it("16. onInstalled reinjeta registro-bridge.js em abas já abertas da plataforma autorizada e ignora origens externas", async () => {
+    const injectedFilesByTab: Array<{ tabId: number; files: string[] }> = [];
+    let onInstalledCb: any = null;
+
+    const tabs = [
+      { id: 10, url: "https://www.redeativa.app.br/busca-ativa" },
+      { id: 20, url: "https://evil.example.com/busca-ativa" },
+      { id: 30, url: "https://web.whatsapp.com/" },
+    ];
+
+    const chromeMock: any = {
+      runtime: {
+        id: "ext-rede-ativa-test",
+        onInstalled: { addListener: (fn: any) => { onInstalledCb = fn; } },
+        onStartup: { addListener: vi.fn() },
+        onMessage: { addListener: vi.fn() },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => {}),
+          remove: vi.fn(async () => {}),
+        },
+      },
+      tabs: {
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+        query: vi.fn(async (q: any) =>
+          q?.url === "*://web.whatsapp.com/*"
+            ? tabs.filter((t) => t.url.startsWith("https://web.whatsapp.com"))
+            : [...tabs]
+        ),
+        sendMessage: vi.fn(async () => ({ pong: true })),
+      },
+      windows: { getCurrent: vi.fn(), get: vi.fn(), update: vi.fn(), create: vi.fn() },
+      scripting: {
+        executeScript: vi.fn(async ({ target, files }: any) => {
+          injectedFilesByTab.push({ tabId: target.tabId, files });
+          return [];
+        }),
+      },
+    };
+
+    const bgCode = fs.readFileSync(BACKGROUND_PATH, "utf8");
+    vm.runInNewContext(
+      bgCode,
+      {
+        chrome: chromeMock,
+        URL,
+        Object,
+        Array,
+        Date,
+        Math,
+        String,
+        Number,
+        Boolean,
+        Promise,
+        setTimeout,
+        clearTimeout,
+        console: { warn: () => {}, error: () => {}, log: () => {} },
+      },
+      { filename: "background.js" }
+    );
+
+    expect(typeof onInstalledCb).toBe("function");
+    onInstalledCb();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(injectedFilesByTab).toEqual([
+      { tabId: 10, files: ["registro-bridge.js"] },
+    ]);
   });
 });
