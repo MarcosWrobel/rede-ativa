@@ -1735,10 +1735,12 @@ export default function ProntuarioClient({
             name: student.name,
             classGroupName: student.classGroup?.name,
             cgm: student.cgm,
+            email: student.email,
             phone: student.phone,
             guardianName: student.guardianName,
           },
         ]}
+        activeSchoolId={currentSchool?.id ?? null}
         preSelectedStudentId={student.id}
         existingMinute={editingMinute}
       />

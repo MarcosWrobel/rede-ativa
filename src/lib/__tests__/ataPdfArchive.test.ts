@@ -36,6 +36,7 @@ vi.mock("@/lib/currentSchool", () => ({
   })),
 }));
 
+import { PDFPage } from "pdf-lib";
 import { generateAtaPdfA1b } from "../ataPdfArchive";
 import { GET as getPdfaRoute } from "@/app/api/atas/[id]/pdfa/route";
 import { prisma } from "../prisma";
@@ -175,5 +176,37 @@ describe("JUR-08: Preservação Arquivística Binária PDF/A-1b (ISO 19005-1 Lev
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toContain("Acesso negado");
+  });
+
+  it("identifica FAMILIAR_CONTATO no PDF/A sem rotular como Responsável Legal", async () => {
+    const drawTextSpy = vi.spyOn(PDFPage.prototype, "drawText");
+    try {
+      await generateAtaPdfA1b({
+        ...dummyMinute,
+        participants: [
+          {
+            name: "Vizinho Recado",
+            role: "FAMILIAR_CONTATO",
+            kinship: "Contato de recado",
+            documentType: "RG",
+            documentNumber: "998877",
+            signatureMode: "SCREEN_CANVAS",
+            signatureData:
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+          },
+        ],
+      });
+
+      const drawnLines = drawTextSpy.mock.calls.map((c) => String(c[0]));
+      expect(
+        drawnLines.some((line) => line.includes("Vizinho Recado (Familiar / Contato • Contato de recado • Doc: 998877)"))
+      ).toBe(true);
+      expect(drawnLines.some((line) => line.includes("Vizinho Recado") && line.includes("Responsável Legal"))).toBe(
+        false
+      );
+      expect(drawnLines.some((line) => line.includes("FAMILIAR_CONTATO"))).toBe(false);
+    } finally {
+      drawTextSpy.mockRestore();
+    }
   });
 });

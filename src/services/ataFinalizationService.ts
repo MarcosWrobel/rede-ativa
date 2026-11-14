@@ -5,6 +5,7 @@ import {
 } from "@/lib/ataCrypto";
 import {
   mergeParticipantSignatures,
+  validateParticipantStudentLinks,
   type IncomingMinuteParticipant,
 } from "./ataParticipantService";
 import {
@@ -311,16 +312,22 @@ export async function executeMinuteFinalization(
             }
 
             if (Array.isArray(rawBody.participants)) {
+              await validateParticipantStudentLinks(tx, minute.schoolId, rawBody.participants);
+
               const participantsToCreate = mergeParticipantSignatures(
                 rawBody.participants,
                 minute.participants || [],
                 { clearMobileTokens: true, minuteId }
               );
 
+              await validateParticipantStudentLinks(tx, minute.schoolId, participantsToCreate);
+
               await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId } });
               if (participantsToCreate.length > 0) {
                 await tx.pedagogicalMinuteParticipant.createMany({ data: participantsToCreate });
               }
+            } else {
+              await validateParticipantStudentLinks(tx, minute.schoolId, minute.participants || []);
             }
 
             if (Array.isArray(rawBody.actionItems)) {

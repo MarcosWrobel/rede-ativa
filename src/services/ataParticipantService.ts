@@ -215,8 +215,15 @@ export function mergeParticipantSignatures(
     const isRefused = !shouldClear && (p.signatureMode === "REFUSED" || matchIsRefused);
 
     const effectiveRole = p.role || "RESPONSAVEL";
-    const resolvedStudentId =
+    const normalizedEffectiveRole = effectiveRole.trim().toUpperCase();
+    const rawIncomingStudentId =
       p.studentId !== undefined ? p.studentId || null : (match?.studentId ?? null);
+    const resolvedStudentId =
+      matchIsProtected && !shouldClear
+        ? rawIncomingStudentId
+        : normalizedEffectiveRole === "ESTUDANTE"
+          ? rawIncomingStudentId
+          : null;
     const resolvedDocumentType =
       p.documentType !== undefined ? p.documentType || null : (match?.documentType ?? null);
     const resolvedDocumentNumber =
@@ -249,6 +256,11 @@ export function mergeParticipantSignatures(
         "CONFLICT:Este participante já possui assinatura, verificação ou registro de recusa no servidor. Utilize 'Refazer assinatura' ou 'Cancelar recusa' antes de alterar identidade ou função."
       );
     }
+
+    const finalStudentId =
+      matchIsProtected && !shouldClear
+        ? match?.studentId ?? resolvedStudentId
+        : resolvedStudentId;
 
     const sigData = shouldClear || isRefused ? null : (p.signatureData || match?.signatureData || null);
     const sigMode = isRefused
@@ -291,7 +303,7 @@ export function mergeParticipantSignatures(
       ...(match?.id ? { id: match.id } : {}),
       ...(options.minuteId ? { minuteId: options.minuteId } : {}),
       role: effectiveRole,
-      studentId: resolvedStudentId,
+      studentId: finalStudentId,
       name: finalName,
       kinship: sanitizedIncomingKinship,
       documentType: resolvedDocumentType,
@@ -336,4 +348,38 @@ export function mergeParticipantSignatures(
         : null,
     };
   });
+}
+
+/**
+ * Revalida no servidor (inclusive dentro de transações PATCH e finalize) se todos
+ * os `studentId` vinculados aos participantes pertencem estritamente à escola da ata.
+ */
+export async function validateParticipantStudentLinks(
+  prismaOrTx: { student: { findMany: (args: any) => Promise<Array<{ id: string }>> } },
+  schoolId: string,
+  participants: Array<{ studentId?: string | null }> | null | undefined
+): Promise<void> {
+  const uniqueIds = Array.from(
+    new Set(
+      (participants || [])
+        .map((p) => (typeof p?.studentId === "string" ? p.studentId.trim() : ""))
+        .filter((id) => id.length > 0)
+    )
+  );
+
+  if (uniqueIds.length === 0) return;
+
+  const matchedStudents = await prismaOrTx.student.findMany({
+    where: {
+      id: { in: uniqueIds },
+      schoolId,
+    },
+    select: { id: true },
+  });
+
+  if (matchedStudents.length !== uniqueIds.length) {
+    throw new Error(
+      "FORBIDDEN:Um ou mais estudantes vinculados aos participantes não pertencem a esta instituição escolar."
+    );
+  }
 }

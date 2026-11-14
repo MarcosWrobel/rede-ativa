@@ -22,6 +22,32 @@ export const PARENTAL_KINSHIP_TERMS = new Set<string>([
   "responsavel legal",
 ]);
 
+export const FAMILIAR_CONTATO_FORBIDDEN_TERMS = new Set<string>([
+  "mae/pai",
+  "pai/mae",
+  "responsavel",
+  "responsavel legal",
+]);
+
+export const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
+  RESPONSAVEL: "Responsável Legal",
+  FAMILIAR_CONTATO: "Familiar / Contato",
+  ESTUDANTE: "Estudante",
+  PROFESSOR: "Professor(a)",
+  EQUIPE_ESCOLAR: "Equipe Escolar",
+  EQUIPE_PEDAGOGICA: "Equipe Escolar",
+  REDE_EXTERNA: "Rede de Proteção / CT",
+  TESTEMUNHA: "Testemunha Presencial",
+};
+
+/**
+ * Formata papel de participante para exibição documental legível (ex.: PDF/impressão).
+ */
+export function formatParticipantRoleLabel(role: string | null | undefined): string {
+  const normalized = (role || "RESPONSAVEL").trim().toUpperCase();
+  return PARTICIPANT_ROLE_LABELS[normalized] || (role ? role.trim() : "Participante");
+}
+
 /**
  * Normaliza texto de vínculo removendo acentos, padronizando barras, espaços e caixa
  * para comparação uniforme entre cliente e servidor.
@@ -39,6 +65,8 @@ export function normalizeKinshipCompare(value: string | null | undefined): strin
 
 /**
  * Sanitiza termos parentais legados (`Mãe/Pai`, etc.) quando o papel não é `RESPONSAVEL`.
+ * Para `FAMILIAR_CONTATO`, remove apenas títulos de representação legal (`Responsável Legal`,
+ * `Mãe/Pai`), mantendo o parentesco específico informado (ex.: `Avó`, `Tio`, `Contato de recado`).
  * Participantes já assinados (`isSigned: true`) nunca sofrem sanitização silenciosa.
  */
 export function sanitizeKinshipForRole(
@@ -55,8 +83,15 @@ export function sanitizeKinshipForRole(
   }
 
   const normalizedRole = (role || "RESPONSAVEL").trim().toUpperCase();
+  const comparable = normalizeKinshipCompare(trimmed);
+  if (normalizedRole === "FAMILIAR_CONTATO") {
+    if (FAMILIAR_CONTATO_FORBIDDEN_TERMS.has(comparable)) {
+      return null;
+    }
+    return trimmed;
+  }
+
   if (normalizedRole !== "RESPONSAVEL") {
-    const comparable = normalizeKinshipCompare(trimmed);
     if (PARENTAL_KINSHIP_TERMS.has(comparable)) {
       return null;
     }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Printer, ArrowLeft, ShieldCheck, Download } from "lucide-react";
 import AtaQrCode from "@/components/ata/AtaQrCode";
 import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
+import { formatParticipantRoleLabel } from "@/lib/participantKinship";
 
 interface Props {
   minute: any;
@@ -345,7 +346,9 @@ export default function PrintPageClient({
                 </div>
                 <p className="text-xs font-bold text-slate-900 print:text-[11px]">{p.name}</p>
                 <p className="text-[10px] text-slate-500 uppercase print:text-[9px]">
-                  {p.role} {p.documentNumber ? `• Doc: ${p.documentNumber}` : ""}
+                  {formatParticipantRoleLabel(p.role)}
+                  {p.kinship ? ` • ${p.kinship}` : ""}
+                  {p.documentNumber ? ` • Doc: ${p.documentNumber}` : ""}
                   {p.verifiedEmail
                     ? p.role === "ESTUDANTE"
                       ? " • Ciência Discente (ECA Art. 12 / Lei 14.063/2020)"

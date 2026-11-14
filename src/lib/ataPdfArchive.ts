@@ -6,6 +6,7 @@ import { PDFDocument, rgb, PDFName, PDFString, PDFHexString } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { anonymizeOtherMinorsInText } from "./ataCrypto";
 import { getAtaValidationUrl } from "./qrCode";
+import { formatParticipantRoleLabel } from "./participantKinship";
 
 export interface GeneratePdfOptions {
   targetStudentId?: string;
@@ -481,7 +482,9 @@ export async function generateAtaPdfA1b(
       }
 
       const pDoc = p.documentNumber ? ` • Doc: ${p.documentNumber}` : "";
-      currentPage.drawText(`• ${p.name} (${p.role || "Participante"}${pDoc})`, {
+      const roleLabel = formatParticipantRoleLabel(p.role);
+      const kinshipLabel = p.kinship ? ` • ${p.kinship}` : "";
+      currentPage.drawText(`• ${p.name} (${roleLabel}${kinshipLabel}${pDoc})`, {
         x: MARGIN_LEFT + 5,
         y,
         size: 8,

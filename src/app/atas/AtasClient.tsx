@@ -722,6 +722,7 @@ export default function AtasClient({
       <AtaEditorModal
         isOpen={isCreateModalOpen}
         isAdmin={isAdmin}
+        activeSchoolId={school?.id ?? null}
         onClose={() => {
           setIsCreateModalOpen(false);
           setEditingMinute(null);

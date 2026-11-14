@@ -7,6 +7,7 @@ import {
   verifyMinuteIntegrity,
   verifyAddendumChain,
 } from "@/lib/ataCrypto";
+import { formatParticipantRoleLabel } from "@/lib/participantKinship";
 
 interface Props {
   params: Promise<{ code: string }>;
@@ -184,7 +185,7 @@ export default async function ValidarAtaPage({ params }: Props) {
                   <div>
                     <strong className="text-slate-900 block">{maskName(p.name)}</strong>
                     <span className="text-[10px] text-slate-500">
-                      {p.role} • Doc: {maskDocument(p.documentNumber)}
+                      {formatParticipantRoleLabel(p.role)} • Doc: {maskDocument(p.documentNumber)}
                       {p.verifiedEmail ? ` • ${maskEmail(p.verifiedEmail)}` : ""}
                     </span>
                   </div>

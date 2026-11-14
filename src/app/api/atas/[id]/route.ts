@@ -9,6 +9,7 @@ import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import {
   mergeParticipantSignatures,
   sanitizeMinutePayload,
+  validateParticipantStudentLinks,
 } from "@/services/ataParticipantService";
 import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 import { z } from "zod";
@@ -337,11 +338,15 @@ export async function PATCH(
           ? await tx.pedagogicalMinuteParticipant.findMany({ where: { minuteId: id } })
           : lockedMinute.participants || [];
 
+        await validateParticipantStudentLinks(tx, lockedMinute.schoolId, data.participants);
+
         const participantsToCreate = mergeParticipantSignatures(
           data.participants,
           existingParticipants,
           { clearMobileTokens: false, minuteId: id }
         );
+
+        await validateParticipantStudentLinks(tx, lockedMinute.schoolId, participantsToCreate);
 
         await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: id } });
         if (participantsToCreate.length > 0) {

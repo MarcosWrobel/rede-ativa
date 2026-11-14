@@ -5,7 +5,7 @@ import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
-import { sanitizeMinutePayload } from "@/services/ataParticipantService";
+import { sanitizeMinutePayload, validateParticipantStudentLinks } from "@/services/ataParticipantService";
 import { sanitizeKinshipForRole } from "@/lib/participantKinship";
 import { z } from "zod";
 
@@ -336,6 +336,8 @@ export async function POST(req: Request) {
       );
     }
 
+    await validateParticipantStudentLinks(prisma, effectiveSchoolId, participants);
+
     const minute = await prisma.pedagogicalMinute.create({
       data: {
         schoolId: effectiveSchoolId,
@@ -366,7 +368,10 @@ export async function POST(req: Request) {
             const isSigned = Boolean(p.signatureData || p.verifiedEmail || p.biometricVerified);
             return {
               role: p.role,
-              studentId: p.studentId || null,
+              studentId:
+                (p.role || "RESPONSAVEL").trim().toUpperCase() === "ESTUDANTE"
+                  ? p.studentId || null
+                  : null,
               name: p.name,
               kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
             documentType: p.documentType || null,
@@ -421,6 +426,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, minute }, { status: 201 });
   } catch (error: any) {
+    const msg = error?.message || "";
+    if (msg.startsWith("FORBIDDEN:")) {
+      return NextResponse.json({ error: msg.replace("FORBIDDEN:", "") }, { status: 403 });
+    }
+    if (msg.startsWith("VALIDATION:")) {
+      return NextResponse.json({ error: msg.replace("VALIDATION:", "") }, { status: 400 });
+    }
     console.error("[POST /api/atas] Erro:", error);
     return NextResponse.json({ error: "Erro ao criar rascunho de ata" }, { status: 500 });
   }

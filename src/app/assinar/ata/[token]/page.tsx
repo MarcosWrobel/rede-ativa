@@ -69,7 +69,9 @@ export default async function AssinarAtaPage({ params }: Props) {
   }));
   const shouldAnonymizeOthers =
     linkedStudents.length > 1 &&
-    (participant.role === "RESPONSAVEL" || participant.role === "ESTUDANTE");
+    (participant.role === "RESPONSAVEL" ||
+      participant.role === "FAMILIAR_CONTATO" ||
+      participant.role === "ESTUDANTE");
 
   const safeSubject = shouldAnonymizeOthers
     ? anonymizeOtherMinorsInText(participant.minute.subject, participant.studentId, linkedStudents)

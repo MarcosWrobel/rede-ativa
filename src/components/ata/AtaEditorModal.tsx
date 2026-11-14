@@ -7,6 +7,7 @@ import AtaQrCode from "./AtaQrCode";
 import SigningPinModal from "./SigningPinModal";
 import PhysicalScanModal from "./PhysicalScanModal";
 import { calculateBusinessDaysDiff } from "@/lib/signingPin";
+import { formatParticipantRoleLabel } from "@/lib/participantKinship";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
@@ -50,13 +51,26 @@ import { getParticipantSignatureSummary } from "./editor/signatureState";
 import { formatSignLinkValidity } from "./editor/signLinkValidity";
 import {
   applyPendingAiActionItemsDecision,
-  applyRoleChangeToUnsignedParticipant,
   isParticipantQrActive,
   isParticipantSignatureLocked,
   resetParticipantSignatureWithServer,
 } from "./editor/participantIdentity";
+import {
+  applyCandidateToParticipantRow,
+  applyManualParticipantFieldEdit,
+  buildParticipantCandidates,
+  ensureParticipantClientKey,
+  getCandidatesForRowRole,
+  pruneUntouchedSuggestionsForRemovedStudents,
+  reconcileSavedParticipantsWithPersistedState,
+  resolveRoleChangeWithCandidates,
+  resolveSingleAutoFillCandidate,
+  ScopedCandidateCache,
+  stripClientParticipantMeta,
+} from "./editor/participantCandidates";
 import type {
   AtaStudentOption,
+  AtaStaffCandidateOption,
   AtaParticipantDraft,
   AtaActionItemDraft,
   AtaActionItemRecord,
@@ -91,6 +105,7 @@ export default function AtaEditorModal({
   preSelectedStudentId,
   existingMinute,
   isAdmin = false,
+  activeSchoolId = null,
 }: AtaEditorModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -113,7 +128,19 @@ export default function AtaEditorModal({
   const [newTeacherName, setNewTeacherName] = useState("");
   const [newTeacherEmail, setNewTeacherEmail] = useState("");
   const [newTeacherSubject, setNewTeacherSubject] = useState("");
-  const [teamSuggestions, setTeamSuggestions] = useState<Array<{ name: string; email?: string }>>([]);
+  const [staffCandidates, setStaffCandidates] = useState<AtaStaffCandidateOption[]>([]);
+  const [staffTruncated, setStaffTruncated] = useState(false);
+  const [loadedStudentsWithContacts, setLoadedStudentsWithContacts] = useState<AtaStudentOption[]>([]);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const staffCacheRef = useRef(
+    new ScopedCandidateCache<{ staff: AtaStaffCandidateOption[]; staffTruncated: boolean }>(60_000)
+  );
+  const contactsCacheRef = useRef(new ScopedCandidateCache<AtaStudentOption[]>(60_000));
+  const staffReqSeqRef = useRef(0);
+  const contactsReqSeqRef = useRef(0);
+  const activeSchoolIdRef = useRef<string | null>(activeSchoolId ?? null);
+  const activeContactsKeyRef = useRef<string>("");
+  const autoSuggestInitializedRef = useRef(false);
   const [isConfidential, setIsConfidential] = useState(false);
   const [subject, setSubject] = useState("Atendimento Pedagógico e Alinhamento de Frequência");
   const [rawNotes, setRawNotes] = useState("");
@@ -309,7 +336,12 @@ export default function AtaEditorModal({
       setRawNotes(existingMinute.rawNotes || "");
       setSummary(existingMinute.summary || "");
       setAgreementsSummary(existingMinute.agreementsSummary || "");
-      setParticipants(existingMinute.participants || []);
+      setParticipants(
+        (existingMinute.participants || []).map((p, i) =>
+          ensureParticipantClientKey({ ...p, originState: "PERSISTED" }, i)
+        )
+      );
+      autoSuggestInitializedRef.current = true;
       setPendingSuggestedActions(null);
       setSignatureResetNotices({});
       setCancelingQrIndex(null);
@@ -346,29 +378,11 @@ export default function AtaEditorModal({
       setSignatureResetNotices({});
       setCancelingQrIndex(null);
       setActionItems([]);
+      autoSuggestInitializedRef.current = false;
 
       if (preSelectedStudentId) {
         setSelectedStudentIds([preSelectedStudentId]);
-        const stud = availableStudents.find((s) => s.id === preSelectedStudentId);
-        if (stud?.guardianName) {
-          setParticipants([
-            {
-              role: "RESPONSAVEL",
-              name: stud.guardianName,
-              kinship: "",
-              documentType: "CPF",
-              documentNumber: "",
-              documentVerifiedByStaff: true,
-              phone: stud.phone || "",
-              signatureMode: "PENDING",
-              signatureData: null,
-              refusalReason: "",
-              witnessName: "",
-            },
-          ]);
-        } else {
-          setParticipants([]);
-        }
+        setParticipants([]);
         setStep(2);
       } else {
         setSelectedStudentIds([]);
@@ -426,7 +440,12 @@ export default function AtaEditorModal({
         setRawNotes(hydrated.rawNotes || "");
         setSummary(hydrated.summary || "");
         setAgreementsSummary(hydrated.agreementsSummary || "");
-        setParticipants(hydrated.participants || []);
+        setParticipants(
+          (hydrated.participants || []).map((p, i) =>
+            ensureParticipantClientKey({ ...p, originState: "PERSISTED" }, i)
+          )
+        );
+        autoSuggestInitializedRef.current = true;
         setExtemporaneousReason(hydrated.extemporaneousReason || "");
         setActionItems(
           hydrated.actionItems
@@ -480,20 +499,240 @@ export default function AtaEditorModal({
     };
   }, [isOpen, qrModalInfo?.openId, qrModalInfo?.participantId, qrModalInfo?.expiresAt]);
 
+  // Ciclo de vida do cache e limpeza ao fechar modal ou trocar escola ativa
   useEffect(() => {
-    if (!isOpen) return;
-    fetch("/api/users")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: unknown) => {
-        if (Array.isArray(data)) {
-          const teachers = (data as Array<{ name?: string | null; email?: string | null }>)
-            .filter((u): u is { name: string; email?: string | null } => Boolean(u.name))
-            .map((u) => ({ name: u.name, email: u.email ?? undefined }));
-          setTeamSuggestions(teachers);
+    const cleanSchoolId = (activeSchoolId || "").trim() || null;
+    if (!isOpen || !cleanSchoolId || activeSchoolIdRef.current !== cleanSchoolId) {
+      staffReqSeqRef.current += 1;
+      contactsReqSeqRef.current += 1;
+      activeContactsKeyRef.current = "";
+      staffCacheRef.current.clearAll();
+      contactsCacheRef.current.clearAll();
+      setStaffCandidates([]);
+      setStaffTruncated(false);
+      setLoadedStudentsWithContacts([]);
+      setIsLoadingContacts(false);
+      activeSchoolIdRef.current = cleanSchoolId;
+    }
+  }, [isOpen, activeSchoolId]);
+
+  // Carga separada da equipe escolar (ordenada e limitada), apenas quando activeSchoolId está definido
+  useEffect(() => {
+    const cleanSchoolId = (activeSchoolId || "").trim();
+    if (!isOpen || !cleanSchoolId || viewMinuteData) return;
+
+    const targetMinuteId = minuteId || existingMinute?.id || "";
+    const staffSubKey = targetMinuteId ? `staff::${targetMinuteId}` : "staff";
+    const cachedStaff = staffCacheRef.current.get(cleanSchoolId, staffSubKey);
+    if (cachedStaff) {
+      setStaffCandidates(cachedStaff.staff);
+      setStaffTruncated(cachedStaff.staffTruncated);
+      return;
+    }
+
+    const controller = new AbortController();
+    const seq = ++staffReqSeqRef.current;
+    const params = new URLSearchParams({
+      part: "staff",
+      schoolId: cleanSchoolId,
+    });
+    if (targetMinuteId) params.set("minuteId", targetMinuteId);
+
+    fetch(`/api/atas/participant-candidates?${params.toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { schoolId?: string; staff?: AtaStaffCandidateOption[]; staffTruncated?: boolean } | null) => {
+        if (
+          !data ||
+          controller.signal.aborted ||
+          seq !== staffReqSeqRef.current ||
+          activeSchoolIdRef.current !== cleanSchoolId ||
+          (data.schoolId && data.schoolId !== cleanSchoolId)
+        ) {
+          return;
         }
+        const safeStaff = Array.isArray(data.staff) ? data.staff : [];
+        const isTruncated = Boolean(data.staffTruncated);
+        staffCacheRef.current.set(cleanSchoolId, staffSubKey, {
+          staff: safeStaff,
+          staffTruncated: isTruncated,
+        });
+        setStaffCandidates(safeStaff);
+        setStaffTruncated(isTruncated);
       })
       .catch(() => {});
-  }, [isOpen]);
+
+    return () => {
+      controller.abort();
+    };
+  }, [isOpen, activeSchoolId, viewMinuteData, minuteId, existingMinute?.id]);
+
+  // Carga sob demanda dos contatos dos estudantes selecionados (com AbortController + requestId)
+  const selectedStudentIdsKey = useMemo(
+    () => [...selectedStudentIds].sort().join(","),
+    [selectedStudentIds]
+  );
+
+  useEffect(() => {
+    const cleanSchoolId = (activeSchoolId || "").trim();
+    if (!isOpen || !cleanSchoolId || viewMinuteData || ataScope !== "STUDENTS" || !selectedStudentIdsKey) {
+      contactsReqSeqRef.current += 1;
+      activeContactsKeyRef.current = "";
+      setLoadedStudentsWithContacts([]);
+      setIsLoadingContacts(false);
+      return;
+    }
+
+    const targetMinuteId = minuteId || existingMinute?.id || "";
+    const cacheKey = `${targetMinuteId || "new"}::${selectedStudentIdsKey}`;
+
+    const applyLoadedStudents = (loaded: AtaStudentOption[]) => {
+      setLoadedStudentsWithContacts(loaded);
+      if (
+        !targetMinuteId &&
+        !autoSuggestInitializedRef.current &&
+        loaded.length === 1
+      ) {
+        const localBundle = buildParticipantCandidates({
+          students: loaded,
+          staff: [],
+        });
+        const soleAuto = resolveSingleAutoFillCandidate(localBundle.familyAndGuardianCandidates);
+        autoSuggestInitializedRef.current = true;
+        setParticipants((prev) => {
+          if (prev.length > 0) return prev;
+          if (soleAuto) {
+            return [
+              applyCandidateToParticipantRow(
+                ensureParticipantClientKey(
+                  {
+                    role: soleAuto.targetRole,
+                    name: "",
+                    kinship: "",
+                    documentType: "CPF",
+                    documentNumber: "",
+                    documentVerifiedByStaff: true,
+                    phone: "",
+                    signatureMode: "PENDING",
+                    signatureData: null,
+                    refusalReason: "",
+                    witnessName: "",
+                  },
+                  0
+                ),
+                soleAuto,
+                "AUTO_SUGGESTED"
+              ),
+            ];
+          }
+          if (preSelectedStudentId) {
+            return [
+              ensureParticipantClientKey(
+                {
+                  role: "RESPONSAVEL",
+                  name: "",
+                  kinship: "",
+                  documentType: "CPF",
+                  documentNumber: "",
+                  documentVerifiedByStaff: true,
+                  phone: "",
+                  signatureMode: "PENDING",
+                  signatureData: null,
+                  refusalReason: "",
+                  witnessName: "",
+                  originState: "AUTO_SUGGESTED",
+                  autoOriginStudentId: loaded[0].id,
+                },
+                0
+              ),
+            ];
+          }
+          return prev;
+        });
+      }
+    };
+
+    const cachedStudents = contactsCacheRef.current.get(cleanSchoolId, cacheKey);
+    if (cachedStudents) {
+      activeContactsKeyRef.current = cacheKey;
+      setIsLoadingContacts(false);
+      applyLoadedStudents(cachedStudents);
+      return;
+    }
+
+    // Limpa sugestões anteriores imediatamente enquanto busca a seleção atual
+    setLoadedStudentsWithContacts([]);
+    setIsLoadingContacts(true);
+    const controller = new AbortController();
+    const seq = ++contactsReqSeqRef.current;
+    activeContactsKeyRef.current = cacheKey;
+
+    const params = new URLSearchParams({
+      part: "contacts",
+      schoolId: cleanSchoolId,
+    });
+    if (targetMinuteId) params.set("minuteId", targetMinuteId);
+    for (const sid of selectedStudentIdsKey.split(",")) {
+      if (sid) params.append("studentIds", sid);
+    }
+
+    fetch(`/api/atas/participant-candidates?${params.toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { schoolId?: string; students?: AtaStudentOption[] } | null) => {
+        if (
+          !data ||
+          controller.signal.aborted ||
+          seq !== contactsReqSeqRef.current ||
+          activeContactsKeyRef.current !== cacheKey ||
+          activeSchoolIdRef.current !== cleanSchoolId ||
+          (data.schoolId && data.schoolId !== cleanSchoolId)
+        ) {
+          return;
+        }
+        const safeStudents = Array.isArray(data.students) ? data.students : [];
+        contactsCacheRef.current.set(cleanSchoolId, cacheKey, safeStudents);
+        applyLoadedStudents(safeStudents);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (
+          !controller.signal.aborted &&
+          seq === contactsReqSeqRef.current &&
+          activeContactsKeyRef.current === cacheKey
+        ) {
+          setIsLoadingContacts(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isOpen, activeSchoolId, viewMinuteData, ataScope, selectedStudentIdsKey, minuteId, existingMinute?.id, preSelectedStudentId]);
+
+  const candidateBundle = useMemo(() => {
+    const cleanSchoolId = (activeSchoolId || "").trim();
+    if (!cleanSchoolId) {
+      return buildParticipantCandidates({
+        students: [],
+        staff: [],
+        teacherDraftParticipants: participants,
+      });
+    }
+    const studentsForCandidates =
+      ataScope === "STUDENTS"
+        ? loadedStudentsWithContacts.filter((s) => selectedStudentIds.includes(s.id))
+        : [];
+    return buildParticipantCandidates({
+      students: studentsForCandidates,
+      staff: staffCandidates,
+      teacherDraftParticipants: participants,
+    });
+  }, [activeSchoolId, ataScope, loadedStudentsWithContacts, selectedStudentIds, staffCandidates, participants]);
 
   // Lista única de turmas para filtro
   const turmasList = useMemo(() => {
@@ -520,36 +759,16 @@ export default function AtaEditorModal({
     });
   }, [availableStudents, studentSearch, selectedTurmaFilter]);
 
-  // Toggle de seleção do aluno
+  // Toggle de seleção do aluno (remove apenas sugestões intocadas do aluno desmarcado)
   const handleToggleStudent = (student: AtaStudentOption) => {
     setStep1Error(null);
     const isSelected = selectedStudentIds.includes(student.id);
-    let nextIds: string[];
+    const nextIds = isSelected
+      ? selectedStudentIds.filter((id) => id !== student.id)
+      : [...selectedStudentIds, student.id];
 
     if (isSelected) {
-      nextIds = selectedStudentIds.filter((id) => id !== student.id);
-    } else {
-      nextIds = [...selectedStudentIds, student.id];
-
-      const guardianName = student.guardianName;
-      if (guardianName && !participants.some((p) => p.name === guardianName)) {
-        setParticipants((prev) => [
-          ...prev,
-          {
-            role: "RESPONSAVEL",
-            name: guardianName,
-            kinship: "",
-            documentType: "CPF",
-            documentNumber: "",
-            documentVerifiedByStaff: true,
-            phone: student.phone || "",
-            signatureMode: "PENDING",
-            signatureData: null,
-            refusalReason: "",
-            witnessName: "",
-          },
-        ]);
-      }
+      setParticipants((prev) => pruneUntouchedSuggestionsForRemovedStudents(prev, nextIds));
     }
     setSelectedStudentIds(nextIds);
   };
@@ -567,20 +786,24 @@ export default function AtaEditorModal({
 
     setParticipants((prev) => [
       ...prev,
-      {
-        role: "PROFESSOR",
-        name: cleanName,
-        kinship: cleanSubject ? `Docente — ${cleanSubject}` : "Professor(a)",
-        documentType: "OUTRO",
-        documentNumber: "",
-        documentVerifiedByStaff: true,
-        phone: "",
-        expectedEmail: cleanEmail || null,
-        signatureMode: "PENDING",
-        signatureData: null,
-        refusalReason: "",
-        witnessName: "",
-      },
+      ensureParticipantClientKey(
+        {
+          role: "PROFESSOR",
+          name: cleanName,
+          kinship: cleanSubject ? `Docente — ${cleanSubject}` : "Professor(a)",
+          documentType: "OUTRO",
+          documentNumber: "",
+          documentVerifiedByStaff: true,
+          phone: "",
+          expectedEmail: cleanEmail || null,
+          signatureMode: "PENDING",
+          signatureData: null,
+          refusalReason: "",
+          witnessName: "",
+          originState: "EXPLICIT_CANDIDATE",
+        },
+        prev.length
+      ),
     ]);
     setNewTeacherName("");
     setNewTeacherEmail("");
@@ -812,10 +1035,10 @@ export default function AtaEditorModal({
       })
       .map((p) => {
         const trimmedName = (p.name || "").trim();
-        return {
+        return stripClientParticipantMeta({
           ...p,
           name: trimmedName.length >= 2 ? trimmedName : "Responsável Presente",
-        };
+        });
       });
 
     const cleanActions = actionItems
@@ -861,7 +1084,9 @@ export default function AtaEditorModal({
     if (data.minute?.id) {
       setMinuteId(data.minute.id);
       if (data.minute.participants) {
-        setParticipants(data.minute.participants);
+        setParticipants((prev) =>
+          reconcileSavedParticipantsWithPersistedState(prev, data.minute!.participants)
+        );
       }
     }
 
@@ -1118,7 +1343,7 @@ export default function AtaEditorModal({
           if (i !== index) return item;
           const cleared = { ...item, hasActiveSignLink: false };
           return nextRoleAfterCancel
-            ? applyRoleChangeToUnsignedParticipant(cleared, nextRoleAfterCancel)
+            ? resolveRoleChangeWithCandidates(cleared, nextRoleAfterCancel, candidateBundle)
             : cleared;
         })
       );
@@ -1145,7 +1370,9 @@ export default function AtaEditorModal({
           if (freshRes.ok) {
             const freshData = (await freshRes.json()) as { minute?: AtaMinuteRecord };
             if (freshData.minute?.participants) {
-              setParticipants(freshData.minute.participants);
+              setParticipants((prev) =>
+                reconcileSavedParticipantsWithPersistedState(prev, freshData.minute!.participants)
+              );
             }
           }
         } catch {
@@ -1168,7 +1395,7 @@ export default function AtaEditorModal({
           if (i !== index) return item;
           const cleared = { ...item, hasActiveSignLink: false };
           return nextRoleAfterCancel
-            ? applyRoleChangeToUnsignedParticipant(cleared, nextRoleAfterCancel)
+            ? resolveRoleChangeWithCandidates(cleared, nextRoleAfterCancel, candidateBundle)
             : cleared;
         })
       );
@@ -1228,7 +1455,7 @@ export default function AtaEditorModal({
       if (activeSignParticipantIndex === index) {
         setActiveSignParticipantIndex(null);
       }
-      setParticipants(result.participants);
+      setParticipants((prev) => reconcileSavedParticipantsWithPersistedState(prev, result.participants));
 
       if (sigSummary.hasPersistedSignature) {
         setSignatureResetNotices((prev) => ({
@@ -1253,31 +1480,68 @@ export default function AtaEditorModal({
 
   // Atalho de 1 clique: Incluir Estudante(s) selecionados como participante(s) da ata
   const handleAddSelectedStudentsAsParticipants = () => {
-    const selected = availableStudents.filter((s) => selectedStudentIds.includes(s.id));
+    const loadedMap = new Map(loadedStudentsWithContacts.map((s) => [s.id, s]));
+    const selected = availableStudents
+      .filter((s) => selectedStudentIds.includes(s.id))
+      .map((s) => loadedMap.get(s.id) || s);
     if (selected.length === 0) return;
 
     setParticipants((prev) => {
       const copy = [...prev];
       selected.forEach((stu) => {
         const alreadyExists = copy.some(
-          (p) => p.studentId === stu.id || (p.name.trim().toLowerCase() === stu.name.trim().toLowerCase() && p.role === "ESTUDANTE")
+          (p) => p.studentId === stu.id && (p.role || "").toUpperCase() === "ESTUDANTE"
         );
         if (!alreadyExists) {
-          copy.push({
-            role: "ESTUDANTE",
-            studentId: stu.id,
-            name: stu.name,
-            kinship: null,
-            documentType: "CGM",
-            documentNumber: stu.cgm || "",
-            documentVerifiedByStaff: true,
-            phone: stu.phone || "",
-            expectedEmail: stu.email || null,
-            signatureMode: "PENDING",
-            signatureData: null,
-            refusalReason: "",
-            witnessName: "",
-          });
+          const studentCandidate = candidateBundle.byKey[`student:${stu.id}`];
+          if (studentCandidate) {
+            copy.push(
+              applyCandidateToParticipantRow(
+                ensureParticipantClientKey(
+                  {
+                    role: "ESTUDANTE",
+                    studentId: stu.id,
+                    name: stu.name,
+                    kinship: null,
+                    documentType: "CGM",
+                    documentNumber: stu.cgm || "",
+                    documentVerifiedByStaff: true,
+                    phone: stu.phone || "",
+                    expectedEmail: stu.email || null,
+                    signatureMode: "PENDING",
+                    signatureData: null,
+                    refusalReason: "",
+                    witnessName: "",
+                  },
+                  copy.length
+                ),
+                studentCandidate,
+                "EXPLICIT_CANDIDATE"
+              )
+            );
+          } else {
+            copy.push(
+              ensureParticipantClientKey(
+                {
+                  role: "ESTUDANTE",
+                  studentId: stu.id,
+                  name: stu.name,
+                  kinship: null,
+                  documentType: "CGM",
+                  documentNumber: stu.cgm || "",
+                  documentVerifiedByStaff: true,
+                  phone: stu.phone || "",
+                  expectedEmail: stu.email || null,
+                  signatureMode: "PENDING",
+                  signatureData: null,
+                  refusalReason: "",
+                  witnessName: "",
+                  originState: "EXPLICIT_CANDIDATE",
+                },
+                copy.length
+              )
+            );
+          }
         }
       });
       return copy;
@@ -1689,7 +1953,9 @@ export default function AtaEditorModal({
                       <div>
                         <p className="font-bold text-slate-900 dark:text-slate-100">{p.name}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {p.role} {p.documentNumber ? `• Doc: ${p.documentNumber}` : ""}
+                          {formatParticipantRoleLabel(p.role)}
+                          {p.kinship ? ` • ${p.kinship}` : ""}
+                          {p.documentNumber ? ` • Doc: ${p.documentNumber}` : ""}
                           {p.verifiedEmail ? ` • ${p.verifiedEmail}` : ""}
                         </p>
                       </div>
@@ -2248,14 +2514,15 @@ export default function AtaEditorModal({
                     <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                       <p className="font-extrabold text-slate-800 text-[11px]">Adicionar Docente:</p>
 
-                      {teamSuggestions.length > 0 && (
+                      {staffCandidates.length > 0 && (
                         <div className="space-y-1">
                           <label className="text-[10px] font-semibold text-slate-500 block">
                             Servidores cadastrados na unidade:
                           </label>
                           <select
+                            aria-label="Selecionar servidor cadastrado na unidade"
                             onChange={(e) => {
-                              const found = teamSuggestions.find((t) => t.name === e.target.value);
+                              const found = staffCandidates.find((t) => t.id === e.target.value);
                               if (found) {
                                 setNewTeacherName(found.name);
                                 if (found.email) setNewTeacherEmail(found.email);
@@ -2265,12 +2532,17 @@ export default function AtaEditorModal({
                             className="w-full p-1.5 text-xs border border-slate-300 rounded-lg bg-white"
                           >
                             <option value="" disabled>Selecionar servidor da equipe...</option>
-                            {teamSuggestions.map((t, i) => (
-                              <option key={i} value={t.name}>
+                            {staffCandidates.map((t) => (
+                              <option key={t.id} value={t.id}>
                                 {t.name} {t.email ? `(${t.email})` : ""}
                               </option>
                             ))}
                           </select>
+                          {staffTruncated && (
+                            <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                              Exibindo os primeiros 200 servidores em ordem alfabética. Caso não encontre, preencha os campos abaixo.
+                            </p>
+                          )}
                         </div>
                       )}
 
@@ -2896,22 +3168,36 @@ export default function AtaEditorModal({
                         type="button"
                         onClick={() => {
                           markLocalEdit();
-                          setParticipants((prev) => [
-                            ...prev,
-                            {
-                              role: "RESPONSAVEL",
-                              name: "",
-                              kinship: "",
-                              documentType: "CPF",
-                              documentNumber: "",
-                              documentVerifiedByStaff: true,
-                              phone: "",
-                              signatureMode: "PENDING",
-                              signatureData: null,
-                              refusalReason: "",
-                              witnessName: "",
-                            },
-                          ]);
+                          setParticipants((prev) => {
+                            const blankRow = ensureParticipantClientKey(
+                              {
+                                role: "RESPONSAVEL",
+                                name: "",
+                                kinship: "",
+                                documentType: "CPF",
+                                documentNumber: "",
+                                documentVerifiedByStaff: true,
+                                phone: "",
+                                signatureMode: "PENDING",
+                                signatureData: null,
+                                refusalReason: "",
+                                witnessName: "",
+                                originState: "AUTO_SUGGESTED",
+                              },
+                              prev.length
+                            );
+                            const familyCandidates = getCandidatesForRowRole(
+                              candidateBundle,
+                              "RESPONSAVEL"
+                            );
+                            const autoCandidate = resolveSingleAutoFillCandidate(familyCandidates);
+                            return [
+                              ...prev,
+                              autoCandidate
+                                ? applyCandidateToParticipantRow(blankRow, autoCandidate, "AUTO_SUGGESTED")
+                                : blankRow,
+                            ];
+                          });
                         }}
                         className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
                       >
@@ -2931,17 +3217,153 @@ export default function AtaEditorModal({
                         cancelingQrIndex === idx ||
                         resettingSigIndex === idx;
                       const kinshipPlaceholder =
-                        p.role === "RESPONSAVEL"
-                          ? "Parentesco (opcional, ex.: Mãe, Pai)"
+                        p.role === "RESPONSAVEL" || p.role === "FAMILIAR_CONTATO"
+                          ? "Parentesco / vínculo (opcional, ex.: Mãe, Avó)"
                           : p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR"
                           ? "Função / Disciplina (opcional)"
                           : "Vínculo / Órgão (opcional)";
+                      const rowCandidates = getCandidatesForRowRole(candidateBundle, p.role);
+                      const legalGuardianOpts = rowCandidates.filter(
+                        (c) => c.group === "RESPONSAVEL_LEGAL"
+                      );
+                      const explicitContactOpts = rowCandidates.filter(
+                        (c) => c.group === "FAMILIAR_CONTATO" || c.group === "RECADO"
+                      );
+                      const pautaTeacherOpts = rowCandidates.filter(
+                        (c) => c.group === "PROFESSOR_PAUTA"
+                      );
+                      const staffTeacherOpts = rowCandidates.filter(
+                        (c) => c.group === "STAFF_MANUAL_TEACHER"
+                      );
+                      const showStaffTruncatedNotice =
+                        staffTruncated &&
+                        (p.role === "EQUIPE_ESCOLAR" || p.role === "PROFESSOR");
 
                       return (
                       <div
-                        key={p.id || idx}
+                        key={p.clientKey || p.id || idx}
                         className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 shadow-2xs"
                       >
+                        {!isIdentityDisabled &&
+                          (rowCandidates.length > 0 ||
+                            (isLoadingContacts &&
+                              (p.role === "RESPONSAVEL" ||
+                                p.role === "FAMILIAR_CONTATO" ||
+                                p.role === "ESTUDANTE"))) && (
+                            <div className="space-y-1">
+                              {isLoadingContacts &&
+                              (p.role === "RESPONSAVEL" ||
+                                p.role === "FAMILIAR_CONTATO" ||
+                                p.role === "ESTUDANTE") ? (
+                                <p className="text-[11px] text-slate-500">
+                                  Carregando contatos dos estudantes da pauta...
+                                </p>
+                              ) : (
+                                <>
+                                  <select
+                                    aria-label={`Selecionar cadastro para o participante ${idx + 1}`}
+                                    value={p.autoFilledCandidateKey || ""}
+                                    onChange={(e) => {
+                                      const selectedKey = e.target.value;
+                                      markLocalEdit();
+                                      if (!selectedKey) {
+                                        setParticipants((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? applyManualParticipantFieldEdit(item, {
+                                                  autoFilledCandidateKey: null,
+                                                  sourceSnapshot: null,
+                                                })
+                                              : item
+                                          )
+                                        );
+                                        return;
+                                      }
+                                      const chosen = candidateBundle.byKey[selectedKey];
+                                      if (!chosen) return;
+                                      setParticipants((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx
+                                            ? applyCandidateToParticipantRow(
+                                                item,
+                                                chosen,
+                                                "EXPLICIT_CANDIDATE"
+                                              )
+                                            : item
+                                        )
+                                      );
+                                    }}
+                                    className="w-full p-1.5 border border-sky-200 rounded-lg bg-sky-50/50 text-xs font-medium text-slate-700"
+                                  >
+                                    <option value="">
+                                      Selecionar cadastro sugerido (ou digitar manualmente)...
+                                    </option>
+                                    {p.role === "RESPONSAVEL" || p.role === "FAMILIAR_CONTATO" ? (
+                                      <>
+                                        {legalGuardianOpts.length > 0 && (
+                                          <optgroup label="Responsáveis cadastrados">
+                                            {legalGuardianOpts.map((c) => (
+                                              <option key={c.key} value={c.key}>
+                                                {c.label}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {explicitContactOpts.length > 0 && (
+                                          <optgroup label="Outros familiares / recado (registra como Familiar / Contato)">
+                                            {explicitContactOpts.map((c) => (
+                                              <option key={c.key} value={c.key}>
+                                                {c.label}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </>
+                                    ) : p.role === "PROFESSOR" ? (
+                                      <>
+                                        {pautaTeacherOpts.length > 0 && (
+                                          <optgroup label="Docentes informados na pauta">
+                                            {pautaTeacherOpts.map((c) => (
+                                              <option key={c.key} value={c.key}>
+                                                {c.label}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {staffTeacherOpts.length > 0 && (
+                                          <optgroup label="Servidores cadastrados na escola">
+                                            {staffTeacherOpts.map((c) => (
+                                              <option key={c.key} value={c.key}>
+                                                {c.label}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </>
+                                    ) : (
+                                      rowCandidates.map((c) => (
+                                        <option key={c.key} value={c.key}>
+                                          {c.label}
+                                        </option>
+                                      ))
+                                    )}
+                                  </select>
+                                  {showStaffTruncatedNotice && (
+                                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                                      Exibindo os primeiros 200 servidores em ordem alfabética. Se necessário, digite os dados abaixo.
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                        {p.nonLegalContactNotice && p.role === "FAMILIAR_CONTATO" && (
+                          <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                            {p.nonLegalContactNotice}
+                          </p>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
                           <div className="md:col-span-4">
                             <select
@@ -2962,7 +3384,11 @@ export default function AtaEditorModal({
                                 setParticipants((prev) =>
                                   prev.map((item, i) =>
                                     i === idx
-                                      ? applyRoleChangeToUnsignedParticipant(item, nextRole)
+                                      ? resolveRoleChangeWithCandidates(
+                                          item,
+                                          nextRole,
+                                          candidateBundle
+                                        )
                                       : item
                                   )
                                 );
@@ -2970,6 +3396,7 @@ export default function AtaEditorModal({
                               className="w-full p-2 border border-slate-300 rounded-lg bg-white font-semibold text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             >
                               <option value="RESPONSAVEL">Responsável Legal</option>
+                              <option value="FAMILIAR_CONTATO">Familiar / Contato</option>
                               <option value="ESTUDANTE">Estudante</option>
                               <option value="PROFESSOR">Professor(a)</option>
                               <option value="EQUIPE_ESCOLAR">Equipe Escolar</option>
@@ -2990,7 +3417,9 @@ export default function AtaEditorModal({
                                 const nextName = e.target.value;
                                 setParticipants((prev) =>
                                   prev.map((item, i) =>
-                                    i === idx ? { ...item, name: nextName } : item
+                                    i === idx
+                                      ? applyManualParticipantFieldEdit(item, { name: nextName })
+                                      : item
                                   )
                                 );
                               }}
@@ -3010,7 +3439,11 @@ export default function AtaEditorModal({
                                 const nextDoc = e.target.value;
                                 setParticipants((prev) =>
                                   prev.map((item, i) =>
-                                    i === idx ? { ...item, documentNumber: nextDoc } : item
+                                    i === idx
+                                      ? applyManualParticipantFieldEdit(item, {
+                                          documentNumber: nextDoc,
+                                        })
+                                      : item
                                   )
                                 );
                               }}
@@ -3054,7 +3487,11 @@ export default function AtaEditorModal({
                                   const nextKinship = e.target.value;
                                   setParticipants((prev) =>
                                     prev.map((item, i) =>
-                                      i === idx ? { ...item, kinship: nextKinship } : item
+                                      i === idx
+                                        ? applyManualParticipantFieldEdit(item, {
+                                            kinship: nextKinship,
+                                          })
+                                        : item
                                     )
                                   );
                                 }}
@@ -3073,7 +3510,9 @@ export default function AtaEditorModal({
                                 const nextPhone = e.target.value;
                                 setParticipants((prev) =>
                                   prev.map((item, i) =>
-                                    i === idx ? { ...item, phone: nextPhone } : item
+                                    i === idx
+                                      ? applyManualParticipantFieldEdit(item, { phone: nextPhone })
+                                      : item
                                   )
                                 );
                               }}

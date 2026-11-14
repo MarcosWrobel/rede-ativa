@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import SignatureCanvas from "@/components/ata/SignatureCanvas";
+import { formatParticipantRoleLabel } from "@/lib/participantKinship";
 import {
   CheckCircle2,
   ShieldCheck,
@@ -347,11 +348,11 @@ export default function MobileSignClient({
             <p className="text-[11px] text-slate-500">
               {participantRole === "ESTUDANTE"
                 ? "Estudante (Ciência e Escuta Ativa — ECA Art. 12)"
-                : participantRole}
+                : formatParticipantRoleLabel(participantRole)}
             </p>
           </div>
           <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-bold text-[10px] text-slate-600 uppercase">
-            {participantRole}
+            {formatParticipantRoleLabel(participantRole)}
           </span>
         </div>
 

@@ -1,3 +1,12 @@
+export interface AtaStudentContactOption {
+  id: string;
+  studentId: string;
+  name: string;
+  kinship: string;
+  phone: string;
+  isPrimary: boolean;
+}
+
 export interface AtaStudentOption {
   id: string;
   name: string;
@@ -6,6 +15,25 @@ export interface AtaStudentOption {
   email?: string | null;
   phone?: string | null;
   guardianName?: string | null;
+  isInactiveRecord?: boolean;
+  contacts?: AtaStudentContactOption[];
+}
+
+export type ParticipantRowOriginState =
+  | "AUTO_SUGGESTED"
+  | "EXPLICIT_CANDIDATE"
+  | "MANUAL_EDIT"
+  | "PERSISTED";
+
+export interface ParticipantSourceSnapshot {
+  candidateKey?: string | null;
+  sourceRole?: string | null;
+  name?: string;
+  phone?: string;
+  documentType?: string | null;
+  documentNumber?: string;
+  expectedEmail?: string | null;
+  kinship?: string;
 }
 
 export interface AtaParticipantDraft {
@@ -39,6 +67,13 @@ export interface AtaParticipantDraft {
   clearSignature?: boolean;
   refusalReason?: string | null;
   witnessName?: string | null;
+  // Metadados exclusivos de interface (removidos antes do envio à API)
+  clientKey?: string;
+  originState?: ParticipantRowOriginState;
+  autoFilledCandidateKey?: string | null;
+  autoOriginStudentId?: string | null;
+  sourceSnapshot?: ParticipantSourceSnapshot | null;
+  nonLegalContactNotice?: string | null;
 }
 
 export interface AtaActionItemDraft {
@@ -183,6 +218,12 @@ export interface FormalizeAtaApiResponse {
   };
 }
 
+export interface AtaStaffCandidateOption {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface AtaEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -191,4 +232,5 @@ export interface AtaEditorModalProps {
   preSelectedStudentId?: string;
   existingMinute?: AtaMinuteRecord | null;
   isAdmin?: boolean;
+  activeSchoolId?: string | null;
 }
