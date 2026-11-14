@@ -9,7 +9,7 @@ export default function PwaRegister() {
 
   useEffect(() => {
     // 1. Registro do Service Worker
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    if (process.env.NODE_ENV === "production" && typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker
         .register("/sw.js")
         .then((reg) => {

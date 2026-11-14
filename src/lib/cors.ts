@@ -3,23 +3,28 @@
  * Permite exclusivamente os portais oficiais da SEED-PR (Power BI e SERP) e o próprio domínio da aplicação.
  */
 
-function isTrustedSyncOrigin(origin: string | null): boolean {
+const EXACT_TRUSTED_HTTPS_HOSTS = new Set([
+  "app.powerbi.com",
+  "redeprotecao.seed.pr.gov.br",
+  "redeativa.app.br",
+  "www.redeativa.app.br",
+  "app.redeativa.app.br",
+  "redeativa.com.br",
+  "www.redeativa.com.br",
+  "app.redeativa.com.br",
+  "registro-leopoldina.vercel.app",
+  "busca-ativa-leopoldina.vercel.app",
+]);
+
+export function isTrustedSyncOrigin(origin: string | null): boolean {
   if (!origin) return false;
   try {
     const url = new URL(origin);
     const host = url.hostname.toLowerCase();
 
     if (url.protocol === "https:") {
-      if (host === "app.powerbi.com") return true;
-      if (host === "redeprotecao.seed.pr.gov.br" || host.endsWith(".redeprotecao.seed.pr.gov.br")) {
-        return true;
-      }
-      if (
-        host === "redeativa.app.br" ||
-        host === "www.redeativa.app.br" ||
-        host.endsWith(".redeativa.app.br") ||
-        host.endsWith(".vercel.app")
-      ) {
+      if (EXACT_TRUSTED_HTTPS_HOSTS.has(host)) return true;
+      if (host.endsWith(".redeprotecao.seed.pr.gov.br")) {
         return true;
       }
     }
