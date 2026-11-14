@@ -67,7 +67,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes ativos passem (630 testes aprovados em 67 suítes Vitest — 70 arquivos no total com 3 `skipIf` de banco isolado —, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes ativos passem (515 testes aprovados em 63 suítes Vitest — 66 arquivos no total com 3 `skipIf` de banco isolado —, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -144,11 +144,11 @@ A interface deve seguir os princípios de alta clareza operacional, concisão co
 ---
 
 ## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
-- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **50 Route Handlers `route.ts`** (`src/app/api/`) e **67 suítes aprovadas (70 arquivos, 3 `skipIf` de banco isolado) / 630 testes Vitest aprovados**.
+- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **52 Route Handlers `route.ts`** (`src/app/api/`) e **63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**.
 - **Estrutura de Referência:**
   ```text
   src/
-  ├── app/                 # 29 páginas SSR + 50 Route Handlers REST (/api/*)
+  ├── app/                 # 29 páginas SSR + 52 Route Handlers REST (/api/*)
   │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
   │   ├── /login           # Login institucional Google OAuth / dev condicional
   │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))

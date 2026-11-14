@@ -1,7 +1,7 @@
 # Backlog Geral de Evolução & Roadmap — Rede Ativa SaaS
 
 Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa SaaS**.
-- **Estado Vivo do Repositório:** **21 models Prisma** • **29 páginas (`page.tsx`)** • **50 Route Handlers (`route.ts`)** • **67 suítes aprovadas (70 arquivos, 3 `skipIf` de banco isolado) / 630 testes Vitest aprovados**
+- **Estado Vivo do Repositório:** **21 models Prisma** • **29 páginas (`page.tsx`)** • **52 Route Handlers (`route.ts`)** • **63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**
 - Status: `[x]` Concluído • `[/]` Em Andamento • `[ ]` Pendente (Roadmap Futuro)
 - Prioridade: `P0` Crítico (Segurança/LGPD/Jurídico) • `P1` Alta (Estabilidade/Performance) • `P2` Média (Valor Pedagógico) • `P3` Expansão Estratégica
 - Esforço: `P` Pequeno (1–2h) • `M` Médio (3–6h) • `G` Grande (1–3 dias)
@@ -195,14 +195,14 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ## Épico 16 — Hardening Referencial, Arquitetura Limpa de Atas & Modularização UI (Sprint 18) — ✅ Concluído
 
-> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 50 Route Handlers (`route.ts`) • 67 suítes aprovadas (70 arquivos, 3 `skipIf` de banco isolado) / 630 testes Vitest aprovados**.
+> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 52 Route Handlers (`route.ts`) • 63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**.
 
 - [x] **`SEC-11`** `[P0 | Esforço: P]` **Contenção Residual 500 & Limites Defensivos SERE (`AUD-04`)**  
   Sanitização de mensagens de erro 500 residuais em [`/api/ai/test-key`](../src/app/api/ai/test-key/route.ts), [`/api/ai/generate-template`](../src/app/api/ai/generate-template/route.ts) e [`/api/auth/[...nextauth]`](../src/app/api/auth/%5B...nextauth%5D/route.ts), aliada a limites superiores em `sereBatchImportSchema` (500 turmas / 5.000 estudantes / 5.000 transferidos) e `MAX_SERE_FILE_SIZE_BYTES = 10 MB`.
 - [x] **`DATA-02`** `[P0 | Esforço: M]` **Proteção Referencial Jurídica (`onDelete: Restrict`) & Build Strict (`AUD-06`)**  
   Substituição de `onDelete: Cascade` por `onDelete: Restrict` em relações de prova legal (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student`, `PedagogicalMinute.school`) com deleção explícita em `/sanitize` e `DELETE /api/schools/[id]`, e falha bloqueante em produção no [`scripts/vercel_db_push.cjs`](../scripts/vercel_db_push.cjs).
 - [x] **`DOC-01`** `[P1 | Esforço: P]` **Governança Documental & Padronização de Pacote (`AUD-01` / `AUD-05`)**  
-  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 50 rotas, 67 suítes aprovadas / 630 testes aprovados) e artefato primário `/extensao-rede-ativa.zip`.
+  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 52 rotas, 63 suítes aprovadas / 515 testes aprovados) e artefato primário `/extensao-rede-ativa.zip`.
 - [x] **`SYNC-01`** `[P0 | Esforço: M]` **Blindagem da Sincronização de Frequência (Power BI, CSV & JSON — `10/11/2026`)**  
   Prevenção de erro HTTP 500 por colisão `P2002` na chave global `@unique` `Student.cgm` em `/api/frequencia/sync` e `/api/serp/sync` via [`src/lib/syncCgmGuard.ts`](../src/lib/syncCgmGuard.ts), atualização cadastral em lote por *delta check*, parser CSV/JSON RFC 4180 completo de 11 colunas em [`src/lib/frequencyImportParser.ts`](../src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](../src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br` e 12 testes em [`src/lib/__tests__/frequenciaSync.test.ts`](../src/lib/__tests__/frequenciaSync.test.ts).
 - [x] **`PERF-01`** `[P0 | Esforço: M]` **Otimização Extrema de Egress, Cache & Custo no Neon Launch (`10/11/2026`)**  

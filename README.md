@@ -98,7 +98,7 @@ npm run build
 ## 📖 Índice da Documentação Canônica
 
 - 👉 **[Contexto Mestre & Regras Inegociáveis para IAs (`AI_CONTEXT.md`)](AI_CONTEXT.md)** — Fonte única de verdade (SSOT) de regras de negócio, estrutura do projeto e convenções.
-- 👉 **[Arquitetura e Engenharia de Software (`docs/ARQUITETURA_E_ENGENHARIA.md`)](docs/ARQUITETURA_E_ENGENHARIA.md)** — Referência técnica unificada: diagramas C4/ERD, 21 models Prisma, 29 páginas SSR, 50 APIs REST, criptografia e segurança.
+- 👉 **[Arquitetura e Engenharia de Software (`docs/ARQUITETURA_E_ENGENHARIA.md`)](docs/ARQUITETURA_E_ENGENHARIA.md)** — Referência técnica unificada: diagramas C4/ERD, 21 models Prisma, 29 páginas SSR, 52 APIs REST, criptografia e segurança.
 - 👉 **[Guia de Colaboração & Onboarding Dev (`docs/GUIA_COLABORACAO.md`)](docs/GUIA_COLABORACAO.md)** — Passo a passo de ambiente local (`localhost:3001`), Neon Branching e fluxo Git.
 - 👉 **[Guia de Implantação e Operação Cloud (`docs/DEPLOY.md`)](docs/DEPLOY.md)** — Provisionamento na Vercel, Neon PostgreSQL, variáveis de ambiente e operação multi-escola.
 - 👉 **[Backlog Evolutivo & Roadmap (`docs/BACKLOG.md`)](docs/BACKLOG.md)** — Registro completo das Sprints 1 a 18 concluídas e planejamento técnico-jurídico futuro.
