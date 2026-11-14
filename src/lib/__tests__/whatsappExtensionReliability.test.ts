@@ -1117,6 +1117,17 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     );
     expect(getFromUnauthorizedTab.activeDispatch).toBeNull();
 
+    // Aba 900 (autorizada), mesmo após o WhatsApp Web limpar ?phone= via history.replaceState (phone: null, url: "/"), recebe o despacho!
+    const getFromAuthorizedTabWithoutUrlPhone = await callBg(
+      { type: "LEOPOLDINA_GET_ACTIVE_DISPATCH", phone: null },
+      { id: "ext-rede-ativa-test", url: "https://web.whatsapp.com/", tab: { id: 900, windowId: 99 } }
+    );
+    expect(getFromAuthorizedTabWithoutUrlPhone.activeDispatch).toMatchObject({
+      requestId: "req-win-1",
+      logId: "log-win-1",
+      phone: "5542999991111",
+    });
+
     const outcomeFromUnauthorizedTab = await callBg(
       {
         type: "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME",
@@ -1255,5 +1266,208 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
       const zippedSha = crypto.createHash("sha256").update(zippedBytes).digest("hex");
       expect(zippedSha).toBe(sourceSha);
     }
+  });
+
+  it("14. Cenário real do WhatsApp Web: URL sem ?phone= (após history.replaceState), cabeçalho com nome salvo em span[dir=auto], IDs @lid e markdown *negrito* confirmam auto-send e envio manual", () => {
+    const markdownTemplate =
+      "Olá! Aqui é da Equipe Pedagógica da *Instituição de Ensino*. Notamos a ausência de *ESTUDANTE TESTE* nas aulas.";
+    const renderedDomBubbleText =
+      "Olá! Aqui é da Equipe Pedagógica da Instituição de Ensino. Notamos a ausência de ESTUDANTE TESTE nas aulas.\n23:30";
+
+    // Parte A: Auto-Send em conversa real sem ?phone= na URL, título nomeado e botão div[role="button"] > span[data-icon="wds-ic-send-filled"]
+    const autoHarness = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/", // Após history.replaceState limpar /send?phone=...
+      chatTitle: "Maria Responsável",
+      outgoingCount: 0,
+      incomingCount: 0,
+      initialDispatch: {
+        requestId: "req-real-auto",
+        logId: "log-real-auto",
+        phone: "5542999991111",
+        studentName: "ESTUDANTE TESTE",
+        text: markdownTemplate,
+        autoSend: true,
+        dispatchedAt: 1_700_000_000_000,
+      },
+    });
+
+    // Simula cabeçalho moderno do WhatsApp Web (span[dir="auto"] sem atributo title)
+    autoHarness.headerSpan.attributes.delete("title");
+    autoHarness.headerSpan.title = "";
+    autoHarness.headerSpan.setAttribute("dir", "auto");
+    autoHarness.headerSpan.textContent = "Maria Responsável";
+    autoHarness.composeBox.textContent = markdownTemplate;
+
+    // Substitui o botão padrão por div[role="button"] contendo span[data-icon="wds-ic-send-filled"]
+    const footerEl = autoHarness.sendBtn.parentNode!;
+    autoHarness.sendBtn.remove();
+    const roleBtn = autoHarness.doc.createElement("div");
+    roleBtn.setAttribute("role", "button");
+    roleBtn.setAttribute("aria-label", "Enviar");
+    const iconSpan = autoHarness.doc.createElement("span");
+    iconSpan.setAttribute("data-icon", "wds-ic-send-filled");
+    roleBtn.appendChild(iconSpan);
+    footerEl.appendChild(roleBtn);
+
+    let autoSendClicked = false;
+    roleBtn.addEventListener("click", () => {
+      autoSendClicked = true;
+      // WhatsApp Web renderiza bolha com @lid (sem @c.us) e sem asteriscos de markdown
+      const lidRow = autoHarness.doc.createElement("div");
+      lidRow.setAttribute("data-id", "true_192837465@lid_3EB0AAAA");
+      const innerOut = autoHarness.doc.createElement("div");
+      innerOut.className = "message-out";
+      const textSpan = autoHarness.doc.createElement("span");
+      textSpan.className = "selectable-text copyable-text";
+      textSpan.textContent = renderedDomBubbleText;
+      innerOut.appendChild(textSpan);
+      lidRow.appendChild(innerOut);
+      autoHarness.chatMessages.appendChild(lidRow);
+      autoHarness.composeBox.textContent = "";
+    });
+
+    autoHarness.injectScript();
+    autoHarness.advanceTime(1200);
+
+    expect(autoSendClicked).toBe(true);
+    const autoOutcomes = autoHarness.sentRuntimeMessages.filter(
+      (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME"
+    );
+    expect(autoOutcomes).toHaveLength(1);
+    expect(autoOutcomes[0]).toMatchObject({
+      outcome: "SENT",
+      requestId: "req-real-auto",
+      logId: "log-real-auto",
+      phone: "5542999991111",
+    });
+
+    // Parte B: Envio manual (autoSend: false) pressionando Enter em nó filho do editor Lexical
+    const manualHarness = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "Maria Responsável",
+      outgoingCount: 0,
+      incomingCount: 0,
+      initialDispatch: {
+        requestId: "req-real-manual",
+        logId: "log-real-manual",
+        phone: "5542999991111",
+        studentName: "ESTUDANTE TESTE",
+        text: markdownTemplate,
+        autoSend: false,
+        dispatchedAt: 1_700_000_000_000,
+      },
+    });
+    manualHarness.headerSpan.attributes.delete("title");
+    manualHarness.headerSpan.title = "";
+    manualHarness.headerSpan.setAttribute("dir", "auto");
+    manualHarness.headerSpan.textContent = "Maria Responsável";
+
+    const lexicalChild = manualHarness.doc.createElement("span");
+    lexicalChild.setAttribute("data-lexical-text", "true");
+    lexicalChild.textContent = markdownTemplate;
+    manualHarness.composeBox.textContent = "";
+    manualHarness.composeBox.appendChild(lexicalChild);
+
+    manualHarness.injectScript();
+
+    // Usuária pressiona Enter com foco no nó filho dentro de div[contenteditable="true"]
+    lexicalChild.focus();
+    lexicalChild.dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, target: lexicalChild });
+
+    const manualLidBubble = manualHarness.doc.createElement("div");
+    manualLidBubble.setAttribute("data-id", "true_192837465@lid_3EB0BBBB");
+    const manualInner = manualHarness.doc.createElement("div");
+    manualInner.className = "message-out";
+    const manualSpan = manualHarness.doc.createElement("span");
+    manualSpan.className = "selectable-text copyable-text";
+    manualSpan.textContent = renderedDomBubbleText;
+    manualInner.appendChild(manualSpan);
+    manualLidBubble.appendChild(manualInner);
+    manualHarness.chatMessages.appendChild(manualLidBubble);
+    manualHarness.composeBox.textContent = "";
+
+    manualHarness.advanceTime(400);
+
+    const manualOutcomes = manualHarness.sentRuntimeMessages.filter(
+      (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME"
+    );
+    expect(manualOutcomes).toHaveLength(1);
+    expect(manualOutcomes[0]).toMatchObject({
+      outcome: "SENT",
+      requestId: "req-real-manual",
+      logId: "log-real-manual",
+      phone: "5542999991111",
+    });
+  });
+
+  it("15. Proteção anti-microfone: nunca clica em button[data-tab='11'] de voz/microfone após envio e confirma SENT mesmo se tabs.onUpdated reenviar LEOPOLDINA_ACTIVATE_DISPATCH", () => {
+    const dispatchPayload = {
+      requestId: "req-no-mic-1",
+      logId: "log-no-mic-1",
+      phone: "5542999991111",
+      studentName: "NATIELE PACHECO DOS SANTOS",
+      text: "teste",
+      autoSend: true,
+      dispatchedAt: 1_700_000_000_000,
+    };
+
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "MARCOS",
+      outgoingCount: 2,
+      incomingCount: 1,
+      initialDispatch: dispatchPayload,
+    });
+    h.headerSpan.attributes.delete("title");
+    h.headerSpan.title = "";
+    h.headerSpan.setAttribute("dir", "auto");
+    h.headerSpan.textContent = "MARCOS";
+    h.composeBox.textContent = "teste";
+
+    let sendClickCount = 0;
+    let micClicked = false;
+
+    h.sendBtn.addEventListener("click", () => {
+      if (h.sendBtn.getAttribute("aria-label") === "Mensagem de voz") {
+        micClicked = true;
+        return;
+      }
+      sendClickCount++;
+      // Simula comportamento real do WhatsApp Web: limpa a caixa de texto e transforma button[data-tab="11"] no botão de microfone!
+      h.composeBox.textContent = "";
+      h.sendBtn.setAttribute("aria-label", "Mensagem de voz");
+      const pttIcon = h.doc.createElement("span");
+      pttIcon.setAttribute("data-icon", "ptt");
+      h.sendBtn.appendChild(pttIcon);
+    });
+
+    h.injectScript();
+
+    // Avança até o disparo do auto-send (600ms tick + 250ms timeout = 850ms)
+    h.advanceTime(900);
+    expect(sendClickCount).toBe(1);
+
+    // Simula chrome.tabs.onUpdated (status === "complete") reenviando LEOPOLDINA_ACTIVATE_DISPATCH com o mesmo requestId
+    h.sendRuntimeToContent({
+      type: "LEOPOLDINA_ACTIVATE_DISPATCH",
+      activeDispatch: dispatchPayload,
+    });
+
+    // Avança mais 5 segundos: deve confirmar SENT e JAMAIS clicar no botão de microfone
+    h.advanceTime(5000);
+
+    expect(micClicked).toBe(false);
+    expect(sendClickCount).toBe(1);
+
+    const outcomes = h.sentRuntimeMessages.filter(
+      (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME"
+    );
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      outcome: "SENT",
+      requestId: "req-no-mic-1",
+      logId: "log-no-mic-1",
+      phone: "5542999991111",
+    });
   });
 });

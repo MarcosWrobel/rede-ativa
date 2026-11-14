@@ -14,10 +14,14 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   let dispatchGeneration = 0;
 
   let activeDispatch = null;
+  let lastCompletedRequestId = null;
   let hasReportedOutcome = false;
   let autoSendTimer = null;
   let autoSendTriggered = false;
+  let autoSendInFlight = false;
   let sendActionTriggered = false;
+  let composeBoxHadTextBeforeSend = false;
+  let userSwitchedChat = false;
   let isCaptureInProgress = false;
 
   let dispatchObserver = null;
@@ -322,9 +326,63 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     return false;
   }
 
+  const SEND_BUTTON_SELECTOR = [
+    'span[data-icon="wds-ic-send-filled"]',
+    'span[data-icon="send"]',
+    'span[data-icon*="send"]',
+    'button[aria-label*="Enviar"]',
+    'button[aria-label*="Send"]',
+    'div[role="button"][aria-label*="Enviar"]',
+    'div[role="button"][aria-label*="Send"]',
+    '[data-testid="compose-btn-send"]',
+    'button[data-tab="11"]',
+  ].join(", ");
+
+  function isVoiceOrMicButton(el) {
+    if (!el) return false;
+    const checkAttrs = (node) => {
+      if (!node || typeof node.getAttribute !== "function") return false;
+      const label = (
+        node.getAttribute("aria-label") ||
+        node.getAttribute("title") ||
+        node.getAttribute("data-testid") ||
+        node.getAttribute("data-icon") ||
+        ""
+      ).toLowerCase();
+      return (
+        label.includes("voz") ||
+        label.includes("voice") ||
+        label.includes("microfone") ||
+        label.includes("microphone") ||
+        label.includes("áudio") ||
+        label.includes("audio") ||
+        label.includes("ptt") ||
+        label.includes("mic") ||
+        label.includes("gravar")
+      );
+    };
+    if (checkAttrs(el)) return true;
+    const parentBtn =
+      typeof el.closest === "function" ? el.closest('button, div[role="button"]') : null;
+    if (parentBtn && checkAttrs(parentBtn)) return true;
+    const scope = parentBtn || el;
+    if (typeof scope.querySelector === "function") {
+      const micIcon = scope.querySelector(
+        'span[data-icon*="ptt"], span[data-icon*="mic"], span[data-icon*="voice"], [data-testid*="ptt"]'
+      );
+      if (micIcon) return true;
+    }
+    return false;
+  }
+
   function normalizeMessageText(text) {
     if (typeof text !== "string") return "";
-    return text.replace(/\s+/g, " ").trim().toLowerCase();
+    return text
+      .replace(/\n?\s*\d{1,2}:\d{2}\s*$/g, "")
+      .replace(/[*_~`]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
   }
 
   function isCompatibleDispatchText(actualText, expectedText) {
@@ -361,19 +419,32 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     }
   }
 
+  function isPresenceOrSubtitleText(value) {
+    if (!value) return true;
+    return /^(online|visto por|last seen|digitando|typing|clique aqui|click here|dados do contato|contact info|conta comercial|business account)/i.test(
+      value.trim()
+    );
+  }
+
   function getHeaderTitle(mainEl) {
     const scope = mainEl || document.querySelector("#main");
     if (!scope) return null;
-    const headerTitleEl = scope.querySelector(
-      'header span[title], header [data-testid="conversation-info-header-chat-title"]'
+    const primaryEl = scope.querySelector(
+      'header [data-testid="conversation-info-header-chat-title"], header span[title]'
     );
-    if (!headerTitleEl) return null;
-    const raw = (
-      headerTitleEl.getAttribute("title") ||
-      headerTitleEl.textContent ||
-      ""
-    ).trim();
-    return raw || null;
+    if (primaryEl) {
+      const raw = (primaryEl.getAttribute("title") || primaryEl.textContent || "").trim();
+      if (raw && !isPresenceOrSubtitleText(raw)) return raw;
+    }
+
+    const candidates = scope.querySelectorAll('header span[dir="auto"]');
+    for (let i = 0; i < candidates.length; i++) {
+      const text = (candidates[i].getAttribute("title") || candidates[i].textContent || "").trim();
+      if (text && !isPresenceOrSubtitleText(text)) {
+        return text;
+      }
+    }
+    return null;
   }
 
   /**
@@ -404,6 +475,27 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     return false;
   }
 
+  function extractExplicitMainPhoneJid(mainEl) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return null;
+
+    const mainDataId = scope.getAttribute("data-id") || "";
+    const mainJidMatch = mainDataId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
+    if (mainJidMatch && mainJidMatch[1]) {
+      return mainJidMatch[1];
+    }
+
+    const idNodes = scope.querySelectorAll("[data-id]");
+    for (let i = idNodes.length - 1; i >= 0; i--) {
+      const dataId = idNodes[i].getAttribute("data-id") || "";
+      const jidMatch = dataId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
+      if (jidMatch && jidMatch[1]) {
+        return jidMatch[1];
+      }
+    }
+    return null;
+  }
+
   /**
    * Extrai a correlação da conversa ativa no painel #main.
    * Prioriza o cabeçalho visível da conversa (#main header) para detectar imediatamente
@@ -427,45 +519,22 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       }
 
       // 2. Se #main possui cabeçalho com nome salvo (sem dígitos), verifica se o cabeçalho mudou
-      // desde a abertura do despacho (indicando troca de conversa pela usuária)
+      // desde a abertura do despacho ou se a usuária trocou de conversa na barra lateral
       if (
-        activeChatTitle &&
-        initialVerifiedHeaderTitle &&
-        activeChatTitle !== initialVerifiedHeaderTitle
+        userSwitchedChat ||
+        (activeChatTitle &&
+          initialVerifiedHeaderTitle &&
+          activeChatTitle !== initialVerifiedHeaderTitle)
       ) {
         return { phone: null, activeChatTitle };
       }
 
-      // 3. Verifica data-id no próprio painel #main ou na última mensagem quando o título não contradiz a sessão
+      // 3. Verifica data-id @c.us no próprio painel #main ou na última mensagem quando o título não contradiz a sessão
       if (mainEl) {
-        const mainDataId = mainEl.getAttribute("data-id") || "";
-        const mainJidMatch = mainDataId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
-        if (mainJidMatch && mainJidMatch[1]) {
-          phone = mainJidMatch[1];
+        const jidPhone = extractExplicitMainPhoneJid(mainEl);
+        if (jidPhone) {
+          phone = jidPhone;
           return { phone, activeChatTitle };
-        }
-
-        // Só consulta data-id de mensagens se o cabeçalho estiver ausente ou igual ao título inicial da sessão
-        if (!activeChatTitle || !initialVerifiedHeaderTitle || activeChatTitle === initialVerifiedHeaderTitle) {
-          const idNodes = mainEl.querySelectorAll("[data-id]");
-          for (let i = idNodes.length - 1; i >= 0; i--) {
-            const dataId = idNodes[i].getAttribute("data-id") || "";
-            const jidMatch = dataId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
-            if (jidMatch && jidMatch[1]) {
-              // Se há título visível sem dígitos e não há ?phone= na URL nem título inicial correspondente,
-              // evita confiar em nós antigos quando o cabeçalho indica outra conversa nomeada
-              const urlPhone = extractUrlIntendedPhone();
-              if (
-                activeChatTitle &&
-                !urlPhone &&
-                (!initialVerifiedHeaderTitle || activeChatTitle !== initialVerifiedHeaderTitle)
-              ) {
-                break;
-              }
-              phone = jidMatch[1];
-              break;
-            }
-          }
         }
       }
 
@@ -485,32 +554,58 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   }
 
   /**
-   * Verifica se a conversa atualmente aberta em #main pertence comprovadamente ao destinatário do activeDispatch.
+   * Verifica se a conversa atualmente aberta em #main pertence ao destinatário do activeDispatch.
+   * Suporta tanto cabeçalhos com número visível quanto conversas com contato salvo/pushName, @lid ou 0 mensagens
+   * após o WhatsApp Web remover ?phone= da URL via history.replaceState, bloqueando qualquer divergência explícita.
    */
   function isDispatchConversationVerified() {
-    if (isInstanceDisposed || !activeDispatch || !activeDispatch.phone) {
+    if (isInstanceDisposed || !activeDispatch || !activeDispatch.phone || userSwitchedChat) {
       return false;
     }
     const mainEl = document.querySelector("#main");
     if (!mainEl) return false;
 
     const currentTitle = getHeaderTitle(mainEl);
-    if (
-      currentTitle &&
-      initialVerifiedHeaderTitle &&
-      currentTitle !== initialVerifiedHeaderTitle
-    ) {
+    if (currentTitle) {
       const currentTitleDigits = normalizePhoneDigits(currentTitle);
-      if (!samePhone(currentTitleDigits, activeDispatch.phone)) {
+      if (currentTitleDigits.length >= 10 && currentTitleDigits.length <= 15) {
+        if (!samePhone(currentTitleDigits, activeDispatch.phone)) {
+          return false;
+        }
+        if (!initialVerifiedHeaderTitle) {
+          initialVerifiedHeaderTitle = currentTitle;
+        }
+        return true;
+      }
+
+      if (initialVerifiedHeaderTitle && currentTitle !== initialVerifiedHeaderTitle) {
         return false;
       }
     }
 
-    const corr = extractActiveChatCorrelation();
-    if (!corr.phone || !samePhone(corr.phone, activeDispatch.phone)) {
-      return false;
+    const jidPhone = extractExplicitMainPhoneJid(mainEl);
+    if (jidPhone) {
+      if (!samePhone(jidPhone, activeDispatch.phone)) {
+        return false;
+      }
+      if (currentTitle && !initialVerifiedHeaderTitle) {
+        initialVerifiedHeaderTitle = currentTitle;
+      }
+      return true;
     }
 
+    const urlPhone = extractUrlIntendedPhone();
+    if (urlPhone) {
+      if (!samePhone(urlPhone, activeDispatch.phone)) {
+        return false;
+      }
+      if (currentTitle && !initialVerifiedHeaderTitle) {
+        initialVerifiedHeaderTitle = currentTitle;
+      }
+      return true;
+    }
+
+    // Aba dedicada autorizada pelo background após history.replaceState limpar ?phone= e sem @c.us (ex.: @lid ou 1º contato)
     if (currentTitle && !initialVerifiedHeaderTitle) {
       initialVerifiedHeaderTitle = currentTitle;
     }
@@ -520,31 +615,56 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   function getOutgoingBubblesInMain(mainEl) {
     const scope = mainEl || document.querySelector("#main");
     if (!scope) return [];
-    return Array.from(
+    let raw = Array.from(
       scope.querySelectorAll("div.message-out, div[data-id^='true_']")
+    );
+    if (raw.length === 0) {
+      const statusIcons = scope.querySelectorAll(
+        'span[data-icon="msg-time"], span[data-icon="msg-check"], span[data-icon="msg-dblcheck"], span[data-icon^="status-"], span[data-icon*="status-"], span[data-icon*="check"], span[aria-label*="Entregue"], span[aria-label*="Lida"], span[aria-label*="Enviada"]'
+      );
+      const containers = [];
+      for (let i = 0; i < statusIcons.length; i++) {
+        const row = statusIcons[i].closest('[role="row"], [data-testid="msg-container"], div[data-id]');
+        if (row && !containers.includes(row)) {
+          containers.push(row);
+        }
+      }
+      raw = containers;
+    }
+    if (raw.length <= 1) return raw;
+    return raw.filter(
+      (el, idx) => !raw.some((other, otherIdx) => otherIdx !== idx && other.contains(el))
     );
   }
 
   function getBubbleIdentifier(bubbleEl) {
     if (!bubbleEl) return "";
-    return (
-      bubbleEl.getAttribute("data-id") ||
-      bubbleEl.id ||
-      ""
-    );
+    const direct = bubbleEl.getAttribute("data-id") || bubbleEl.id;
+    if (direct) return direct;
+    const ancestorWithId =
+      typeof bubbleEl.closest === "function" ? bubbleEl.closest("[data-id]") : null;
+    return ancestorWithId ? ancestorWithId.getAttribute("data-id") || "" : "";
   }
 
   function extractBubbleBodyText(bubbleEl) {
     if (!bubbleEl) return "";
     try {
-      const selectable = bubbleEl.querySelector("span.selectable-text.copyable-text, span.selectable-text");
-      if (selectable) {
-        return (selectable.textContent || "").trim();
+      const selectableSpans = Array.from(
+        bubbleEl.querySelectorAll(
+          "span.selectable-text.copyable-text, span.selectable-text"
+        )
+      );
+      if (selectableSpans.length > 0) {
+        const joined = selectableSpans
+          .map((s) => (s.textContent || "").trim())
+          .filter(Boolean)
+          .join("\n");
+        if (joined) return joined;
       }
       const clone = bubbleEl.cloneNode(true);
-      const metas = clone.querySelectorAll('[data-testid="msg-meta"], .copyable-text > span[dir="auto"]');
+      const metas = clone.querySelectorAll('[data-testid="msg-meta"]');
       metas.forEach((m) => m.remove());
-      return (clone.textContent || "").trim();
+      return (clone.textContent || "").replace(/\n?\s*\d{1,2}:\d{2}\s*$/, "").trim();
     } catch {
       return "";
     }
@@ -564,14 +684,44 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     return (box.textContent || "").trim();
   }
 
+  function findSendButton(mainEl) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return null;
+    const candidates = scope.querySelectorAll(SEND_BUTTON_SELECTOR);
+    for (let i = 0; i < candidates.length; i++) {
+      const raw = candidates[i];
+      if (isVoiceOrMicButton(raw)) continue;
+      const btn =
+        (typeof raw.closest === "function" && raw.closest('button, div[role="button"]')) || raw;
+      if (isVoiceOrMicButton(btn)) continue;
+      return btn;
+    }
+    return null;
+  }
+
+  function simulateNativeClick(el) {
+    if (!el || isVoiceOrMicButton(el)) return;
+    if (typeof el.click === "function") {
+      el.click();
+    }
+  }
+
   /**
    * Registra a linha de base das mensagens enviadas existentes em #main antes do envio atual.
+   * Uma vez que uma ação de envio foi acionada (sendActionTriggered), congela a linha de base
+   * para nunca absorver a própria bolha recém-enviada.
    */
   function ensureBaselineForMain(mainEl) {
     const scope = mainEl || document.querySelector("#main");
     if (!scope) return;
 
-    if (baselineCapturedForMain === scope) {
+    const composeText = getComposeBoxText(scope);
+    if (composeText) {
+      lastCapturedComposeText = composeText;
+      composeBoxHadTextBeforeSend = true;
+    }
+
+    if (baselineCapturedForMain === scope || sendActionTriggered) {
       return;
     }
 
@@ -592,11 +742,6 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
         initialVerifiedHeaderTitle = currentTitle;
       }
     }
-
-    const composeText = getComposeBoxText(scope);
-    if (composeText && !lastCapturedComposeText) {
-      lastCapturedComposeText = composeText;
-    }
   }
 
   /**
@@ -615,60 +760,82 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     }
 
     const currentMessages = getOutgoingBubblesInMain(mainEl);
-    if (currentMessages.length === 0) return false;
+    if (currentMessages.length > 0) {
+      const lastBubble = currentMessages[currentMessages.length - 1];
+      if (lastBubble && !baselineOutgoingNodes.has(lastBubble)) {
+        const lastBubbleId = getBubbleIdentifier(lastBubble);
+        const isInBaselineIds = Boolean(lastBubbleId && baselineOutgoingIds.has(lastBubbleId));
+        if (!isInBaselineIds) {
+          let jidMatches = true;
+          if (lastBubbleId) {
+            const jidMatch = lastBubbleId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
+            if (jidMatch && jidMatch[1] && !samePhone(jidMatch[1], activeDispatch.phone)) {
+              jidMatches = false;
+            }
+          }
 
-    const lastBubble = currentMessages[currentMessages.length - 1];
-    if (!lastBubble) return false;
+          let orderMatches = true;
+          if (baselineLastOutgoingNode && mainEl.contains(baselineLastOutgoingNode)) {
+            const pos = baselineLastOutgoingNode.compareDocumentPosition(lastBubble);
+            if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) {
+              orderMatches = false;
+            }
+          }
 
-    // A última bolha na base da conversa deve ser um nó genuinamente novo (não pertencente ao baseline inicial)
-    if (baselineOutgoingNodes.has(lastBubble)) {
-      return false;
-    }
+          if (jidMatches && orderMatches) {
+            const bubbleText = extractBubbleBodyText(lastBubble);
+            const hasReferenceText = Boolean(expectedMessageText || lastCapturedComposeText);
 
-    const lastBubbleId = getBubbleIdentifier(lastBubble);
-    if (lastBubbleId && baselineOutgoingIds.has(lastBubbleId)) {
-      return false;
-    }
+            let textMatches = false;
+            if (bubbleText && hasReferenceText) {
+              const matchesExpected =
+                Boolean(expectedMessageText) &&
+                isCompatibleDispatchText(bubbleText, expectedMessageText);
+              const matchesComposed =
+                Boolean(lastCapturedComposeText) &&
+                isCompatibleDispatchText(bubbleText, lastCapturedComposeText);
+              textMatches = matchesExpected || matchesComposed;
+            } else if (sendActionTriggered) {
+              textMatches = true;
+            }
 
-    // Se a última bolha possuir JID explícito em data-id, deve corresponder ao telefone esperado
-    if (lastBubbleId) {
-      const jidMatch = lastBubbleId.match(/(?:true_|false_)?(\d{10,15})@c\.us/);
-      if (jidMatch && jidMatch[1] && !samePhone(jidMatch[1], activeDispatch.phone)) {
-        return false;
+            if (textMatches) {
+              reportOutcome(
+                "SENT",
+                {
+                  trigger: triggerSource || "DOM_NEW_BOTTOM_OUTGOING_VERIFIED",
+                  messageId: lastBubbleId || null,
+                },
+                activeDispatch.generation
+              );
+              return true;
+            }
+          }
+        }
       }
     }
 
-    // Se havia uma última bolha no baseline e ela ainda está no DOM, a nova bolha deve vir DEPOIS dela
-    // na ordem do documento (impede falso-positivo ao carregar histórico antigo no topo durante scroll)
-    if (baselineLastOutgoingNode && mainEl.contains(baselineLastOutgoingNode)) {
-      const pos = baselineLastOutgoingNode.compareDocumentPosition(lastBubble);
-      if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) {
-        return false;
-      }
+    // Caminho complementar: quando o disparo de envio (auto ou manual) ocorreu nesta conversa verificada,
+    // a caixa de composição possuía o texto antes do envio e foi esvaziada pelo WhatsApp Web (e o botão Enviar sumiu)
+    if (
+      sendActionTriggered &&
+      composeBoxHadTextBeforeSend &&
+      getComposeBoxText(mainEl).length === 0 &&
+      !findSendButton(mainEl) &&
+      !checkInvalidNumberDialog()
+    ) {
+      reportOutcome(
+        "SENT",
+        {
+          trigger: triggerSource || "COMPOSE_CONSUMED_VERIFIED",
+          messageId: null,
+        },
+        activeDispatch.generation
+      );
+      return true;
     }
 
-    const bubbleText = extractBubbleBodyText(lastBubble);
-    const referenceText = expectedMessageText || lastCapturedComposeText;
-
-    // Se houve texto esperado e a nova bolha expõe texto legível, exige compatibilidade textual
-    if (bubbleText && referenceText) {
-      if (!isCompatibleDispatchText(bubbleText, referenceText)) {
-        return false;
-      }
-    } else if (!sendActionTriggered) {
-      // Sem ação de envio disparada nesta aba e sem comprovação textual da mensagem pretendida, não confirma
-      return false;
-    }
-
-    reportOutcome(
-      "SENT",
-      {
-        trigger: triggerSource || "DOM_NEW_BOTTOM_OUTGOING_VERIFIED",
-        messageId: lastBubbleId || null,
-      },
-      activeDispatch.generation
-    );
-    return true;
+    return false;
   }
 
   function disconnectDispatchObserver() {
@@ -688,10 +855,12 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       clearInterval(autoSendTimer);
       autoSendTimer = null;
     }
+    autoSendInFlight = false;
     disconnectDispatchObserver();
     if (reason === "CANCELLED" || reason === "EXPIRED") {
       activeDispatch = null;
       sendActionTriggered = false;
+      composeBoxHadTextBeforeSend = false;
       autoSendTriggered = false;
     }
   }
@@ -705,6 +874,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 
     const dispatchSnapshot = activeDispatch;
     hasReportedOutcome = true;
+    lastCompletedRequestId = dispatchSnapshot.requestId;
 
     stopDispatchMonitoring(outcome);
 
@@ -737,12 +907,17 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 
   /**
    * Aciona o botão nativo de envio (ou tecla Enter na caixa de texto) somente após validar a conversa.
-   * Não confirma envio por timeout cego: aguarda evidência da nova bolha em evaluateSendConfirmation.
+   * Nunca clica em botões de microfone/voz e nunca repete clique após o campo de texto esvaziar.
    */
   function triggerSendAction(sendBtn, composeBox, currentGen) {
-    if (isInstanceDisposed || autoSendTriggered || hasReportedOutcome || !activeDispatch) return;
-    if (activeDispatch.generation !== currentGen) return;
-    if (!isDispatchConversationVerified()) return;
+    if (isInstanceDisposed || autoSendTriggered || hasReportedOutcome || !activeDispatch) {
+      autoSendInFlight = false;
+      return;
+    }
+    if (activeDispatch.generation !== currentGen || !isDispatchConversationVerified()) {
+      autoSendInFlight = false;
+      return;
+    }
 
     const mainEl = document.querySelector("#main");
     ensureBaselineForMain(mainEl);
@@ -750,6 +925,15 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     const currentComposeText = getComposeBoxText(mainEl);
     if (currentComposeText) {
       lastCapturedComposeText = currentComposeText;
+      composeBoxHadTextBeforeSend = true;
+    }
+
+    if (sendBtn && isVoiceOrMicButton(sendBtn)) {
+      sendBtn = null;
+    }
+    if (!sendBtn && !currentComposeText) {
+      autoSendInFlight = false;
+      return;
     }
 
     autoSendTriggered = true;
@@ -761,8 +945,9 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     );
 
     if (sendBtn) {
-      sendBtn.click();
+      simulateNativeClick(sendBtn);
       scheduleTimeout(() => {
+        autoSendInFlight = false;
         if (isInstanceDisposed || hasReportedOutcome || !activeDispatch || activeDispatch.generation !== currentGen) {
           return;
         }
@@ -798,8 +983,20 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       });
       composeBox.dispatchEvent(enterEvent);
       scheduleTimeout(() => {
+        autoSendInFlight = false;
         evaluateSendConfirmation("AUTO_SEND_DIRECT_ENTER", currentGen);
       }, 350);
+    } else {
+      autoSendInFlight = false;
+    }
+  }
+
+  function scheduleManualSendVerification(triggerSource, currentGen) {
+    const delays = [150, 450, 900];
+    for (let i = 0; i < delays.length; i++) {
+      scheduleTimeout(() => {
+        evaluateSendConfirmation(triggerSource, currentGen);
+      }, delays[i]);
     }
   }
 
@@ -809,32 +1006,47 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     if (!target || typeof target.closest !== "function") return;
     if (topBarContainer && topBarContainer.contains(target)) return;
 
-    const sendBtn = target.closest(
-      'button[data-tab="11"], button[aria-label="Enviar"], button[aria-label="Send"], span[data-icon="send"], span[data-icon="wds-ic-send-filled"]'
-    );
-    if (sendBtn && isDispatchConversationVerified()) {
+    if (target.closest('#pane-side, [data-testid="chat-list"], [aria-label*="Lista de conversas"]')) {
+      userSwitchedChat = true;
+      return;
+    }
+
+    const sendBtn = target.closest(SEND_BUTTON_SELECTOR);
+    if (sendBtn && !isVoiceOrMicButton(sendBtn) && isDispatchConversationVerified()) {
       const currentGen = activeDispatch.generation;
       const mainEl = document.querySelector("#main");
       ensureBaselineForMain(mainEl);
       const currentComposeText = getComposeBoxText(mainEl);
       if (currentComposeText) {
         lastCapturedComposeText = currentComposeText;
+        composeBoxHadTextBeforeSend = true;
       }
       sendActionTriggered = true;
-      scheduleTimeout(() => {
-        evaluateSendConfirmation("MANUAL_SEND_BUTTON_CLICK", currentGen);
-      }, 150);
+      scheduleManualSendVerification("MANUAL_SEND_BUTTON_CLICK", currentGen);
     }
+  }
+
+  function isComposeInputTarget(node) {
+    if (!node) return false;
+    if (typeof node.getAttribute === "function") {
+      if (
+        node.getAttribute("contenteditable") === "true" ||
+        node.getAttribute("role") === "textbox"
+      ) {
+        return true;
+      }
+    }
+    if (typeof node.closest === "function") {
+      return Boolean(node.closest('div[contenteditable="true"], [role="textbox"]'));
+    }
+    return false;
   }
 
   function handleDocKeydown(e) {
     if (isInstanceDisposed || !activeDispatch || hasReportedOutcome) return;
     if (e.key === "Enter" && !e.shiftKey) {
-      const activeEl = document.activeElement;
       if (
-        activeEl &&
-        (activeEl.getAttribute("contenteditable") === "true" ||
-          activeEl.getAttribute("role") === "textbox") &&
+        (isComposeInputTarget(e.target) || isComposeInputTarget(document.activeElement)) &&
         isDispatchConversationVerified()
       ) {
         const currentGen = activeDispatch.generation;
@@ -843,11 +1055,10 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
         const currentComposeText = getComposeBoxText(mainEl);
         if (currentComposeText) {
           lastCapturedComposeText = currentComposeText;
+          composeBoxHadTextBeforeSend = true;
         }
         sendActionTriggered = true;
-        scheduleTimeout(() => {
-          evaluateSendConfirmation("MANUAL_ENTER_KEY_PRESS", currentGen);
-        }, 150);
+        scheduleManualSendVerification("MANUAL_ENTER_KEY_PRESS", currentGen);
       }
     }
   }
@@ -922,6 +1133,14 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   function startDispatchMonitoring(dispatch) {
     if (isInstanceDisposed || !dispatch || !dispatch.requestId || !dispatch.logId) return;
 
+    // Impede reinício duplicado do mesmo requestId (ex.: tabs.onUpdated após init)
+    if (
+      (activeDispatch && activeDispatch.requestId === dispatch.requestId) ||
+      lastCompletedRequestId === dispatch.requestId
+    ) {
+      return;
+    }
+
     stopDispatchMonitoring("SUPERSEDED");
 
     const currentGen = ++dispatchGeneration;
@@ -931,7 +1150,10 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     };
     hasReportedOutcome = false;
     autoSendTriggered = false;
+    autoSendInFlight = false;
     sendActionTriggered = false;
+    composeBoxHadTextBeforeSend = false;
+    userSwitchedChat = false;
     baselineCapturedForMain = null;
     baselineOutgoingNodes = new WeakSet();
     baselineOutgoingIds = new Set();
@@ -957,7 +1179,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     ensureDispatchObserverConnected();
 
     let ticks = 0;
-    const maxTicks = 45; // ~27s de monitoramento ativo limitado
+    const maxTicks = autoSendEnabled ? 45 : 150;
 
     autoSendTimer = setInterval(() => {
       if (isInstanceDisposed || !activeDispatch || hasReportedOutcome || activeDispatch.generation !== currentGen) {
@@ -980,24 +1202,21 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
           return;
         }
 
-        if (autoSendEnabled && !autoSendTriggered) {
-          const sendBtn = mainEl.querySelector(
-            'button[data-tab="11"], button[aria-label="Enviar"], button[aria-label="Send"], span[data-icon="send"], span[data-icon="wds-ic-send-filled"]'
-          );
+        if (autoSendEnabled && !autoSendTriggered && !autoSendInFlight) {
+          const clickableBtn = findSendButton(mainEl);
           const composeBox = getComposeBoxElement(mainEl);
-          const clickableBtn = sendBtn ? sendBtn.closest("button") || sendBtn : null;
+          const textContent = composeBox ? (composeBox.textContent || "").trim() : "";
 
-          if (clickableBtn) {
+          if (clickableBtn && (!composeBox || textContent.length > 0)) {
+            autoSendInFlight = true;
             scheduleTimeout(() => triggerSendAction(clickableBtn, composeBox, currentGen), 250);
             return;
           }
 
-          if (composeBox && ticks >= 4) {
-            const textContent = (composeBox.textContent || "").trim();
-            if (textContent.length > 2) {
-              scheduleTimeout(() => triggerSendAction(null, composeBox, currentGen), 250);
-              return;
-            }
+          if (composeBox && ticks >= 4 && textContent.length > 1) {
+            autoSendInFlight = true;
+            scheduleTimeout(() => triggerSendAction(null, composeBox, currentGen), 250);
+            return;
           }
         }
       }

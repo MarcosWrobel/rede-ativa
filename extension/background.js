@@ -483,16 +483,64 @@ chrome.runtime.onStartup.addListener(() => {
   ensureContentScriptInOpenWhatsAppTabs();
 });
 
+function buildActiveDispatchPayload(op) {
+  if (!op || op.kind !== "DISPATCH") return null;
+  return {
+    requestId: op.requestId,
+    logId: op.logId,
+    studentName: op.studentName || null,
+    phone: op.phone || null,
+    text: op.intendedText || null,
+    autoSend: op.autoSend,
+    dispatchedAt: op.createdAt,
+  };
+}
+
+async function pushActiveDispatchToTabIfPending(tabId) {
+  if (!tabId) return;
+  try {
+    const matched = await withOperationStoreLock(async () => {
+      const now = Date.now();
+      const { pending } = await loadOperationMapsUnlocked(now);
+      const candidates = Object.values(pending).filter(
+        (op) =>
+          op &&
+          op.kind === "DISPATCH" &&
+          op.targetTabId === tabId &&
+          typeof op.expiresAt === "number" &&
+          now <= op.expiresAt
+      );
+      if (candidates.length === 0) return null;
+      candidates.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return candidates[0];
+    });
+    if (matched) {
+      await chrome.tabs.sendMessage(tabId, {
+        type: "LEOPOLDINA_ACTIVATE_DISPATCH",
+        activeDispatch: buildActiveDispatchPayload(matched),
+      });
+    }
+  } catch {}
+}
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete" && tab?.url && tab.url.includes("web.whatsapp.com")) {
-    chrome.tabs.sendMessage(tabId, { type: "LEOPOLDINA_PING" }).catch(() => {
-      chrome.scripting
-        .executeScript({
-          target: { tabId },
-          files: ["whatsapp-content.js"],
-        })
-        .catch(() => {});
-    });
+    chrome.tabs
+      .sendMessage(tabId, { type: "LEOPOLDINA_PING" })
+      .then(() => {
+        pushActiveDispatchToTabIfPending(tabId);
+      })
+      .catch(() => {
+        chrome.scripting
+          .executeScript({
+            target: { tabId },
+            files: ["whatsapp-content.js"],
+          })
+          .then(() => {
+            pushActiveDispatchToTabIfPending(tabId);
+          })
+          .catch(() => {});
+      });
   }
 });
 
@@ -658,34 +706,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return op;
           }
 
-          if (!reqPhone) {
-            return null;
-          }
-
-          const candidates = Object.values(pending).filter(
-            (op) =>
-              op &&
-              op.kind === "DISPATCH" &&
-              (!op.targetTabId || !waCheck.tabId || op.targetTabId === waCheck.tabId) &&
-              op.phone &&
-              arePhonesCompatible(reqPhone, op.phone)
-          );
+          const candidates = Object.values(pending).filter((op) => {
+            if (!op || op.kind !== "DISPATCH") return false;
+            if (op.targetTabId && waCheck.tabId && op.targetTabId !== waCheck.tabId) {
+              return false;
+            }
+            if (reqPhone) {
+              return Boolean(op.phone && arePhonesCompatible(reqPhone, op.phone));
+            }
+            // Quando o WhatsApp Web já limpou ?phone=... via history.replaceState antes do document_idle,
+            // entrega o despacho se esta aba for a targetTabId dedicada registrada (ou se targetTabId ainda não foi gravado nos primeiros 15s)
+            if (op.targetTabId && waCheck.tabId) {
+              return op.targetTabId === waCheck.tabId;
+            }
+            if (!op.targetTabId && waCheck.tabId && now - (op.createdAt || 0) < 15000) {
+              return true;
+            }
+            return false;
+          });
           if (candidates.length === 0) return null;
           candidates.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          return candidates[0];
+          const chosen = candidates[0];
+          if (!chosen.targetTabId && waCheck.tabId) {
+            chosen.targetTabId = waCheck.tabId;
+            await saveOperationMapsUnlocked(pending, consumed);
+          }
+          return chosen;
         });
 
         if (matchedDispatch) {
           sendResponse({
-            activeDispatch: {
-              requestId: matchedDispatch.requestId,
-              logId: matchedDispatch.logId,
-              studentName: matchedDispatch.studentName || null,
-              phone: matchedDispatch.phone || null,
-              text: matchedDispatch.intendedText || null,
-              autoSend: matchedDispatch.autoSend,
-              dispatchedAt: matchedDispatch.createdAt,
-            },
+            activeDispatch: buildActiveDispatchPayload(matchedDispatch),
           });
         } else {
           sendResponse({ activeDispatch: null, autoSendDefault: autoSendPref });
@@ -1312,6 +1363,12 @@ async function handleWhatsAppDispatch(targetUrl, reuseTab = true) {
     focused: true,
   });
 
-  const createdTabId = newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0].id : null;
+  let createdTabId = newWindow.tabs && newWindow.tabs[0] ? newWindow.tabs[0].id : null;
+  if (!createdTabId && newWindow && newWindow.id) {
+    try {
+      const winTabs = await chrome.tabs.query({ windowId: newWindow.id });
+      if (winTabs && winTabs[0]) createdTabId = winTabs[0].id;
+    } catch {}
+  }
   return { reusedTab: false, windowId: newWindow.id, tabId: createdTabId };
 }
