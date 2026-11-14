@@ -77,6 +77,7 @@ export interface DispatchWhatsAppMetadata {
   studentName?: string;
   phone?: string;
   autoSend?: boolean;
+  onDispatchFailure?: () => void;
 }
 
 /**
@@ -101,7 +102,7 @@ export function dispatchWhatsAppToBrowser(
 
   // Modo Convencional explicitamente escolhido pelo usuário:
   if (preference === "native") {
-    window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME);
+    if (!window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME)) metadata?.onDispatchFailure?.();
     return { dispatchedVia: "WINDOW_OPEN" };
   }
 
@@ -117,17 +118,39 @@ export function dispatchWhatsAppToBrowser(
     if (metadata?.phone) payload.phone = metadata.phone;
     if (metadata?.autoSend !== undefined) payload.autoSend = metadata.autoSend;
 
-    window.postMessage(payload, "*");
+    if (metadata?.onDispatchFailure) {
+      const requestId = createExtensionRequestId();
+      payload.requestId = requestId;
+      const onFailure = metadata.onDispatchFailure;
+      const handleAck = (event: MessageEvent) => {
+        if (event.source !== window || event.origin !== window.location.origin ||
+            event.data?.type !== "LEOPOLDINA_DISPATCH_WHATSAPP_ACK" || event.data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", handleAck);
+        if (event.data.response?.success !== true) {
+          onFailure();
+        }
+      };
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", handleAck);
+        onFailure();
+      }, 6000);
+      window.addEventListener("message", handleAck);
+    }
+
+    const targetOrigin = window.location?.origin || "*";
+    window.postMessage(payload, targetOrigin);
     return { dispatchedVia: "EXTENSION" };
   }
 
   // Fallback nativo: janela nomeada síncrona
-  window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME);
+  if (!window.open(targetUrl, WA_ME_REUSABLE_WINDOW_NAME)) metadata?.onDispatchFailure?.();
   return { dispatchedVia: "WINDOW_OPEN" };
 }
 
 export interface ExtractWhatsAppReplyResult {
   success: boolean;
+  requestId?: string;
   logId?: string;
   rawText?: string;
   selectionUsed?: boolean;
@@ -136,6 +159,14 @@ export interface ExtractWhatsAppReplyResult {
   screenshotDataUrl?: string | null;
   error?: string;
   message?: string;
+}
+
+let extensionReqSequence = 0;
+const consumedExtensionRequestIds = new Set<string>();
+
+export function createExtensionRequestId(): string {
+  extensionReqSequence += 1;
+  return `req_${Date.now()}_${extensionReqSequence}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
@@ -162,6 +193,7 @@ export function extractWhatsAppReplyViaExtension(
   return new Promise<ExtractWhatsAppReplyResult>((resolve) => {
     let isSettled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const requestId = createExtensionRequestId();
 
     const cleanup = () => {
       if (timer) {
@@ -192,10 +224,27 @@ export function extractWhatsAppReplyViaExtension(
           data.type === "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED") &&
         data.logId === logId
       ) {
+        // Exige requestId presente, idêntico ao da operação iniciada e ainda não consumido
+        if (
+          typeof data.requestId !== "string" ||
+          data.requestId !== requestId ||
+          consumedExtensionRequestIds.has(requestId)
+        ) {
+          return;
+        }
+        if (
+          typeof data.receivedAt === "number" &&
+          Math.abs(Date.now() - data.receivedAt) > Math.max(effectiveTimeoutMs, 120000)
+        ) {
+          return;
+        }
+
+        consumedExtensionRequestIds.add(requestId);
         isSettled = true;
         cleanup();
         resolve({
           success: Boolean(data.success),
+          requestId,
           logId: data.logId,
           rawText: data.rawText,
           selectionUsed: Boolean(data.selectionUsed),
@@ -216,6 +265,7 @@ export function extractWhatsAppReplyViaExtension(
       cleanup();
       resolve({
         success: false,
+        requestId,
         error: "EXTENSION_TIMEOUT",
         message:
           "A extensão não respondeu a tempo. Verifique se ela está ativa ou cole o texto manualmente.",
@@ -226,6 +276,7 @@ export function extractWhatsAppReplyViaExtension(
     window.postMessage(
       {
         type: "REDEATIVA_EXTRACT_WHATSAPP_REPLY",
+        requestId,
         logId,
         phone,
         studentName,

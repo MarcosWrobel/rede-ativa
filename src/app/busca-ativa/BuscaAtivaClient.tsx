@@ -102,6 +102,7 @@ export default function BuscaAtivaClient({
   } | null>(null);
   const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const latestIndividualDispatchRef = useRef<string | null>(null);
   const [autoConfirmationToast, setAutoConfirmationToast] = useState<{
     message: string;
     type: "success" | "warning";
@@ -335,6 +336,7 @@ export default function BuscaAtivaClient({
     setIsSending(true);
     setErrorMessage("");
     setLastSentSuccess(null);
+    latestIndividualDispatchRef.current = null;
 
     try {
       const targetPhone = customPhone || selectedStudent.phone;
@@ -365,11 +367,17 @@ export default function BuscaAtivaClient({
         deliveryStatus: data.deliveryStatus || "LINK_OPENED",
       });
 
+      latestIndividualDispatchRef.current = data.logId;
       dispatchWhatsAppToBrowser(data.whatsappUrl, {
         logId: data.logId,
         studentId: selectedStudent.id,
         studentName: selectedStudent.name,
         phone: targetPhone,
+        onDispatchFailure: () => {
+          if (latestIndividualDispatchRef.current === data.logId) {
+            setErrorMessage("A mensagem foi registrada, mas a abertura do WhatsApp não foi confirmada. Verifique se a conversa já abriu; se necessário, use 'Abrir conversa manualmente' abaixo.");
+          }
+        },
       });
     } catch (err: any) {
       setErrorMessage(err.message || "Erro ao processar envio.");
@@ -1173,7 +1181,7 @@ export default function BuscaAtivaClient({
                         <>
                           <CheckCircle className="w-4 h-4 mr-1.5 text-emerald-600" />
                           <span>
-                            Mensagem aberta para {lastSentSuccess.studentName}
+                            Mensagem registrada para {lastSentSuccess.studentName}
                           </span>
                         </>
                       )}
@@ -1222,13 +1230,9 @@ export default function BuscaAtivaClient({
                       href={lastSentSuccess.whatsappUrl}
                       target={WA_ME_REUSABLE_WINDOW_NAME}
                       rel="noopener noreferrer"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        dispatchWhatsAppToBrowser(lastSentSuccess.whatsappUrl);
-                      }}
                       className="inline-flex items-center font-bold text-sky-800 underline hover:text-sky-950 ml-auto"
                     >
-                      Reabrir conversa <ExternalLink className="w-3 h-3 ml-1" />
+                      Abrir conversa manualmente <ExternalLink className="w-3 h-3 ml-1" />
                     </a>
                   </div>
                 </div>

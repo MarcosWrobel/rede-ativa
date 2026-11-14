@@ -68,6 +68,8 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
 
     // Seção 2: Captura assistida + Fallback
     expect(html).toContain("Texto Bruto Recebido (WhatsApp Web):");
+    expect(html).toContain("A leitura de imagens está indisponível");
+    expect(html).toContain("copie ou digite a resposta");
     expect(html).toContain("Extrair da Aba do WhatsApp Web");
 
     // Seção 3: Classificação com IA
@@ -203,6 +205,7 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
     it("rejeita telefones comprovadamente distintos", () => {
       expect(isPhoneCompatible("42999998888", "41888887777")).toBe(false);
       expect(isPhoneCompatible("5541911112222", "5542999998888")).toBe(false);
+      expect(isPhoneCompatible("5541999998888", "5542999998888")).toBe(false);
     });
 
     it("permite fallback permissivo quando um dos parâmetros for nulo ou vazio", () => {
@@ -291,7 +294,9 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
       expect(secondHtml).not.toContain("Captura assistida via extensão");
     });
 
-    it("rejeita replays de cache de storage (fromStorageCache) e mensagens destinadas a outro contato", () => {
+    it("rejeita replays de cache de storage (fromStorageCache), eventos sem correlação, eventos já consumidos e mensagens destinadas a outro contato", () => {
+      const consumed = new Set<string>(["req_ja_consumido"]);
+
       // Cache legado reenviado pelo bridge deve ser sempre ignorado
       expect(
         shouldAcceptLiveWhatsAppPush(
@@ -299,10 +304,15 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
             pushedFromWhatsApp: true,
             fromStorageCache: true,
+            requestId: "req_cap_2",
+            logId: "msg-contato-2",
+            phone: "42988881111",
             rawText: "Mensagem antiga do primeiro contato",
           },
           "msg-contato-2",
-          "42988881111"
+          "42988881111",
+          "req_cap_2",
+          consumed
         )
       ).toBe(false);
 
@@ -312,11 +322,15 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
           {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
             pushedFromWhatsApp: true,
+            requestId: "req_cap_2",
             logId: "msg-contato-1",
+            phone: "42988881111",
             rawText: "Mensagem do contato 1",
           },
           "msg-contato-2",
-          "42988881111"
+          "42988881111",
+          "req_cap_2",
+          consumed
         )
       ).toBe(false);
 
@@ -326,15 +340,19 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
           {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
             pushedFromWhatsApp: true,
+            requestId: "req_cap_2",
+            logId: "msg-contato-2",
             phone: "41911112222",
             rawText: "Mensagem de outro telefone",
           },
           "msg-contato-2",
-          "42988881111"
+          "42988881111",
+          "req_cap_2",
+          consumed
         )
       ).toBe(false);
 
-      // Push ao vivo sem logId/phone (botão na janela do WhatsApp Web) é aceito enquanto este modal está aberto
+      // Push sem requestId ou sem logId (sem correlação válida) deve ser rejeitado (sem fallback para último contexto)
       expect(
         shouldAcceptLiveWhatsAppPush(
           {
@@ -343,7 +361,45 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
             rawText: "Bom dia, meu filho está com consulta hoje.",
           },
           "msg-contato-2",
-          "42988881111"
+          "42988881111",
+          "req_cap_2",
+          consumed
+        )
+      ).toBe(false);
+
+      // Push com requestId já consumido (repetição da mesma operação) deve ser rejeitado
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            requestId: "req_ja_consumido",
+            logId: "msg-contato-2",
+            phone: "42988881111",
+            rawText: "Repetição de operação consumida",
+          },
+          "msg-contato-2",
+          "42988881111",
+          "req_ja_consumido",
+          consumed
+        )
+      ).toBe(false);
+
+      // Push ao vivo com correlação válida (requestId, logId e phone compatível) e não consumido é aceito
+      expect(
+        shouldAcceptLiveWhatsAppPush(
+          {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            pushedFromWhatsApp: true,
+            requestId: "req_cap_2",
+            logId: "msg-contato-2",
+            phone: "5542988881111",
+            rawText: "Bom dia, meu filho está com consulta hoje.",
+          },
+          "msg-contato-2",
+          "42988881111",
+          "req_cap_2",
+          consumed
         )
       ).toBe(true);
     });

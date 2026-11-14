@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ModalDialog from "@/components/ModalDialog";
 import {
+  createExtensionRequestId,
   extractWhatsAppReplyViaExtension,
   isExtensionActive,
 } from "@/lib/clientDispatcher";
@@ -63,12 +64,14 @@ export interface WhatsAppReplyCaptureModalProps {
 
 export function isPhoneCompatible(phoneA?: string | null, phoneB?: string | null): boolean {
   if (!phoneA || !phoneB) return true;
-  const digitsA = String(phoneA).replace(/\D/g, "");
-  const digitsB = String(phoneB).replace(/\D/g, "");
+  const normalize = (value: string) => {
+    const digits = value.replace(/\D/g, "").replace(/^0+/, "");
+    return digits.length === 10 || digits.length === 11 ? `55${digits}` : digits;
+  };
+  const digitsA = normalize(String(phoneA));
+  const digitsB = normalize(String(phoneB));
   if (!digitsA || !digitsB) return true;
-  const tailA = digitsA.slice(-8);
-  const tailB = digitsB.slice(-8);
-  return tailA === tailB || digitsA.includes(tailB) || digitsB.includes(tailA);
+  return digitsA.length >= 10 && digitsA === digitsB;
 }
 
 export const LAST_PUSHED_REPLY_STORAGE_KEY = "redeativa_last_pushed_reply";
@@ -77,7 +80,7 @@ export const LAST_PUSHED_REPLY_STORAGE_KEY = "redeativa_last_pushed_reply";
  * Limpa quaisquer caches residuais de capturas do WhatsApp Web no cliente e na extensão
  * para garantir que cada abertura de modal para outro contato comece sempre limpa.
  */
-export function clearWhatsAppPushedReplyCache(): void {
+export function clearWhatsAppPushedReplyCache(requestId?: string | null): void {
   if (typeof window === "undefined") return;
   try {
     delete (window as any).__REDEATIVA_LAST_PUSHED_REPLY__;
@@ -91,18 +94,24 @@ export function clearWhatsAppPushedReplyCache(): void {
   } catch {}
   try {
     const targetOrigin = window.location?.origin || "*";
-    window.postMessage({ type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" }, targetOrigin);
+    const payload: Record<string, any> = { type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" };
+    if (requestId) {
+      payload.requestId = requestId;
+    }
+    window.postMessage(payload, targetOrigin);
   } catch {}
 }
 
 /**
  * Valida se um evento pushedFromWhatsApp deve ser aceito pelo modal atualmente aberto.
- * Rejeita replays vindos do cache de storage (fromStorageCache) e eventos destinados a outro logId/telefone.
+ * Exige correlação explícita (requestId, logId e phone compatível), expiração (2 min) e consumo único por operação.
  */
 export function shouldAcceptLiveWhatsAppPush(
   data: any,
   currentMessageLogId: string,
-  currentPhoneUsed?: string | null
+  currentPhoneUsed?: string | null,
+  expectedRequestId?: string | null,
+  consumedRequestIds?: Set<string>
 ): boolean {
   if (!data || typeof data !== "object") return false;
   if (
@@ -115,16 +124,34 @@ export function shouldAcceptLiveWhatsAppPush(
     return false;
   }
 
+  // Exige requestId válido e não consumido
+  if (typeof data.requestId !== "string" || !data.requestId.trim()) {
+    return false;
+  }
+  if (expectedRequestId && data.requestId !== expectedRequestId) {
+    return false;
+  }
+  if (consumedRequestIds && consumedRequestIds.has(data.requestId)) {
+    return false;
+  }
+
+  // Exige logId explícito e correspondente ao atendimento atual
+  if (!data.logId || data.logId !== currentMessageLogId) {
+    return false;
+  }
+
+  // Rejeita eventos obsoletos (> 2 minutos)
+  if (typeof data.receivedAt === "number" && Date.now() - data.receivedAt > 120000) {
+    return false;
+  }
+
   const hasContent = Boolean(
     (typeof data.rawText === "string" && data.rawText.trim().length > 0) ||
       data.screenshotDataUrl
   );
   if (!hasContent) return false;
 
-  if (data.logId && data.logId !== currentMessageLogId) {
-    return false;
-  }
-  if (data.phone && !isPhoneCompatible(data.phone, currentPhoneUsed)) {
+  if (currentPhoneUsed && (!data.phone || !isPhoneCompatible(data.phone, currentPhoneUsed))) {
     return false;
   }
 
@@ -204,6 +231,8 @@ function WhatsAppReplyCaptureModalContent({
   const isMountedRef = useRef<boolean>(true);
   const aiAbortControllerRef = useRef<AbortController | null>(null);
   const lastPushFingerprintRef = useRef<string | null>(null);
+  const activeCaptureRequestIdRef = useRef<string | null>(null);
+  const consumedCaptureRequestIdsRef = useRef<Set<string>>(new Set());
 
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractionNotice, setExtractionNotice] = useState<{
@@ -395,6 +424,19 @@ function WhatsAppReplyCaptureModalContent({
         return;
       }
 
+      if (res.error === "CHAT_MISMATCH" || res.error === "CHAT_PHONE_UNAVAILABLE") {
+        setExtractedByExtension(false);
+        setExtractedAtIso(null);
+        setNumberNotOnWhatsApp(false);
+        setExtractionNotice({
+          type: "warn",
+          message: res.error === "CHAT_PHONE_UNAVAILABLE"
+            ? "O WhatsApp não exibiu um telefone verificável para esta conversa. Copie e cole a resposta abaixo."
+            : "O telefone da conversa não corresponde ao atendimento. Abra o contato correto ou copie e cole a resposta abaixo.",
+        });
+        return;
+      }
+
       // Se o DOM não retornou texto mas capturamos a imagem da tela (captureVisibleTab), acionamos o OCR Multimodal!
       if (res.screenshotDataUrl) {
         setActiveChatTitle(res.activeChatTitle || null);
@@ -437,7 +479,7 @@ function WhatsAppReplyCaptureModalContent({
       setIsExtracting(true);
       setExtractionNotice({
         type: "info",
-        message: `Capturando mensagens e tela da conversa (${phoneUsed}) no WhatsApp Web...`,
+        message: `Capturando mensagens da conversa (${phoneUsed}) no WhatsApp Web...`,
       });
 
       try {
@@ -471,6 +513,23 @@ function WhatsAppReplyCaptureModalContent({
     isMountedRef.current = true;
     clearWhatsAppPushedReplyCache();
 
+    const captureRequestId = createExtensionRequestId();
+    activeCaptureRequestIdRef.current = captureRequestId;
+
+    // Registra o contexto de captura por operação para vincular esta aba, requestId e logId ao background worker
+    try {
+      const targetOrigin = window.location?.origin || "*";
+      window.postMessage(
+        {
+          type: "REDEATIVA_REGISTER_CAPTURE_CONTEXT",
+          requestId: captureRequestId,
+          logId: messageLog.id,
+          phone: messageLog.phoneUsed,
+        },
+        targetOrigin
+      );
+    } catch {}
+
     if (isExtensionActive()) {
       setExtractionNotice({
         type: "info",
@@ -497,7 +556,15 @@ function WhatsAppReplyCaptureModalContent({
       }
 
       const data = event.data;
-      if (!shouldAcceptLiveWhatsAppPush(data, messageLog.id, messageLog.phoneUsed)) {
+      if (
+        !shouldAcceptLiveWhatsAppPush(
+          data,
+          messageLog.id,
+          messageLog.phoneUsed,
+          activeCaptureRequestIdRef.current,
+          consumedCaptureRequestIdsRef.current
+        )
+      ) {
         return;
       }
 
@@ -512,7 +579,8 @@ function WhatsAppReplyCaptureModalContent({
         lastPushFingerprintRef.current = fingerprint;
       }
 
-      clearWhatsAppPushedReplyCache();
+      consumedCaptureRequestIdsRef.current.add(data.requestId);
+      clearWhatsAppPushedReplyCache(data.requestId);
       void applyExtractionPayload(data, messageLog.phoneUsed);
     };
 
@@ -521,7 +589,8 @@ function WhatsAppReplyCaptureModalContent({
       isMountedRef.current = false;
       aiAbortControllerRef.current?.abort();
       window.removeEventListener("message", handlePushedCapture);
-      clearWhatsAppPushedReplyCache();
+      clearWhatsAppPushedReplyCache(activeCaptureRequestIdRef.current);
+      activeCaptureRequestIdRef.current = null;
     };
   }, [messageLog.id, messageLog.phoneUsed, applyExtractionPayload]);
 
@@ -632,6 +701,9 @@ function WhatsAppReplyCaptureModalContent({
               )}
             </div>
           </div>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            A leitura de imagens está indisponível. Se necessário, copie ou digite a resposta no campo abaixo.
+          </p>
         </div>
 
         {/* SEÇÃO 2: Captura Assistida via Extensão + Fallback Manual */}
@@ -668,7 +740,7 @@ function WhatsAppReplyCaptureModalContent({
                 disabled={isExtracting}
                 aria-label="Extrair da Aba do WhatsApp Web"
                 className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-semibold transition cursor-pointer disabled:opacity-50"
-                title="Capturar texto selecionado, mensagens da conversa ou imagem da tela (OCR) do WhatsApp Web"
+                title="Capturar texto selecionado ou mensagens da conversa no WhatsApp Web"
               >
                 {isExtracting ? (
                   <>

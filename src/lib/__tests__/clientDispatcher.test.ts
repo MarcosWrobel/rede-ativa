@@ -110,7 +110,7 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
         type: "LEOPOLDINA_DISPATCH_WHATSAPP",
         url: "https://web.whatsapp.com/send/?phone=554299999999",
       },
-      "*"
+      "http://localhost:3000"
     );
     expect(openSpy).not.toHaveBeenCalled();
   });
@@ -130,30 +130,61 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     expect(postMessageSpy).not.toHaveBeenCalled();
   });
 
+  it("avisa se a extensão não confirma abertura e ignora ACK de outra operação", () => {
+    vi.useFakeTimers();
+    try {
+      (globalThis.window as any).__REDEATIVA_EXTENSION_ACTIVE__ = true;
+      const failed = vi.fn();
+      const postSpy = vi.spyOn(globalThis.window, "postMessage");
+      dispatchWhatsAppToBrowser("https://web.whatsapp.com/send?phone=5542999990001", { logId: "log-a", onDispatchFailure: failed });
+      const requestId = postSpy.mock.calls.at(-1)![0].requestId;
+      for (const listener of [...messageListeners]) listener({ source: window, origin: window.location.origin, data: { type: "LEOPOLDINA_DISPATCH_WHATSAPP_ACK", requestId: "outra", response: { success: true } } });
+      vi.advanceTimersByTime(6000);
+      expect(failed).toHaveBeenCalledTimes(1);
+
+      failed.mockClear();
+      dispatchWhatsAppToBrowser("https://web.whatsapp.com/send?phone=5542999990001", { logId: "log-b", onDispatchFailure: failed });
+      const nextId = postSpy.mock.calls.at(-1)![0].requestId;
+      expect(nextId).not.toBe(requestId);
+      for (const listener of [...messageListeners]) listener({ source: window, origin: window.location.origin, data: { type: "LEOPOLDINA_DISPATCH_WHATSAPP_ACK", requestId: nextId, response: { success: true } } });
+      vi.advanceTimersByTime(6000);
+      expect(failed).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
   describe("extractWhatsAppReplyViaExtension (Fluxo Assistido de Retorno MV3)", () => {
     it("dispara postMessage REDEATIVA_EXTRACT_WHATSAPP_REPLY com logId, phone e studentName", () => {
       const postMessageSpy = vi.spyOn(globalThis.window, "postMessage");
       extractWhatsAppReplyViaExtension("log_test_123", "5542988887777", "Lucas Gabriel");
 
       expect(postMessageSpy).toHaveBeenCalledWith(
-        {
+        expect.objectContaining({
           type: "REDEATIVA_EXTRACT_WHATSAPP_REPLY",
+          requestId: expect.any(String),
           logId: "log_test_123",
           phone: "5542988887777",
           studentName: "Lucas Gabriel",
-        },
+        }),
         "http://localhost:3000"
       );
     });
 
-    it("extrai retorno com sucesso ao receber REDEATIVA_WHATSAPP_REPLY_EXTRACTED da extensão", async () => {
-      const promise = extractWhatsAppReplyViaExtension("log_abc", "5542999991111");
+    const getLastPostedRequestId = (): string => {
+      const calls = (globalThis.window.postMessage as any).mock?.calls || [];
+      return calls[calls.length - 1]?.[0]?.requestId;
+    };
 
-      // Simula resposta assíncrona do content-script bridge
+    it("extrai retorno com sucesso ao receber REDEATIVA_WHATSAPP_REPLY_EXTRACTED da extensão", async () => {
+      const postSpy = vi.spyOn(globalThis.window, "postMessage");
+      const promise = extractWhatsAppReplyViaExtension("log_abc", "5542999991111");
+      const reqId = postSpy.mock.calls[0][0].requestId;
+
+      // Simula resposta assíncrona do content-script bridge correlacionada pelo requestId
       const responsePayload = {
         origin: "http://localhost:3000",
         data: {
           type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+          requestId: reqId,
           logId: "log_abc",
           success: true,
           rawText: "Bom dia, o aluno Lucas compareceu ao médico e levará atestado amanhã.",
@@ -166,6 +197,7 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
 
       const result = await promise;
       expect(result.success).toBe(true);
+      expect(result.requestId).toBe(reqId);
       expect(result.logId).toBe("log_abc");
       expect(result.rawText).toBe("Bom dia, o aluno Lucas compareceu ao médico e levará atestado amanhã.");
       expect(result.domTimestamp).toBe("[08:45, 08/11/2026]");
@@ -174,12 +206,15 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("compatibilidade dual: aceita evento LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_legacy_1");
+      const reqId = getLastPostedRequestId();
 
       const responsePayload = {
         origin: "http://localhost:3000",
         data: {
           type: "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED",
+          requestId: reqId,
           logId: "log_legacy_1",
           success: true,
           rawText: "Sim, confirmado.",
@@ -194,13 +229,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("repasse de erro vindo da extensão (ex: WHATSAPP_TAB_NOT_FOUND)", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_not_found");
+      const reqId = getLastPostedRequestId();
 
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_not_found",
             success: false,
             error: "WHATSAPP_TAB_NOT_FOUND",
@@ -216,13 +254,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("repasse de erro NUMBER_NOT_ON_WHATSAPP quando número não possui conta", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_invalid_num", "5541999999999");
+      const reqId = getLastPostedRequestId();
 
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_invalid_num",
             success: false,
             error: "NUMBER_NOT_ON_WHATSAPP",
@@ -238,13 +279,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("repasse de NO_INCOMING_MESSAGE com metadados de chat localizado mas sem resposta", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_no_msg", "5542988881234");
+      const reqId = getLastPostedRequestId();
 
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_no_msg",
             success: false,
             error: "NO_INCOMING_MESSAGE",
@@ -262,13 +306,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("repasse de erro CHAT_OPEN_TIMEOUT quando a extensão não consegue abrir automaticamente a conversa", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_chat_timeout", "5542999998888");
+      const reqId = getLastPostedRequestId();
 
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_chat_timeout",
             success: false,
             error: "CHAT_OPEN_TIMEOUT",
@@ -284,13 +331,16 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
     });
 
     it("repassa screenshotDataUrl (captureVisibleTab para OCR) e selectionUsed no retorno da extensão", async () => {
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_ocr_1", "5542999990000", "Maria Clara");
+      const reqId = getLastPostedRequestId();
 
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_ocr_1",
             success: true,
             rawText: "A aluna teve consulta médica hoje cedo.",
@@ -306,9 +356,11 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
       expect(result.screenshotDataUrl).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/");
     });
 
-    it("ignora mensagens com logId diferente ou de origem não confiável", async () => {
+    it("ignora mensagens sem requestId, com requestId divergente, com logId diferente ou de origem não confiável", async () => {
       vi.useFakeTimers();
+      vi.spyOn(globalThis.window, "postMessage");
       const promise = extractWhatsAppReplyViaExtension("log_real", "5542999999999", 5000);
+      const reqId = getLastPostedRequestId();
 
       // 1. Mensagem de origem maliciosa
       messageListeners.forEach((listener) =>
@@ -316,6 +368,7 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
           origin: "https://site-invasor.com",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_real",
             success: true,
             rawText: "Texto injetado malicioso",
@@ -323,12 +376,26 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
         })
       );
 
-      // 2. Mensagem com logId de outro chamado
+      // 2. Mensagem sem requestId (sem correlação por operação)
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            logId: "log_real",
+            success: true,
+            rawText: "Texto sem requestId",
+          },
+        })
+      );
+
+      // 3. Mensagem com logId de outro chamado
+      messageListeners.forEach((listener) =>
+        listener({
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "outro_log_id",
             success: true,
             rawText: "Texto de outro aluno",
@@ -336,12 +403,13 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
         })
       );
 
-      // 3. Agora envia a resposta legítima
+      // 4. Agora envia a resposta legítima correlacionada
       messageListeners.forEach((listener) =>
         listener({
           origin: "http://localhost:3000",
           data: {
             type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
             logId: "log_real",
             success: true,
             rawText: "Resposta legítima",
