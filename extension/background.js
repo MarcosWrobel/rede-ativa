@@ -627,8 +627,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
+        const storageRes = await chrome.storage.local.get([
+          "opt_whatsapp_auto_send",
+          "opt_whatsapp_spa_reuse",
+        ]);
         const autoSendPref = storageRes?.opt_whatsapp_auto_send !== false;
+        const spaReusePref = storageRes?.opt_whatsapp_spa_reuse !== false;
 
         let intendedText = "";
         try {
@@ -661,16 +665,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.registered");
         traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.opening");
 
-        const result = await handleWhatsAppDispatch(request.url, request.reuseTab !== false);
+        const result = await handleWhatsAppDispatch(request.url, request.reuseTab !== false, {
+          activeDispatch: buildActiveDispatchPayload(reg.operation),
+          spaReuse: spaReusePref,
+          requestId: reg.operation.requestId,
+        });
         if (result && result.tabId) {
-          await withOperationStoreLock(async () => {
-            const { pending, consumed } = await loadOperationMapsUnlocked(Date.now());
-            const existingOp = pending[reg.operation.requestId];
-            if (existingOp) {
-              existingOp.targetTabId = result.tabId;
-              await saveOperationMapsUnlocked(pending, consumed);
-            }
-          });
+          await assignOperationTargetTab(reg.operation.requestId, result.tabId);
         }
         traceLocalOperation(senderCheck, request.diagnostics === true, "background.send.opened");
         sendResponse({
@@ -697,8 +698,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        const storageRes = await chrome.storage.local.get(["opt_whatsapp_auto_send"]);
+        const storageRes = await chrome.storage.local.get([
+          "opt_whatsapp_auto_send",
+          "opt_whatsapp_spa_reuse",
+        ]);
         const autoSendPref = storageRes?.opt_whatsapp_auto_send !== false;
+        const spaReusePref = storageRes?.opt_whatsapp_spa_reuse !== false;
 
         let urlPhone = "";
         try {
@@ -768,6 +773,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       } catch {
         sendResponse({ activeDispatch: null, autoSendDefault: true });
+      }
+    })();
+    return true;
+  }
+
+  // 2.1 Fallback controlado caso a troca rápida SPA não conclua na aba do WhatsApp Web
+  if (request?.type === "LEOPOLDINA_SPA_NAVIGATE_FALLBACK") {
+    (async () => {
+      try {
+        const waCheck = validateWhatsAppSender(sender);
+        if (!waCheck.ok || !waCheck.tabId) {
+          sendResponse({ success: false, error: waCheck.error || "UNAUTHORIZED" });
+          return;
+        }
+        const reqId = typeof request.requestId === "string" ? request.requestId.trim() : "";
+        const targetUrl = typeof request.targetUrl === "string" ? request.targetUrl : "";
+        if (!reqId || !isAllowedWhatsAppUrl(targetUrl)) {
+          sendResponse({ success: false, error: "INVALID_FALLBACK_REQUEST" });
+          return;
+        }
+        const isAuthorizedOp = await withOperationStoreLock(async () => {
+          const { pending } = await loadOperationMapsUnlocked(Date.now());
+          const op = pending[reqId];
+          return Boolean(op && op.kind === "DISPATCH" && (!op.targetTabId || op.targetTabId === waCheck.tabId));
+        });
+        if (!isAuthorizedOp) {
+          sendResponse({ success: false, error: "OPERATION_NOT_FOUND" });
+          return;
+        }
+        await chrome.tabs.update(waCheck.tabId, { url: targetUrl, active: true });
+        sendResponse({ success: true });
+      } catch (err) {
+        sendResponse({ success: false, error: err?.message || String(err) });
       }
     })();
     return true;
@@ -1331,10 +1369,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+async function assignOperationTargetTab(requestId, tabId) {
+  if (!requestId || !tabId) return;
+  await withOperationStoreLock(async () => {
+    const { pending, consumed } = await loadOperationMapsUnlocked(Date.now());
+    const existingOp = pending[requestId];
+    if (existingOp && existingOp.targetTabId !== tabId) {
+      existingOp.targetTabId = tabId;
+      await saveOperationMapsUnlocked(pending, consumed);
+    }
+  });
+}
+
 /**
  * Abre ou reutiliza uma janela dedicada compacta do WhatsApp Web.
  */
-async function handleWhatsAppDispatch(targetUrl, reuseTab = true) {
+async function handleWhatsAppDispatch(targetUrl, reuseTab = true, options = {}) {
   if (!isAllowedWhatsAppUrl(targetUrl)) {
     throw new Error("URL de destino não permitida.");
   }
@@ -1363,6 +1413,29 @@ async function handleWhatsAppDispatch(targetUrl, reuseTab = true) {
       targetTab = tabs[0];
     }
 
+    if (options.requestId && targetTab.id) {
+      await assignOperationTargetTab(options.requestId, targetTab.id);
+    }
+
+    if (options.spaReuse && options.activeDispatch && chrome.tabs?.sendMessage) {
+      try {
+        const spaRes = await chrome.tabs.sendMessage(targetTab.id, {
+          type: "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH",
+          targetUrl,
+          activeDispatch: options.activeDispatch,
+        });
+        if (spaRes && spaRes.accepted === true) {
+          await chrome.tabs.update(targetTab.id, { active: true });
+          if (targetTab.windowId) {
+            try {
+              await chrome.windows.update(targetTab.windowId, { focused: true });
+            } catch {}
+          }
+          return { reusedTab: true, spaSwitched: true, tabId: targetTab.id };
+        }
+      } catch {}
+    }
+
     const updatedTab = await chrome.tabs.update(targetTab.id, {
       url: targetUrl,
       active: true,
@@ -1374,7 +1447,7 @@ async function handleWhatsAppDispatch(targetUrl, reuseTab = true) {
       } catch {}
     }
 
-    return { reusedTab: true, tabId: targetTab.id };
+    return { reusedTab: true, spaSwitched: false, tabId: targetTab.id };
   }
 
   const { left, top } = await getPopupCoordinates();

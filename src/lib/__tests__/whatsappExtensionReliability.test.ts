@@ -699,7 +699,7 @@ function createWhatsAppContentHarness(options?: {
   };
 }
 
-describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.1)", () => {
+describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.2)", () => {
   it("1. Reinjeção 1x, 5x e 10x de whatsapp-content.js não acumula listeners, timers, observers nem barras duplicadas", () => {
     const h = createWhatsAppContentHarness();
 
@@ -717,7 +717,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     const pingResponses = h.sendRuntimeToContent({ type: "LEOPOLDINA_PING" });
     expect(pingResponses).toHaveLength(1);
-    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.1" });
+    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.2" });
   });
 
   it("2. __REDEATIVA_WA_CLEANUP__ remove todos os listeners, cancela timers pendentes e impede confirmação posterior", () => {
@@ -1211,7 +1211,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     expect(winListeners).toHaveLength(1);
     expect(runtimeListeners).toHaveLength(1);
-    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.1");
+    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.2");
   });
 
   it("12. WhatsAppDispatchToggle e BuscaAtivaClient removem todos os listeners e timers no cleanup de useEffect", () => {
@@ -1230,9 +1230,9 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(buscaAtivaSource).toContain("if (toastTimer) clearTimeout(toastTimer)");
   });
 
-  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.1 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
+  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.2 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
-    expect(manifest.version).toBe("1.6.1");
+    expect(manifest.version).toBe("1.6.2");
     expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version);
 
     expect(fs.existsSync(ZIP_REDE_ATIVA_PATH)).toBe(true);
@@ -1543,5 +1543,203 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(injectedFilesByTab).toEqual([
       { tabId: 10, files: ["registro-bridge.js"] },
     ]);
+  });
+
+  it("17. background.js reutiliza janela/aba do WhatsApp via SPA (sem recarregar url) quando opt_whatsapp_spa_reuse está ativo e faz fallback seguro quando desativado ou recusado", async () => {
+    let onMessageCb: any = null;
+    const storageData: Record<string, any> = {
+      opt_whatsapp_auto_send: true,
+      opt_whatsapp_spa_reuse: true,
+    };
+    const tabsUpdateCalls: Array<{ tabId: number; props: any }> = [];
+    const tabsSendMessageCalls: Array<{ tabId: number; msg: any }> = [];
+    let spaAccepted = true;
+
+    const chromeMock: any = {
+      runtime: {
+        id: "ext-rede-ativa-test",
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+        onMessage: { addListener: (fn: any) => { onMessageCb = fn; } },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async (keys: any) => {
+            if (Array.isArray(keys)) {
+              const out: Record<string, any> = {};
+              for (const k of keys) {
+                if (k in storageData) out[k] = storageData[k];
+              }
+              return out;
+            }
+            return { ...storageData };
+          }),
+          set: vi.fn(async (patch: any) => Object.assign(storageData, patch)),
+          remove: vi.fn(async () => {}),
+        },
+      },
+      tabs: {
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+        get: vi.fn(async (id: number) =>
+          id === 10
+            ? { id: 10, url: "https://www.redeativa.app.br/busca-ativa" }
+            : id === 77
+            ? { id: 77, windowId: 5, url: "https://web.whatsapp.com/" }
+            : null
+        ),
+        query: vi.fn(async (q: any) =>
+          q?.url === "*://web.whatsapp.com/*"
+            ? [{ id: 77, windowId: 5, url: "https://web.whatsapp.com/" }]
+            : [{ id: 10, url: "https://www.redeativa.app.br/busca-ativa" }]
+        ),
+        update: vi.fn(async (tabId: number, props: any) => {
+          tabsUpdateCalls.push({ tabId, props });
+          return { id: tabId, windowId: 5, ...props };
+        }),
+        sendMessage: vi.fn(async (tabId: number, msg: any) => {
+          tabsSendMessageCalls.push({ tabId, msg });
+          if (msg?.type === "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH") {
+            return spaAccepted ? { accepted: true, requestId: msg.activeDispatch?.requestId } : { accepted: false };
+          }
+          return { ok: true };
+        }),
+      },
+      windows: {
+        getCurrent: vi.fn(async () => ({ id: 1 })),
+        get: vi.fn(async (id: number) => ({ id, type: "popup" })),
+        update: vi.fn(async () => ({})),
+        create: vi.fn(async () => ({ id: 9, tabs: [{ id: 99 }] })),
+      },
+      scripting: { executeScript: vi.fn(async () => []) },
+    };
+
+    const bgCode = fs.readFileSync(BACKGROUND_PATH, "utf8");
+    vm.runInNewContext(
+      bgCode,
+      {
+        chrome: chromeMock,
+        URL,
+        Object,
+        Array,
+        Date,
+        Math,
+        String,
+        Number,
+        Boolean,
+        Promise,
+        setTimeout,
+        clearTimeout,
+        console: { warn: () => {}, error: () => {}, log: () => {} },
+      },
+      { filename: "background.js" }
+    );
+
+    const invokeDispatch = (requestId: string) =>
+      new Promise<any>((resolve) => {
+        onMessageCb(
+          {
+            type: "LEOPOLDINA_DISPATCH_WHATSAPP",
+            requestId,
+            logId: `log-${requestId}`,
+            phone: "5542999991111",
+            studentName: "Estudante SPA",
+            url: "https://web.whatsapp.com/send/?phone=5542999991111&text=Oi",
+            reuseTab: true,
+          },
+          { tab: { id: 10, url: "https://www.redeativa.app.br/busca-ativa" }, frameId: 0, documentId: "doc-1", origin: "https://www.redeativa.app.br" },
+          resolve
+        );
+      });
+
+    // 1) SPA habilitado e aceito -> NÃO passa url em chrome.tabs.update
+    const res1 = await invokeDispatch("req-spa-1");
+    expect(res1.success).toBe(true);
+    expect(res1.spaSwitched).toBe(true);
+    expect(tabsSendMessageCalls.some((c) => c.msg?.type === "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH")).toBe(true);
+    expect(tabsUpdateCalls.some((c) => "url" in c.props)).toBe(false);
+
+    // 2) SPA recusado pelo content script -> fallback imediato para chrome.tabs.update({ url })
+    tabsUpdateCalls.length = 0;
+    spaAccepted = false;
+    const res2 = await invokeDispatch("req-spa-2");
+    expect(res2.success).toBe(true);
+    expect(res2.spaSwitched).toBe(false);
+    expect(tabsUpdateCalls.some((c) => c.props.url === "https://web.whatsapp.com/send/?phone=5542999991111&text=Oi")).toBe(true);
+
+    // 3) Toggle opt_whatsapp_spa_reuse = false -> reverte diretamente para reload via chrome.tabs.update({ url })
+    tabsUpdateCalls.length = 0;
+    tabsSendMessageCalls.length = 0;
+    storageData.opt_whatsapp_spa_reuse = false;
+    spaAccepted = true;
+    const res3 = await invokeDispatch("req-spa-3");
+    expect(res3.success).toBe(true);
+    expect(res3.spaSwitched).toBe(false);
+    expect(tabsSendMessageCalls.some((c) => c.msg?.type === "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH")).toBe(false);
+    expect(tabsUpdateCalls.some((c) => c.props.url === "https://web.whatsapp.com/send/?phone=5542999991111&text=Oi")).toBe(true);
+  });
+
+  it("18. whatsapp-content.js alterna de Chat A para Chat B via LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH sem absorver histórico/título do Chat A na baseline", () => {
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      outgoingCount: 1,
+    });
+    h.headerSpan.setAttribute("title", "Contato Anterior A");
+    h.headerSpan.title = "Contato Anterior A";
+    h.headerSpan.textContent = "Contato Anterior A";
+    h.composeBox.textContent = "";
+    h.injectScript();
+
+    // Configura #side para indicar WhatsApp Web carregado e autenticado
+    const appEl = h.doc.getElementById("app")!;
+    const sideEl = h.doc.createElement("div");
+    sideEl.id = "side";
+    appEl.appendChild(sideEl);
+
+    const responses = h.sendRuntimeToContent({
+      type: "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH",
+      targetUrl: "https://web.whatsapp.com/send/?phone=5542999992222&text=Nova+mensagem+B",
+      activeDispatch: {
+        requestId: "req-spa-switch-B",
+        logId: "log-spa-switch-B",
+        phone: "5542999992222",
+        studentName: "Responsavel B",
+        text: "Nova mensagem B",
+        autoSend: true,
+        dispatchedAt: 1_700_000_000_000,
+      },
+    });
+
+    expect(responses[0]).toEqual({ accepted: true, requestId: "req-spa-switch-B" });
+
+    // Simula WhatsApp Web trocando o #main do Chat A para o Chat B de forma assíncrona
+    h.headerSpan.setAttribute("title", "Responsavel B");
+    h.headerSpan.title = "Responsavel B";
+    h.headerSpan.textContent = "Responsavel B";
+    h.chatMessages.children = [];
+    h.composeBox.textContent = "Nova mensagem B";
+
+    h.sendBtn.addEventListener("click", () => {
+      h.composeBox.textContent = "";
+      const newBubbleB = h.doc.createElement("div");
+      newBubbleB.setAttribute("data-id", "true_5542999992222@c.us_3EB0B1");
+      const innerB = h.doc.createElement("div");
+      innerB.className = "message-out";
+      const spanB = h.doc.createElement("span");
+      spanB.className = "selectable-text copyable-text";
+      spanB.textContent = "Nova mensagem B";
+      innerB.appendChild(spanB);
+      newBubbleB.appendChild(innerB);
+      h.chatMessages.appendChild(newBubbleB);
+    });
+
+    // Avança timers para resolver SPA switch, capturar baseline do Chat B, acionar auto-send e confirmar SENT
+    h.advanceTime(900);
+    h.advanceTime(1200);
+
+    const sentOutcome = h.sentRuntimeMessages.find(
+      (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME" && m.requestId === "req-spa-switch-B"
+    );
+    expect(sentOutcome).toBeDefined();
+    expect(sentOutcome.outcome).toBe("SENT");
   });
 });

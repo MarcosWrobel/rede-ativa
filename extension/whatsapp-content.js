@@ -1,5 +1,5 @@
 // whatsapp-content.js - Captura Assistida de Retornos e Confirmação Verificada de Envio (WhatsApp Web)
-// Versão 1.6.1 — Ciclo de vida idempotente, observação escopada, proteção anti-microfone e verificação estrita de despacho
+// Versão 1.6.2 — Ciclo de vida idempotente, troca rápida SPA na mesma instância, proteção anti-microfone e verificação estrita de despacho
 
 if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   try {
@@ -8,7 +8,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 }
 
 (function () {
-  const EXTENSION_VERSION = "1.6.1";
+  const EXTENSION_VERSION = "1.6.2";
 
   let isInstanceDisposed = false;
   let dispatchGeneration = 0;
@@ -44,6 +44,11 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   let baselineOutgoingIds = new Set();
   let baselineLastOutgoingNode = null;
   let initialVerifiedHeaderTitle = null;
+  let spaSwitchPending = false;
+  let spaPreviousTitle = "";
+  let spaSwitchStartedAt = 0;
+  let spaFallbackUrl = "";
+  let spaFallbackTriggered = false;
   let expectedMessageText = "";
   let lastCapturedComposeText = "";
 
@@ -856,6 +861,9 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       autoSendTimer = null;
     }
     autoSendInFlight = false;
+    spaSwitchPending = false;
+    spaFallbackUrl = "";
+    spaFallbackTriggered = false;
     disconnectDispatchObserver();
     if (reason === "CANCELLED" || reason === "EXPIRED") {
       activeDispatch = null;
@@ -1114,7 +1122,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
         }
 
         const mainEl = document.querySelector("#main");
-        if (mainEl && isDispatchConversationVerified()) {
+        if (mainEl && tryResolveSpaSwitch(mainEl) && isDispatchConversationVerified()) {
           ensureBaselineForMain(mainEl);
           evaluateSendConfirmation("DOM_OUTGOING_BUBBLE_DETECTED", currentGen);
         }
@@ -1128,9 +1136,114 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   }
 
   /**
+   * Verifica se o WhatsApp Web já está carregado e autenticado para troca SPA sem recarregar.
+   */
+  function isWhatsAppWebAppReadyForSpa() {
+    if (isInstanceDisposed) return false;
+    const appEl = document.getElementById("app");
+    if (!appEl) return false;
+    if (document.querySelector('[data-ref], canvas[aria-label*="QR"]')) {
+      return false;
+    }
+    return Boolean(
+      document.querySelector("#side") ||
+        document.querySelector("#pane-side") ||
+        document.querySelector('[data-testid="chat-list"]') ||
+        document.querySelector("#main")
+    );
+  }
+
+  /**
+   * Dispara navegação interna via link <a href="..."> dentro da mesma instância do WhatsApp Web.
+   */
+  function triggerInPageSpaNavigation(targetUrl) {
+    const parent = document.getElementById("app") || document.body || document.documentElement;
+    if (!parent) return false;
+    const anchor = document.createElement("a");
+    anchor.href = targetUrl;
+    anchor.rel = "noopener noreferrer";
+    anchor.style.display = "none";
+    parent.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return true;
+  }
+
+  /**
+   * Aguarda a troca de conversa no #main após clique SPA antes de capturar a baseline.
+   */
+  function tryResolveSpaSwitch(mainEl) {
+    if (!spaSwitchPending) return true;
+
+    const elapsed = Date.now() - spaSwitchStartedAt;
+    const currentTitle = mainEl ? getHeaderTitle(mainEl) : "";
+    const composeText = mainEl ? getComposeBoxText(mainEl) : "";
+
+    const titleChanged = Boolean(currentTitle && currentTitle !== spaPreviousTitle);
+    const titleMatchesPhone = Boolean(
+      currentTitle &&
+        activeDispatch?.phone &&
+        normalizePhoneDigits(currentTitle).endsWith(
+          normalizePhoneDigits(activeDispatch.phone).slice(-8)
+        )
+    );
+    const composeReady = Boolean(composeText && composeText.length > 0);
+
+    if (titleChanged || (composeReady && (titleMatchesPhone || elapsed >= 150)) || elapsed >= 450) {
+      spaSwitchPending = false;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Se a troca rápida SPA não abrir a conversa nem preencher o compose em 2.5s,
+   * solicita ao background o fallback seguro via chrome.tabs.update({ url }).
+   */
+  function maybeTriggerSpaFallback(mainEl, currentGen) {
+    if (
+      !spaFallbackUrl ||
+      spaFallbackTriggered ||
+      hasReportedOutcome ||
+      sendActionTriggered ||
+      autoSendTriggered ||
+      !activeDispatch ||
+      activeDispatch.generation !== currentGen
+    ) {
+      return false;
+    }
+
+    const elapsed = Date.now() - spaSwitchStartedAt;
+    if (elapsed < 2500) return false;
+
+    const currentTitle = mainEl ? getHeaderTitle(mainEl) : "";
+    const composeText = mainEl ? getComposeBoxText(mainEl) : "";
+    const switchedOrHasText =
+      Boolean(currentTitle && currentTitle !== spaPreviousTitle) ||
+      Boolean(composeText && composeText.length > 0);
+
+    if (!switchedOrHasText && chrome?.runtime?.sendMessage) {
+      spaFallbackTriggered = true;
+      const reqId = activeDispatch.requestId;
+      const fallbackUrl = spaFallbackUrl;
+      try {
+        chrome.runtime.sendMessage({
+          type: "LEOPOLDINA_SPA_NAVIGATE_FALLBACK",
+          requestId: reqId,
+          targetUrl: fallbackUrl,
+        });
+      } catch {}
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Inicia o monitoramento vinculado exclusivamente à geração e identidade do despacho.
    */
-  function startDispatchMonitoring(dispatch) {
+  function startDispatchMonitoring(dispatch, options = {}) {
     if (isInstanceDisposed || !dispatch || !dispatch.requestId || !dispatch.logId) return;
 
     // Impede reinício duplicado do mesmo requestId (ex.: tabs.onUpdated após init)
@@ -1159,6 +1272,11 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     baselineOutgoingIds = new Set();
     baselineLastOutgoingNode = null;
     initialVerifiedHeaderTitle = null;
+    spaSwitchPending = Boolean(options && options.spaSwitch);
+    spaPreviousTitle = options && typeof options.previousTitle === "string" ? options.previousTitle : "";
+    spaSwitchStartedAt = spaSwitchPending ? Date.now() : 0;
+    spaFallbackUrl = options && typeof options.fallbackUrl === "string" ? options.fallbackUrl : "";
+    spaFallbackTriggered = false;
     expectedMessageText = (dispatch.text || extractUrlIntendedText() || "").trim();
     lastCapturedComposeText = "";
 
@@ -1172,7 +1290,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     );
 
     const mainNow = document.querySelector("#main");
-    if (mainNow && isDispatchConversationVerified()) {
+    if (mainNow && tryResolveSpaSwitch(mainNow) && isDispatchConversationVerified()) {
       ensureBaselineForMain(mainNow);
     }
 
@@ -1195,7 +1313,11 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       }
 
       const mainEl = document.querySelector("#main");
-      if (mainEl && isDispatchConversationVerified()) {
+      if (maybeTriggerSpaFallback(mainEl, currentGen)) {
+        return;
+      }
+
+      if (mainEl && tryResolveSpaSwitch(mainEl) && isDispatchConversationVerified()) {
         ensureBaselineForMain(mainEl);
 
         if (evaluateSendConfirmation("DOM_POLL_VERIFIED", currentGen)) {
@@ -1503,6 +1625,38 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       } else {
         sendResponse({ activated: false });
       }
+      return true;
+    }
+
+    if (request?.type === "LEOPOLDINA_SPA_NAVIGATE_AND_DISPATCH") {
+      ensureTopBar();
+      if (
+        !isWhatsAppWebAppReadyForSpa() ||
+        !request.targetUrl ||
+        !request.activeDispatch ||
+        !request.activeDispatch.requestId ||
+        !request.activeDispatch.logId
+      ) {
+        sendResponse({ accepted: false, reason: "WHATSAPP_NOT_READY" });
+        return true;
+      }
+
+      const mainNow = document.querySelector("#main");
+      const previousTitle = mainNow ? getHeaderTitle(mainNow) : "";
+      startDispatchMonitoring(request.activeDispatch, {
+        spaSwitch: true,
+        previousTitle,
+        fallbackUrl: request.targetUrl,
+      });
+
+      const clicked = triggerInPageSpaNavigation(request.targetUrl);
+      if (!clicked) {
+        stopDispatchMonitoring("SPA_CLICK_FAILED");
+        sendResponse({ accepted: false, reason: "SPA_CLICK_FAILED" });
+        return true;
+      }
+
+      sendResponse({ accepted: true, requestId: request.activeDispatch.requestId });
       return true;
     }
 

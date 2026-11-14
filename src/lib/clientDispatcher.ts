@@ -3,7 +3,7 @@ import { extensionDiagnosticsEnabled, traceExtensionStep } from "./extensionDiag
 
 export const WHATSAPP_DISPATCH_STORAGE_KEY = "redeativa_whatsapp_dispatch_mode";
 export const LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
-export const EXPECTED_EXTENSION_VERSION = "1.6.1";
+export const EXPECTED_EXTENSION_VERSION = "1.6.2";
 export type WhatsAppDispatchMode = "extension" | "native";
 
 declare global {
