@@ -2531,4 +2531,191 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(genericBlocked[0].success).toBe(false);
     expect(genericBlocked[0].rawText).toBeUndefined();
   });
+
+  it("24. MED-01: isDispatchConversationVerified rejeita contradição de headerPhone explícito ou @lid mapeado para outro número", () => {
+    // (a) headerPhone explícito divergente via tel:/link ou texto no #main header
+    const hHeaderMismatch = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "Responsável Salvo",
+      outgoingCount: 0,
+      incomingCount: 0,
+    });
+    const headerLink = hHeaderMismatch.doc.createElement("a");
+    headerLink.setAttribute("href", "tel:+5542988887777");
+    headerLink.textContent = "+55 42 98888-7777";
+    hHeaderMismatch.mainEl.querySelector("header")!.appendChild(headerLink);
+    hHeaderMismatch.injectScript();
+
+    hHeaderMismatch.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_ACTIVATE_DISPATCH",
+        activeDispatch: {
+          requestId: "req-med01-hdr",
+          logId: "log-med01-hdr",
+          phone: "5542999991111",
+          studentName: "Estudante Alvo",
+          text: "Comunicado oficial",
+          autoSend: false,
+        },
+      },
+      { id: "ext-rede-ativa-test" },
+      () => {}
+    );
+    hHeaderMismatch.advanceTime(1200);
+    // Não deve confirmar despacho na conversa cujo headerPhone diverge
+    expect(
+      hHeaderMismatch.sentRuntimeMessages.some(
+        (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME"
+      )
+    ).toBe(false);
+
+    // (b) @lid já vinculado a outro número (5542988887777) bloqueia despacho para 5542999991111
+    const hLidMismatch = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/send/?phone=5542988887777",
+      chatTitle: "Contato Salvo A",
+      outgoingCount: 1,
+      incomingCount: 0,
+    });
+    const existingOut = hLidMismatch.chatMessages.children[0];
+    existingOut.setAttribute("data-id", "true_111222333444@lid_3EB0OLD");
+    hLidMismatch.injectScript();
+
+    // Agora ativa despacho para outro número enquanto #main ainda exibe @lid 111222333444@lid
+    hLidMismatch.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_ACTIVATE_DISPATCH",
+        activeDispatch: {
+          requestId: "req-med01-lid",
+          logId: "log-med01-lid",
+          phone: "5542999991111",
+          studentName: "Estudante B",
+          text: "Outro comunicado",
+          autoSend: true,
+        },
+      },
+      { id: "ext-rede-ativa-test" },
+      () => {}
+    );
+    hLidMismatch.advanceTime(1200);
+    expect(
+      hLidMismatch.sentRuntimeMessages.some(
+        (m) => m.type === "LEOPOLDINA_WHATSAPP_DISPATCH_OUTCOME" && m.requestId === "req-med01-lid"
+      )
+    ).toBe(false);
+  });
+
+  it("25. BAI-02: handleHumanCaptureButtonClick aplica fail-closed quando requiresVerification=true e phone ausente sem prova outgoing", () => {
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "Contato Sem Prova",
+      outgoingCount: 0,
+      incomingCount: 1,
+      initialCaptureCtx: {
+        requestId: "req-bai02-1",
+        logId: "log-bai02-1",
+        phone: null,
+        studentName: "Estudante Sem Prova",
+        expectedOutgoingText: "Texto que não existe no DOM",
+        requiresVerification: true,
+      },
+    });
+    h.injectScript();
+
+    const captureBtn = h.doc.getElementById("leopoldina-wa-capture-btn");
+    expect(captureBtn).toBeTruthy();
+    captureBtn!.click();
+
+    expect(
+      h.sentRuntimeMessages.some((m) => m.type === "LEOPOLDINA_PUSH_CAPTURED_REPLY")
+    ).toBe(false);
+    const banner = h.doc.getElementById("leopoldina-wa-banner");
+    expect(banner?.textContent).toContain("Não foi possível confirmar este contato");
+  });
+
+  it("26. OBS-01 & BAI-01: registro-bridge limpa activeDispatches quando despacho falha e WhatsAppDispatchToggle valida source/origin", () => {
+    const bridgeCode = fs.readFileSync(
+      path.join(ROOT_DIR, "extension/registro-bridge.js"),
+      "utf8"
+    );
+    const winListeners = new Map<string, Array<(e: any) => void>>();
+    const postedMessages: any[] = [];
+    const sandbox: any = {
+      window: {
+        location: { origin: "https://www.redeativa.app.br", hostname: "www.redeativa.app.br" },
+        addEventListener: (ev: string, fn: (e: any) => void) => {
+          const list = winListeners.get(ev) || [];
+          list.push(fn);
+          winListeners.set(ev, list);
+        },
+        removeEventListener: vi.fn(),
+        postMessage: (msg: any) => postedMessages.push(msg),
+      },
+      document: {
+        documentElement: { dataset: {} },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        querySelectorAll: () => [],
+      },
+      sessionStorage: { getItem: () => null, removeItem: vi.fn() },
+      localStorage: { getItem: () => "extension" },
+      chrome: {
+        runtime: {
+          id: "ext-rede-ativa-test",
+          lastError: null as any,
+          sendMessage: (msg: any, cb?: (res: any) => void) => {
+            if (msg?.type === "LEOPOLDINA_DISPATCH_WHATSAPP") {
+              cb?.({ success: false, error: "DISPATCH_FAILED" });
+            }
+          },
+          onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+        },
+        storage: { local: { get: (_keys: string[], cb: (r: any) => void) => cb({}) } },
+      },
+      URL,
+      Set,
+      Map,
+      Date,
+      setTimeout: vi.fn(() => 1),
+      clearTimeout: vi.fn(),
+      console,
+    };
+    vm.runInNewContext(bridgeCode, sandbox);
+
+    for (const fn of winListeners.get("message") || []) {
+      fn({
+        source: sandbox.window,
+        origin: "https://www.redeativa.app.br",
+        data: {
+          type: "LEOPOLDINA_DISPATCH_WHATSAPP",
+          requestId: "req-fail-cleanup-1",
+          logId: "log-fail-cleanup-1",
+          url: "https://web.whatsapp.com/send/?phone=5542999990001",
+        },
+      });
+    }
+
+    // Se activeDispatches foi limpo imediatamente no ACK de erro, um novo despacho com o mesmo requestId pode ser aceito (ou não fica retido)
+    expect(postedMessages.some((m) => m.type === "LEOPOLDINA_DISPATCH_WHATSAPP_ACK" && m.requestId === "req-fail-cleanup-1" && m.response?.success === false)).toBe(true);
+    // Verifica que o relay de outcome após falha é rejeitado porque activeDispatches não retém req-fail-cleanup-1
+    const runtimeFn = sandbox.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const confirmedBefore = postedMessages.filter((m) => m.type === "REDEATIVA_WHATSAPP_CONFIRMED").length;
+    runtimeFn(
+      {
+        type: "REDEATIVA_WHATSAPP_DISPATCH_OUTCOME_RELAY",
+        requestId: "req-fail-cleanup-1",
+        logId: "log-fail-cleanup-1",
+        outcome: "SENT",
+      },
+      { id: "ext-rede-ativa-test" }
+    );
+    expect(postedMessages.filter((m) => m.type === "REDEATIVA_WHATSAPP_CONFIRMED").length).toBe(confirmedBefore);
+
+    // BAI-01: WhatsAppDispatchToggle valida source e origin no listener de message
+    const toggleSource = fs.readFileSync(
+      path.join(ROOT_DIR, "src/components/whatsapp/WhatsAppDispatchToggle.tsx"),
+      "utf8"
+    );
+    expect(toggleSource).toContain("if (event.source !== undefined && event.source !== window) return;");
+    expect(toggleSource).toContain("event.origin !== window.location.origin");
+  });
 });

@@ -3,8 +3,13 @@
 import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform?: string }>;
+}
+
 export default function PwaRegister() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
 
   useEffect(() => {
@@ -23,7 +28,7 @@ export default function PwaRegister() {
     // 2. Captura do evento beforeinstallprompt para exibir botão de instalação no mobile/desktop
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
       // Exibe apenas se o usuário não dispensou recentemente
       const dismissed = sessionStorage.getItem("pwa_install_dismissed");
       if (!dismissed) {

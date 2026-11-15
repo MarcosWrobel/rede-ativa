@@ -536,6 +536,7 @@
             (response) => {
               traceLocal("bridge.send.response");
               if (chrome.runtime.lastError) {
+                if (requestId) activeDispatches.delete(requestId);
                 console.warn(
                   "[Sincronizador Rede Ativa] Aviso ao enviar para background:",
                   chrome.runtime.lastError.message
@@ -546,6 +547,10 @@
                   response: { success: false, error: "EXTENSION_ERROR" },
                 }, currentOrigin);
                 return;
+              }
+
+              if (response?.success !== true && requestId) {
+                activeDispatches.delete(requestId);
               }
 
               window.postMessage(

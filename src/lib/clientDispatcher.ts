@@ -95,6 +95,18 @@ export interface DispatchWhatsAppMetadata {
   onDispatchFailure?: () => void;
 }
 
+export interface DispatchWhatsAppPayload {
+  type: "LEOPOLDINA_DISPATCH_WHATSAPP";
+  url: string;
+  requestId?: string;
+  logId?: string;
+  studentId?: string;
+  studentName?: string;
+  phone?: string;
+  autoSend?: boolean;
+  diagnostics?: boolean;
+}
+
 /**
  * Despacha uma mensagem do WhatsApp otimizada para o navegador da secretária:
  * 1. Se a preferência for "native": ignora a extensão intencionalmente e abre via window.open convencional.
@@ -125,7 +137,7 @@ export function dispatchWhatsAppToBrowser(
 
   // Modo Extensão:
   if (isExtensionActive()) {
-    const payload: any = {
+    const payload: DispatchWhatsAppPayload = {
       type: "LEOPOLDINA_DISPATCH_WHATSAPP",
       url: targetUrl,
     };
@@ -231,6 +243,7 @@ export function extractWhatsAppReplyViaExtension(
 
     const handleMessage = (event: MessageEvent) => {
       if (isSettled) return;
+      if (event.source !== undefined && event.source !== window) return;
 
       // Validação de origem rigorosa contra spoofing
       if (

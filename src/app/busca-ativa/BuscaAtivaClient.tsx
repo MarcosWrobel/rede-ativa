@@ -379,8 +379,9 @@ export default function BuscaAtivaClient({
           }
         },
       });
-    } catch (err: any) {
-      setErrorMessage(err.message || "Erro ao processar envio.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao processar envio.";
+      setErrorMessage(msg);
     } finally {
       setIsSending(false);
     }

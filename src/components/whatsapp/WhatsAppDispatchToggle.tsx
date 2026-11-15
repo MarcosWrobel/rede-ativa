@@ -28,11 +28,20 @@ export default function WhatsAppDispatchToggle({ className = "", compact = false
     setHasExtension(isExtensionActive());
     setInstalledVersion(getInstalledExtensionVersion());
 
-    const handlePreferenceChanged = (e: any) => {
-      if (e?.detail) setMode(e.detail);
+    const handlePreferenceChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<WhatsAppDispatchMode>;
+      if (customEvent.detail) setMode(customEvent.detail);
     };
 
     const handleWindowMessage = (event: MessageEvent) => {
+      if (event.source !== undefined && event.source !== window) return;
+      if (
+        event.origin &&
+        event.origin !== "null" &&
+        event.origin !== window.location.origin
+      ) {
+        return;
+      }
       if (
         event.data?.type === "REDEATIVA_EXTENSION_READY" ||
         event.data?.type === "LEOPOLDINA_EXTENSION_READY"

@@ -447,5 +447,62 @@ describe("clientDispatcher — Controle Liga/Desliga (Modo Extensão vs Convenci
 
       vi.useRealTimers();
     });
+
+    it("MED-02: rejeita MessageEvent com source diferente de window mesmo com origin 'null' ou igual", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(globalThis.window, "postMessage");
+      const promise = extractWhatsAppReplyViaExtension("log_source_guard", "5542999992222");
+      const reqId = getLastPostedRequestId();
+
+      // 1. Mensagem de outro frame (source !== window) com origin "null"
+      messageListeners.forEach((listener) =>
+        listener({
+          source: {} as Window,
+          origin: "null",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
+            logId: "log_source_guard",
+            success: true,
+            rawText: "Spoof de iframe sandboxed",
+          },
+        })
+      );
+
+      // 2. Mensagem com source null (ex.: postMessage sem janela de origem válida)
+      messageListeners.forEach((listener) =>
+        listener({
+          source: null,
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
+            logId: "log_source_guard",
+            success: true,
+            rawText: "Spoof com source null",
+          },
+        })
+      );
+
+      // 3. Mensagem legítima da própria janela (source === window)
+      messageListeners.forEach((listener) =>
+        listener({
+          source: globalThis.window,
+          origin: "http://localhost:3000",
+          data: {
+            type: "REDEATIVA_WHATSAPP_REPLY_EXTRACTED",
+            requestId: reqId,
+            logId: "log_source_guard",
+            success: true,
+            rawText: "Resposta legítima da mesma janela",
+          },
+        })
+      );
+
+      const result = await promise;
+      expect(result.success).toBe(true);
+      expect(result.rawText).toBe("Resposta legítima da mesma janela");
+      vi.useRealTimers();
+    });
   });
 });

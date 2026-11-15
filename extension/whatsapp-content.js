@@ -900,6 +900,19 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       return true;
     }
 
+    const headerPhone = extractExplicitHeaderPhone(mainEl);
+    if (headerPhone && !samePhone(headerPhone, activeDispatch.phone)) {
+      return false;
+    }
+
+    const curLid = extractMainLid(mainEl);
+    if (curLid && verifiedPhoneByLid.has(curLid)) {
+      const mapped = verifiedPhoneByLid.get(curLid);
+      if (mapped && !samePhone(mapped, activeDispatch.phone)) {
+        return false;
+      }
+    }
+
     // Aba dedicada autorizada pelo background após history.replaceState limpar ?phone= e sem @c.us (ex.: @lid ou 1º contato)
     if (currentTitle && !initialVerifiedHeaderTitle) {
       initialVerifiedHeaderTitle = currentTitle;
@@ -1907,6 +1920,28 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
           lastCaptureBtnHasSelection = null;
           syncCaptureButtonsState(true);
           return;
+        }
+
+        if (ctx.requiresVerification && !ctx.phone) {
+          const mainEl = document.querySelector("#main");
+          const hasOutgoingProof = Boolean(
+            mainEl &&
+              hasMatchingOutgoingMessageInMain(
+                mainEl,
+                ctx.expectedOutgoingText || null,
+                ctx.studentName || null
+              )
+          );
+          if (!hasOutgoingProof) {
+            isCaptureInProgress = false;
+            createOrUpdateBanner(
+              "⚠️ Não foi possível confirmar este contato no WhatsApp Web. Clique em 'Extrair resposta' no modal da plataforma.",
+              "#b45309"
+            );
+            lastCaptureBtnHasSelection = null;
+            syncCaptureButtonsState(true);
+            return;
+          }
         }
 
         const extraction = extractIncomingMessagesFromDOM(ctx.phone, {

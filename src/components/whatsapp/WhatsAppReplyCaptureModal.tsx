@@ -60,7 +60,7 @@ export interface WhatsAppReplyCaptureModalProps {
   messageLog: MessageLogModalItem | null;
   studentName?: string;
   classNameLabel?: string;
-  onSuccess: (updatedLog: any) => void;
+  onSuccess: (updatedLog: MessageLogModalItem) => void;
 }
 
 export function isPhoneCompatible(phoneA?: string | null, phoneB?: string | null): boolean {
@@ -77,6 +77,10 @@ export function isPhoneCompatible(phoneA?: string | null, phoneB?: string | null
 
 export const LAST_PUSHED_REPLY_STORAGE_KEY = "redeativa_last_pushed_reply";
 
+type WindowWithReplyCache = Window & {
+  __REDEATIVA_LAST_PUSHED_REPLY__?: unknown;
+};
+
 /**
  * Limpa quaisquer caches residuais de capturas do WhatsApp Web no cliente e na extensão
  * para garantir que cada abertura de modal para outro contato comece sempre limpa.
@@ -84,10 +88,10 @@ export const LAST_PUSHED_REPLY_STORAGE_KEY = "redeativa_last_pushed_reply";
 export function clearWhatsAppPushedReplyCache(requestId?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    delete (window as any).__REDEATIVA_LAST_PUSHED_REPLY__;
+    delete (window as WindowWithReplyCache).__REDEATIVA_LAST_PUSHED_REPLY__;
   } catch {
     try {
-      (window as any).__REDEATIVA_LAST_PUSHED_REPLY__ = undefined;
+      (window as WindowWithReplyCache).__REDEATIVA_LAST_PUSHED_REPLY__ = undefined;
     } catch {}
   }
   try {
@@ -95,7 +99,7 @@ export function clearWhatsAppPushedReplyCache(requestId?: string | null): void {
   } catch {}
   try {
     const targetOrigin = window.location?.origin || "*";
-    const payload: Record<string, any> = { type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" };
+    const payload: Record<string, string> = { type: "REDEATIVA_CLEAR_LAST_CAPTURED_REPLY" };
     if (requestId) {
       payload.requestId = requestId;
     }
@@ -108,51 +112,53 @@ export function clearWhatsAppPushedReplyCache(requestId?: string | null): void {
  * Exige correlação explícita (requestId, logId e phone compatível), expiração (2 min) e consumo único por operação.
  */
 export function shouldAcceptLiveWhatsAppPush(
-  data: any,
+  data: unknown,
   currentMessageLogId: string,
   currentPhoneUsed?: string | null,
   expectedRequestId?: string | null,
   consumedRequestIds?: Set<string>
 ): boolean {
   if (!data || typeof data !== "object") return false;
+  const payload = data as Record<string, unknown>;
   if (
-    data.type !== "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" &&
-    data.type !== "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED"
+    payload.type !== "REDEATIVA_WHATSAPP_REPLY_EXTRACTED" &&
+    payload.type !== "LEOPOLDINA_WHATSAPP_REPLY_EXTRACTED"
   ) {
     return false;
   }
-  if (!data.pushedFromWhatsApp || data.fromStorageCache) {
+  if (!payload.pushedFromWhatsApp || payload.fromStorageCache) {
     return false;
   }
 
   // Exige requestId válido e não consumido
-  if (typeof data.requestId !== "string" || !data.requestId.trim()) {
+  if (typeof payload.requestId !== "string" || !payload.requestId.trim()) {
     return false;
   }
-  if (expectedRequestId && data.requestId !== expectedRequestId) {
+  if (expectedRequestId && payload.requestId !== expectedRequestId) {
     return false;
   }
-  if (consumedRequestIds && consumedRequestIds.has(data.requestId)) {
+  if (consumedRequestIds && consumedRequestIds.has(payload.requestId)) {
     return false;
   }
 
   // Exige logId explícito e correspondente ao atendimento atual
-  if (!data.logId || data.logId !== currentMessageLogId) {
+  if (!payload.logId || payload.logId !== currentMessageLogId) {
     return false;
   }
 
   // Rejeita eventos obsoletos (> 2 minutos)
-  if (typeof data.receivedAt === "number" && Date.now() - data.receivedAt > 120000) {
+  if (typeof payload.receivedAt === "number" && Date.now() - payload.receivedAt > 120000) {
     return false;
   }
 
   const hasContent = Boolean(
-    (typeof data.rawText === "string" && data.rawText.trim().length > 0) ||
-      data.screenshotDataUrl
+    (typeof payload.rawText === "string" && payload.rawText.trim().length > 0) ||
+      payload.screenshotDataUrl
   );
   if (!hasContent) return false;
 
-  if (currentPhoneUsed && (!data.phone || !isPhoneCompatible(data.phone, currentPhoneUsed))) {
+  const eventPhone = typeof payload.phone === "string" ? payload.phone : null;
+  if (currentPhoneUsed && (!eventPhone || !isPhoneCompatible(eventPhone, currentPhoneUsed))) {
     return false;
   }
 
