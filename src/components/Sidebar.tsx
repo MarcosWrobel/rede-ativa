@@ -183,6 +183,12 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           icon: FileText,
           description: "Textos padronizados de comunicação",
         },
+        {
+          href: "/treinamento",
+          label: "Orientação e Guias",
+          icon: GraduationCap,
+          description: "Simulador e guias operacionais",
+        },
         ...(isSecretariat
           ? [
               {

@@ -425,3 +425,216 @@ progress.queue-progress::-moz-progress-bar {
     box-sizing: border-box !important;
   }
 }
+
+/* Keyframes da coreografia do Simulador Pedagógico 2D */
+@keyframes simSignatureDraw {
+  from {
+    stroke-dashoffset: 320;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes simModalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes simChatBubbleUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes simFileSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes simPinPop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes simTypingDot {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes simSheetSlide {
+  from {
+    opacity: 0;
+    transform: translateX(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes simProgressBar {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes simNeonFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes simNeonPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(56, 189, 248, 0.85),
+      0 0 18px rgba(59, 130, 246, 0.55),
+      0 0 32px rgba(16, 185, 129, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px rgba(56, 189, 248, 0.95),
+      0 0 24px rgba(59, 130, 246, 0.72),
+      0 0 40px rgba(16, 185, 129, 0.48);
+  }
+}
+
+@keyframes simClickRipple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.4);
+    opacity: 0;
+  }
+}
+
+.sim-focus-neon {
+  position: relative;
+  box-shadow:
+    0 0 0 2px rgba(56, 189, 248, 0.85),
+    0 0 18px rgba(59, 130, 246, 0.55),
+    0 0 32px rgba(16, 185, 129, 0.35);
+  animation: simNeonPulse 1.8s ease-in-out infinite;
+}
+
+.sim-focus-neon::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(135deg, #06b6d4, #3b82f6, #10b981, #6366f1);
+  background-size: 200% 200%;
+  animation: simNeonFlow 2.6s linear infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.sim-card-spotlight {
+  position: relative;
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1.5px rgba(56, 189, 248, 0.65),
+    0 14px 30px -8px rgba(59, 130, 246, 0.25),
+    0 0 24px rgba(16, 185, 129, 0.22);
+  transition: transform 450ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 450ms ease, opacity 500ms ease;
+}
+
+.sim-card-dimmed {
+  opacity: 0.65;
+  transition: opacity 500ms ease;
+}
+
+.sim-click-ripple {
+  animation: simClickRipple 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.sim-signature-path {
+  stroke-dasharray: 320;
+  stroke-dashoffset: 320;
+  animation: simSignatureDraw 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.sim-modal-in {
+  animation: simModalIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sim-chat-bubble {
+  animation: simChatBubbleUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sim-file-slide {
+  animation: simFileSlide 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sim-pin-dot {
+  animation: simPinPop 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sim-sheet-slide {
+  animation: simSheetSlide 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sim-signature-path,
+  .sim-modal-in,
+  .sim-chat-bubble,
+  .sim-file-slide,
+  .sim-pin-dot,
+  .sim-sheet-slide,
+  .sim-focus-neon,
+  .sim-focus-neon::after,
+  .sim-click-ripple {
+    animation: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}

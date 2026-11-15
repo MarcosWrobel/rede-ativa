@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui fé pública documental (Lei nº 14.063/2020) com PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, perícia vetorial de traço, governança extemporânea (> 5 dias úteis), adendos encadeados ("Em tempo") e biometria móvel WebAuthn.
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 66 arquivos: 63 aprovados e 3 `skipIf` de banco isolado pré-existentes; 515 testes aprovados e 12 ignorados (527 testes) em `13/11/2026`, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`) e que o build de produção compile sem erros (`npm run build`).
+6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 71 arquivos: 68 aprovados e 3 `skipIf` de banco isolado pré-existentes; 652 testes aprovados e 12 ignorados (664 testes) em `14/11/2026`, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts` e `treinamentoPage.test.tsx`) e que o build de produção compile sem erros (`npm run build`).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -203,10 +203,11 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ```text
 ├── src/
-│   ├── app/                        # 29 Páginas SSR + 52 Route Handlers (Next.js 16 App Router)
+│   ├── app/                        # 30 Páginas SSR + 52 Route Handlers (Next.js 16 App Router)
 │   │   ├── login/                  # Login institucional Google OAuth e login dev condicional
 │   │   ├── impacto/                # Redirecionamento permanente para landing pública na raiz (/)
-│   │   ├── preview-landing/        # Simulador e demonstração interativa do workflow pedagógico
+│   │   ├── preview-landing/        # Pré-visualização da landing pública com PedagogicalFlowSimulator
+│   │   ├── treinamento/            # Central autenticada de orientação operacional, guias e simulador 2D internamente escopado por edição
 │   │   ├── admin/                  # Painel Super Admin (/admin) e Diretório (/admin/escolas)
 │   │   ├── secretaria/             # Painel Executivo Municipal SEMEC e análise preditiva
 │   │   ├── gestao/                 # Painel da Direção Escolar
@@ -232,6 +233,8 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── ataParticipantService.ts# Sanitização de rascunhos e pareamento anti-forja de signatários
 │   │   └── ataFinalizationService.ts# Cálculo de dias úteis BRT, hash SHA-256 e lavratura atômica
 │   ├── components/                 # Componentes React reutilizáveis
+│   │   ├── PedagogicalFlowSimulator.tsx # Simulador 2D interativo em App Shell (âncoras DOM data-sim-target, cadência 3 tempos e Item 10)
+│   │   ├── landing/                # LandingPageClient (flag ENABLE_LEGACY_WORKFLOW_PANELS = false) e painéis legados preservados
 │   │   ├── ata/                    # Editor widescreen (editor/* tipado, qrPollController, hook, banner QR, signatureState, signLinkValidity), PIN modal, scan físico, canvas
 │   │   └── whatsapp/               # Modal de retorno assistido e alternador de Janela Dedicada Compacta
 │   ├── lib/                        # Regras de negócio, segurança, criptografia e integrações
@@ -274,7 +277,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 66 arquivos: 63 aprovados e 3 skipIf banco isolado; 515 testes aprovados)
+# Executar suíte completa de testes (Vitest — 71 arquivos: 68 aprovados e 3 skipIf banco isolado; 652 testes aprovados e 12 ignorados)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

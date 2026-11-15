@@ -3,6 +3,7 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import ImpactoClient from "../ImpactoClient";
 import ImpactoPage from "../page";
+import { ENABLE_LEGACY_WORKFLOW_PANELS } from "@/components/landing/LandingPageClient";
 
 // Mock do next/navigation
 vi.mock("next/navigation", () => ({
@@ -61,8 +62,15 @@ describe("Landing Page de Produção (/) & Redirecionamento (/impacto)", () => {
     expect(html).toContain("Redução da exposição de conversas na tela");
     expect(html).toContain("Relatório de contatos e intervenções");
     expect(html).toContain("Simulação demonstrativa • Dados fictícios");
-    expect(html).toContain("Fluxo completo");
-    expect(html).toContain("Contatos com famílias");
+    expect(html).toContain("Simulação demonstrativa");
+    expect(html).toContain("Dados fictícios");
+    expect(html).toContain("Equipe Pedagógica");
+    expect(html).toContain("Direção Escolar");
+    expect(html).toContain("Secretaria de Educação");
+    expect(ENABLE_LEGACY_WORKFLOW_PANELS).toBe(false);
+    expect(html).not.toContain("Fluxo completo");
+    expect(html).not.toContain("Contatos com famílias");
+    expect(html).toContain("1. Matrículas e faltas");
     expect(html).toContain("Menos retrabalho na busca ativa e nas atas");
     expect(html).toContain("Acompanhamento escolar e registro pedagógico.");
   });

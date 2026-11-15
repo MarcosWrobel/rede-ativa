@@ -17,13 +17,69 @@ import {
 } from 'lucide-react';
 import WorkflowAnimation from '@/components/landing/WorkflowAnimation';
 import MasterWorkflowAnimation from '@/components/landing/MasterWorkflowAnimation';
+import PedagogicalFlowSimulator from '@/components/PedagogicalFlowSimulator';
+
+/**
+ * Controla a exibição dos dois painéis legados da seção `#workflow-demo`
+ * ("Fluxo completo" via `MasterWorkflowAnimation` e "Contatos com famílias"
+ * via `WorkflowAnimation`) junto à barra de abas seletoras.
+ *
+ * Para reativar ambos os painéis em produção no futuro, altere o valor para
+ * `true`. Enquanto permanecer `false`, apenas `<PedagogicalFlowSimulator mode="public" />`
+ * é exibido como visão única da demonstração.
+ */
+export const ENABLE_LEGACY_WORKFLOW_PANELS = false;
 
 export interface LandingPageClientProps {
   mode?: 'production' | 'preview';
 }
 
+type NetworkRoleKey = 'pedagogica' | 'direcao' | 'secretaria';
+
+const NETWORK_ROLES: Array<{
+  key: NetworkRoleKey;
+  label: string;
+  summary: string;
+  items: string[];
+}> = [
+  {
+    key: 'pedagogica',
+    label: 'Equipe Pedagógica',
+    summary:
+      'Organização das tentativas de contato por turma e turno, conferência de atestados vigentes, preparação de mensagens e atas pedagógicas.',
+    items: [
+      'Preparo de mensagens com dados do estudante e revisão antes do envio',
+      'Registro de retorno da família e justificativas em sequência contínua',
+      'Elaboração de minuta de ata com confirmação de autoria por PIN',
+    ],
+  },
+  {
+    key: 'direcao',
+    label: 'Direção Escolar',
+    summary:
+      'Acompanhamento de encaminhamentos e prazos, confirmação de atas e gestão da equipe pedagógica.',
+    items: [
+      'Visão dos encaminhamentos pendentes e prazos da unidade escolar',
+      'Acompanhamento das atas confirmadas e complementos vinculados',
+      'Gestão de acessos e organização da equipe escolar',
+    ],
+  },
+  {
+    key: 'secretaria',
+    label: 'Secretaria de Educação',
+    summary:
+      'Leitura consolidada de infrequência e acompanhamento de abandono e evasão entre as escolas da rede.',
+    items: [
+      'Indicadores consolidados de infrequência por unidade de ensino',
+      'Acompanhamento de casos de abandono e evasão na rede',
+      'Padronização de relatórios de contatos e intervenções',
+    ],
+  },
+];
+
 export default function LandingPageClient({ mode = 'production' }: LandingPageClientProps) {
-  const [animationMode, setAnimationMode] = useState<'master' | 'simple'>('master');
+  const [animationMode, setAnimationMode] = useState<'guided' | 'master' | 'simple'>('guided');
+  const [selectedRole, setSelectedRole] = useState<NetworkRoleKey>('pedagogica');
   const isPreview = mode === 'preview';
 
   const scrollToDemo = (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -191,45 +247,136 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
         <div className="text-center space-y-3 mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
             <Layers className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
-            <span>Simulação demonstrativa • Dados fictícios</span>
+            <span>Simulação demonstrativa</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Da preparação do contato ao histórico do estudante
           </h2>
 
-          {/* Seletor de Visualização */}
-          <div className="pt-2 flex items-center justify-center">
-            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200 shadow-2xs gap-1">
-              <button
-                type="button"
-                onClick={() => setAnimationMode('master')}
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ${
-                  animationMode === 'master'
-                    ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-                <span>Fluxo completo</span>
-              </button>
+          {/* Seletor de Visualização (oculto quando ENABLE_LEGACY_WORKFLOW_PANELS = false) */}
+          {ENABLE_LEGACY_WORKFLOW_PANELS && (
+            <div className="pt-2 flex items-center justify-center">
+              <div className="inline-flex flex-wrap justify-center p-1 rounded-xl bg-slate-100 border border-slate-200 shadow-2xs gap-1">
+                <button
+                  type="button"
+                  onClick={() => setAnimationMode('guided')}
+                  className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ${
+                    animationMode === 'guided'
+                      ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                  <span>Simulação guiada</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setAnimationMode('simple')}
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
-                  animationMode === 'simple'
-                    ? 'bg-white text-sky-900 shadow-xs ring-1 ring-sky-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5 text-sky-600" aria-hidden="true" />
-                <span>Contatos com famílias</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAnimationMode('master')}
+                  className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ${
+                    animationMode === 'master'
+                      ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                  <span>Fluxo completo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAnimationMode('simple')}
+                  className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
+                    animationMode === 'simple'
+                      ? 'bg-white text-sky-900 shadow-xs ring-1 ring-sky-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-sky-600" aria-hidden="true" />
+                  <span>Contatos com famílias</span>
+                </button>
+              </div>
             </div>
+          )}
+        </div>
+
+        {ENABLE_LEGACY_WORKFLOW_PANELS ? (
+          animationMode === 'guided' ? (
+            <PedagogicalFlowSimulator mode="public" />
+          ) : animationMode === 'master' ? (
+            <MasterWorkflowAnimation />
+          ) : (
+            <WorkflowAnimation />
+          )
+        ) : (
+          <PedagogicalFlowSimulator mode="public" />
+        )}
+      </section>
+
+      {/* 4.5. Visão por Papel na Rede de Ensino */}
+      <section aria-labelledby="visao-papeis-titulo" className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h2
+            id="visao-papeis-titulo"
+            className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight"
+          >
+            Atuação por papel na rede de ensino
+          </h2>
+          <div className="mt-5 inline-flex flex-wrap justify-center p-1 rounded-xl bg-slate-100 border border-slate-200 gap-1">
+            {NETWORK_ROLES.map((role) => {
+              const isSelected = selectedRole === role.key;
+              return (
+                <button
+                  key={role.key}
+                  type="button"
+                  onClick={() => setSelectedRole(role.key)}
+                  aria-pressed={isSelected}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ${
+                    isSelected
+                      ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  {role.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {animationMode === 'master' ? <MasterWorkflowAnimation /> : <WorkflowAnimation />}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {NETWORK_ROLES.map((role) => {
+            const isSelected = selectedRole === role.key;
+            return (
+              <div
+                key={role.key}
+                className={`rounded-2xl p-6 border transition-all ${
+                  isSelected
+                    ? 'bg-emerald-50/40 border-emerald-300 shadow-sm'
+                    : 'bg-white border-slate-200/90 shadow-xs'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="text-base font-bold text-slate-900">{role.label}</h3>
+                  {isSelected && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                      Selecionado
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-700 leading-relaxed mb-4">{role.summary}</p>
+                <ul className="space-y-2 text-xs text-slate-700 pt-3 border-t border-slate-200">
+                  {role.items.map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" aria-hidden="true" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       {/* 5. Funcionalidades em 3 Colunas */}

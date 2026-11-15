@@ -1,7 +1,7 @@
 # Backlog Geral de Evolução & Roadmap — Rede Ativa SaaS
 
 Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa SaaS**.
-- **Estado Vivo do Repositório:** **21 models Prisma** • **29 páginas (`page.tsx`)** • **52 Route Handlers (`route.ts`)** • **63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**
+- **Estado Vivo do Repositório:** **21 models Prisma** • **30 páginas (`page.tsx`)** • **52 Route Handlers (`route.ts`)** • **68 suítes aprovadas (71 arquivos, 3 `skipIf` de banco isolado) / 652 testes Vitest aprovados**
 - Status: `[x]` Concluído • `[/]` Em Andamento • `[ ]` Pendente (Roadmap Futuro)
 - Prioridade: `P0` Crítico (Segurança/LGPD/Jurídico) • `P1` Alta (Estabilidade/Performance) • `P2` Média (Valor Pedagógico) • `P3` Expansão Estratégica
 - Esforço: `P` Pequeno (1–2h) • `M` Médio (3–6h) • `G` Grande (1–3 dias)
@@ -195,20 +195,50 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ## Épico 16 — Hardening Referencial, Arquitetura Limpa de Atas & Modularização UI (Sprint 18) — ✅ Concluído
 
-> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 52 Route Handlers (`route.ts`) • 63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**.
+> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 50 Route Handlers (`route.ts`) • 67 suítes aprovadas (70 arquivos, 3 `skipIf` de banco isolado) / 630 testes Vitest aprovados**.
 
 - [x] **`SEC-11`** `[P0 | Esforço: P]` **Contenção Residual 500 & Limites Defensivos SERE (`AUD-04`)**  
   Sanitização de mensagens de erro 500 residuais em [`/api/ai/test-key`](../src/app/api/ai/test-key/route.ts), [`/api/ai/generate-template`](../src/app/api/ai/generate-template/route.ts) e [`/api/auth/[...nextauth]`](../src/app/api/auth/%5B...nextauth%5D/route.ts), aliada a limites superiores em `sereBatchImportSchema` (500 turmas / 5.000 estudantes / 5.000 transferidos) e `MAX_SERE_FILE_SIZE_BYTES = 10 MB`.
 - [x] **`DATA-02`** `[P0 | Esforço: M]` **Proteção Referencial Jurídica (`onDelete: Restrict`) & Build Strict (`AUD-06`)**  
   Substituição de `onDelete: Cascade` por `onDelete: Restrict` em relações de prova legal (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student`, `PedagogicalMinute.school`) com deleção explícita em `/sanitize` e `DELETE /api/schools/[id]`, e falha bloqueante em produção no [`scripts/vercel_db_push.cjs`](../scripts/vercel_db_push.cjs).
 - [x] **`DOC-01`** `[P1 | Esforço: P]` **Governança Documental & Padronização de Pacote (`AUD-01` / `AUD-05`)**  
-  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 52 rotas, 63 suítes aprovadas / 515 testes aprovados) e artefato primário `/extensao-rede-ativa.zip`.
+  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 50 rotas, 67 suítes aprovadas / 630 testes aprovados) e artefato primário `/extensao-rede-ativa.zip`.
 - [x] **`SYNC-01`** `[P0 | Esforço: M]` **Blindagem da Sincronização de Frequência (Power BI, CSV & JSON — `10/11/2026`)**  
   Prevenção de erro HTTP 500 por colisão `P2002` na chave global `@unique` `Student.cgm` em `/api/frequencia/sync` e `/api/serp/sync` via [`src/lib/syncCgmGuard.ts`](../src/lib/syncCgmGuard.ts), atualização cadastral em lote por *delta check*, parser CSV/JSON RFC 4180 completo de 11 colunas em [`src/lib/frequencyImportParser.ts`](../src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](../src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br` e 12 testes em [`src/lib/__tests__/frequenciaSync.test.ts`](../src/lib/__tests__/frequenciaSync.test.ts).
 - [x] **`PERF-01`** `[P0 | Esforço: M]` **Otimização Extrema de Egress, Cache & Custo no Neon Launch (`10/11/2026`)**  
   Eliminação da transferência repetida de brasões Base64 (`1,14 MB`) via proxy binário cacheado em CDN [`GET /api/schools/[id]/logo`](../src/app/api/schools/%5Bid%5D/logo/route.ts) e [`src/lib/schoolLogo.ts`](../src/lib/schoolLogo.ts), deduplicação com React `cache()` + TTL 60s em [`src/lib/currentSchool.ts`](../src/lib/currentSchool.ts), omissão estrita de `physicalSignedScanData`/`signatureData`/`biometricStrokeData` em listagens (`/api/atas`, Prontuário 360º, `/livro/[ano]`), `select` enxuto em `/faltas` e leitura prévia sem escritas em `RateLimitBucket` na extensão ([`src/lib/extensionSyncAuth.ts`](../src/lib/extensionSyncAuth.ts)), validado por 10 testes em [`src/lib/__tests__/egressAndCacheOptimization.test.ts`](../src/lib/__tests__/egressAndCacheOptimization.test.ts).
 - [x] **`PERF-07` / `AUT-08`** `[P0 | Esforço: G]` **Hardening de Desempenho, Ciclo de Vida e Confiabilidade de Despachos da Extensão Chrome MV3 (`v1.6.0` — `13/11/2026`)**
   Implementação de ciclo de vida idempotente (`window.__REDEATIVA_WA_CLEANUP__` em [`extension/whatsapp-content.js`](../extension/whatsapp-content.js) e `window.__REDEATIVA_BRIDGE_CLEANUP__` em [`extension/registro-bridge.js`](../extension/registro-bridge.js)) com remoção integral de listeners (`runtime.onMessage`, `selectionchange`, `click`, `keydown`, `message`), timers (`pendingTimeouts`, `autoSendTimer`) e observers (`dispatchObserver`, `rootContainerObserver`); substituição do `uiHeartbeatTimer` permanente de 1s por `rootContainerObserver` leve (`subtree: false`) e ativação do `dispatchObserver` exclusivamente durante despachos válidos (-100% de callbacks ociosos e auto-mutações em `selectionchange`); confirmação estrita de envio (`evaluateSendConfirmation` exigindo conversa verificada em `#main header`, nova bolha na base de `#main` via `Node.DOCUMENT_POSITION_FOLLOWING` e compatibilidade textual com `intendedText`, eliminando falsos positivos em timeout de 45s, rolagem de histórico, troca de conversa e corrida A ➔ B); vínculo estrito de aba (`targetTabId` / `UNAUTHORIZED_WHATSAPP_TAB`), preservação de outras abas do WhatsApp e remoção de resize forçado em [`extension/background.js`](../extension/background.js); limpeza de listeners/timers em [`src/components/whatsapp/WhatsAppDispatchToggle.tsx`](../src/components/whatsapp/WhatsAppDispatchToggle.tsx) e [`src/app/busca-ativa/BuscaAtivaClient.tsx`](../src/app/busca-ativa/BuscaAtivaClient.tsx), validado por 13 testes em [`src/lib/__tests__/whatsappExtensionReliability.test.ts`](../src/lib/__tests__/whatsappExtensionReliability.test.ts).
+
+---
+
+## Épico 17 — Evolução da Landing Page, Funil Comercial & Experiência Pública (Planejado)
+
+> **Planejamento técnico detalhado:** [`docs/landing/PLANO_EVOLUCAO_LANDING.md`](landing/PLANO_EVOLUCAO_LANDING.md) • **Estado:** Simulador 2D coreografado, Central `/treinamento` e vitrine `/impacto` / `/` sob Item 10 concluídos; demais evoluções comerciais de Onda 1/2 seguem planejadas.
+
+### Entregue — Simulador 2D Coreografado, Central de Orientação (`/treinamento`) & Vitrine `/impacto`
+
+- [x] **`TRN-01` / `LP-SIM-01`** `[P1 | Esforço: G]` **Módulo de Demonstração Animada 2D (`PedagogicalFlowSimulator.tsx`), Central `/treinamento` e Integração Pública em `/impacto` (`/`)**
+  - **Entregue:** Refatoração integral de [`src/components/PedagogicalFlowSimulator.tsx`](../src/components/PedagogicalFlowSimulator.tsx) com Mini App Shell fiel à interface real, rastreamento de cursor via DOM (`data-sim-target` + `getBoundingClientRect` + `ResizeObserver` com fallback percentual para `jsdom`), cadência física em 3 tempos (`moving -> clicking -> settled`), destaque *spotlight* neon em [`src/app/globals.css`](../src/app/globals.css) e rodapé discreto (`"Simulação demonstrativa • Dados fictícios"`). Publicação da rota autenticada [`/treinamento`](../src/app/treinamento/page.tsx) ([`TreinamentoClient.tsx`](../src/app/treinamento/TreinamentoClient.tsx)) vinculada à barra lateral ([`Sidebar.tsx`](../src/components/Sidebar.tsx) — `"Orientação e Guias"`) com guias condicionados à edição da unidade ativa (`INSTITUCIONAL_ESSENCIAL` vs. `PILOTO_INTEGRADA` / `SUPERADMIN`). Integração em [`LandingPageClient.tsx`](../src/components/landing/LandingPageClient.tsx) com seleção de visão por perfil (`Equipe Pedagógica`, `Direção Escolar`, `Secretaria de Educação`), em estrita conformidade com o Item 10 do [`GEMINI.md`](../GEMINI.md) e cobertura por [`treinamentoPage.test.tsx`](../src/app/treinamento/__tests__/treinamentoPage.test.tsx) e [`impactoPage.test.tsx`](../src/app/impacto/__tests__/impactoPage.test.tsx).
+  - **Rastreabilidade (Ocultação Não-Destrutiva):** Os dois painéis anteriores da seção `#workflow-demo` (`"Fluxo completo"` via `MasterWorkflowAnimation` e `"Contatos com famílias"` via `WorkflowAnimation`) permanecem preservados em [`src/components/landing/LandingPageClient.tsx`](../src/components/landing/LandingPageClient.tsx) sob a constante exportada `ENABLE_LEGACY_WORKFLOW_PANELS = false`, exibindo exclusivamente `<PedagogicalFlowSimulator mode="public" />` até eventual reativação.
+
+### Onda 1 — Execução Técnica Imediata (Sem Dependências Externas)
+
+- [ ] **`LP-01`** `[P1 | Esforço: G]` **Caminho de Aquisição & Formulário Integrado de Demonstração**  
+  Restaurar `"Agendar demonstração"` como ação principal na abertura e `"Solicitar apresentação para minha escola ou rede"` no encerramento ([`LandingPageClient.tsx`](../src/components/landing/LandingPageClient.tsx)), mantendo `"Acessar sistema"` no cabeçalho; criar formulário integrado (`#solicitar-demonstracao`), helper central de canais configuráveis por ambiente (`src/lib/contactChannel.ts`), rota pública protegida por rate limit (`POST /api/contact`, `SELF_AUTH_API_PREFIXES` em [`proxyConstants.ts`](../src/lib/proxyConstants.ts)), persistência em model `DemoRequest` e triagem no painel `/admin`.
+- [ ] **`LP-02`** `[P1 | Esforço: M]` **Seção "Implantação e suporte" em 3 Passos (`Configuração`, `Capacitação`, `Início acompanhado`)**  
+  Detalhar início guiado (`/onboarding`), permissões por unidade (`/equipe`), importação de planilhas compatíveis (`CSV`/`XLSX`) e exportações disponíveis em `PDF` e `CSV`, mantendo a descrição restrita ao fluxo existente dentro do sistema enquanto formato de capacitação ao vivo e canais formais de suporte estão em definição (ver [planejamento](landing/PLANO_EVOLUCAO_LANDING.md)).
+- [ ] **`LP-03`** `[P1 | Esforço: M]` **Entrada Específica "Para escolas e secretarias de educação"**  
+  Apresentar estritamente recursos verificados para redes municipais: gestão de múltiplas escolas (`EducationNetwork`/`School`), permissões isoladas por unidade/papel (`GESTAO_SECRETARIA`, `GESTOR_ESCOLAR`, `PEDAGOGA`) e visão consolidada em [`/secretaria`](../src/app/secretaria/page.tsx), omitindo extensões experimentais para novas redes na edição padrão `INSTITUCIONAL_ESSENCIAL`.
+- [ ] **`LP-04`** `[P1 | Esforço: M]` **Ajustes de Cópia, Contraste, Abas Mobile & Refatoração dos Simuladores**  
+  Atualizar cards e bullets (`"Mensagem preenchida para revisão"`, `"Minutas padronizadas para revisão"`, `"Histórico mantido quando o estudante muda de turma"`, `"Etapa 1 de 3"`, `"Código de conferência e assinatura do responsável legal"`), encurtar abas mobile (`"Mensagem"`, `"Ata"`, `"Histórico"`), elevar contraste dos avisos em verde-claro e refatorar [`MasterWorkflowAnimation.tsx`](../src/components/landing/MasterWorkflowAnimation.tsx) e [`WorkflowAnimation.tsx`](../src/components/landing/WorkflowAnimation.tsx) com grid adaptativo sem cortes nem espaço vazio excessivo, maior tempo de leitura e suporte integral a `prefers-reduced-motion: reduce`.
+
+### Onda 2 — Condicionada a Insumos Externos (Bloqueada)
+
+- [ ] **`LP-05`** `[P2 | Esforço: M]` **Seção "Como uma equipe pedagógica utiliza a Rede Ativa" (Prova de Uso Verificável)**  
+  *Bloqueado por autorização formal documentada de escola parceira:* exibir contexto da instituição, período observado, tarefas executadas e depoimento aprovado da equipe.
+- [ ] **`LP-06`** `[P1 | Esforço: M]` **Rodapé Institucional Completo & Páginas Jurídicas (`/privacidade`, `/termos`)**  
+  *Bloqueado por dados empresariais e revisão jurídica:* ativar Razão Social, CNPJ, e-mails/canais oficiais de contato e suporte e publicar **Política de privacidade** e **Termos de uso** em rotas públicas liberadas em [`proxyConstants.ts`](../src/lib/proxyConstants.ts).
 
 ---
 
@@ -249,4 +279,5 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 16** | Fluxo Assistido WhatsApp Web & Selagem Bipartida | Épico 14 | ✅ Concluído |
 | **Sprint 17** | Usabilidade do Livro de Atas, Digitalização Direta & Preservação Arquivística | Épico 15 | ✅ Concluído |
 | **Sprint 18** | Hardening Referencial (`AUD-04`/`06`), Camada `src/services/` & Modularização UI | Épico 16 | ✅ Concluído |
+| **Planejado** | Funil Comercial, Secretarias, Implantação & Simuladores ([Plano](landing/PLANO_EVOLUCAO_LANDING.md)) | Épico 17 | ⏳ Onda 1 Pronta / Onda 2 Bloqueada |
 | **Futuro** | Observabilidade APM & Filas Assíncronas | Expansão | ⏳ Planejado sob Demanda |

@@ -3,6 +3,7 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import PreviewLandingPage, { metadata } from '../page';
 import PreviewLandingClient from '../PreviewLandingClient';
+import { ENABLE_LEGACY_WORKFLOW_PANELS } from '@/components/landing/LandingPageClient';
 import WorkflowAnimation from '@/components/landing/WorkflowAnimation';
 import MasterWorkflowAnimation from '@/components/landing/MasterWorkflowAnimation';
 
@@ -76,9 +77,11 @@ describe('Preview Landing Page & Guardrails de UX Writing (/preview-landing)', (
     expect(html).toContain('href="/login"');
     expect(html).toContain('Acessar sistema');
 
-    // Seletor de visualização
-    expect(html).toContain('Fluxo completo');
-    expect(html).toContain('Contatos com famílias');
+    // Visão única padrão (painéis legados ocultos sob ENABLE_LEGACY_WORKFLOW_PANELS = false)
+    expect(ENABLE_LEGACY_WORKFLOW_PANELS).toBe(false);
+    expect(html).not.toContain('Fluxo completo');
+    expect(html).not.toContain('Contatos com famílias');
+    expect(html).toContain('1. Matrículas e faltas');
 
     // 3 Colunas operacionais sem parágrafos repetitivos
     expect(html).toContain('Menos retrabalho na busca ativa e nas atas');
