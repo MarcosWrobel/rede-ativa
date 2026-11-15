@@ -1,9 +1,10 @@
 import { WA_ME_REUSABLE_WINDOW_NAME } from "./whatsappProvider";
 import { extensionDiagnosticsEnabled, traceExtensionStep } from "./extensionDiagnostics";
+import { getStoredPreference } from "./storageKeys";
 
 export const WHATSAPP_DISPATCH_STORAGE_KEY = "redeativa_whatsapp_dispatch_mode";
 export const LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
-export const EXPECTED_EXTENSION_VERSION = "1.6.2";
+export const EXPECTED_EXTENSION_VERSION = "1.6.5";
 export type WhatsAppDispatchMode = "extension" | "native";
 
 declare global {
@@ -200,7 +201,8 @@ export function extractWhatsAppReplyViaExtension(
   logId: string,
   phone?: string,
   studentNameOrTimeout?: string | number,
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  expectedOutgoingText?: string
 ): Promise<ExtractWhatsAppReplyResult> {
   const studentName = typeof studentNameOrTimeout === "string" ? studentNameOrTimeout : undefined;
   const effectiveTimeoutMs = typeof studentNameOrTimeout === "number" ? studentNameOrTimeout : timeoutMs;
@@ -305,9 +307,46 @@ export function extractWhatsAppReplyViaExtension(
         logId,
         phone,
         studentName,
+        ...(typeof expectedOutgoingText === "string" && expectedOutgoingText.trim()
+          ? { expectedOutgoingText }
+          : {}),
         ...(extensionDiagnosticsEnabled() ? { diagnostics: true } : {}),
       },
       targetOrigin
     );
   });
+}
+
+export function openWhatsAppChatViaExtension(
+  phone?: string | null,
+  metadata?: { logId?: string; studentName?: string }
+): boolean {
+  if (typeof window === "undefined") return false;
+  if (!isExtensionActive()) return false;
+
+  try {
+    const mode = getStoredPreference("whatsapp_dispatch_mode");
+    if (mode === "native" || mode === "TAB") return false;
+  } catch {}
+
+  const rawDigits = (phone || "").replace(/\D/g, "");
+  const cleanPhone =
+    rawDigits.length === 10 || rawDigits.length === 11 ? `55${rawDigits}` : rawDigits;
+  const targetUrl =
+    cleanPhone.length >= 10
+      ? `https://web.whatsapp.com/send/?phone=${cleanPhone}`
+      : "https://web.whatsapp.com/";
+
+  const targetOrigin = window.location?.origin || "*";
+  window.postMessage(
+    {
+      type: "REDEATIVA_OPEN_WHATSAPP_CHAT",
+      url: targetUrl,
+      phone: cleanPhone || null,
+      logId: metadata?.logId || null,
+      studentName: metadata?.studentName || null,
+    },
+    targetOrigin
+  );
+  return true;
 }

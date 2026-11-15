@@ -1,5 +1,5 @@
 // whatsapp-content.js - Captura Assistida de Retornos e Confirmação Verificada de Envio (WhatsApp Web)
-// Versão 1.6.2 — Ciclo de vida idempotente, troca rápida SPA na mesma instância, proteção anti-microfone e verificação estrita de despacho
+// Versão 1.6.5 — Correlação @lid + nome do estudante + filtro de timestamp + transição SPA verificada
 
 if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   try {
@@ -8,7 +8,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 }
 
 (function () {
-  const EXTENSION_VERSION = "1.6.2";
+  const EXTENSION_VERSION = "1.6.5";
 
   let isInstanceDisposed = false;
   let dispatchGeneration = 0;
@@ -22,6 +22,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   let sendActionTriggered = false;
   let composeBoxHadTextBeforeSend = false;
   let userSwitchedChat = false;
+  let manualPaneSideClickEpoch = 0;
   let isCaptureInProgress = false;
 
   let dispatchObserver = null;
@@ -49,8 +50,57 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   let spaSwitchStartedAt = 0;
   let spaFallbackUrl = "";
   let spaFallbackTriggered = false;
+  let lastVerifiedSessionPhone = null;
+  let lastVerifiedSessionHeaderTitle = null;
+  const LID_PHONE_STORAGE_KEY = "redeativa_verified_lid_phone_map_v1";
+  const verifiedPhoneByLid = new Map();
   let expectedMessageText = "";
   let lastCapturedComposeText = "";
+  let pendingTabVerifiedPhone = null;
+  let pendingTabPhoneTimer = null;
+
+  function setPendingTabVerifiedPhone(phone, resetSwitch = false) {
+    const clean = typeof normalizePhoneDigits === "function"
+      ? normalizePhoneDigits(phone)
+      : String(phone || "").replace(/\D/g, "");
+    if (clean.length < 10) return;
+    pendingTabVerifiedPhone = clean;
+    if (resetSwitch) {
+      userSwitchedChat = false;
+    }
+    if (pendingTabPhoneTimer) {
+      clearTimeout(pendingTabPhoneTimer);
+      pendingTabPhoneTimer = null;
+    }
+    pendingTabPhoneTimer = scheduleTimeout(() => {
+      pendingTabVerifiedPhone = null;
+      pendingTabPhoneTimer = null;
+    }, 10 * 60 * 1000);
+  }
+
+  function clearPendingTabVerifiedPhone() {
+    pendingTabVerifiedPhone = null;
+    if (pendingTabPhoneTimer) {
+      clearTimeout(pendingTabPhoneTimer);
+      pendingTabPhoneTimer = null;
+    }
+  }
+
+  try {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      const rawMap = window.sessionStorage.getItem(LID_PHONE_STORAGE_KEY);
+      if (rawMap) {
+        const parsedMap = JSON.parse(rawMap);
+        if (parsedMap && typeof parsedMap === "object" && !Array.isArray(parsedMap)) {
+          for (const [lidKey, mappedPhone] of Object.entries(parsedMap)) {
+            if (typeof lidKey === "string" && lidKey.endsWith("@lid") && typeof mappedPhone === "string") {
+              verifiedPhoneByLid.set(lidKey, mappedPhone);
+            }
+          }
+        }
+      }
+    }
+  } catch {}
 
   const pendingTimeouts = new Set();
 
@@ -480,6 +530,183 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     return false;
   }
 
+  function checkStartingChatDialog() {
+    const root = document.getElementById("app") || document.body;
+    if (!root) return false;
+
+    const dialogs = root.querySelectorAll(
+      'div[role="dialog"], div[data-animate-modal-popup="true"]'
+    );
+    for (let i = 0; i < dialogs.length; i++) {
+      const rawText = (dialogs[i].textContent || "").toLowerCase();
+      if (!rawText) continue;
+      if (
+        rawText.includes("iniciando conversa") ||
+        rawText.includes("starting chat") ||
+        rawText.includes("procurando contato")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function extractExplicitHeaderPhone(mainEl) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return null;
+    const headerNodes = scope.querySelectorAll("header span[title], header span[dir='auto']");
+    for (let i = 0; i < headerNodes.length; i++) {
+      const candidate = (
+        headerNodes[i].getAttribute("title") ||
+        headerNodes[i].textContent ||
+        ""
+      ).trim();
+      if (!candidate || isPresenceOrSubtitleText(candidate)) continue;
+      if (!/^[+\d\s().-]+$/.test(candidate)) continue;
+      const digits = normalizePhoneDigits(candidate);
+      if (digits.length >= 10 && digits.length <= 15) {
+        return digits;
+      }
+    }
+    return null;
+  }
+
+  function formatWhatsAppSendPhone(rawPhone) {
+    const digits = normalizePhoneDigits(rawPhone);
+    if (!digits) return "";
+    if ((digits.length === 10 || digits.length === 11) && !digits.startsWith("55")) {
+      return "55" + digits;
+    }
+    return digits;
+  }
+
+  function isGroupChatInMain(mainEl) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return false;
+    const directId = scope.getAttribute("data-id") || "";
+    if (directId.includes("@g.us")) return true;
+    try {
+      const idNodes = scope.querySelectorAll("[data-id]");
+      for (let i = idNodes.length - 1; i >= 0; i--) {
+        const dataId = idNodes[i].getAttribute("data-id") || "";
+        if (dataId.includes("@g.us")) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function extractMainLid(mainEl) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return null;
+
+    const mainDataId = scope.getAttribute("data-id") || "";
+    const mainLidMatch = mainDataId.match(/(?:true_|false_)?(\d{8,25}@lid)/);
+    if (mainLidMatch && mainLidMatch[1]) {
+      return mainLidMatch[1];
+    }
+
+    const idNodes = scope.querySelectorAll("[data-id]");
+    for (let i = idNodes.length - 1; i >= 0; i--) {
+      const dataId = idNodes[i].getAttribute("data-id") || "";
+      const lidMatch = dataId.match(/(?:true_|false_)?(\d{8,25}@lid)/);
+      if (lidMatch && lidMatch[1]) {
+        return lidMatch[1];
+      }
+    }
+    return null;
+  }
+
+  function persistVerifiedLidMap() {
+    try {
+      if (typeof window === "undefined" || !window.sessionStorage) return;
+      while (verifiedPhoneByLid.size > 200) {
+        const firstKey = verifiedPhoneByLid.keys().next().value;
+        if (!firstKey) break;
+        verifiedPhoneByLid.delete(firstKey);
+      }
+      const obj = {};
+      verifiedPhoneByLid.forEach((val, key) => {
+        obj[key] = val;
+      });
+      window.sessionStorage.setItem(LID_PHONE_STORAGE_KEY, JSON.stringify(obj));
+    } catch {}
+  }
+
+  function recordVerifiedChatBinding(phone, mainEl, updateSession = true) {
+    const clean = normalizePhoneDigits(phone);
+    if (clean.length < 10) return;
+    const scope = mainEl || document.querySelector("#main");
+    if (scope && isGroupChatInMain(scope)) return;
+
+    if (updateSession && !userSwitchedChat && scope) {
+      const title = getHeaderTitle(scope);
+      if (title) {
+        lastVerifiedSessionPhone = clean;
+        lastVerifiedSessionHeaderTitle = title;
+      }
+    }
+
+    if (scope) {
+      const lid = extractMainLid(scope);
+      if (lid) {
+        if (verifiedPhoneByLid.has(lid)) {
+          verifiedPhoneByLid.delete(lid);
+        }
+        verifiedPhoneByLid.set(lid, clean);
+        persistVerifiedLidMap();
+      }
+    }
+  }
+
+  const GENERIC_STUDENT_TERMS = new Set([
+    "estudante",
+    "aluno",
+    "aluna",
+    "responsavel",
+  ]);
+
+  function normalizeStudentMatchText(text) {
+    return normalizeMessageText(text)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function hasMatchingOutgoingMessageInMain(mainEl, expectedOutgoingText, studentName) {
+    const scope = mainEl || document.querySelector("#main");
+    if (!scope) return false;
+    const hasExpectedText =
+      typeof expectedOutgoingText === "string" &&
+      normalizeMessageText(expectedOutgoingText).length >= 3;
+    const cleanStudentName =
+      typeof studentName === "string"
+        ? normalizeStudentMatchText(studentName).replace(/[^a-z0-9]+/g, " ").trim()
+        : "";
+    const paddedStudentName =
+      cleanStudentName.length >= 4 && !GENERIC_STUDENT_TERMS.has(cleanStudentName)
+        ? ` ${cleanStudentName} `
+        : "";
+    if (!hasExpectedText && !paddedStudentName) return false;
+
+    const bubbles = getOutgoingBubblesInMain(scope).slice(-12);
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const body = extractBubbleBodyText(bubbles[i]);
+      if (!body) continue;
+      if (hasExpectedText && isCompatibleDispatchText(body, expectedOutgoingText)) {
+        return true;
+      }
+      if (paddedStudentName) {
+        const cleanBody = normalizeStudentMatchText(body).replace(/[^a-z0-9]+/g, " ").trim();
+        if (` ${cleanBody} `.includes(paddedStudentName)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   function extractExplicitMainPhoneJid(mainEl) {
     const scope = mainEl || document.querySelector("#main");
     if (!scope) return null;
@@ -502,11 +729,16 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   }
 
   /**
-   * Extrai a correlação da conversa ativa no painel #main.
-   * Prioriza o cabeçalho visível da conversa (#main header) para detectar imediatamente
-   * trocas de conversa para outros números ou contatos nomeados.
+   * Extrai a correlação verificada da conversa ativa em #main sem permitir leitura cega de chats alheios.
+   * Ordem estrita: bloqueio de grupo (@g.us) -> dígitos no cabeçalho -> @c.us no #main ->
+   * mapa verificado @lid -> sessão/URL ativa sem troca -> comprovação por mensagem enviada.
    */
-  function extractActiveChatCorrelation() {
+  function extractActiveChatCorrelation(options = {}) {
+    const expectedPhone = options && typeof options.expectedPhone === "string" ? options.expectedPhone : null;
+    const expectedOutgoingText =
+      options && typeof options.expectedOutgoingText === "string" ? options.expectedOutgoingText : null;
+    const studentName =
+      options && typeof options.studentName === "string" ? options.studentName : null;
     let activeChatTitle = null;
     let phone = null;
 
@@ -514,44 +746,97 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       const mainEl = document.querySelector("#main");
       activeChatTitle = getHeaderTitle(mainEl);
 
-      // 1. Se o cabeçalho visível de #main contém dígitos de telefone, ele é a fonte primária da conversa aberta
+      if (mainEl && isGroupChatInMain(mainEl)) {
+        return { phone: null, activeChatTitle, isGroup: true };
+      }
+
+      // 1. Cabeçalho com dígitos visíveis de telefone (fonte primária da conversa aberta)
       if (activeChatTitle) {
         const titleDigits = normalizePhoneDigits(activeChatTitle);
         if (titleDigits.length >= 10 && titleDigits.length <= 15) {
           phone = titleDigits;
+          recordVerifiedChatBinding(phone, mainEl, false);
+          return { phone, activeChatTitle };
+        }
+      }
+      if (mainEl) {
+        const headerPhone = extractExplicitHeaderPhone(mainEl);
+        if (headerPhone) {
+          phone = headerPhone;
+          recordVerifiedChatBinding(phone, mainEl, false);
           return { phone, activeChatTitle };
         }
       }
 
-      // 2. Se #main possui cabeçalho com nome salvo (sem dígitos), verifica se o cabeçalho mudou
-      // desde a abertura do despacho ou se a usuária trocou de conversa na barra lateral
-      if (
-        userSwitchedChat ||
-        (activeChatTitle &&
-          initialVerifiedHeaderTitle &&
-          activeChatTitle !== initialVerifiedHeaderTitle)
-      ) {
-        return { phone: null, activeChatTitle };
-      }
-
-      // 3. Verifica data-id @c.us no próprio painel #main ou na última mensagem quando o título não contradiz a sessão
+      // 2. Identificador explícito @c.us dentro de #main (permite detectar inclusive CHAT_MISMATCH após troca de chat)
       if (mainEl) {
         const jidPhone = extractExplicitMainPhoneJid(mainEl);
         if (jidPhone) {
           phone = jidPhone;
+          recordVerifiedChatBinding(phone, mainEl, false);
           return { phone, activeChatTitle };
         }
       }
 
-      // 4. Fallback para o parâmetro phone da URL (/send?phone=...) apenas se o cabeçalho não trocou para outra conversa
-      if (!phone) {
-        const urlPhone = extractUrlIntendedPhone();
-        if (
-          urlPhone &&
-          (!activeChatTitle || !initialVerifiedHeaderTitle || activeChatTitle === initialVerifiedHeaderTitle)
-        ) {
-          phone = urlPhone;
+      // 3. Vínculo @lid <-> telefone previamente comprovado nesta sessão
+      if (mainEl) {
+        const currentLid = extractMainLid(mainEl);
+        if (currentLid && verifiedPhoneByLid.has(currentLid)) {
+          phone = verifiedPhoneByLid.get(currentLid);
+          return { phone, activeChatTitle, matchedBy: "LID_MAP" };
         }
+      }
+
+      // 4. Se #main possui cabeçalho nominal sem dígitos, só aproveita URL ?phone= ou sessão ativa
+      // quando a usuária não clicou em outro chat e o cabeçalho não divergiu do título verificado
+      const headerChangedFromDispatch = Boolean(
+        activeChatTitle && initialVerifiedHeaderTitle && activeChatTitle !== initialVerifiedHeaderTitle
+      );
+      if (!userSwitchedChat && !headerChangedFromDispatch) {
+        const urlPhone = extractUrlIntendedPhone();
+        if (urlPhone) {
+          phone = urlPhone;
+          recordVerifiedChatBinding(phone, mainEl, true);
+          return { phone, activeChatTitle, matchedBy: "URL_PARAM" };
+        }
+
+        if (
+          lastVerifiedSessionPhone &&
+          activeChatTitle &&
+          lastVerifiedSessionHeaderTitle &&
+          activeChatTitle === lastVerifiedSessionHeaderTitle
+        ) {
+          phone = lastVerifiedSessionPhone;
+          return { phone, activeChatTitle, matchedBy: "SESSION" };
+        }
+
+        const navPhone = normalizePhoneDigits(
+          (options && options.verifiedTabPhone) || pendingTabVerifiedPhone || ""
+        );
+        if (
+          navPhone.length >= 10 &&
+          mainEl &&
+          !isGroupChatInMain(mainEl) &&
+          !checkInvalidNumberDialog() &&
+          !checkStartingChatDialog()
+        ) {
+          phone = navPhone;
+          recordVerifiedChatBinding(phone, mainEl, true);
+          return { phone, activeChatTitle, matchedBy: "TAB_NAVIGATION" };
+        }
+      }
+
+      // 5. Comprovação positiva pelo texto da mensagem oficial enviada ou nome do estudante presente em #main
+      if (
+        expectedPhone &&
+        normalizePhoneDigits(expectedPhone).length >= 10 &&
+        (expectedOutgoingText || studentName) &&
+        mainEl &&
+        hasMatchingOutgoingMessageInMain(mainEl, expectedOutgoingText, studentName)
+      ) {
+        phone = normalizePhoneDigits(expectedPhone);
+        recordVerifiedChatBinding(phone, mainEl, true);
+        return { phone, activeChatTitle, matchedBy: "OUTGOING_MESSAGE" };
       }
     } catch {}
 
@@ -568,7 +853,9 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       return false;
     }
     const mainEl = document.querySelector("#main");
-    if (!mainEl) return false;
+    if (!mainEl || isGroupChatInMain(mainEl) || checkStartingChatDialog() || checkInvalidNumberDialog()) {
+      return false;
+    }
 
     const currentTitle = getHeaderTitle(mainEl);
     if (currentTitle) {
@@ -580,6 +867,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
         if (!initialVerifiedHeaderTitle) {
           initialVerifiedHeaderTitle = currentTitle;
         }
+        recordVerifiedChatBinding(activeDispatch.phone, mainEl, true);
         return true;
       }
 
@@ -596,6 +884,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       if (currentTitle && !initialVerifiedHeaderTitle) {
         initialVerifiedHeaderTitle = currentTitle;
       }
+      recordVerifiedChatBinding(activeDispatch.phone, mainEl, true);
       return true;
     }
 
@@ -607,6 +896,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       if (currentTitle && !initialVerifiedHeaderTitle) {
         initialVerifiedHeaderTitle = currentTitle;
       }
+      recordVerifiedChatBinding(activeDispatch.phone, mainEl, true);
       return true;
     }
 
@@ -614,6 +904,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     if (currentTitle && !initialVerifiedHeaderTitle) {
       initialVerifiedHeaderTitle = currentTitle;
     }
+    recordVerifiedChatBinding(activeDispatch.phone, mainEl, true);
     return true;
   }
 
@@ -887,6 +1178,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     stopDispatchMonitoring(outcome);
 
     if (outcome === "SENT") {
+      recordVerifiedChatBinding(dispatchSnapshot.phone, document.querySelector("#main"), true);
       createOrUpdateBanner(
         `✅ Mensagem enviada para ${dispatchSnapshot.studentName || dispatchSnapshot.phone}! Registrando na plataforma...`,
         "#059669"
@@ -1009,15 +1301,32 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   }
 
   function handleDocClick(e) {
-    if (isInstanceDisposed || !activeDispatch || hasReportedOutcome) return;
+    if (isInstanceDisposed) return;
     const target = e.target;
     if (!target || typeof target.closest !== "function") return;
     if (topBarContainer && topBarContainer.contains(target)) return;
 
+    // Rastreamento contínuo de troca de chat na barra lateral, mesmo após encerrar um despacho
     if (target.closest('#pane-side, [data-testid="chat-list"], [aria-label*="Lista de conversas"]')) {
       userSwitchedChat = true;
+      manualPaneSideClickEpoch++;
+      lastVerifiedSessionPhone = null;
+      lastVerifiedSessionHeaderTitle = null;
+      clearPendingTabVerifiedPhone();
+      try {
+        if (chrome?.runtime?.sendMessage) {
+          chrome.runtime.sendMessage(
+            { type: "LEOPOLDINA_CLEAR_TAB_VERIFIED_PHONE" },
+            () => {
+              void chrome?.runtime?.lastError;
+            }
+          );
+        }
+      } catch {}
       return;
     }
+
+    if (!activeDispatch || hasReportedOutcome) return;
 
     const sendBtn = target.closest(SEND_BUTTON_SELECTOR);
     if (sendBtn && !isVoiceOrMicButton(sendBtn) && isDispatchConversationVerified()) {
@@ -1148,8 +1457,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     return Boolean(
       document.querySelector("#side") ||
         document.querySelector("#pane-side") ||
-        document.querySelector('[data-testid="chat-list"]') ||
-        document.querySelector("#main")
+        document.querySelector('[data-testid="chat-list"]')
     );
   }
 
@@ -1191,6 +1499,17 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 
     if (titleChanged || (composeReady && (titleMatchesPhone || elapsed >= 150)) || elapsed >= 450) {
       spaSwitchPending = false;
+      if ((titleChanged || composeReady) && activeDispatch?.phone && !isGroupChatInMain(mainEl)) {
+        setPendingTabVerifiedPhone(activeDispatch.phone, false);
+        try {
+          chrome.runtime.sendMessage(
+            { type: "LEOPOLDINA_CONFIRM_TAB_VERIFIED_PHONE", phone: activeDispatch.phone },
+            () => {
+              void chrome?.runtime?.lastError;
+            }
+          );
+        } catch {}
+      }
       return true;
     }
 
@@ -1362,7 +1681,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
    * Extrai as últimas mensagens recebidas (message-in) da conversa atualmente aberta no WhatsApp Web,
    * ou o texto selecionado manualmente pela usuária.
    */
-  function extractIncomingMessagesFromDOM(expectedPhone) {
+  function extractIncomingMessagesFromDOM(expectedPhone, options = {}) {
     if (isInstanceDisposed) {
       return {
         success: false,
@@ -1379,8 +1698,31 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       };
     }
 
-    const chatCorrelation = extractActiveChatCorrelation();
+    const chatCorrelation = extractActiveChatCorrelation({
+      expectedPhone: typeof expectedPhone === "string" ? expectedPhone : null,
+      expectedOutgoingText:
+        options && typeof options.expectedOutgoingText === "string"
+          ? options.expectedOutgoingText
+          : null,
+      studentName:
+        options && typeof options.studentName === "string"
+          ? options.studentName
+          : null,
+      verifiedTabPhone:
+        options && typeof options.verifiedTabPhone === "string"
+          ? options.verifiedTabPhone
+          : null,
+    });
     const activeChatTitle = chatCorrelation.activeChatTitle;
+
+    if (chatCorrelation.isGroup) {
+      return {
+        success: false,
+        error: "CHAT_MISMATCH",
+        activeChatTitle,
+        message: "A conversa aberta é um grupo e não corresponde ao atendimento individual.",
+      };
+    }
 
     if (expectedPhone) {
       if (!chatCorrelation.phone) {
@@ -1492,6 +1834,9 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       }
 
       msgText = msgText.replace(/\n\d{1,2}:\d{2}\s*$/, "").trim();
+      if (/^\d{1,2}:\d{2}$/.test(msgText)) {
+        msgText = "";
+      }
 
       if (msgText && !extractedMessages.includes(msgText)) {
         extractedMessages.push(msgText);
@@ -1528,8 +1873,8 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     ensureTopBar();
 
     const chatCorrelation = extractActiveChatCorrelation();
-    if (!chatCorrelation.phone) {
-      createOrUpdateBanner("⚠️ Número da conversa indisponível. Use 'Extrair resposta' na plataforma ou copie o texto.", "#b45309");
+    if (chatCorrelation.isGroup) {
+      createOrUpdateBanner("⚠️ Grupos não podem ser vinculados a um atendimento individual.", "#b45309");
       return;
     }
 
@@ -1541,7 +1886,11 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     }
 
     chrome.runtime.sendMessage(
-      { type: "LEOPOLDINA_GET_CAPTURE_CONTEXT", phone: chatCorrelation.phone },
+      {
+        type: "LEOPOLDINA_GET_CAPTURE_CONTEXT",
+        phone: chatCorrelation.phone || null,
+        activeChatTitle: chatCorrelation.activeChatTitle || null,
+      },
       (ctx) => {
         if (isInstanceDisposed) {
           isCaptureInProgress = false;
@@ -1549,19 +1898,47 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
         }
         if (chrome.runtime.lastError || !ctx?.success) {
           isCaptureInProgress = false;
-          createOrUpdateBanner("⚠️ Abra 'Capturar Retorno' no atendimento correspondente na plataforma antes de enviar.", "#b45309");
+          createOrUpdateBanner(
+            ctx?.error === "AMBIGUOUS_OPERATION_CONTEXT"
+              ? "⚠️ Há mais de um modal de captura aberto. Use 'Extrair resposta' direto no modal desejado."
+              : "⚠️ Abra 'Capturar Retorno' no atendimento correspondente na plataforma antes de enviar.",
+            "#b45309"
+          );
           lastCaptureBtnHasSelection = null;
           syncCaptureButtonsState(true);
           return;
         }
 
-        const extraction = extractIncomingMessagesFromDOM(ctx.phone);
+        const extraction = extractIncomingMessagesFromDOM(ctx.phone, {
+          expectedOutgoingText: ctx.expectedOutgoingText || null,
+          studentName: ctx.studentName || null,
+          verifiedTabPhone: !userSwitchedChat && ctx.verifiedTabPhone ? ctx.verifiedTabPhone : null,
+        });
+
+        const canPushVerified =
+          extraction.success || extraction.error === "NO_INCOMING_MESSAGE";
+
+        if (!canPushVerified) {
+          isCaptureInProgress = false;
+          const warnMsg =
+            extraction.error === "CHAT_MISMATCH"
+              ? "⚠️ Esta conversa não corresponde ao atendimento aberto na plataforma. Envio bloqueado."
+              : extraction.error === "NUMBER_NOT_ON_WHATSAPP"
+              ? "⚠️ Número sem WhatsApp ativo."
+              : "⚠️ Não foi possível confirmar este contato no WhatsApp Web. Clique em 'Extrair resposta' no modal da plataforma.";
+          createOrUpdateBanner(warnMsg, "#b45309");
+          lastCaptureBtnHasSelection = null;
+          syncCaptureButtonsState(true);
+          return;
+        }
+
         chrome.runtime.sendMessage(
           {
             type: "LEOPOLDINA_PUSH_CAPTURED_REPLY",
             requestId: ctx.requestId,
             logId: ctx.logId,
             phone: ctx.phone,
+            studentName: ctx.studentName || null,
             rawText: extraction.rawText || "",
             selectionUsed: Boolean(extraction.selectionUsed),
             domTimestamp: extraction.domTimestamp || null,
@@ -1660,6 +2037,140 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       return true;
     }
 
+    if (request?.type === "LEOPOLDINA_SPA_OPEN_CHAT") {
+      ensureTopBar();
+      const targetUrl = typeof request.targetUrl === "string" ? request.targetUrl : "";
+      const openPhone = normalizePhoneDigits(request.phone || "");
+      const openStudentName =
+        typeof request.studentName === "string" ? request.studentName : null;
+      if (!isWhatsAppWebAppReadyForSpa() || !targetUrl) {
+        sendResponse({ accepted: false, reason: "WHATSAPP_NOT_READY" });
+        return true;
+      }
+
+      const mainBefore = document.querySelector("#main");
+      const hadMainBefore = Boolean(mainBefore);
+      const preNavTitle = mainBefore ? getHeaderTitle(mainBefore) : null;
+      const preNavLid = mainBefore ? extractMainLid(mainBefore) : null;
+      const startEpoch = manualPaneSideClickEpoch;
+
+      const existingCorrelation = mainBefore
+        ? extractActiveChatCorrelation({
+            expectedPhone: openPhone,
+            studentName: openStudentName,
+          })
+        : { phone: null };
+      if (
+        openPhone &&
+        existingCorrelation.phone &&
+        samePhone(existingCorrelation.phone, openPhone) &&
+        !isGroupChatInMain(mainBefore) &&
+        !checkInvalidNumberDialog()
+      ) {
+        setPendingTabVerifiedPhone(openPhone, true);
+        recordVerifiedChatBinding(openPhone, mainBefore, true);
+        try {
+          chrome.runtime.sendMessage(
+            { type: "LEOPOLDINA_CONFIRM_TAB_VERIFIED_PHONE", phone: openPhone },
+            () => {
+              void chrome?.runtime?.lastError;
+            }
+          );
+        } catch {}
+        sendResponse({ accepted: true, alreadyOpen: true, verified: true });
+        return true;
+      }
+
+      clearPendingTabVerifiedPhone();
+      lastVerifiedSessionPhone = null;
+      lastVerifiedSessionHeaderTitle = null;
+      initialVerifiedHeaderTitle = null;
+      userSwitchedChat = false;
+
+      const clicked = triggerInPageSpaNavigation(targetUrl);
+      if (!clicked) {
+        sendResponse({ accepted: false, reason: "SPA_CLICK_FAILED" });
+        return true;
+      }
+
+      if (openPhone.length >= 10) {
+        let responded = false;
+        const respondOnce = (payload) => {
+          if (responded) return;
+          responded = true;
+          try {
+            sendResponse(payload);
+          } catch {}
+        };
+        let openCheckCount = 0;
+        const maxOpenChecks = 4;
+        const pollOpenTransition = () => {
+          if (isInstanceDisposed || manualPaneSideClickEpoch !== startEpoch) {
+            respondOnce({ accepted: false, reason: "SPA_CANCELLED" });
+            return;
+          }
+          if (checkInvalidNumberDialog()) {
+            clearPendingTabVerifiedPhone();
+            respondOnce({ accepted: false, reason: "INVALID_NUMBER" });
+            return;
+          }
+          openCheckCount++;
+          const curMain = document.querySelector("#main");
+          if (curMain && !isGroupChatInMain(curMain) && !checkStartingChatDialog() && !checkInvalidNumberDialog()) {
+            const curTitle = getHeaderTitle(curMain);
+            const curLid = extractMainLid(curMain);
+            const didTransition = Boolean(
+              !hadMainBefore ||
+                (curTitle && curTitle !== preNavTitle) ||
+                (curLid && curLid !== preNavLid)
+            );
+            if (didTransition) {
+              let contradicts = false;
+              if (curTitle) {
+                const digits = normalizePhoneDigits(curTitle);
+                if (digits.length >= 10 && digits.length <= 15 && !samePhone(digits, openPhone)) {
+                  contradicts = true;
+                }
+              }
+              const hdrPhone = extractExplicitHeaderPhone(curMain);
+              if (hdrPhone && !samePhone(hdrPhone, openPhone)) contradicts = true;
+              const jidPhone = extractExplicitMainPhoneJid(curMain);
+              if (jidPhone && !samePhone(jidPhone, openPhone)) contradicts = true;
+              if (curLid && verifiedPhoneByLid.has(curLid)) {
+                const mapped = verifiedPhoneByLid.get(curLid);
+                if (mapped && !samePhone(mapped, openPhone)) contradicts = true;
+              }
+              if (!contradicts) {
+                setPendingTabVerifiedPhone(openPhone, true);
+                recordVerifiedChatBinding(openPhone, curMain, true);
+                try {
+                  chrome.runtime.sendMessage(
+                    { type: "LEOPOLDINA_CONFIRM_TAB_VERIFIED_PHONE", phone: openPhone },
+                    () => {
+                      void chrome?.runtime?.lastError;
+                    }
+                  );
+                } catch {}
+                respondOnce({ accepted: true, verified: true });
+                return;
+              }
+            }
+          }
+          if (openCheckCount < maxOpenChecks) {
+            scheduleTimeout(pollOpenTransition, 350);
+          } else {
+            clearPendingTabVerifiedPhone();
+            respondOnce({ accepted: false, reason: "SPA_NO_TRANSITION" });
+          }
+        };
+        scheduleTimeout(pollOpenTransition, 350);
+        return true;
+      }
+
+      sendResponse({ accepted: true, verified: false });
+      return true;
+    }
+
     if (request?.type === "LEOPOLDINA_CANCEL_DISPATCH") {
       if (!request.requestId || (activeDispatch && activeDispatch.requestId === request.requestId)) {
         stopDispatchMonitoring("CANCELLED");
@@ -1681,21 +2192,114 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       const requestId = request.requestId || null;
       const logId = request.logId || null;
       const expectedPhone = request.phone || null;
+      const studentName =
+        typeof request.studentName === "string" ? request.studentName : null;
+      const expectedOutgoingText =
+        typeof request.expectedOutgoingText === "string" ? request.expectedOutgoingText : null;
+      const verifiedTabPhone =
+        typeof request.verifiedTabPhone === "string" ? request.verifiedTabPhone : null;
+
+      if (verifiedTabPhone && !userSwitchedChat) {
+        setPendingTabVerifiedPhone(verifiedTabPhone, false);
+      }
 
       let attempts = 0;
       const maxAttempts = 6;
+      let spaNavAttempted = false;
+      let spaNavVerified = false;
+      let preNavTitle = null;
+      let preNavLid = null;
+      let hadMainBefore = false;
+      let navStartEpoch = manualPaneSideClickEpoch;
+
+      const tryCompleteSpaNavBinding = () => {
+        if (!spaNavAttempted || spaNavVerified || !expectedPhone) return;
+        if (manualPaneSideClickEpoch !== navStartEpoch) return;
+        if (checkInvalidNumberDialog() || checkStartingChatDialog()) return;
+        const curMain = document.querySelector("#main");
+        if (!curMain || isGroupChatInMain(curMain)) return;
+
+        const curTitle = getHeaderTitle(curMain);
+        const curLid = extractMainLid(curMain);
+        const didTransition = Boolean(
+          !hadMainBefore ||
+            (curTitle && curTitle !== preNavTitle) ||
+            (curLid && curLid !== preNavLid)
+        );
+        if (!didTransition) return;
+
+        // Garante que nenhuma fonte explícita do novo painel contradiga expectedPhone
+        if (curTitle) {
+          const titleDigits = normalizePhoneDigits(curTitle);
+          if (titleDigits.length >= 10 && titleDigits.length <= 15 && !samePhone(titleDigits, expectedPhone)) {
+            return;
+          }
+        }
+        const curHeaderPhone = extractExplicitHeaderPhone(curMain);
+        if (curHeaderPhone && !samePhone(curHeaderPhone, expectedPhone)) {
+          return;
+        }
+        const curJid = extractExplicitMainPhoneJid(curMain);
+        if (curJid && !samePhone(curJid, expectedPhone)) {
+          return;
+        }
+        if (curLid && verifiedPhoneByLid.has(curLid)) {
+          const mapped = verifiedPhoneByLid.get(curLid);
+          if (mapped && !samePhone(mapped, expectedPhone)) {
+            return;
+          }
+        }
+
+        spaNavVerified = true;
+        setPendingTabVerifiedPhone(expectedPhone, true);
+        recordVerifiedChatBinding(expectedPhone, curMain, true);
+      };
 
       const attemptExtract = () => {
         if (isInstanceDisposed) return;
         attempts++;
-        const result = extractIncomingMessagesFromDOM(expectedPhone);
+
+        tryCompleteSpaNavBinding();
+        let result = extractIncomingMessagesFromDOM(expectedPhone, {
+          expectedOutgoingText,
+          studentName,
+          verifiedTabPhone: !userSwitchedChat ? verifiedTabPhone : null,
+        });
+
+        const formattedTarget = formatWhatsAppSendPhone(expectedPhone);
+        const canTrySpaOpen = Boolean(
+          !spaNavAttempted &&
+            formattedTarget.length >= 10 &&
+            !result.success &&
+            isWhatsAppWebAppReadyForSpa() &&
+            !getSelectedWhatsAppText() &&
+            (result.error === "CHAT_PHONE_UNAVAILABLE" ||
+              result.error === "NO_ACTIVE_CHAT_PANEL" ||
+              result.error === "CHAT_MISMATCH")
+        );
+
+        let triggeredNavNow = false;
+        if (canTrySpaOpen) {
+          const mainBefore = document.querySelector("#main");
+          hadMainBefore = Boolean(mainBefore);
+          preNavTitle = mainBefore ? getHeaderTitle(mainBefore) : null;
+          preNavLid = mainBefore ? extractMainLid(mainBefore) : null;
+          navStartEpoch = manualPaneSideClickEpoch;
+          spaNavAttempted = true;
+          triggeredNavNow = triggerInPageSpaNavigation(
+            `https://web.whatsapp.com/send/?phone=${formattedTarget}`
+          );
+        }
 
         const shouldRetry =
           !result.success &&
           attempts < maxAttempts &&
-          (result.error === "NO_ACTIVE_CHAT_PANEL" ||
+          (triggeredNavNow ||
+            checkStartingChatDialog() ||
+            result.error === "NO_ACTIVE_CHAT_PANEL" ||
             result.error === "NO_INCOMING_MESSAGE" ||
-            result.error === "CHAT_PHONE_UNAVAILABLE");
+            result.error === "CHAT_PHONE_UNAVAILABLE" ||
+            (spaNavAttempted && !spaNavVerified && result.error === "CHAT_MISMATCH"));
 
         if (shouldRetry) {
           scheduleTimeout(attemptExtract, 550);
@@ -1716,6 +2320,12 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
           requestId,
           logId,
           phone: expectedPhone || result.phone || null,
+          ...(!result.success &&
+          spaNavAttempted &&
+          !spaNavVerified &&
+          formattedTarget.length >= 10
+            ? { spaNavNoTransition: true }
+            : {}),
         });
       };
 
@@ -1734,6 +2344,13 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
     observeRootContainer();
 
     const urlPhone = extractUrlIntendedPhone();
+    if (urlPhone) {
+      setPendingTabVerifiedPhone(urlPhone, true);
+      const mainNow = document.querySelector("#main");
+      if (mainNow && !isGroupChatInMain(mainNow) && !checkStartingChatDialog() && !checkInvalidNumberDialog()) {
+        recordVerifiedChatBinding(urlPhone, mainNow, true);
+      }
+    }
 
     chrome.runtime.sendMessage(
       {
@@ -1742,6 +2359,18 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
       },
       (res) => {
         if (isInstanceDisposed || chrome.runtime.lastError) return;
+        if (res?.verifiedTabPhone && !userSwitchedChat) {
+          setPendingTabVerifiedPhone(res.verifiedTabPhone, false);
+          const mainAfter = document.querySelector("#main");
+          if (mainAfter && !isGroupChatInMain(mainAfter) && !checkStartingChatDialog() && !checkInvalidNumberDialog()) {
+            const curTitle = getHeaderTitle(mainAfter);
+            const curDigits = curTitle ? normalizePhoneDigits(curTitle) : "";
+            const headerMatchesOrNominal = !curDigits || curDigits.length < 10 || samePhone(curDigits, res.verifiedTabPhone);
+            if (headerMatchesOrNominal) {
+              recordVerifiedChatBinding(res.verifiedTabPhone, mainAfter, true);
+            }
+          }
+        }
         const dispatch = res?.activeDispatch;
         if (!dispatch || !dispatch.requestId || !dispatch.logId) return;
 
@@ -1759,6 +2388,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   }
 
   window.__REDEATIVA_WA_CLEANUP__ = () => {
+    clearPendingTabVerifiedPhone();
     if (isInstanceDisposed) {
       stopDispatchMonitoring("CLEANUP");
       clearAllPendingTimeouts();

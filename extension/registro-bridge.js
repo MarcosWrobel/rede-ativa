@@ -25,8 +25,9 @@
       "busca-ativa-leopoldina.vercel.app",
     ]);
 
+    const EXTENSION_VERSION = "1.6.5";
     const REQUEST_TTL_MS = 20000;
-    const CAPTURE_CONTEXT_TTL_MS = 120000;
+    const CAPTURE_CONTEXT_TTL_MS = 15 * 60 * 1000;
     const pendingRequests = new Map();
     const activeCaptures = new Map();
     const activeDispatches = new Map();
@@ -89,6 +90,87 @@
       return;
     }
     const isLocalPage = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+    function normalizeBrazilianPhoneDigits(rawPhone) {
+      const digits = String(rawPhone || "").replace(/\D/g, "");
+      if (!digits) return "";
+      if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
+      return digits;
+    }
+
+    function parseWhatsAppTargetUrl(rawHref) {
+      try {
+        const parsed = new URL(String(rawHref || ""));
+        if (parsed.protocol !== "https:") return null;
+        const host = parsed.hostname.toLowerCase();
+        if (host !== "web.whatsapp.com" && host !== "wa.me" && host !== "api.whatsapp.com") {
+          return null;
+        }
+        let rawPhone = parsed.searchParams.get("phone") || "";
+        if (!rawPhone && host === "wa.me") {
+          const pathDigits = parsed.pathname.replace(/\//g, "").replace(/\D/g, "");
+          if (pathDigits.length >= 10) rawPhone = pathDigits;
+        }
+        const phone = normalizeBrazilianPhoneDigits(rawPhone);
+        if (!phone) {
+          return {
+            phone: "",
+            url: host === "web.whatsapp.com" ? parsed.toString() : "https://web.whatsapp.com/",
+          };
+        }
+        const canonical = new URL("https://web.whatsapp.com/send/");
+        canonical.searchParams.set("phone", phone);
+        const textParam = parsed.searchParams.get("text");
+        if (textParam) {
+          canonical.searchParams.set("text", textParam);
+        }
+        return { phone, url: canonical.toString() };
+      } catch {
+        return null;
+      }
+    }
+
+    function shouldUseCompactExtensionRouting() {
+      try {
+        if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+          const mode =
+            localStorage.getItem("redeativa_whatsapp_dispatch_mode") ??
+            localStorage.getItem("leopoldina_whatsapp_dispatch_mode");
+          if (mode === "native" || mode === "TAB") return false;
+        }
+      } catch {}
+      return true;
+    }
+
+    function sendOpenWhatsAppChat(target, metadata = {}) {
+      if (!chrome?.runtime?.sendMessage) return;
+      const sendWithReuse = (reuseTab) => {
+        try {
+          chrome.runtime.sendMessage(
+            {
+              type: "LEOPOLDINA_OPEN_WHATSAPP_CHAT",
+              url: target.url,
+              phone: target.phone || null,
+              studentName: typeof metadata.studentName === "string" ? metadata.studentName : null,
+              logId: typeof metadata.logId === "string" ? metadata.logId : null,
+              reuseTab,
+            },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {}
+      };
+      if (chrome?.storage?.local?.get) {
+        try {
+          chrome.storage.local.get(["opt_whatsapp_tab_reuse"], (res) => {
+            sendWithReuse(res?.opt_whatsapp_tab_reuse !== false);
+          });
+          return;
+        } catch {}
+      }
+      sendWithReuse(true);
+    }
     function traceLocal(stage) {
       if (!isLocalPage) return;
       try {
@@ -103,17 +185,8 @@
       delete window.__REDEATIVA_LAST_PUSHED_REPLY__;
     } catch {}
 
-    // 1. Marcação no DOM para detecção síncrona instantânea pela aplicação autorizada
-    if (document.documentElement) {
-      document.documentElement.dataset.redeativaExtension = "true";
-      document.documentElement.dataset.redeativaExtensionVersion = "1.6.2";
-      document.documentElement.dataset.leopoldinaExtension = "true";
-      document.documentElement.dataset.leopoldinaExtensionVersion = "1.6.2";
-    }
-
-    // 2. Anúncio via postMessage restrito à origem exata da página
     const readyPayload = {
-      version: "1.6.2",
+      version: EXTENSION_VERSION,
       capabilities: [
         "WHATSAPP_TAB_REUSE",
         "WHATSAPP_AUTO_SEND",
@@ -122,8 +195,127 @@
         "SERP_SCRAPER",
       ],
     };
-    window.postMessage({ type: "REDEATIVA_EXTENSION_READY", ...readyPayload }, pageOrigin);
-    window.postMessage({ type: "LEOPOLDINA_EXTENSION_READY", ...readyPayload }, pageOrigin);
+
+    function ensureExtensionMarkers() {
+      const root = typeof document !== "undefined" ? document.documentElement : null;
+      if (!root || !root.dataset) return false;
+      let changed = false;
+      if (root.dataset.redeativaExtension !== "true") {
+        root.dataset.redeativaExtension = "true";
+        changed = true;
+      }
+      if (root.dataset.redeativaExtensionVersion !== EXTENSION_VERSION) {
+        root.dataset.redeativaExtensionVersion = EXTENSION_VERSION;
+        changed = true;
+      }
+      if (root.dataset.leopoldinaExtension !== "true") {
+        root.dataset.leopoldinaExtension = "true";
+        changed = true;
+      }
+      if (root.dataset.leopoldinaExtensionVersion !== EXTENSION_VERSION) {
+        root.dataset.leopoldinaExtensionVersion = EXTENSION_VERSION;
+        changed = true;
+      }
+      return changed;
+    }
+
+    function announceExtensionReady() {
+      if (isBridgeDisposed) return;
+      ensureExtensionMarkers();
+      try {
+        window.postMessage({ type: "REDEATIVA_EXTENSION_READY", ...readyPayload }, pageOrigin);
+        window.postMessage({ type: "LEOPOLDINA_EXTENSION_READY", ...readyPayload }, pageOrigin);
+      } catch {}
+    }
+
+    function inferStudentNameFromOpenDialog() {
+      try {
+        if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") {
+          return null;
+        }
+        const dialogs = document.querySelectorAll("dialog[open], [role='dialog']");
+        for (const dialog of dialogs) {
+          if (!dialog || typeof dialog.querySelector !== "function") continue;
+          const explicitAttr = dialog
+            .querySelector("[data-student-name]")
+            ?.getAttribute?.("data-student-name");
+          if (typeof explicitAttr === "string" && explicitAttr.trim().length >= 3) {
+            return explicitAttr.trim();
+          }
+
+          const headingEl = dialog.querySelector("h1, h2, h3");
+          const headingText = String(headingEl?.textContent || "").trim();
+          if (!/capturar\s+retorno/i.test(headingText)) {
+            continue;
+          }
+
+          const subtitleEl =
+            headingEl?.parentElement?.querySelector?.("p") ||
+            dialog.querySelector("header p, h1 + p, h2 + p, h3 + p");
+          const rawSubtitle = String(subtitleEl?.textContent || "").trim();
+          if (!rawSubtitle) continue;
+
+          const candidate = rawSubtitle.split(/\s*[•|·]\s*/)[0].trim();
+          if (
+            candidate.length >= 3 &&
+            !/capturar\s+retorno/i.test(candidate) &&
+            !/^(responda|clique|cole|selecione|a leitura)\b/i.test(candidate)
+          ) {
+            return candidate;
+          }
+        }
+      } catch {}
+      return null;
+    }
+
+    // 1 e 2. Marcação no DOM + anúncio postMessage no início e após hidratação do Next.js/React
+    announceExtensionReady();
+
+    const hydrationTimerIds = [];
+    if (typeof setTimeout === "function") {
+      for (const delayMs of [120, 450, 1200, 2500]) {
+        const timerId = setTimeout(() => {
+          announceExtensionReady();
+        }, delayMs);
+        hydrationTimerIds.push(timerId);
+      }
+    }
+
+    const handleDomContentLoaded = () => announceExtensionReady();
+    const handleWindowLoad = () => announceExtensionReady();
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("DOMContentLoaded", handleDomContentLoaded);
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("load", handleWindowLoad);
+    }
+
+    let rootDatasetObserver = null;
+    if (
+      typeof MutationObserver === "function" &&
+      typeof document !== "undefined" &&
+      document.documentElement
+    ) {
+      try {
+        rootDatasetObserver = new MutationObserver(() => {
+          if (isBridgeDisposed) return;
+          if (ensureExtensionMarkers()) {
+            announceExtensionReady();
+          }
+        });
+        rootDatasetObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: [
+            "data-redeativa-extension",
+            "data-redeativa-extension-version",
+            "data-leopoldina-extension",
+            "data-leopoldina-extension-version",
+          ],
+        });
+      } catch {
+        rootDatasetObserver = null;
+      }
+    }
 
     // 3. Escuta eventos emitidos pela aplicação Rede Ativa na mesma janela e origem autorizada
     const handleWindowMessage = (event) => {
@@ -134,6 +326,14 @@
       if (!isTrustedSyncOrigin(event.origin)) return;
 
       const data = event.data;
+
+      if (
+        data.type === "REDEATIVA_PING_EXTENSION" ||
+        data.type === "LEOPOLDINA_PING_EXTENSION"
+      ) {
+        announceExtensionReady();
+        return;
+      }
 
       // 3.0 Registro de contexto de captura ativa (exige requestId + logId explícitos e não consumidos)
       if (
@@ -149,11 +349,17 @@
         if (!requestId || !logId) return;
         if (consumedRequestIds.has(requestId) || activeCaptures.has(requestId)) return;
 
+        const resolvedStudentName =
+          typeof data.studentName === "string" && data.studentName.trim()
+            ? data.studentName.trim()
+            : inferStudentNameFromOpenDialog();
+
         const now = Date.now();
         activeCaptures.set(requestId, {
           requestId,
           logId,
           phone: data.phone || null,
+          studentName: resolvedStudentName || null,
           createdAt: now,
           expiresAt: now + CAPTURE_CONTEXT_TTL_MS,
         });
@@ -165,7 +371,11 @@
               requestId,
               logId,
               phone: data.phone || null,
-              studentName: data.studentName || null,
+              studentName: resolvedStudentName || null,
+              expectedOutgoingText:
+                typeof data.expectedOutgoingText === "string"
+                  ? data.expectedOutgoingText
+                  : null,
             },
             () => {
               void chrome.runtime.lastError;
@@ -190,6 +400,11 @@
         if (!requestId || !logId) return;
         if (consumedRequestIds.has(requestId) || pendingRequests.has(requestId)) return;
 
+        const resolvedStudentName =
+          typeof data.studentName === "string" && data.studentName.trim()
+            ? data.studentName.trim()
+            : inferStudentNameFromOpenDialog();
+
         const now = Date.now();
         pendingRequests.set(requestId, {
           requestId,
@@ -205,7 +420,10 @@
             requestId,
             logId,
             phone: data.phone,
-            studentName: data.studentName,
+            studentName: resolvedStudentName || null,
+            ...(typeof data.expectedOutgoingText === "string" && data.expectedOutgoingText.trim()
+              ? { expectedOutgoingText: data.expectedOutgoingText }
+              : {}),
             diagnostics: isLocalPage && data.diagnostics === true,
           },
           (response) => {
@@ -370,6 +588,32 @@
         return;
       }
 
+      // 3.3b Abertura direta de conversa no modo compacto via extensão (ex.: modal de retorno)
+      if (
+        data.type === "REDEATIVA_OPEN_WHATSAPP_CHAT" ||
+        data.type === "LEOPOLDINA_OPEN_WHATSAPP_CHAT"
+      ) {
+        let target = null;
+        if (typeof data.url === "string" && data.url.trim()) {
+          target = parseWhatsAppTargetUrl(data.url.trim());
+        } else if (typeof data.phone === "string" && data.phone.trim()) {
+          const phone = normalizeBrazilianPhoneDigits(data.phone);
+          target = phone
+            ? { phone, url: `https://web.whatsapp.com/send/?phone=${phone}` }
+            : { phone: "", url: "https://web.whatsapp.com/" };
+        }
+        if (!target) return;
+        const resolvedStudentName =
+          typeof data.studentName === "string" && data.studentName.trim()
+            ? data.studentName.trim()
+            : inferStudentNameFromOpenDialog();
+        sendOpenWhatsAppChat(target, {
+          studentName: resolvedStudentName || null,
+          logId: data.logId,
+        });
+        return;
+      }
+
       // 3.4 Consulta legada ao último retorno: limpa estado residual sem reenviar cache antigo
       if (
         data.type === "REDEATIVA_GET_LAST_CAPTURED_REPLY" ||
@@ -384,8 +628,35 @@
     };
     window.addEventListener("message", handleWindowMessage);
 
+    let lastClickOpenUrl = "";
+    let lastClickOpenAt = 0;
+    const handleDocumentClick = (event) => {
+      if (isBridgeDisposed || !event || event.defaultPrevented) return;
+      if (typeof event.button === "number" && event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target?.closest?.("a[href]");
+      if (!anchor || anchor.hasAttribute("download")) return;
+      if (anchor.dataset?.redeativaExtLink === "true") return;
+      if (!shouldUseCompactExtensionRouting()) return;
+      const href = anchor.getAttribute("href");
+      const target = parseWhatsAppTargetUrl(href);
+      if (!target) return;
+
+      event.preventDefault();
+      const now = Date.now();
+      if (target.url === lastClickOpenUrl && now - lastClickOpenAt < 300) {
+        return;
+      }
+      lastClickOpenUrl = target.url;
+      lastClickOpenAt = now;
+      sendOpenWhatsAppChat(target);
+    };
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("click", handleDocumentClick, true);
+    }
+
     // 4. Escuta mensagens direcionadas pelo Background Service Worker exclusivamente a esta aba
-    const handleRuntimeMessage = (message, sender) => {
+    const handleRuntimeMessage = (message, sender, sendResponse) => {
       if (isBridgeDisposed) return;
       if (sender?.id && chrome?.runtime?.id && sender.id !== chrome.runtime.id) {
         return;
@@ -396,6 +667,16 @@
       }
 
       pruneExpiredState();
+
+      if (message?.type === "LEOPOLDINA_BRIDGE_PING") {
+        announceExtensionReady();
+        if (typeof sendResponse === "function") {
+          try {
+            sendResponse({ alive: true, version: EXTENSION_VERSION });
+          } catch {}
+        }
+        return;
+      }
 
       if (message?.type === "REDEATIVA_EXTENSION_DIAGNOSTIC" && isLocalPage && [
         "background.send.registered", "background.send.opening", "background.send.opened", "background.send.error",
@@ -480,7 +761,28 @@
     window.__REDEATIVA_BRIDGE_CLEANUP__ = () => {
       if (isBridgeDisposed) return;
       isBridgeDisposed = true;
-      window.removeEventListener("message", handleWindowMessage);
+      for (const timerId of hydrationTimerIds) {
+        try {
+          if (typeof clearTimeout === "function") {
+            clearTimeout(timerId);
+          }
+        } catch {}
+      }
+      hydrationTimerIds.length = 0;
+      if (rootDatasetObserver && typeof rootDatasetObserver.disconnect === "function") {
+        try {
+          rootDatasetObserver.disconnect();
+        } catch {}
+      }
+      rootDatasetObserver = null;
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("message", handleWindowMessage);
+        window.removeEventListener("load", handleWindowLoad);
+      }
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("click", handleDocumentClick, true);
+        document.removeEventListener("DOMContentLoaded", handleDomContentLoaded);
+      }
       if (chrome?.runtime?.onMessage?.removeListener) {
         try {
           chrome.runtime.onMessage.removeListener(handleRuntimeMessage);

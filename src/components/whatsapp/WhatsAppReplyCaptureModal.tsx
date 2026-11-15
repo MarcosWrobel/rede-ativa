@@ -6,6 +6,7 @@ import {
   createExtensionRequestId,
   extractWhatsAppReplyViaExtension,
   isExtensionActive,
+  openWhatsAppChatViaExtension,
 } from "@/lib/clientDispatcher";
 import { getStoredPreference } from "@/lib/storageKeys";
 import {
@@ -483,7 +484,13 @@ function WhatsAppReplyCaptureModalContent({
       });
 
       try {
-        const res = await extractWhatsAppReplyViaExtension(logId, phoneUsed, targetStudentName);
+        const res = await extractWhatsAppReplyViaExtension(
+          logId,
+          phoneUsed,
+          targetStudentName,
+          15000,
+          messageLog?.messageContent
+        );
         if (!isMountedRef.current) return;
         await applyExtractionPayload(res, phoneUsed);
       } catch (err: unknown) {
@@ -505,7 +512,7 @@ function WhatsAppReplyCaptureModalContent({
         }
       }
     },
-    [applyExtractionPayload]
+    [applyExtractionPayload, messageLog?.messageContent]
   );
 
   // Inicializa o modal sempre limpo e escuta apenas capturas ao vivo disparadas enquanto este modal estiver aberto
@@ -525,6 +532,8 @@ function WhatsAppReplyCaptureModalContent({
           requestId: captureRequestId,
           logId: messageLog.id,
           phone: messageLog.phoneUsed,
+          studentName: resolvedStudentName,
+          expectedOutgoingText: messageLog.messageContent || undefined,
         },
         targetOrigin
       );
@@ -726,6 +735,17 @@ function WhatsAppReplyCaptureModalContent({
                 }
                 target="_blank"
                 rel="noopener noreferrer"
+                data-redeativa-ext-link="true"
+                onClick={(e) => {
+                  if (
+                    openWhatsAppChatViaExtension(messageLog.phoneUsed, {
+                      logId: messageLog.id,
+                      studentName,
+                    })
+                  ) {
+                    e.preventDefault();
+                  }
+                }}
                 aria-label="Abrir Conversa"
                 className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 font-semibold transition"
                 title="Abrir a conversa deste aluno no WhatsApp Web"
@@ -804,6 +824,17 @@ function WhatsAppReplyCaptureModalContent({
                     }
                     target="_blank"
                     rel="noopener noreferrer"
+                    data-redeativa-ext-link="true"
+                    onClick={(e) => {
+                      if (
+                        openWhatsAppChatViaExtension(messageLog.phoneUsed, {
+                          logId: messageLog.id,
+                          studentName,
+                        })
+                      ) {
+                        e.preventDefault();
+                      }
+                    }}
                     className="font-bold underline text-amber-900 dark:text-amber-200 hover:text-amber-950 flex items-center space-x-1"
                   >
                     <span>Abrir WhatsApp</span>

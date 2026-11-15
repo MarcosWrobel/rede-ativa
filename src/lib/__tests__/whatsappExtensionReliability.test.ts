@@ -699,7 +699,7 @@ function createWhatsAppContentHarness(options?: {
   };
 }
 
-describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.2)", () => {
+describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.5)", () => {
   it("1. Reinjeção 1x, 5x e 10x de whatsapp-content.js não acumula listeners, timers, observers nem barras duplicadas", () => {
     const h = createWhatsAppContentHarness();
 
@@ -717,7 +717,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     const pingResponses = h.sendRuntimeToContent({ type: "LEOPOLDINA_PING" });
     expect(pingResponses).toHaveLength(1);
-    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.2" });
+    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.5" });
   });
 
   it("2. __REDEATIVA_WA_CLEANUP__ remove todos os listeners, cancela timers pendentes e impede confirmação posterior", () => {
@@ -1211,7 +1211,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     expect(winListeners).toHaveLength(1);
     expect(runtimeListeners).toHaveLength(1);
-    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.2");
+    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.5");
   });
 
   it("12. WhatsAppDispatchToggle e BuscaAtivaClient removem todos os listeners e timers no cleanup de useEffect", () => {
@@ -1230,9 +1230,9 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(buscaAtivaSource).toContain("if (toastTimer) clearTimeout(toastTimer)");
   });
 
-  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.2 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
+  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.5 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
-    expect(manifest.version).toBe("1.6.2");
+    expect(manifest.version).toBe("1.6.5");
     expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version);
 
     expect(fs.existsSync(ZIP_REDE_ATIVA_PATH)).toBe(true);
@@ -1741,5 +1741,794 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     );
     expect(sentOutcome).toBeDefined();
     expect(sentOutcome.outcome).toBe("SENT");
+  });
+
+  it("19. Extração em contato salvo (@lid + URL limpa) funciona via comprovação de texto/vínculo @lid/navegação SPA e bloqueia rigorosamente grupos ou conversas alheias (zero vazamento)", () => {
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      outgoingCount: 0,
+      incomingCount: 0,
+    });
+    h.headerSpan.attributes.delete("title");
+    h.headerSpan.title = "";
+    h.headerSpan.setAttribute("dir", "auto");
+    h.headerSpan.textContent = "Mãe do João";
+
+    // Bolhas reais com identificador @lid (sem @c.us)
+    const sentMsg = h.doc.createElement("div");
+    sentMsg.setAttribute("data-id", "true_192837465001@lid_3EB0OUT1");
+    sentMsg.className = "message-out";
+    const sentSpan = h.doc.createElement("span");
+    sentSpan.className = "selectable-text copyable-text";
+    sentSpan.textContent = "Olá, notamos 3 faltas consecutivas de João.";
+    sentMsg.appendChild(sentSpan);
+    h.chatMessages.appendChild(sentMsg);
+
+    const incomingMsg = h.doc.createElement("div");
+    incomingMsg.setAttribute("data-id", "false_192837465001@lid_3EB0IN1");
+    incomingMsg.className = "message-in";
+    const inSpan = h.doc.createElement("span");
+    inSpan.className = "selectable-text copyable-text";
+    inSpan.textContent = "Ele estava com febre hoje.";
+    incomingMsg.appendChild(inSpan);
+    h.chatMessages.appendChild(incomingMsg);
+
+    h.injectScript();
+
+    // 1) Grupo (@g.us) no #main é bloqueado imediatamente com CHAT_MISMATCH
+    const groupMarker = h.doc.createElement("div");
+    groupMarker.setAttribute("data-id", "false_120363000111222@g.us_3EB0GRP");
+    h.chatMessages.appendChild(groupMarker);
+
+    const groupResponses: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-ext-grp",
+        logId: "log-ext-grp",
+        phone: "5542999991111",
+        expectedOutgoingText: "Olá, notamos 3 faltas consecutivas de João.",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => groupResponses.push(r)
+    );
+    h.advanceTime(4000);
+    expect(groupResponses[0].success).toBe(false);
+    expect(groupResponses[0].error).toBe("CHAT_MISMATCH");
+    groupMarker.remove();
+
+    // 2) Conversa individual nominal (@lid) sem expectedOutgoingText e sem vínculo prévio -> bloqueada (zero vazamento)
+    const unverifiedResponses: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-ext-unverified",
+        logId: "log-ext-unverified",
+        phone: "5542999991111",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => unverifiedResponses.push(r)
+    );
+    h.advanceTime(4000);
+    expect(unverifiedResponses[0].success).toBe(false);
+    expect(unverifiedResponses[0].error).toBe("CHAT_PHONE_UNAVAILABLE");
+
+    // 3) Com expectedOutgoingText compatível -> confirma o contato @lid e extrai a resposta
+    const verifiedResponses: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-ext-verified",
+        logId: "log-ext-verified",
+        phone: "5542999991111",
+        expectedOutgoingText: "Olá, notamos 3 faltas consecutivas de João.",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => verifiedResponses.push(r)
+    );
+    expect(verifiedResponses[0]).toMatchObject({
+      success: true,
+      requestId: "req-ext-verified",
+      logId: "log-ext-verified",
+      activeChatTitle: "Mãe do João",
+    });
+    expect(verifiedResponses[0].rawText).toContain("Ele estava com febre hoje.");
+
+    // 4) Agora @lid 192837465001@lid já está vinculado a 5542999991111: tentar extrair OUTRO aluno nele retorna CHAT_MISMATCH!
+    const crossStudentResponses: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-ext-other",
+        logId: "log-ext-other",
+        phone: "5542988887777",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => crossStudentResponses.push(r)
+    );
+    h.advanceTime(4000);
+    expect(crossStudentResponses[0].success).toBe(false);
+    expect(crossStudentResponses[0].error).toBe("CHAT_MISMATCH");
+
+    // 5) Navegação SPA silenciosa na extração quando outra conversa pessoal está aberta: transiciona #main e extrai sem text= na URL
+    const appEl = h.doc.getElementById("app")!;
+    const sideEl = h.doc.createElement("div");
+    sideEl.id = "side";
+    appEl.appendChild(sideEl);
+
+    h.headerSpan.textContent = "Contato Pessoal Qualquer";
+    sentMsg.setAttribute("data-id", "true_999000888777@lid_3EB0PERS");
+    sentSpan.textContent = "Conversa pessoal privada";
+    incomingMsg.setAttribute("data-id", "false_999000888777@lid_3EB0PERSIN");
+    inSpan.textContent = "Assunto privado que não pode vazar";
+
+    const spaLinksClicked: string[] = [];
+    const origCreate = h.doc.createElement.bind(h.doc);
+    h.doc.createElement = ((tag: string) => {
+      const el = origCreate(tag);
+      if (tag.toLowerCase() === "a") {
+        (el as any).click = () => {
+          spaLinksClicked.push((el as any).href || "");
+          // Simula transição do #main para o chat da Responsável 3 após clique SPA
+          h.headerSpan.textContent = "Responsável Maria Lote";
+          sentMsg.setAttribute("data-id", "true_777666555444@lid_3EB0R3");
+          sentSpan.textContent = "Mensagem oficial escola";
+          incomingMsg.setAttribute("data-id", "false_777666555444@lid_3EB0R3IN");
+          inSpan.textContent = "Recebido, obrigada!";
+        };
+      }
+      return el;
+    }) as any;
+
+    const spaResponses: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-ext-spa-3",
+        logId: "log-ext-spa-3",
+        phone: "5542977776666",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => spaResponses.push(r)
+    );
+    h.advanceTime(650);
+
+    expect(spaLinksClicked).toEqual(["https://web.whatsapp.com/send/?phone=5542977776666"]);
+    expect(spaResponses[0].success).toBe(true);
+    expect(spaResponses[0].rawText).toContain("Recebido, obrigada!");
+  });
+
+  it("20. Botão 'Capturar Retorno' na barra do WhatsApp Web em contato @lid exige confirmação pelo contexto único e bloqueia se a conversa aberta for alheia", async () => {
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      outgoingCount: 0,
+      incomingCount: 0,
+      initialCaptureCtx: {
+        requestId: "req-cap-lid-1",
+        logId: "log-cap-lid-1",
+        phone: "5542999995555",
+        expectedOutgoingText: "Comunicado Busca Ativa Escolar",
+      },
+    });
+    h.headerSpan.attributes.delete("title");
+    h.headerSpan.title = "";
+    h.headerSpan.textContent = "Pai do Lucas";
+
+    const outEl = h.doc.createElement("div");
+    outEl.setAttribute("data-id", "true_555444333222@lid_3EB0OUT");
+    outEl.className = "message-out";
+    const outSpan = h.doc.createElement("span");
+    outSpan.textContent = "Mensagem pessoal completamente diferente";
+    outEl.appendChild(outSpan);
+    h.chatMessages.appendChild(outEl);
+
+    const inEl = h.doc.createElement("div");
+    inEl.setAttribute("data-id", "false_555444333222@lid_3EB0IN");
+    inEl.className = "message-in";
+    const inSpan = h.doc.createElement("span");
+    inSpan.textContent = "Dado pessoal privado";
+    inEl.appendChild(inSpan);
+    h.chatMessages.appendChild(inEl);
+
+    h.injectScript();
+
+    // 1) Conversa aberta não bate com expectedOutgoingText nem @lid -> bloqueia PUSH (zero vazamento)
+    h.sendRuntimeToContent({ type: "LEOPOLDINA_TRIGGER_HUMAN_CAPTURE" });
+    expect(
+      h.sentRuntimeMessages.filter((m) => m.type === "LEOPOLDINA_PUSH_CAPTURED_REPLY")
+    ).toHaveLength(0);
+
+    // 2) Na conversa correta contendo a mensagem enviada do atendimento -> envia PUSH com sucesso
+    outSpan.textContent = "Comunicado Busca Ativa Escolar";
+    inSpan.textContent = "Sim, iremos conversar com o Lucas.";
+
+    h.sendRuntimeToContent({ type: "LEOPOLDINA_TRIGGER_HUMAN_CAPTURE" });
+    const pushes = h.sentRuntimeMessages.filter(
+      (m) => m.type === "LEOPOLDINA_PUSH_CAPTURED_REPLY"
+    );
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]).toMatchObject({
+      requestId: "req-cap-lid-1",
+      logId: "log-cap-lid-1",
+      phone: "5542999995555",
+    });
+    expect(pushes[0].rawText).toContain("Sim, iremos conversar com o Lucas.");
+  });
+
+  it("21. registro-bridge.js intercepta links do WhatsApp com DDI 55 em janela compacta e respeita modo native", () => {
+    const bridgeCode = fs.readFileSync(
+      path.join(ROOT_DIR, "extension/registro-bridge.js"),
+      "utf8"
+    );
+
+    const winListeners: Record<string, any[]> = {};
+    const docListeners: Record<string, any[]> = {};
+    const sentToBg: any[] = [];
+    let currentDispatchMode: string | null = null;
+
+    const chromeMock: any = {
+      runtime: {
+        id: "ext-rede-ativa-test",
+        lastError: null,
+        sendMessage: (msg: any, cb?: (res: any) => void) => {
+          sentToBg.push(msg);
+          if (cb) cb({ success: true });
+        },
+        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      storage: {
+        local: {
+          get: (_keys: string[], cb: (res: any) => void) => cb({ opt_whatsapp_tab_reuse: true }),
+        },
+      },
+    };
+
+    const sandbox: any = {
+      window: {
+        location: { origin: "https://www.redeativa.app.br", hostname: "www.redeativa.app.br" },
+        addEventListener: (ev: string, fn: any) => {
+          (winListeners[ev] ||= []).push(fn);
+        },
+        removeEventListener: (ev: string, fn: any) => {
+          winListeners[ev] = (winListeners[ev] || []).filter((f) => f !== fn);
+        },
+        postMessage: vi.fn(),
+      },
+      document: {
+        documentElement: { dataset: {} },
+        addEventListener: (ev: string, fn: any) => {
+          (docListeners[ev] ||= []).push(fn);
+        },
+        removeEventListener: (ev: string, fn: any) => {
+          docListeners[ev] = (docListeners[ev] || []).filter((f) => f !== fn);
+        },
+      },
+      localStorage: {
+        getItem: (key: string) =>
+          key === "redeativa_whatsapp_dispatch_mode" ? currentDispatchMode : null,
+      },
+      sessionStorage: { removeItem: vi.fn(), getItem: vi.fn() },
+      chrome: chromeMock,
+      URL,
+      Set,
+      Map,
+      Date,
+      Math,
+      setTimeout,
+      clearTimeout,
+      console: { warn: () => {}, error: () => {}, log: () => {} },
+    };
+
+    vm.runInNewContext(bridgeCode, sandbox, { filename: "registro-bridge.js" });
+    expect(docListeners.click).toHaveLength(1);
+
+    const makeAnchorClick = (href: string) => {
+      let prevented = false;
+      const anchor = {
+        dataset: {},
+        hasAttribute: () => false,
+        getAttribute: (name: string) => (name === "href" ? href : null),
+      };
+      const ev = {
+        defaultPrevented: false,
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        preventDefault: () => {
+          prevented = true;
+          ev.defaultPrevented = true;
+        },
+        target: {
+          closest: (sel: string) => (sel === "a[href]" ? anchor : null),
+        },
+      };
+      docListeners.click[0](ev);
+      return prevented;
+    };
+
+    // 1) Clique padrão em link sem DDI 55 -> intercepta e normaliza 5542999998888
+    expect(makeAnchorClick("https://web.whatsapp.com/send?phone=42999998888")).toBe(true);
+    expect(sentToBg).toHaveLength(1);
+    expect(sentToBg[0]).toMatchObject({
+      type: "LEOPOLDINA_OPEN_WHATSAPP_CHAT",
+      url: "https://web.whatsapp.com/send/?phone=5542999998888",
+      phone: "5542999998888",
+    });
+
+    // 2) Clique em wa.me -> também normaliza e roteia via extensão
+    expect(makeAnchorClick("https://wa.me/42991112222")).toBe(true);
+    expect(sentToBg).toHaveLength(2);
+    expect(sentToBg[1]).toMatchObject({
+      type: "LEOPOLDINA_OPEN_WHATSAPP_CHAT",
+      url: "https://web.whatsapp.com/send/?phone=5542991112222",
+      phone: "5542991112222",
+    });
+
+    // 3) Quando modo local está em "native", não intercepta clique
+    currentDispatchMode = "native";
+    expect(makeAnchorClick("https://web.whatsapp.com/send?phone=42988887777")).toBe(false);
+    expect(sentToBg).toHaveLength(2);
+
+    // 4) Cleanup remove o listener de clique
+    sandbox.window.__REDEATIVA_BRIDGE_CLEANUP__();
+    expect(docListeners.click).toHaveLength(0);
+  });
+
+  it("22. Bloqueia vinculação de @lid sem transição SPA (!didTransition), sinaliza spaNavNoTransition, aceita verifiedTabPhone e limpa ao clicar em #pane-side", () => {
+    const h = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      outgoingCount: 0,
+      incomingCount: 0,
+    });
+    const appEl = h.doc.getElementById("app")!;
+    const sideEl = h.doc.createElement("div");
+    sideEl.id = "side";
+    appEl.appendChild(sideEl);
+
+    const paneSide = h.doc.createElement("div");
+    paneSide.id = "pane-side";
+    appEl.appendChild(paneSide);
+
+    h.headerSpan.attributes.delete("title");
+    h.headerSpan.title = "";
+    h.headerSpan.textContent = "Conversa Alheia";
+
+    const inEl = h.doc.createElement("div");
+    inEl.setAttribute("data-id", "false_111222333444@lid_3EB0PRIV");
+    inEl.className = "message-in";
+    const inSpan = h.doc.createElement("span");
+    inSpan.textContent = "Mensagem privada";
+    inEl.appendChild(inSpan);
+    h.chatMessages.appendChild(inEl);
+
+    // Simula clique SPA que NÃO altera #main (!didTransition)
+    const origCreate = h.doc.createElement.bind(h.doc);
+    h.doc.createElement = ((tag: string) => {
+      const el = origCreate(tag);
+      if (tag.toLowerCase() === "a") {
+        (el as any).click = () => {};
+      }
+      return el;
+    }) as any;
+
+    h.injectScript();
+
+    // 1) Extração para outro telefone sem transição de #main -> bloqueia vazamento e retorna spaNavNoTransition: true
+    const blockedRes: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-no-trans-1",
+        logId: "log-no-trans-1",
+        phone: "5542988887777",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => blockedRes.push(r)
+    );
+    h.advanceTime(4000);
+
+    expect(blockedRes[0]).toMatchObject({
+      success: false,
+      error: "CHAT_PHONE_UNAVAILABLE",
+      spaNavNoTransition: true,
+    });
+    expect(blockedRes[0].rawText).toBeUndefined();
+
+    // 2) Fallback/navegação confirmada na conversa correta com verifiedTabPhone -> pareia @lid e extrai normalmente
+    h.headerSpan.textContent = "Mãe do Carlos";
+    inEl.setAttribute("data-id", "false_222333444555@lid_3EB0CARLOS");
+    inSpan.textContent = "Estou a caminho da escola";
+
+    const verifiedRes: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-verified-nav-2",
+        logId: "log-verified-nav-2",
+        phone: "5542988887777",
+        verifiedTabPhone: "5542988887777",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => verifiedRes.push(r)
+    );
+    expect(verifiedRes[0].success).toBe(true);
+    expect(verifiedRes[0].rawText).toContain("Estou a caminho da escola");
+
+    // 3) Clique manual em #pane-side limpa verifiedTabPhone e bloqueia outro chat sem transição
+    paneSide.click();
+
+    expect(
+      h.sentRuntimeMessages.some((m) => m.type === "LEOPOLDINA_CLEAR_TAB_VERIFIED_PHONE")
+    ).toBe(true);
+
+    h.headerSpan.textContent = "Outro Contato";
+    inEl.setAttribute("data-id", "false_333444555666@lid_3EB0OTHER");
+    inSpan.textContent = "Dado sensível";
+
+    const blockedAfterSwitch: any[] = [];
+    h.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-after-switch-3",
+        logId: "log-after-switch-3",
+        phone: "5542988887777",
+        verifiedTabPhone: "5542988887777",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => blockedAfterSwitch.push(r)
+    );
+    h.advanceTime(4000);
+    expect(blockedAfterSwitch[0].success).toBe(false);
+    expect(blockedAfterSwitch[0].rawText).toBeUndefined();
+  });
+
+  it("23. Corrige corrida CLEAR vs REGISTER, restaura marcadores pós-hidratação, infere studentName do modal e casa @lid por Aluno(a) filtrando timestamp de figurinha", async () => {
+    // (a) background.js: CLEAR sem requestId após/durante REGISTER não remove o contexto CAPTURE recém-registrado
+    const storageData: Record<string, any> = {};
+    let onBgMessage: any = null;
+    const bgChromeMock: any = {
+      runtime: {
+        id: "ext-rede-ativa-test",
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+        onMessage: { addListener: (fn: any) => { onBgMessage = fn; } },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async (keys: any) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            const out: Record<string, any> = {};
+            for (const k of list) if (k in storageData) out[k] = storageData[k];
+            return out;
+          }),
+          set: vi.fn(async (items: any) => {
+            Object.assign(storageData, items);
+          }),
+          remove: vi.fn(async (keys: any) => {
+            await Promise.resolve();
+            for (const k of (Array.isArray(keys) ? keys : [keys])) delete storageData[k];
+          }),
+        },
+      },
+      tabs: {
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+        query: vi.fn(async () => []),
+        update: vi.fn(),
+        remove: vi.fn(),
+        sendMessage: vi.fn(async () => ({ ok: true })),
+      },
+      windows: {
+        getCurrent: vi.fn(async () => ({ id: 1, width: 1440, left: 0, top: 0 })),
+        get: vi.fn(),
+        update: vi.fn(),
+        create: vi.fn(),
+      },
+      scripting: { executeScript: vi.fn(async () => []) },
+    };
+
+    vm.runInNewContext(
+      fs.readFileSync(BACKGROUND_PATH, "utf8"),
+      {
+        chrome: bgChromeMock,
+        URL,
+        Object,
+        Array,
+        Date,
+        Math,
+        String,
+        Number,
+        Boolean,
+        Promise,
+        setTimeout,
+        clearTimeout,
+        console: { warn: () => {}, error: () => {}, log: () => {} },
+      },
+      { filename: "background.js" }
+    );
+
+    const callBg = (req: any, sender: any) =>
+      new Promise<any>((resolve) =>
+        onBgMessage(req, { frameId: 0, documentId: `doc-${sender.tab?.id}`, ...sender }, resolve)
+      );
+
+    const platformSender = {
+      id: "ext-rede-ativa-test",
+      url: "https://redeativa.app.br/historico",
+      tab: { id: 101, windowId: 1 },
+    };
+    const [clearLegacyRes, regRes] = await Promise.all([
+      callBg({ type: "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY" }, platformSender),
+      callBg(
+        {
+          type: "LEOPOLDINA_REGISTER_CAPTURE_CONTEXT",
+          requestId: "cap-race-v165",
+          logId: "log-race-v165",
+          phone: "5542988455899",
+          studentName: "NATIELE PACHECO",
+        },
+        platformSender
+      ),
+    ]);
+
+    expect(clearLegacyRes.success).toBe(true);
+    expect(regRes.success).toBe(true);
+
+    const waGetCtx = await callBg(
+      { type: "LEOPOLDINA_GET_CAPTURE_CONTEXT", phone: null },
+      { id: "ext-rede-ativa-test", url: "https://web.whatsapp.com/", tab: { id: 900, windowId: 99 } }
+    );
+    expect(waGetCtx).toMatchObject({
+      success: true,
+      requestId: "cap-race-v165",
+      logId: "log-race-v165",
+      studentName: "NATIELE PACHECO",
+    });
+
+    const explicitClear = await callBg(
+      { type: "LEOPOLDINA_CLEAR_LAST_CAPTURED_REPLY", requestId: "cap-race-v165" },
+      platformSender
+    );
+    expect(explicitClear.success).toBe(true);
+    const waAfterExplicitClear = await callBg(
+      { type: "LEOPOLDINA_GET_CAPTURE_CONTEXT", phone: null },
+      { id: "ext-rede-ativa-test", url: "https://web.whatsapp.com/", tab: { id: 900, windowId: 99 } }
+    );
+    expect(waAfterExplicitClear).toEqual({ success: false, error: "UNKNOWN_OPERATION_CONTEXT" });
+
+    // (b) registro-bridge.js: restaura marcadores após hidratação e infere studentName do <dialog open>
+    const postedMessages: any[] = [];
+    const sentBridgeMessages: any[] = [];
+    const scheduledTimers: Array<{ id: number; fn: () => void }> = [];
+    let nextTimerId = 1;
+    const winListeners = new Map<string, Set<(ev: any) => void>>();
+    const docListeners = new Map<string, Set<(ev: any) => void>>();
+    const bridgeRuntimeListeners: any[] = [];
+    let disconnectedObservers = 0;
+    const mutationObservers: Array<{ cb: () => void }> = [];
+
+    class MockMutationObserver {
+      private cb: () => void;
+      constructor(cb: () => void) {
+        this.cb = cb;
+        mutationObservers.push({ cb });
+      }
+      observe() {}
+      disconnect() {
+        disconnectedObservers++;
+      }
+    }
+
+    const subtitleEl = { textContent: "NATIELE PACHECO • 1º A" };
+    const headingEl = {
+      textContent: "Capturar Retorno do Responsável",
+      parentElement: {
+        querySelector: (sel: string) => (sel === "p" ? subtitleEl : null),
+      },
+    };
+    const openDialogMock = {
+      querySelector: (sel: string) => {
+        if (sel.includes("h1")) return headingEl;
+        return null;
+      },
+    };
+    const rootDataset: Record<string, string> = {};
+
+    const bridgeSandbox: any = {
+      MutationObserver: MockMutationObserver,
+      window: {
+        location: { origin: "https://redeativa.app.br", hostname: "redeativa.app.br" },
+        addEventListener: (t: string, fn: any) => {
+          if (!winListeners.has(t)) winListeners.set(t, new Set());
+          winListeners.get(t)!.add(fn);
+        },
+        removeEventListener: (t: string, fn: any) => winListeners.get(t)?.delete(fn),
+        postMessage: (msg: any) => postedMessages.push(msg),
+      },
+      document: {
+        documentElement: { dataset: rootDataset },
+        addEventListener: (t: string, fn: any) => {
+          if (!docListeners.has(t)) docListeners.set(t, new Set());
+          docListeners.get(t)!.add(fn);
+        },
+        removeEventListener: (t: string, fn: any) => docListeners.get(t)?.delete(fn),
+        querySelectorAll: (sel: string) =>
+          sel.includes("dialog[open]") ? [openDialogMock] : [],
+      },
+      sessionStorage: { removeItem: vi.fn(), getItem: vi.fn() },
+      chrome: {
+        runtime: {
+          id: "ext-rede-ativa-test",
+          sendMessage: (msg: any, cb?: any) => {
+            sentBridgeMessages.push(msg);
+            if (typeof cb === "function") cb({ success: true });
+          },
+          onMessage: {
+            addListener: (fn: any) => bridgeRuntimeListeners.push(fn),
+            removeListener: (fn: any) => {
+              const i = bridgeRuntimeListeners.indexOf(fn);
+              if (i >= 0) bridgeRuntimeListeners.splice(i, 1);
+            },
+          },
+        },
+      },
+      URL,
+      Set,
+      Map,
+      Date,
+      Math,
+      setTimeout: (fn: () => void) => {
+        const id = nextTimerId++;
+        scheduledTimers.push({ id, fn });
+        return id;
+      },
+      clearTimeout: (id: number) => {
+        const idx = scheduledTimers.findIndex((t) => t.id === id);
+        if (idx >= 0) scheduledTimers.splice(idx, 1);
+      },
+      console: { warn: () => {}, error: () => {}, log: () => {} },
+    };
+
+    vm.runInNewContext(fs.readFileSync(BRIDGE_PATH, "utf8"), bridgeSandbox, {
+      filename: "registro-bridge.js",
+    });
+
+    expect(rootDataset.redeativaExtension).toBe("true");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.6.5");
+
+    // Simula hidratação do Next/React removendo atributos data-* do <html>
+    delete rootDataset.redeativaExtension;
+    delete rootDataset.redeativaExtensionVersion;
+    const readyCountBefore = postedMessages.filter((m) => m.type === "REDEATIVA_EXTENSION_READY").length;
+    mutationObservers[0].cb();
+
+    expect(rootDataset.redeativaExtension).toBe("true");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.6.5");
+    expect(
+      postedMessages.filter((m) => m.type === "REDEATIVA_EXTENSION_READY").length
+    ).toBeGreaterThan(readyCountBefore);
+
+    // Ping vindo do background também responde alive + version
+    const pingReplies: any[] = [];
+    bridgeRuntimeListeners[0](
+      { type: "LEOPOLDINA_BRIDGE_PING" },
+      { id: "ext-rede-ativa-test" },
+      (res: any) => pingReplies.push(res)
+    );
+    expect(pingReplies[0]).toEqual({ alive: true, version: "1.6.5" });
+
+    // Modal aberto sem enviar studentName no payload -> bridge infere "NATIELE PACHECO" do <dialog open>
+    for (const fn of winListeners.get("message") || []) {
+      fn({
+        source: bridgeSandbox.window,
+        origin: "https://redeativa.app.br",
+        data: {
+          type: "REDEATIVA_REGISTER_CAPTURE_CONTEXT",
+          requestId: "req-dlg-1",
+          logId: "log-dlg-1",
+          phone: "5542988455899",
+        },
+      });
+    }
+    const regBridgeMsg = sentBridgeMessages.find(
+      (m) => m.type === "LEOPOLDINA_REGISTER_CAPTURE_CONTEXT"
+    );
+    expect(regBridgeMsg?.studentName).toBe("NATIELE PACHECO");
+
+    bridgeSandbox.window.__REDEATIVA_BRIDGE_CLEANUP__();
+    expect(disconnectedObservers).toBe(1);
+    expect(scheduledTimers).toHaveLength(0);
+
+    // (c) whatsapp-content.js: chat salvo ("Amor ❤️") + @lid casa via Aluno(a) e ignora timestamp "16:28"
+    const waH = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "Amor ❤️",
+      outgoingCount: 0,
+      incomingCount: 0,
+    });
+    waH.headerSpan.attributes.delete("title");
+    waH.headerSpan.title = "";
+    waH.headerSpan.textContent = "Amor ❤️";
+
+    const outEl = waH.doc.createElement("div");
+    outEl.setAttribute("data-id", "true_999888777666@lid_3EB0OUT");
+    outEl.className = "message-out";
+    const outSpan = waH.doc.createElement("span");
+    outSpan.textContent =
+      "Boa noite! diva\nAluno(a): NATIELE PACHECO\nTurma: 1º A\nPedimos que desconsiderem esta notificação.\n15:57";
+    outEl.appendChild(outSpan);
+    waH.chatMessages.appendChild(outEl);
+
+    for (const txt of ["Começou a pinicar kkkk\n16:24", "Até o pescoço\n16:24", "16:28"]) {
+      const inBubble = waH.doc.createElement("div");
+      inBubble.setAttribute("data-id", "false_999888777666@lid_3EB0IN");
+      inBubble.className = "message-in";
+      const inSpan = waH.doc.createElement("span");
+      inSpan.textContent = txt;
+      inBubble.appendChild(inSpan);
+      waH.chatMessages.appendChild(inBubble);
+    }
+
+    waH.injectScript();
+
+    const extractRes: any[] = [];
+    waH.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-natiele-1",
+        logId: "log-natiele-1",
+        phone: "5542988455899",
+        studentName: "NATIELE PACHECO",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => extractRes.push(r)
+    );
+    waH.advanceTime(2500);
+
+    expect(extractRes[0].success).toBe(true);
+    expect(extractRes[0].rawText).toContain("Começou a pinicar kkkk");
+    expect(extractRes[0].rawText).toContain("Até o pescoço");
+    expect(extractRes[0].rawText).not.toContain("16:28");
+
+    // Termo genérico ("Aluno") em outro chat @lid sem texto esperado NÃO autoriza correlação
+    const genericH = createWhatsAppContentHarness({
+      url: "https://web.whatsapp.com/",
+      chatTitle: "Contato Qualquer",
+      outgoingCount: 0,
+      incomingCount: 0,
+    });
+    const gOut = genericH.doc.createElement("div");
+    gOut.setAttribute("data-id", "true_555444333222@lid_3EB0GEN");
+    gOut.className = "message-out";
+    const gOutSpan = genericH.doc.createElement("span");
+    gOutSpan.textContent = "Mensagem com palavra aluno sem nome completo";
+    gOut.appendChild(gOutSpan);
+    genericH.chatMessages.appendChild(gOut);
+
+    const gIn = genericH.doc.createElement("div");
+    gIn.setAttribute("data-id", "false_555444333222@lid_3EB0GENIN");
+    gIn.className = "message-in";
+    const gInSpan = genericH.doc.createElement("span");
+    gInSpan.textContent = "Conteúdo privado";
+    gIn.appendChild(gInSpan);
+    genericH.chatMessages.appendChild(gIn);
+
+    genericH.injectScript();
+    const genericBlocked: any[] = [];
+    genericH.runtimeListeners[0](
+      {
+        type: "LEOPOLDINA_EXTRACT_LAST_INCOMING_MESSAGE",
+        requestId: "req-generic-1",
+        logId: "log-generic-1",
+        phone: "5542988455899",
+        studentName: "Aluno",
+      },
+      { id: "ext-rede-ativa-test" },
+      (r: any) => genericBlocked.push(r)
+    );
+    genericH.advanceTime(4000);
+    expect(genericBlocked[0].success).toBe(false);
+    expect(genericBlocked[0].rawText).toBeUndefined();
   });
 });
