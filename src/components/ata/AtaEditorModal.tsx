@@ -1752,13 +1752,13 @@ export default function AtaEditorModal({
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left text-xs space-y-2 max-w-2xl mx-auto">
             <p className="font-bold text-slate-700 flex items-center space-x-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>Selo de Integridade Criptográfica (SHA-256 — Lei nº 14.063/2020):</span>
+              <span>Código de verificação de integridade:</span>
             </p>
             <p className="font-mono text-[11px] text-slate-700 break-all bg-white p-3 rounded-xl border border-slate-200">
               {finalizedAta.contentHash}
             </p>
             <p className="text-xs text-slate-500">
-              Lavrado com fé pública por <strong>{finalizedAta.authorName}</strong> em{" "}
+              Confirmado por <strong>{finalizedAta.authorName}</strong> em{" "}
               {finalizedAta.finalizedAt
                 ? new Date(finalizedAta.finalizedAt).toLocaleString("pt-BR")
                 : new Date(finalizedAta.attendedAt).toLocaleString("pt-BR")}
@@ -1780,10 +1780,10 @@ export default function AtaEditorModal({
             <a
               href={`/api/atas/${finalizedAta.id}/pdfa?download=1`}
               className="inline-flex items-center space-x-2 px-5 py-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-extrabold transition shadow-xs"
-              title="Baixar Certidão Arquivística PDF/A-1b (ISO 19005-1 Level B)"
+              title="Baixar arquivo PDF para preservação"
             >
               <Download className="w-4 h-4 text-sky-600" />
-              <span>Baixar PDF/A-1b</span>
+              <span>Baixar PDF</span>
             </a>
 
             {finalizedAta.agreementsSummary && (() => {
@@ -1838,9 +1838,9 @@ export default function AtaEditorModal({
         title={
           isVoid
             ? `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} (Tornada Sem Efeito)`
-            : `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} — Documento Oficial Imutável`
+            : `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} — Documento Oficial Confirmado`
         }
-        description="Registro selado criptograficamente (SHA-256). Conforme a Lei nº 14.063/2020, o texto original é inalterável, admitindo-se apenas Termos de Aditamento ('Em tempo')."
+        description="Após a confirmação, alterações são registradas em complemento vinculado à ata, preservando o histórico."
       >
         <div className="space-y-5 text-xs">
           {isVoid && (
@@ -2034,9 +2034,9 @@ export default function AtaEditorModal({
                 )}
               </div>
 
-              {/* Hash e Averbação de Cancelamento */}
+              {/* Código de Verificação e Averbação de Cancelamento */}
               <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-2">
-                <span className="font-bold text-slate-700 dark:text-slate-300 block">Hash SHA-256 Original:</span>
+                <span className="font-bold text-slate-700 dark:text-slate-300 block">Código de verificação original:</span>
                 <p className="font-mono text-[10px] text-slate-600 dark:text-slate-400 break-all bg-white dark:bg-slate-950 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
                   {viewMinuteData.contentHash}
                 </p>
@@ -2156,10 +2156,10 @@ export default function AtaEditorModal({
               <a
                 href={`/api/atas/${viewMinuteData.id}/pdfa?download=1`}
                 className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold transition"
-                title="Arquivo arquivístico oficial com certificação XMP e normas ISO 19005-1 Level B"
+                title="Baixar arquivo PDF para preservação"
               >
                 <Download className="w-4 h-4 text-emerald-600" />
-                <span>Baixar PDF/A-1b</span>
+                <span>Baixar PDF</span>
               </a>
               <button
                 type="button"
@@ -2253,7 +2253,7 @@ export default function AtaEditorModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Lavratura de Ata do Atendimento Pedagógico"
-      description="Substitui o caderno manuscrito com fé pública institucional, validade jurídica (Lei nº 14.063/2020) e integração ao Prontuário 360º."
+      description="Registra atendimentos, participantes e combinados vinculados ao histórico do estudante."
       maxWidthClass="max-w-[98vw] 2xl:max-w-[1560px]"
     >
       <div className="space-y-5 text-xs">
@@ -2584,7 +2584,7 @@ export default function AtaEditorModal({
                     <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-[11px] text-indigo-900 leading-snug">
                       <p className="font-bold flex items-center space-x-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-indigo-700 shrink-0 inline mr-1" />
-                        <span>Fé Pública & Assinatura Digital</span>
+                        <span>Assinatura com conta institucional</span>
                       </p>
                       Professores com e-mail <strong>@escola.pr.gov.br</strong> poderão assinar com 1 clique via Google Workspace SEED-PR, QR Code no celular ou assinatura na tela.
                     </div>
@@ -3590,7 +3590,7 @@ export default function AtaEditorModal({
                                 className="rounded border-slate-300 text-sky-600"
                               />
                               <span className="text-[11px] text-slate-600 font-medium">
-                                Documento conferido presencialmente (Fé Pública)
+                                Documento conferido presencialmente
                               </span>
                             </label>
                           </div>
@@ -3700,7 +3700,7 @@ export default function AtaEditorModal({
                         {activeRefusalIndex === idx && (
                           <div className="p-3 bg-rose-50/80 border border-rose-200 rounded-xl space-y-2 mt-2">
                             <p className="font-bold text-rose-900 text-xs">
-                              Registro de Recusa de Assinatura (com fé pública):
+                              Registro de Recusa de Assinatura:
                             </p>
                             <input
                               type="text"

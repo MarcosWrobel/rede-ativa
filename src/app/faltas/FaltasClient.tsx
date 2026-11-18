@@ -87,7 +87,7 @@ export default function FaltasClient({
   currentUser = { name: "Equipe Pedagógica", email: "", isAdmin: false }
 }: Props) {
   const router = useRouter();
-  const isIntegrated = currentSchool?.edition ? currentSchool.edition === "PILOTO_INTEGRADA" : true;
+  const isIntegrated = currentSchool?.edition === "PILOTO_INTEGRADA";
   const [activeTab, setActiveTab] = useState<"serp" | "ranking">("serp");
   
   // Filtros Avançados
@@ -330,7 +330,9 @@ export default function FaltasClient({
 
     try {
       const tpl = templates.find((t) => t.id === selectedTemplateId);
-      const reasonTitle = tpl?.title || "BUSCA ATIVA - FREQUÊNCIA (POWER BI)";
+      const reasonTitle =
+        tpl?.title ||
+        (isIntegrated ? "BUSCA ATIVA - FREQUÊNCIA (POWER BI)" : "BUSCA ATIVA - FREQUÊNCIA ESCOLAR");
 
       const res = await fetch("/api/messages/send", {
         method: "POST",
@@ -688,7 +690,7 @@ export default function FaltasClient({
     setSyncResult(null);
 
     try {
-      const res = await fetch("/api/frequencia/sync", {
+      const res = await fetch("/api/low-attendance/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ alunos: parsedData }),
@@ -731,19 +733,21 @@ export default function FaltasClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Botão de Download da Extensão */}
-          <a
-            href="/extensao-rede-ativa.zip"
-            download="extensao-rede-ativa.zip"
-            title="Baixar instalador da Extensão Sincronizadora para o navegador Chrome"
-            className="px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
-          >
-            <Download className="w-4 h-4 text-purple-600" />
-            <span>Baixar Extensão</span>
-          </a>
+          {/* Botão de Download da Extensão (exclusivo da edição PILOTO_INTEGRADA) */}
+          {isIntegrated && (
+            <a
+              href="/extensao-rede-ativa.zip"
+              download="extensao-rede-ativa.zip"
+              title="Baixar instalador da Extensão Sincronizadora para o navegador Chrome"
+              className="px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
+            >
+              <Download className="w-4 h-4 text-purple-600" />
+              <span>Baixar Extensão</span>
+            </a>
+          )}
 
-          {/* Botão Autenticado para Copiar Chave da Extensão (Disponível para Administradores de qualquer edição escolar) */}
-          {Boolean(currentUser?.isAdmin) && (
+          {/* Botão Autenticado para Copiar Chave da Extensão (exclusivo PILOTO_INTEGRADA) */}
+          {isIntegrated && Boolean(currentUser?.isAdmin) && (
             <button
               type="button"
               onClick={handleCopyExtensionToken}
@@ -855,7 +859,9 @@ export default function FaltasClient({
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Frequência e SERP ({recordsList.length})
+              {isIntegrated
+                ? `Frequência e SERP (${recordsList.length})`
+                : `Frequência Escolar (${recordsList.length})`}
             </button>
             <button
               type="button"
@@ -1093,10 +1099,10 @@ export default function FaltasClient({
           </div>
 
           <div className="flex items-center space-x-3">
-            {/* Status SERP */}
+            {/* Status Rede / SERP */}
             <div className="flex items-center space-x-1.5 text-xs text-slate-600 dark:text-slate-400">
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                SERP:
+                {isIntegrated ? "SERP:" : "Rede:"}
               </span>
               <select
                 value={selectedActionStatus}
@@ -1109,7 +1115,9 @@ export default function FaltasClient({
                 <option value="TODOS">Todos os Casos</option>
                 <option value="CONSELHO_TUTELAR">🏛️ Encaminhado Conselho Tutelar</option>
                 <option value="MINISTERIO_PUBLICO">⚖️ Ministério Público</option>
-                <option value="EM_ACOMPANHAMENTO">📋 Em Acompanhamento SERP</option>
+                <option value="EM_ACOMPANHAMENTO">
+                  {isIntegrated ? "📋 Em Acompanhamento SERP" : "📋 Em Acompanhamento"}
+                </option>
                 <option value="COM_ACAO">Com Ações / Encaminhamento</option>
                 <option value="SEM_ACAO">Sem Encaminhamento Registrado</option>
               </select>
@@ -1188,7 +1196,9 @@ export default function FaltasClient({
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Atual</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Ant.</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[100px]`}>Variação</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[220px]`}>Encaminhamentos (SERP / CT)</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[220px]`}>
+                    {isIntegrated ? "Encaminhamentos (SERP / CT)" : "Encaminhamentos e Medidas"}
+                  </th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right min-w-[130px]`}>Ações</th>
                 </tr>
               </thead>
@@ -1385,7 +1395,7 @@ export default function FaltasClient({
                                 )}
                                 {rec.serpStatus === "EM_ACOMPANHAMENTO" && (
                                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                    📋 Acompanhamento SERP
+                                    {isIntegrated ? "📋 Acompanhamento SERP" : "📋 Em Acompanhamento"}
                                   </span>
                                 )}
                                 {rec.serpStatus === "ARQUIVADO" && (
@@ -1426,7 +1436,11 @@ export default function FaltasClient({
                           <Link
                             href={`/alunos/${rec.student.id}/dossie`}
                             className="inline-flex items-center p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition align-middle"
-                            title="Emitir Dossiê Individual em PDF (Conselho Tutelar / SERP)"
+                            title={
+                              isIntegrated
+                                ? "Gerar relatório em PDF (Conselho Tutelar / SERP)"
+                                : "Gerar histórico de acompanhamento em PDF"
+                            }
                           >
                             <FileText className="w-4 h-4" />
                           </Link>
@@ -1507,7 +1521,7 @@ export default function FaltasClient({
           <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
               <Flame className="w-4 h-4 text-red-500" />
-              <span>Ranking por Contatos de Falta Disparados</span>
+              <span>Ranking por Contatos de Falta</span>
             </div>
             <span className="text-xs text-slate-500 font-medium">
               Estudantes notificados via WhatsApp
@@ -1573,7 +1587,7 @@ export default function FaltasClient({
                         <Link
                           href={`/alunos/${item.student.id}/dossie`}
                           className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition"
-                          title="Emitir Dossiê PDF"
+                          title="Gerar histórico de acompanhamento em PDF"
                         >
                           <FileText className="w-3.5 h-3.5" />
                           <span>PDF</span>
@@ -1689,9 +1703,9 @@ export default function FaltasClient({
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
-                    <span>Opção 2: Colar Lista JSON</span>
+                    <span>{isIntegrated ? "Opção 2: Colar Lista JSON" : "Opção 2: Colar dados da planilha"}</span>
                     <span className="text-[11px] font-normal text-slate-400">
-                      {isIntegrated ? 'Clique em "Copiar JSON" na extensão' : 'Cole a lista JSON de estudantes e frequências'}
+                      {isIntegrated ? 'Clique em "Copiar JSON" na extensão' : 'Cole a lista de estudantes e frequências'}
                     </span>
                   </label>
                   <textarea
@@ -1704,7 +1718,7 @@ export default function FaltasClient({
                     placeholder={
                       isIntegrated
                         ? "Cole aqui o JSON gerado pelo botão 'Copiar JSON' da extensão..."
-                        : 'Cole aqui o JSON no formato: [{"cgm": "...", "nome": "...", "frequencia": "85%"}]'
+                        : 'Cole aqui os dados CSV ou lista de estudantes e frequências...'
                     }
                     className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
                   />
@@ -1771,13 +1785,19 @@ export default function FaltasClient({
 
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Ações Tomadas (Encaminhamentos / SERP / CT):
+                {isIntegrated
+                  ? "Ações Tomadas (Encaminhamentos / SERP / CT):"
+                  : "Ações Tomadas (Encaminhamentos / Rede de Proteção):"}
               </label>
               <textarea
                 rows={4}
                 value={actionText}
                 onChange={(e) => setActionText(e.target.value)}
-                placeholder="Ex: 4 buscas SERP realizadas - Encaminhado ao Conselho Tutelar via protocolo 1234/2026..."
+                placeholder={
+                  isIntegrated
+                    ? "Ex: 4 buscas SERP realizadas - Encaminhado ao Conselho Tutelar via protocolo 1234/2026..."
+                    : "Ex: Contato telefônico realizado e encaminhamento registrado junto ao Conselho Tutelar..."
+                }
                 className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-slate-50 focus:bg-white"
               />
             </div>
@@ -1894,24 +1914,26 @@ export default function FaltasClient({
                     </div>
 
                     <div className="bg-white p-2 rounded-lg border border-slate-200 col-span-2 sm:col-span-1">
-                      <span className="text-[10px] text-slate-500 block">Status SERP:</span>
-                      <span className="font-bold text-slate-800 text-[11px] truncate block" title={activeStudentData.attendance.serpProtocol || activeStudentData.attendance.serpStatus || "Sem ficha"}>
-                        {activeStudentData.attendance.serpProtocol ? `#${activeStudentData.attendance.serpProtocol}` : (activeStudentData.attendance.serpStatus || "Sem ficha ativa")}
+                      <span className="text-[10px] text-slate-500 block">
+                        {isIntegrated ? "Status SERP:" : "Acompanhamento:"}
+                      </span>
+                      <span className="font-bold text-slate-800 text-[11px] truncate block" title={activeStudentData.attendance.serpProtocol || activeStudentData.attendance.serpStatus || "Sem registro"}>
+                        {activeStudentData.attendance.serpProtocol ? `#${activeStudentData.attendance.serpProtocol}` : (activeStudentData.attendance.serpStatus || "Sem registro ativo")}
                       </span>
                     </div>
                   </div>
                 )}
 
-                {/* Ações Rápidas de Navegação / Prontuário / Dossiê / Lavratura de Ata */}
+                {/* Ações Rápidas de Navegação / Prontuário / Relatório / Lavratura de Ata */}
                 <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
                   <Link
                     href={`/atas?studentId=${activeStudentData.student.id}&category=BUSCA_ATIVA_FALTAS&create=true`}
                     target="_blank"
                     className="inline-flex items-center space-x-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50/80 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg border border-indigo-200 transition"
-                    title="Lavrar ata formal de infrequência no livro digital"
+                    title="Lavrar ata de infrequência no livro digital"
                   >
                     <BookOpenCheck className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Lavrar Ata (1 Clique)</span>
+                    <span>Lavrar Ata</span>
                   </Link>
 
                   <Link
@@ -1929,7 +1951,7 @@ export default function FaltasClient({
                     className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
                   >
                     <FileText className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Dossiê A4</span>
+                    <span>Relatório PDF</span>
                   </Link>
                 </div>
               </div>
@@ -2112,7 +2134,11 @@ export default function FaltasClient({
 
                 {/* Chips de Inserção Rápida de Variáveis */}
                 <div className="space-y-1 pt-1">
-                  <span className="text-[10px] text-slate-500 font-semibold block">Inserir Variáveis do B.I. & Aluno:</span>
+                  <span className="text-[10px] text-slate-500 font-semibold block">
+                    {isIntegrated
+                      ? "Inserir Variáveis do B.I. & Aluno:"
+                      : "Inserir Variáveis de Frequência & Estudante:"}
+                  </span>
                   <div className="flex flex-wrap gap-1">
                     {[
                       { tag: "{frequencia}", label: "Freq. Geral (%)" },
@@ -2175,7 +2201,7 @@ export default function FaltasClient({
                   </div>
                   <p className="text-[11px] opacity-90">
                     {messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
-                      ? "O telefone foi marcado como inválido no cadastro do estudante e constará como tentativa frustrada no Dossiê PDF."
+                      ? "O telefone foi marcado como inválido no cadastro do estudante e constará no histórico de acompanhamento."
                       : "Confirme se o envio foi concluído no WhatsApp Web ou se o número não possui conta:"}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
@@ -2249,12 +2275,12 @@ export default function FaltasClient({
                 {isSendingMessage ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Disparando...</span>
+                    <span>Preparando...</span>
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    <span>Disparar via WhatsApp</span>
+                    <span>Revisar e enviar</span>
                   </>
                 )}
               </button>

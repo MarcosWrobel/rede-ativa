@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { dispatchAndPersistMessage } from "@/services/messageDispatchService";
 
 export async function POST(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
+
+    const rateLimitKey = `msg-send:${authCheck.schoolId || "global"}:${authCheck.userId}`;
+    const rlCheck = await enforceRateLimit(rateLimitKey, RATE_LIMIT_POLICIES.MESSAGE_REPLY);
+    if (!rlCheck.ok) return rlCheck.response;
 
     const parsed = messageSendSchema.safeParse(await req.json());
     if (!parsed.success) {

@@ -21,7 +21,11 @@ function humanizeGeminiError(rawMsg: string): string {
       return "Limite de requisições excedido no Google Gemini (Erro 429). Aguarde um instante e tente novamente.";
     }
     if (parsed?.error?.message) {
-      return parsed.error.message;
+      const msg = String(parsed.error.message).toLowerCase();
+      if (msg.includes("api key not valid")) {
+        return "Chave da API Gemini inválida ou sem autorização.";
+      }
+      return "serviço de IA temporariamente indisponível";
     }
   } catch {
     // rawMsg is not JSON
@@ -33,7 +37,10 @@ function humanizeGeminiError(rawMsg: string): string {
   if (rawMsg.includes("429") || rawMsg.includes("RESOURCE_EXHAUSTED")) {
     return "Limite de requisições excedido no Google Gemini (Erro 429). Aguarde um instante e tente novamente.";
   }
-  return rawMsg;
+  if (rawMsg.toLowerCase().includes("api key not valid") || rawMsg.includes("403 Forbidden")) {
+    return "Chave da API Gemini inválida ou sem autorização.";
+  }
+  return "serviço de IA temporariamente indisponível";
 }
 
 const formalizeAtaSchema = z

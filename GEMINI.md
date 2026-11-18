@@ -67,7 +67,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes ativos passem (515 testes aprovados em 63 suítes Vitest — 66 arquivos no total com 3 `skipIf` de banco isolado —, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts` e `egressAndCacheOptimization.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes ativos passem (691 testes aprovados em 74 suítes Vitest — 77 arquivos no total com 3 `skipIf` de banco isolado e 4 casos de Redis/Postgres em `rateLimitDistributed.test.ts` —, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts` a `sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -144,21 +144,24 @@ A interface deve seguir os princípios de alta clareza operacional, concisão co
 ---
 
 ## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
-- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **29 páginas `page.tsx`** (`src/app/`), **52 Route Handlers `route.ts`** (`src/app/api/`) e **63 suítes aprovadas (66 arquivos, 3 `skipIf` de banco isolado) / 515 testes Vitest aprovados**.
+- **Contadores Verificados do Repositório:** **21 models Prisma** (`prisma/schema.prisma`), **30 páginas `page.tsx`** (`src/app/`), **53 Route Handlers `route.ts`** (`src/app/api/`), **7 módulos em `src/services/`**, **45 bibliotecas em `src/lib/`** e **74 suítes aprovadas (77 arquivos, 3 `skipIf` de banco isolado) / 691 testes Vitest aprovados (12 `skipIf`)**.
 - **Estrutura de Referência:**
   ```text
   src/
-  ├── app/                 # 29 páginas SSR + 52 Route Handlers REST (/api/*)
+  ├── app/                 # 30 páginas SSR + 53 Route Handlers REST (/api/*)
   │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
   │   ├── /login           # Login institucional Google OAuth / dev condicional
   │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))
   │   ├── /preview-landing # Demonstração e simulador interativo público
   │   └── ...              # Demais rotas operacionais, RBAC e portais QR (/validar, /assinar)
-  ├── services/            # Camada pura de domínio e transações de Atas
+  ├── services/            # 7 módulos de domínio, transações, sync e mensageria
   │   ├── ataParticipantService.ts
-  │   └── ataFinalizationService.ts
+  │   ├── ataFinalizationService.ts
+  │   ├── frequencySyncService.ts
+  │   ├── messageDispatchService.ts
+  │   └── messaging/       # Contratos e capacidade isolados (piloto Evolution MSG-*)
   ├── components/ata/editor/ # Subcomponentes acessíveis e tipagem estrita do editor de atas
-  └── lib/                 # Segurança multi-tenant, criptografia SHA-256, IA e parsers
+  └── lib/                 # 45 bibliotecas (segurança multi-tenant, criptografia SHA-256, IA e parsers)
   ```
 - **Pacote da Extensão MV3:** O build gera `/public/extensao-rede-ativa.zip` como artefato principal (mantendo `/public/extensao-leopoldina.zip` automaticamente como alias de retrocompatibilidade).
 

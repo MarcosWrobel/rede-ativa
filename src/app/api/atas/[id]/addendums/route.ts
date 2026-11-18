@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { computeAddendumHash } from "@/lib/ataCrypto";
+import { computeAddendumHash, canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
@@ -59,6 +59,12 @@ export async function POST(
     if (!assertTenantOwnership(preCheckMinute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
+    if (!canAccessConfidentialMinute(preCheckMinute, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
+        { status: 403 }
+      );
+    }
     if (preCheckMinute.status !== "FINALIZED") {
       return NextResponse.json(
         { error: "Termos de aditamento ('Em tempo') só podem ser lavrados em atas já finalizadas." },
@@ -66,10 +72,24 @@ export async function POST(
       );
     }
 
-    // Simetria das Formas (Lei nº 14.063/2020): exige PIN de Fé Pública para aditar ata oficial
+    // Simetria das Formas: exige confirmação de autoria por PIN para aditar ata confirmada
     const pinLockKey = `pin-fail:${authCheck.userId}`;
     const pinRateCheck = await checkRateLimit(pinLockKey, RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE);
     if (!pinRateCheck.success) {
+      await logAudit({
+        action: "SIGNING_PIN_LOCKOUT",
+        entityType: "User",
+        entityId: authCheck.userId,
+        details: {
+          reason: "Bloqueio temporário por excesso de tentativas incorretas de PIN (15 min)",
+          attemptedMinuteId: id,
+          retryAfterSeconds: pinRateCheck.retryAfterSeconds,
+        },
+        user: { id: authCheck.userId, name: authCheck.userName, email: authCheck.email },
+        schoolId: preCheckMinute.schoolId || currentSchool.id,
+        req,
+      });
+
       return NextResponse.json(
         {
           error: `Muitas tentativas incorretas de PIN. Uso bloqueado por ${pinRateCheck.retryAfterSeconds} segundos.`,
@@ -87,7 +107,7 @@ export async function POST(
 
     // Executa em transação atômica para garantir encadeamento linear estrito dos hashes dos adendos
     const addendum = await prisma.$transaction(async (tx) => {
-      // Bloqueio pessimista de linha na ata pai para garantir linearidade estrita da hash-chain (Lei nº 14.063/2020)
+      // Bloqueio pessimista de linha na ata pai para garantir linearidade estrita da hash-chain
       try {
         await tx.$executeRaw`
           SELECT "id" FROM "PedagogicalMinute" WHERE "id" = ${id} FOR UPDATE;
@@ -113,6 +133,9 @@ export async function POST(
       const currentSchool = await getCurrentSchool(authCheck.schoolId);
       if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
         throw new Error("Acesso negado a registro de outra instituição de ensino.");
+      }
+      if (!canAccessConfidentialMinute(minute, authCheck.session)) {
+        throw new Error("Acesso negado: esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor.");
       }
 
       if (minute.status !== "FINALIZED") {

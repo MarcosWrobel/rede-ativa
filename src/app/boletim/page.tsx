@@ -24,6 +24,8 @@ export default async function BoletimPage() {
   return (
     <BoletimClient
       initialData={initialDigest}
+      schoolEdition={currentSchool.edition}
+      schoolNetwork={currentSchool.network}
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",

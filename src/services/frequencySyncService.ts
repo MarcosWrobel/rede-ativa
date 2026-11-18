@@ -106,8 +106,12 @@ export async function loadSchoolStudentMatcherContext(
   schoolId: string | null | undefined,
   incomingRawCgms: Array<string | number | null | undefined>
 ) {
+  if (!schoolId || !schoolId.trim()) {
+    throw new Error("TENANT_REQUIRED");
+  }
+
   const allStudents = await prisma.student.findMany({
-    where: schoolId ? { schoolId, active: true } : { active: true },
+    where: { schoolId: schoolId.trim(), active: true },
     select: {
       id: true,
       cgm: true,
@@ -212,12 +216,22 @@ export async function executePowerBiFrequencySync(options: {
   alunos: PowerBiSyncAlunoItem[];
   currentSchool: ResolvedSchool;
   authMethod: "SESSION" | "TOKEN";
+  sourceMode?: "EXTENSION_SCRAPER" | "MANUAL_FILE";
   userId?: string;
   userName: string;
   userEmail: string;
   req: Request;
 }) {
-  const { alunos, currentSchool, authMethod, userId, userName, userEmail, req } = options;
+  const {
+    alunos,
+    currentSchool,
+    authMethod,
+    sourceMode = "EXTENSION_SCRAPER",
+    userId,
+    userName,
+    userEmail,
+    req,
+  } = options;
 
   const { allStudents, studentByIdMap, cgmMap, nameMap, usedCgms } =
     await loadSchoolStudentMatcherContext(
@@ -339,7 +353,11 @@ export async function executePowerBiFrequencySync(options: {
 
   const rowsToUpsert = Array.from(batchRecords.values());
   const BATCH_SIZE = 250;
-  const defaultAction = "Importado do Power BI (PRESENTE NA ESCOLA)";
+  const isManualOrEssential =
+    sourceMode === "MANUAL_FILE" || currentSchool.edition === "INSTITUCIONAL_ESSENCIAL";
+  const defaultAction = isManualOrEssential
+    ? "Importado por arquivo de frequência"
+    : "Importado do Power BI (PRESENTE NA ESCOLA)";
   const referenceWeek = getIsoWeekKey(new Date());
 
   for (let i = 0; i < rowsToUpsert.length; i += BATCH_SIZE) {
@@ -411,7 +429,7 @@ export async function executePowerBiFrequencySync(options: {
           "updatedAt" = NOW()
         FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
         WHERE s."id" = v."id"
-          ${currentSchool.id ? Prisma.sql`AND s."schoolId" = ${currentSchool.id}` : Prisma.empty}
+          AND s."schoolId" = ${currentSchool.id}
       `;
     }
     estudantesEnriquecidos = studentUpdateEntries.length;
@@ -434,8 +452,9 @@ export async function executePowerBiFrequencySync(options: {
       await prisma.absenceJustification.deleteMany({
         where: {
           studentId: { in: exchangeStudentIds },
+          student: { schoolId: currentSchool.id },
           type: "DISPENSA_LEGAL",
-          notes: { contains: "Power BI" },
+          OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
         },
       });
     } catch (err: any) {
@@ -451,8 +470,9 @@ export async function executePowerBiFrequencySync(options: {
     const existingJusts = await prisma.absenceJustification.findMany({
       where: {
         studentId: { in: studentIdsWithAmparo },
+        student: { schoolId: currentSchool.id },
         type: "DISPENSA_LEGAL",
-        notes: { contains: "Power BI" },
+        OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
       },
       select: {
         id: true,
@@ -464,6 +484,9 @@ export async function executePowerBiFrequencySync(options: {
     const existingMap = new Map<string, { id: string; endDate: Date }>();
     existingJusts.forEach((j) => existingMap.set(j.studentId, j));
     const now = new Date();
+    const amparoPrefix = isManualOrEssential
+      ? "Importado via arquivo de frequência"
+      : "Sincronizado automaticamente via Power BI";
 
     for (const [studentId, amparo] of pendingAmparos.entries()) {
       const existing = existingMap.get(studentId);
@@ -474,7 +497,7 @@ export async function executePowerBiFrequencySync(options: {
             type: "DISPENSA_LEGAL",
             startDate: amparo.date < now ? amparo.date : now,
             endDate: amparo.date,
-            notes: `Sincronizado automaticamente via Power BI (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
+            notes: `${amparoPrefix} (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
             createdByName: userName,
             createdByEmail: userEmail,
           },
@@ -488,7 +511,7 @@ export async function executePowerBiFrequencySync(options: {
             where: { id: existing.id },
             data: {
               endDate: amparo.date,
-              notes: `Sincronizado automaticamente via Power BI (Amparo Legal Vigência Máx atualizada para: ${amparo.vigenciaStr})`,
+              notes: `${amparoPrefix} (Amparo Legal Vigência Máx atualizada para: ${amparo.vigenciaStr})`,
             },
           });
           amparosAtualizados++;

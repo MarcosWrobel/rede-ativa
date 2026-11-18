@@ -8,6 +8,7 @@ import { DELETE as deleteSchool } from "@/app/api/schools/[id]/route";
 import { POST as sanitizeSchool } from "@/app/api/schools/[id]/sanitize/route";
 import AuditoriaPage from "@/app/auditoria/page";
 import { sanitizeCsvField } from "@/lib/csvSanitizer";
+import { hashPin } from "@/lib/signingPin";
 
 // Mock State
 const mockState = {
@@ -176,6 +177,16 @@ vi.mock("@/lib/prisma", () => {
       }),
     },
     user: {
+      findUnique: vi.fn(async ({ where }: any) => {
+        const pinHash = await hashPin("8391");
+        return {
+          id: where?.id || "usr-gestor-a",
+          signingPinHash: pinHash,
+          pinAttempts: 0,
+          pinLockedUntil: null,
+        };
+      }),
+      update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => {
         mockState.deletionOrder.push("user.updateMany");
         return { count: 0 };
@@ -437,6 +448,7 @@ describe("Milestone M2: Data Integrity, RBAC & Audit Isolation Test Suite", () =
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            signingPin: "8391",
             summary: "Texto formal detalhado com mais de dez caracteres obrigatórios para lavratura.",
             studentIds: ["aluno-a1", "aluno-b1"], // Cross-tenant!
           }),
@@ -457,6 +469,7 @@ describe("Milestone M2: Data Integrity, RBAC & Audit Isolation Test Suite", () =
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            signingPin: "8391",
             summary: "Texto formal detalhado com mais de dez caracteres obrigatórios para lavratura.",
             studentIds: ["aluno-fantasma"],
           }),

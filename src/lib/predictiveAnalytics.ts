@@ -76,7 +76,7 @@ export function generatePredictiveRecommendations(
     recommendations.push({
       priority: "HIGH",
       title: "Alerta Crítico: Risco de Trabalho Infantil",
-      action: `Identificados ${trabalhoCase.count} registros vinculados a trabalho precoce. Necessário acionamento imediato da Rede de Proteção (CRAS/CREAS/Conselho Tutelar) para resguardo legal das crianças e adolescentes conforme Art. 56 do ECA.`,
+      action: `Identificados ${trabalhoCase.count} registros vinculados a trabalho precoce. Necessário acionamento imediato da Rede de Proteção (CRAS/CREAS/Conselho Tutelar) para proteção de crianças e adolescentes (ECA).`,
     });
   }
 

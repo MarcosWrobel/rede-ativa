@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import EncaminhamentosClient from "./EncaminhamentosClient";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ export default async function EncaminhamentosPage() {
           minute: {
             select: {
               id: true,
+              schoolId: true,
               ataNumber: true,
               year: true,
               subject: true,
@@ -49,6 +51,8 @@ export default async function EncaminhamentosPage() {
               finalizedAt: true,
               status: true,
               isConfidential: true,
+              authorId: true,
+              authorEmail: true,
               students: {
                 select: {
                   id: true,
@@ -78,6 +82,14 @@ export default async function EncaminhamentosPage() {
           status: true,
           dueDate: true,
           responsible: true,
+          minute: {
+            select: {
+              schoolId: true,
+              isConfidential: true,
+              authorId: true,
+              authorEmail: true,
+            },
+          },
         },
       }),
       prisma.classGroup.findMany({
@@ -86,8 +98,12 @@ export default async function EncaminhamentosPage() {
         orderBy: { name: "asc" },
       }),
     ]);
-    actionItems = results[0] || [];
-    allSchoolActions = results[1] || [];
+    actionItems = (results[0] || []).filter(
+      (item: any) => !item.minute || canAccessConfidentialMinute(item.minute, session)
+    );
+    allSchoolActions = (results[1] || []).filter(
+      (item: any) => !item.minute || canAccessConfidentialMinute(item.minute, session)
+    );
     classes = results[2] || [];
   } catch (err) {
     console.error("[EncaminhamentosPage] Erro ao carregar compromissos:", err);

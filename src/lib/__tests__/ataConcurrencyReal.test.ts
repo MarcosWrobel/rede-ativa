@@ -288,7 +288,8 @@ describe.skipIf(!hasIsolatedDb)(
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA",
+                  signatureData:
+                    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
                 }),
               }),
               { params: Promise.resolve({ token }) }
@@ -591,7 +592,8 @@ describe.skipIf(!hasIsolatedDb)(
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  signatureData: "data:image/png;base64,BBBBBBBBBBBBBBBBBBBB",
+                  signatureData:
+                    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
                 }),
               }),
               { params: Promise.resolve({ token }) }

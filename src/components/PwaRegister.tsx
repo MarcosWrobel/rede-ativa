@@ -65,7 +65,7 @@ export default function PwaRegister() {
     >
       <div className="flex items-center space-x-2.5 min-w-0">
         <div className="w-8 h-8 rounded-xl bg-sky-600 flex items-center justify-center shrink-0 font-black text-sm">
-          LA
+          RA
         </div>
         <div className="min-w-0">
           <p className="font-bold truncate">Instalar Busca Ativa (App)</p>

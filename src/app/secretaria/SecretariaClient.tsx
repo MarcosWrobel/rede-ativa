@@ -459,7 +459,7 @@ export default function SecretariaClient({
           <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
             {metrics.messagesSentThisMonth}
           </p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Disparos registrados</span>
+          <span className="text-[11px] text-slate-500 mt-1 block">Contatos registrados</span>
         </div>
       </div>
 
@@ -956,7 +956,7 @@ export default function SecretariaClient({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200/80">
                 <span className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider block">
-                  Respostas Familiares Auditadas
+                  Respostas Familiares Categorizadas
                 </span>
                 <p className="text-2xl font-black text-indigo-950 mt-1">
                   {predictiveData?.totalCategorizedReplies || 0}
@@ -1077,7 +1077,7 @@ export default function SecretariaClient({
                             {meta.label}
                           </span>
                           <span className="font-extrabold text-slate-900">
-                            {item.percentage}% ({item.count} {item.count === 1 ? "ocorrência" : "ocorrências"})
+                            {item.percentage}% ({item.count} {item.count === 1 ? "registro" : "registros"})
                           </span>
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">

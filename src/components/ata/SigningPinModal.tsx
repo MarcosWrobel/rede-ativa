@@ -133,11 +133,11 @@ export default function SigningPinModal({
           <div>
             <h3 className="text-base font-black text-slate-900">
               {mode === "SETUP"
-                ? "Cadastrar PIN de Fé Pública"
-                : "Assinatura com Fé Pública"}
+                ? "Cadastrar PIN de confirmação"
+                : "Confirmação de autoria por PIN"}
             </h3>
             <p className="text-xs text-slate-500 font-medium">
-              Lei Federal nº 14.063/2020 • Autenticação do Servidor
+              Autenticação do servidor da equipe pedagógica
             </p>
           </div>
         </div>
@@ -159,7 +159,7 @@ export default function SigningPinModal({
           <form onSubmit={handleSetupSubmit} className="space-y-4">
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 leading-relaxed">
               <ShieldCheck className="w-4 h-4 text-emerald-600 inline mr-1 -mt-0.5" />
-              Crie um <strong>PIN de 4 a 6 dígitos</strong> para assinar e lavrar atas com fé pública.
+              Crie um <strong>PIN de 4 a 6 dígitos</strong> para confirmar sua autoria ao registrar atas.
             </div>
 
             <div className="space-y-3">

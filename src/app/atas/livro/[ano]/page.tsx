@@ -111,11 +111,15 @@ export default async function LivroAnualPage({ params }: Props) {
     if (!canAccessConfidentialMinute(m, session)) {
       return {
         ...m,
+        subject: "Atendimento sob sigilo institucional",
         rawNotes: null,
-        summary: "[REGISTRO SOB SIGILO REFORÇADO ECA — ACESSO INTEGRAL RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
+        summary: "[REGISTRO SOB SIGILO INSTITUCIONAL — ACESSO INTEGRAL RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
         agreementsSummary: null,
+        students: [],
+        participants: [],
         actionItems: [],
         addendums: [],
+        restrictedConfidential: true,
       };
     }
     return m;

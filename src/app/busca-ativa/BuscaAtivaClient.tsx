@@ -889,7 +889,7 @@ export default function BuscaAtivaClient({
                       <Link
                         href={`/alunos/${selectedStudent.id}/dossie`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[10px]"
-                        title="Emitir dossiê"
+                        title="Emitir histórico de acompanhamento"
                       >
                         <FileText className="w-3 h-3" />
                         <span>PDF</span>
@@ -1385,7 +1385,7 @@ export default function BuscaAtivaClient({
               >
                 <Send className="w-4 h-4" />
                 <span>
-                  Iniciar disparos ({checkedStudentIds.length})
+                  Iniciar envios ({checkedStudentIds.length})
                 </span>
               </button>
             </div>

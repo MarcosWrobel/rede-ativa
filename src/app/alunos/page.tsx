@@ -85,6 +85,7 @@ export default async function AlunosPage() {
       initialStudents={enrichedStudents}
       classGroups={classGroups}
       isAdmin={checkIsAdmin(session)}
+      isIntegrated={currentSchool.edition === "PILOTO_INTEGRADA"}
     />
   );
 }

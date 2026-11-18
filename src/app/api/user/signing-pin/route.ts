@@ -131,7 +131,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: "PIN de fé pública cadastrado com sucesso!",
+        message: "PIN de confirmação cadastrado com sucesso.",
       });
     }
 
@@ -229,7 +229,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: "PIN de fé pública atualizado com sucesso!",
+        message: "PIN de confirmação atualizado com sucesso.",
       });
     }
 
@@ -284,7 +284,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: "PIN de fé pública redefinido com sucesso através da conta institucional!",
+        message: "PIN de confirmação redefinido com sucesso através da conta institucional.",
       });
     }
 

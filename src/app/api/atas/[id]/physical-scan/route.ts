@@ -3,8 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSchoolManager, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { logAudit } from "@/lib/audit";
 import {
+  validateAndDecodeScanData,
   savePhysicalScanFile,
   getPhysicalScanBuffer,
   deletePhysicalScanFile,
@@ -94,7 +96,7 @@ export async function GET(
         return NextResponse.json(
           {
             error:
-              "Acesso restrito. Este documento possui sigilo reforçado (ECA Art. 143) e sua via física só pode ser acessada pelo autor ou direção escolar.",
+              "Acesso restrito. Este documento possui sigilo reforçado e sua via física só pode ser acessada pelo autor ou direção escolar.",
           },
           { status: 403 }
         );
@@ -158,6 +160,9 @@ export async function POST(
         year: true,
         subject: true,
         status: true,
+        isConfidential: true,
+        authorId: true,
+        authorEmail: true,
         physicalScanStorageKey: true,
         physicalScanProvider: true,
         physicalSignedScanData: true,
@@ -172,6 +177,13 @@ export async function POST(
     if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a ata de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
+
+    if (!canAccessConfidentialMinute(existing, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
         { status: 403 }
       );
     }
@@ -209,6 +221,15 @@ export async function POST(
     };
 
     if (scanData) {
+      try {
+        validateAndDecodeScanData(scanData);
+      } catch (validationErr: any) {
+        return NextResponse.json(
+          { error: validationErr?.message || "Arquivo digitalizado inválido." },
+          { status: 400 }
+        );
+      }
+
       // Salva via motor híbrido (Object Storage se configurado ou Fallback Base64 no Postgres)
       const stored = await savePhysicalScanFile({
         schoolId: existing.schoolId,
@@ -305,6 +326,9 @@ export async function DELETE(
         year: true,
         subject: true,
         status: true,
+        isConfidential: true,
+        authorId: true,
+        authorEmail: true,
         physicalScanStorageKey: true,
         physicalScanProvider: true,
       },
@@ -318,6 +342,13 @@ export async function DELETE(
     if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a ata de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
+
+    if (!canAccessConfidentialMinute(existing, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
         { status: 403 }
       );
     }

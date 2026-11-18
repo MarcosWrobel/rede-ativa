@@ -1,7 +1,7 @@
 # Backlog Geral de Evolução & Roadmap — Rede Ativa SaaS
 
 Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa SaaS**.
-- **Estado Vivo do Repositório:** **21 models Prisma** • **30 páginas (`page.tsx`)** • **52 Route Handlers (`route.ts`)** • **68 suítes aprovadas (71 arquivos, 3 `skipIf` de banco isolado) / 652 testes Vitest aprovados**
+- **Estado Vivo do Repositório:** **21 models Prisma** • **30 páginas (`page.tsx`)** • **53 Route Handlers (`route.ts`)** • **7 módulos em `src/services/`** • **45 bibliotecas em `src/lib/`** • **74 suítes aprovadas (77 arquivos, 3 `skipIf` de banco isolado) / 691 testes Vitest aprovados (12 `skipIf`)** • **Extensão MV3 `v1.6.5`**
 - Status: `[x]` Concluído • `[/]` Em Andamento • `[ ]` Pendente (Roadmap Futuro)
 - Prioridade: `P0` Crítico (Segurança/LGPD/Jurídico) • `P1` Alta (Estabilidade/Performance) • `P2` Média (Valor Pedagógico) • `P3` Expansão Estratégica
 - Esforço: `P` Pequeno (1–2h) • `M` Médio (3–6h) • `G` Grande (1–3 dias)
@@ -43,7 +43,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ## Épico 4 — Automação de WhatsApp & IA na Triagem (Sprint 5) — ✅ Concluído
 
-- [x] **`AUT-01`** `[P2 | Esforço: M]` **Rastreamento de Entrega (`deliveryStatus`) e Saneamento de Números** — Invalidação automática `FAILED_NO_WHATSAPP` em [`src/app/api/messages/status/route.ts`](../src/app/api/messages/status/route.ts) e confirmação assistida via extensão `v1.6.0`.
+- [x] **`AUT-01`** `[P2 | Esforço: M]` **Rastreamento de Entrega (`deliveryStatus`) e Saneamento de Números** — Invalidação automática `FAILED_NO_WHATSAPP` em [`src/app/api/messages/status/route.ts`](../src/app/api/messages/status/route.ts) e acompanhamento assistido via extensão (evoluída até `v1.6.5`).
 - [x] **`AUT-02`** `[P2 | Esforço: G]` **Fila Assistida de Disparo por Turma** — [`src/app/busca-ativa/BuscaAtivaClient.tsx`](../src/app/busca-ativa/BuscaAtivaClient.tsx) + [`src/lib/whatsappProvider.ts`](../src/lib/whatsappProvider.ts) com salto de atestados vigentes.
 - [x] **`AUT-03`** `[P3 | Esforço: G]` **Formalização & Classificação de Retorno com IA Gemini** — [`src/app/api/ai/classify-reply/route.ts`](../src/app/api/ai/classify-reply/route.ts) com pseudonimização prévia e fallback heurístico.
 - [x] **`AUT-04`** `[P2 | Esforço: M]` **Janela Dedicada Compacta (`480x760px`) & Detecção Mobile/Desktop** — Orquestração via [`extension/background.js`](../extension/background.js) e [`src/components/whatsapp/WhatsAppDispatchToggle.tsx`](../src/components/whatsapp/WhatsAppDispatchToggle.tsx).
@@ -120,7 +120,7 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 - [x] **`JUR-06`** `[P0 | Esforço: M]` **PIN de Fé Pública do Servidor na Lavratura (`PBKDF2-SHA512`)**  
   Criptografia com 100.000 iterações, bloqueio temporário após 3 tentativas incorretas, onboarding modal ([`SigningPinModal.tsx`](../src/components/ata/SigningPinModal.tsx)) e redefinição via OIDC `@escola.pr.gov.br` em [`src/lib/signingPin.ts`](../src/lib/signingPin.ts) e [`src/app/api/user/signing-pin/route.ts`](../src/app/api/user/signing-pin/route.ts).
 - [x] **`JUR-07`** `[P0 | Esforço: M]` **Governança da Sequência Cronológica e Lavratura Extemporânea (> 5 dias úteis)**  
-  Exigência obrigatória de `extemporaneousReason` quando o intervalo entre `attendedAt` e `finalizedAt` excede 5 dias úteis, com impressão de **Nota de Escrituração & Fé Pública** na folha A4 e na certidão pública, validada em [`complianceAndForensics.test.ts`](../src/lib/__tests__/complianceAndForensics.test.ts), [`signingPin.test.ts`](../src/lib/__tests__/signingPin.test.ts) e [`securityAndLegalAuditV2.test.ts`](../src/lib/__tests__/securityAndLegalAuditV2.test.ts) (marco histórico de 215 testes em 37 suítes à época; consolidado hoje em **55 suítes / 396 testes**).
+  Exigência obrigatória de `extemporaneousReason` quando o intervalo entre `attendedAt` e `finalizedAt` excede 5 dias úteis, com impressão de nota na folha A4 e na consulta pública, validada à época em [`complianceAndForensics.test.ts`](../src/lib/__tests__/complianceAndForensics.test.ts), [`signingPin.test.ts`](../src/lib/__tests__/signingPin.test.ts) e [`securityAndLegalAuditV2.test.ts`](../src/lib/__tests__/securityAndLegalAuditV2.test.ts) *(marco histórico de 215 testes em 37 suítes à época; ver estado vivo no topo deste backlog)*.
 
 ---
 
@@ -195,14 +195,14 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ## Épico 16 — Hardening Referencial, Arquitetura Limpa de Atas & Modularização UI (Sprint 18) — ✅ Concluído
 
-> Estado consolidado pós-sprint: **21 models Prisma • 29 páginas (`page.tsx`) • 50 Route Handlers (`route.ts`) • 67 suítes aprovadas (70 arquivos, 3 `skipIf` de banco isolado) / 630 testes Vitest aprovados**.
+> Marco histórico pós-Sprint 18 (à época: 21 models Prisma • 29 páginas • 50 Route Handlers • 67 suítes / 630 testes; ver estado atual consolidado no topo).
 
 - [x] **`SEC-11`** `[P0 | Esforço: P]` **Contenção Residual 500 & Limites Defensivos SERE (`AUD-04`)**  
   Sanitização de mensagens de erro 500 residuais em [`/api/ai/test-key`](../src/app/api/ai/test-key/route.ts), [`/api/ai/generate-template`](../src/app/api/ai/generate-template/route.ts) e [`/api/auth/[...nextauth]`](../src/app/api/auth/%5B...nextauth%5D/route.ts), aliada a limites superiores em `sereBatchImportSchema` (500 turmas / 5.000 estudantes / 5.000 transferidos) e `MAX_SERE_FILE_SIZE_BYTES = 10 MB`.
 - [x] **`DATA-02`** `[P0 | Esforço: M]` **Proteção Referencial Jurídica (`onDelete: Restrict`) & Build Strict (`AUD-06`)**  
   Substituição de `onDelete: Cascade` por `onDelete: Restrict` em relações de prova legal (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student`, `PedagogicalMinute.school`) com deleção explícita em `/sanitize` e `DELETE /api/schools/[id]`, e falha bloqueante em produção no [`scripts/vercel_db_push.cjs`](../scripts/vercel_db_push.cjs).
 - [x] **`DOC-01`** `[P1 | Esforço: P]` **Governança Documental & Padronização de Pacote (`AUD-01` / `AUD-05`)**  
-  Sincronização integral de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com os contadores vivos (21 models, 29 páginas, 50 rotas, 67 suítes aprovadas / 630 testes aprovados) e artefato primário `/extensao-rede-ativa.zip`.
+  Sincronização de `AI_CONTEXT.md`, `GEMINI.md`, `ARQUITETURA_E_ENGENHARIA.md`, `BACKLOG.md`, `DEPLOY.md`, `GUIA_ESCALABILIDADE.md` e `auditorias/README.md` com o artefato primário `/extensao-rede-ativa.zip` e os contadores vivos do repositório (posteriormente revalidados para `21` models, `30` páginas, `53` rotas e `74/77` suítes — `691` testes aprovados).
 - [x] **`SYNC-01`** `[P0 | Esforço: M]` **Blindagem da Sincronização de Frequência (Power BI, CSV & JSON — `10/11/2026`)**  
   Prevenção de erro HTTP 500 por colisão `P2002` na chave global `@unique` `Student.cgm` em `/api/frequencia/sync` e `/api/serp/sync` via [`src/lib/syncCgmGuard.ts`](../src/lib/syncCgmGuard.ts), atualização cadastral em lote por *delta check*, parser CSV/JSON RFC 4180 completo de 11 colunas em [`src/lib/frequencyImportParser.ts`](../src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](../src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br` e 12 testes em [`src/lib/__tests__/frequenciaSync.test.ts`](../src/lib/__tests__/frequenciaSync.test.ts).
 - [x] **`PERF-01`** `[P0 | Esforço: M]` **Otimização Extrema de Egress, Cache & Custo no Neon Launch (`10/11/2026`)**  

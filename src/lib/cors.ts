@@ -47,7 +47,7 @@ export function isTrustedSyncOrigin(origin: string | null): boolean {
 export function getSyncCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin");
   const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-sync-token",
     Vary: "Origin",
   };

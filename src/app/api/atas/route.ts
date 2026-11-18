@@ -4,12 +4,15 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import { generateVerificationCode, canAccessConfidentialMinute, stripParticipantSecrets } from "@/lib/ataCrypto";
 import { sanitizeMinutePayload, validateParticipantStudentLinks } from "@/services/ataParticipantService";
+import { getCurrentBrasiliaYear } from "@/services/ataFinalizationService";
 import { sanitizeKinshipForRole } from "@/lib/participantKinship";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const PNG_DATA_URL_MAX_CHARS = 700_000;
 
 const createMinuteDraftSchema = z.object({
   category: z.string().default("ACOMPANHAMENTO_PEDAGOGICO"),
@@ -32,7 +35,20 @@ const createMinuteDraftSchema = z.object({
         documentVerifiedByStaff: z.boolean().default(false),
         phone: z.string().optional().nullable(),
         signatureMode: z.string().default("PENDING"),
-        signatureData: z.string().optional().nullable(),
+        signatureData: z
+          .string()
+          .max(PNG_DATA_URL_MAX_CHARS, "Imagem de assinatura excede o tamanho máximo permitido (512KB).")
+          .refine(
+            (v) => v.trim().startsWith("data:image/png;base64,"),
+            "Formato de assinatura inválido: utilize apenas imagem PNG (data:image/png;base64,)."
+          )
+          .optional()
+          .nullable(),
+        biometricStrokeData: z
+          .string()
+          .max(200_000, "Dados vetoriais da assinatura excedem o limite permitido (200KB).")
+          .optional()
+          .nullable(),
         biometricVerified: z.boolean().default(false),
         biometricDeviceType: z.string().optional().nullable(),
         expectedEmail: z.string().optional().nullable(),
@@ -62,7 +78,7 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const yearParam = searchParams.get("year");
-    const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();
+    const year = yearParam ? parseInt(yearParam, 10) : getCurrentBrasiliaYear();
     const status = searchParams.get("status"); // DRAFT | FINALIZED | VOIDED
     const studentId = searchParams.get("studentId");
     const category = searchParams.get("category");
@@ -215,7 +231,11 @@ export async function GET(req: Request) {
       );
     }
 
-    const responseMinutes = minutes.map((m) => {
+    const visibleMinutes = search
+      ? minutes.filter((m) => canAccessConfidentialMinute(m, authCheck.session))
+      : minutes;
+
+    const responseMinutes = visibleMinutes.map((m) => {
       const allowedConfidential = canAccessConfidentialMinute(m, authCheck.session);
       const safeParticipants = m.participants.map((p) => {
         const {
@@ -239,15 +259,20 @@ export async function GET(req: Request) {
       if (!allowedConfidential) {
         return {
           ...m,
+          subject: "Atendimento sob sigilo institucional",
           rawNotes: null,
-          summary: "[CONTEÚDO SOB SIGILO REFORÇADO ECA — ACESSO RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
+          summary: "[CONTEÚDO SOB SIGILO INSTITUCIONAL — ACESSO RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
           agreementsSummary: null,
+          students: [],
           actionItems: [],
           addendums: [],
           physicalSignedScanData: null,
+          physicalScanStorageKey: null,
+          physicalScanSha256: null,
+          govBrProtocol: null,
           hasPhysicalScan: false,
           restrictedConfidential: true,
-          participants: safeParticipants,
+          participants: [],
         };
       }
 
@@ -283,7 +308,7 @@ export async function POST(req: Request) {
 
     const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
     const ip = extractClientIp(req);
-    const currentYear = new Date().getFullYear();
+    const currentYear = getCurrentBrasiliaYear();
 
     const {
       category,
@@ -365,7 +390,7 @@ export async function POST(req: Request) {
         },
         participants: {
           create: participants.map((p) => {
-            const isSigned = Boolean(p.signatureData || p.verifiedEmail || p.biometricVerified);
+            const isSigned = Boolean(p.signatureData);
             return {
               role: p.role,
               studentId:
@@ -424,7 +449,7 @@ export async function POST(req: Request) {
       ipAddress: ip,
     });
 
-    return NextResponse.json({ success: true, minute }, { status: 201 });
+    return NextResponse.json({ success: true, minute: stripParticipantSecrets(minute) }, { status: 201 });
   } catch (error: any) {
     const msg = error?.message || "";
     if (msg.startsWith("FORBIDDEN:")) {

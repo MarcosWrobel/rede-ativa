@@ -76,9 +76,10 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
     expect(html).toContain("Classificação e Síntese Formal (Human-in-the-Loop):");
     expect(html).toContain("Sugerir Classificação e Síntese com IA");
 
-    // Seção 4: Revisão humana e selagem probatória
+    // Seção 4: Revisão humana e registro de retorno
     expect(html).toContain("Categoria da Justificativa / Motivo da Ausência:");
-    expect(html).toContain("Confirmar e Selar Retorno (SHA-256)");
+    expect(html).toContain("Confirmar e registrar retorno");
+    expect(html).not.toContain("SHA-256");
   });
 
   it("renderiza opções de categorias de retorno padronizadas", () => {
@@ -188,7 +189,8 @@ describe("WhatsAppReplyCaptureModal (Human-in-the-Loop UX)", () => {
     expect(html).toContain("5º Ano Municipal");
     expect(html).toContain("43988887777");
     expect(html).toContain("Capturar Retorno do Responsável");
-    expect(html).toContain("Confirmar e Selar Retorno (SHA-256)");
+    expect(html).toContain("Confirmar e registrar retorno");
+    expect(html).not.toContain("SHA-256");
   });
 
   describe("isPhoneCompatible (Tolerância de formato e DDI)", () => {

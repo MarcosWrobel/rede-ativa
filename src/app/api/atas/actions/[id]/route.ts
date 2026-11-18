@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ export async function PATCH(
             ataNumber: true,
             year: true,
             subject: true,
+            isConfidential: true,
+            authorId: true,
+            authorEmail: true,
           },
         },
       },
@@ -46,6 +50,13 @@ export async function PATCH(
     const currentSchool = await getCurrentSchool(authCheck.schoolId);
     if (!assertTenantOwnership(actionItem.minute?.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
+    }
+
+    if (!canAccessConfidentialMinute(actionItem.minute, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
+        { status: 403 }
+      );
     }
 
     const rawBody = await req.json();

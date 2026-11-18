@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { isBootstrapAdminEmail } from "./roles";
 
 export interface MinuteStudentPayload {
   studentId: string;
@@ -338,7 +339,7 @@ export function canAccessConfidentialMinute(
   const email = (user.email || "").toLowerCase().trim();
   const role = user.role;
 
-  if (role === "SUPERADMIN" || role === "ADMIN" || email === "marcos.wrobel@escola.pr.gov.br") {
+  if (role === "SUPERADMIN" || role === "ADMIN" || isBootstrapAdminEmail(email)) {
     return true;
   }
 
@@ -367,4 +368,82 @@ export function canAccessConfidentialMinute(
   }
 
   return false;
+}
+
+/**
+ * Remove segredos de assinatura móvel (`mobileSignToken`, `mobileSignExpiresAt`)
+ * de participantes antes de serializar respostas JSON em rotas de criação, edição e lavratura.
+ */
+export function stripParticipantSecrets<T>(minute: T): T {
+  if (!minute || typeof minute !== "object") return minute;
+  const record = minute as Record<string, any>;
+  if (!Array.isArray(record.participants) || record.participants.length === 0) {
+    return minute;
+  }
+
+  return {
+    ...record,
+    participants: record.participants.map((p: any) => {
+      if (!p || typeof p !== "object") return p;
+      const { mobileSignToken, mobileSignExpiresAt, ...rest } = p;
+      return {
+        ...rest,
+        hasSignature: Boolean(rest.hasSignature),
+        hasActiveSignLink:
+          typeof rest.hasActiveSignLink === "boolean"
+            ? rest.hasActiveSignLink
+            : Boolean(mobileSignToken),
+      };
+    }),
+  } as T;
+}
+
+/**
+ * Valida estritamente imagem de assinatura em PNG (prefixo Data URL, limite de 512 KB
+ * e assinatura binária PNG `\x89PNG\r\n\x1a\n`).
+ */
+export function validatePngSignatureDataUrl(
+  rawDataUrl: string,
+  maxBytes: number = 512 * 1024
+): { ok: true; byteLength: number } | { ok: false; error: string } {
+  const trimmed = rawDataUrl.trim();
+  const match = trimmed.match(/^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) {
+    return {
+      ok: false,
+      error: "Formato de assinatura inválido. Envie apenas imagem PNG codificada em Base64 (data:image/png;base64,).",
+    };
+  }
+
+  const base64Clean = match[1].replace(/\s+/g, "");
+  if (!base64Clean) {
+    return { ok: false, error: "Imagem de assinatura vazia ou corrompida." };
+  }
+
+  const buffer = Buffer.from(base64Clean, "base64");
+  if (buffer.length < 8) {
+    return { ok: false, error: "Conteúdo binário de assinatura PNG inválido ou truncado." };
+  }
+  if (buffer.length > maxBytes) {
+    return { ok: false, error: "Imagem de assinatura excede o tamanho máximo permitido (512KB)." };
+  }
+
+  const isPngMagic =
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a;
+
+  if (!isPngMagic) {
+    return {
+      ok: false,
+      error: "Conteúdo binário incompatível com PNG válido (MIME spoofing bloqueado).",
+    };
+  }
+
+  return { ok: true, byteLength: buffer.length };
 }

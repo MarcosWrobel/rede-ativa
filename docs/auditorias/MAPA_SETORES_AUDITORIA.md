@@ -2,7 +2,7 @@
 
 Este documento estabelece o **mapa arquitetural minucioso** e as **diretrizes operacionais** para implementações e execução das auditorias setoriais, de integração e geral na plataforma **Rede Ativa SaaS**. Nenhum agente deve iniciar uma varredura de auditoria sem antes referenciar este mapa de escopo e as regras de preservação em [`AGENTS.md`](../../AGENTS.md) e [`GEMINI.md`](../../GEMINI.md).
 
-> **Inventário Verificado do Código-Fonte:** **21 models Prisma** ([`prisma/schema.prisma`](../../prisma/schema.prisma)), **30 páginas `page.tsx`** (`src/app/`), **52 Route Handlers `route.ts`** (`src/app/api/`), **7 módulos em `src/services/`**, **45 módulos em `src/lib/`** e **extensão Chrome MV3 `v1.6.5`** ([`extension/manifest.json`](../../extension/manifest.json)).
+> **Inventário Verificado do Código-Fonte:** **21 models Prisma** ([`prisma/schema.prisma`](../../prisma/schema.prisma)), **30 páginas `page.tsx`** (`src/app/`), **53 Route Handlers `route.ts`** (`src/app/api/`), **7 módulos em `src/services/`**, **45 módulos em `src/lib/`**, **77 arquivos de teste (`74` aprovados / `691` testes aprovados + `12` `skipIf`)** e **extensão Chrome MV3 `v1.6.5`** ([`extension/manifest.json`](../../extension/manifest.json)).
 
 ---
 
@@ -91,7 +91,7 @@ Os módulos do projeto encontram-se rigorosamente categorizados em **5 setores o
 - **Route Handlers:**
   - `/api/students`, `/api/students/import`, `/api/students/[id]/attendances`, `/api/students/[id]/contacts`, `/api/students/[id]/justifications`
   - `/api/classes`, `/api/frequencia/sync` (bloqueado `403` em `INSTITUCIONAL_ESSENCIAL`), `/api/serp/sync` (bloqueado `403` em `INSTITUCIONAL_ESSENCIAL`)
-  - `/api/low-attendance`, `/api/justifications`, `/api/justifications/[id]`, `/api/reports`, `/api/secretaria/metrics`
+  - `/api/low-attendance`, `/api/low-attendance/import`, `/api/justifications`, `/api/justifications/[id]`, `/api/reports`, `/api/secretaria/metrics`
   - `/api/ai/classify-reply`, `/api/ai/formalize-ata`, `/api/ai/generate-template`, `/api/ai/test-key`
 - **Models Prisma:** `ClassGroup`, `Student`, `LowAttendanceRecord`, `AttendanceSnapshot`, `StudentContact`, `AbsenceJustification`, `InPersonAttendance`.
 

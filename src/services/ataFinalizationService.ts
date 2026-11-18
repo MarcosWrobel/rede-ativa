@@ -1,6 +1,8 @@
 import {
   computeMinuteHash,
   generateVerificationCode,
+  canAccessConfidentialMinute,
+  stripParticipantSecrets,
   type MinuteCanonicalPayload,
 } from "@/lib/ataCrypto";
 import {
@@ -34,6 +36,13 @@ function getBrasiliaDateParts(date: Date): { year: number; month: number; day: n
     month: map.month,
     day: map.day,
   };
+}
+
+/**
+ * Retorna o ano civil oficial no fuso horário de Brasília (America/Sao_Paulo).
+ */
+export function getCurrentBrasiliaYear(date: Date = new Date()): number {
+  return getBrasiliaDateParts(date).year;
 }
 
 /**
@@ -216,6 +225,7 @@ export interface ExecuteMinuteFinalizationParams {
     ip?: string | null;
   };
   verifyTenantOwnership: (minuteSchoolId: string) => boolean;
+  session?: any;
 }
 
 export interface ExecuteMinuteFinalizationResult {
@@ -233,7 +243,7 @@ export interface ExecuteMinuteFinalizationResult {
 export async function executeMinuteFinalization(
   params: ExecuteMinuteFinalizationParams
 ): Promise<ExecuteMinuteFinalizationResult> {
-  const { prisma, minuteId, rawBody, author, verifyTenantOwnership } = params;
+  const { prisma, minuteId, rawBody, author, verifyTenantOwnership, session } = params;
   const currentYear = getBrasiliaDateParts(new Date()).year;
 
   const runTx =
@@ -267,6 +277,23 @@ export async function executeMinuteFinalization(
 
           if (!verifyTenantOwnership(minute.schoolId)) {
             throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
+          }
+
+          const effectiveSession =
+            session ??
+            ({
+              user: {
+                id: author.userId,
+                email: author.email,
+                role: author.role,
+                schoolId: minute.schoolId,
+              },
+            } as any);
+
+          if (!canAccessConfidentialMinute(minute, effectiveSession)) {
+            throw new Error(
+              "FORBIDDEN:Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor."
+            );
           }
 
           if (minute.status === "FINALIZED") {
@@ -470,7 +497,7 @@ export async function executeMinuteFinalization(
   }
 
   return {
-    minute: finalized,
+    minute: stripParticipantSecrets(finalized),
     alreadyFinalized: isAlreadyFinalized,
   };
 }

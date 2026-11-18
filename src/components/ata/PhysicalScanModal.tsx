@@ -234,7 +234,7 @@ export default function PhysicalScanModal({
 
               {minute.physicalScanSha256 && (
                 <p className="text-[10px] font-mono text-slate-500 truncate">
-                  SHA-256: {minute.physicalScanSha256}
+                  Código de verificação do anexo: {minute.physicalScanSha256}
                 </p>
               )}
 

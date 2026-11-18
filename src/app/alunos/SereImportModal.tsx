@@ -45,6 +45,7 @@ interface Props {
   onClose: () => void;
   existingClassGroups: Array<{ id: string; name: string; segment: string; shift?: string }>;
   isAdmin?: boolean;
+  isIntegrated?: boolean;
   onImportComplete: (payload: {
     students: any[];
     classGroups: any[];
@@ -57,6 +58,7 @@ export default function SereImportModal({
   onClose,
   existingClassGroups,
   isAdmin = false,
+  isIntegrated = false,
   onImportComplete,
 }: Props) {
   const tableCaptionId = useId();
@@ -334,8 +336,8 @@ export default function SereImportModal({
       open={open}
       onClose={handleClose}
       size="xl"
-      title="Importação em Lote de Alunos (SERE / SEED-PR)"
-      subtitle="Cadastre ou atualize turmas e estudantes de qualquer escola estadual diretamente pelos relatórios em Excel (.xls/.xlsx), PDF ou CSV por turno do SERE."
+      title="Importação em Lote de Alunos (SERE)"
+      subtitle="Cadastre ou atualize turmas e estudantes diretamente pelos relatórios em Excel (.xls/.xlsx), PDF ou CSV compatíveis com o SERE."
     >
       <div className="space-y-4 text-xs">
         {errorMsg && (
@@ -355,7 +357,9 @@ export default function SereImportModal({
                   Lote do SERE processado com sucesso!
                 </h3>
                 <p className="text-emerald-800">
-                  As turmas, matrículas oficiais (CGM) e telefones já estão prontos para uso no Painel de Envio e na sincronização com Power BI e SERP.
+                  {isIntegrated
+                    ? "As turmas, matrículas (CGM) e telefones já estão prontos para uso na Busca Ativa e na sincronização com Power BI e SERP."
+                    : "As turmas, matrículas (CGM) e telefones já estão prontos para uso na Busca Ativa e no acompanhamento de frequência."}
                 </p>
               </div>
             </div>
@@ -616,7 +620,7 @@ export default function SereImportModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-sky-50 border border-sky-200">
                     <div>
                       <label className="font-bold text-slate-700 block mb-1">
-                        Nome Institucional da Escola (Cabeçalhos & Dossiês PDF):
+                        Nome Institucional da Escola (Cabeçalhos & Relatórios PDF):
                       </label>
                       <input
                         type="text"

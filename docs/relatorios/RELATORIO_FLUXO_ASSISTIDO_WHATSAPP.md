@@ -1,4 +1,8 @@
 # Relatório de Engenharia: Fluxo Assistido de Retorno do WhatsApp Web
+
+> [!NOTE]
+> **Snapshot Histórico `Point-in-Time` (Entrega Sprint 16 / Branch `feature/whatsapp-reply-assisted`):** Este documento registra o marco histórico da implementação inicial (`330/330` testes à época). Rótulos visuais citados no texto (como termos técnicos ou jurídicos em botões) foram posteriormente adequados à **Seção 10 de [`GEMINI.md`](../../GEMINI.md)**. Para o estado vigente da mensageria e extensão (`v1.6.5`), consulte [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md) e [`../extensao/ESTADO_E_VALIDACAO_EXTENSAO.md`](../extensao/ESTADO_E_VALIDACAO_EXTENSAO.md).
+
 **Plataforma:** Rede Ativa SaaS  
 **Módulo:** Busca Ativa Escolar & Dossiê Probatório (WhatsApp)  
 **Branch:** `feature/whatsapp-reply-assisted`  

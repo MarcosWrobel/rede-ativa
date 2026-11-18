@@ -114,7 +114,7 @@ export default function SchoolSelector({
         <div className="flex flex-col min-w-0 pr-1">
           <div className="flex items-center space-x-1.5">
             <span className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[140px] sm:max-w-[200px] md:max-w-[260px]">
-              {currentSchool?.name || "Colégio Estadual"}
+              {currentSchool?.name || "Instituição de Ensino"}
             </span>
             <span
               className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider ${

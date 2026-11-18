@@ -1,6 +1,8 @@
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
+import { checkRateLimit, hashIp, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import MobileSignClient from "./MobileSignClient";
 
 interface Props {
@@ -8,6 +10,29 @@ interface Props {
 }
 
 export default async function AssinarAtaPage({ params }: Props) {
+  const reqHeaders = await headers();
+  const rawIp =
+    reqHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    reqHeaders.get("x-real-ip")?.trim() ||
+    "unknown";
+  const rlCheck = await checkRateLimit(
+    `rl:sign-token-page:${hashIp(rawIp)}`,
+    RATE_LIMIT_POLICIES.SIGN_TOKEN_ACCESS
+  );
+
+  if (!rlCheck.success) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center space-y-3">
+          <h1 className="text-lg font-black text-slate-900">Limite de acessos excedido</h1>
+          <p className="text-xs text-slate-500">
+            Muitas tentativas em curto intervalo. Aguarde {rlCheck.retryAfterSeconds} segundos para abrir este link novamente.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const { token } = await params;
 
   const participant = await prisma.pedagogicalMinuteParticipant.findUnique({
@@ -41,7 +66,7 @@ export default async function AssinarAtaPage({ params }: Props) {
         <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center space-y-3">
           <h1 className="text-lg font-black text-slate-900">Ata Já Lavrada Oficialmente</h1>
           <p className="text-xs text-slate-500">
-            Esta ata pedagógica já foi finalizada e selada criptograficamente. Não é mais possível coletar novas assinaturas neste registro.
+            Esta ata pedagógica já foi confirmada. Não é mais possível coletar novas assinaturas neste registro.
           </p>
         </div>
       </div>

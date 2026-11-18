@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp } from "@/lib/audit";
-import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
+import { anonymizeOtherMinorsInText, validatePngSignatureDataUrl } from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import { z } from "zod";
 import {
@@ -13,8 +13,8 @@ import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_SIG_IMAGE = /^data:image\/(png|jpeg|jpg|webp);base64,/i;
 const MAX_SIG_BYTES = 512 * 1024; // 512 KB
+const MAX_SIG_BASE64_CHARS = 700_000;
 const MAX_STROKE_BYTES = 200 * 1024; // 200 KB
 
 const submitSignSchema = z.object({
@@ -214,9 +214,16 @@ export async function POST(
     }
 
     if (signatureData) {
-      if (signatureData.length > MAX_SIG_BYTES || !ALLOWED_SIG_IMAGE.test(signatureData.trim())) {
+      if (signatureData.length > MAX_SIG_BASE64_CHARS) {
         return NextResponse.json(
           { error: "Imagem de assinatura inválida ou excede o tamanho máximo permitido (512KB)." },
+          { status: 400 }
+        );
+      }
+      const sigValidation = validatePngSignatureDataUrl(signatureData, MAX_SIG_BYTES);
+      if (!sigValidation.ok) {
+        return NextResponse.json(
+          { error: sigValidation.error },
           { status: 400 }
         );
       }
@@ -320,29 +327,49 @@ export async function POST(
           };
         }
 
-        await tx.pedagogicalMinuteParticipant.update({
-          where: { id: freshParticipant.id },
-          data: {
-            signatureMode: "ESCOLA_OAUTH",
-            verifiedEmail,
-            verifiedGoogleName: verifiedGoogleName || null,
-            verifiedGoogleSub: verifiedGoogleSub || null,
-            emailVerifiedAt: now,
-            signedAt: now,
-            signerIp: ip,
-            signerUserAgent: userAgent,
-            signatureData: signatureData || null, // Se o usuário também desenhou opcionalmente
-            biometricStrokeData: signatureData ? (biometricStrokeData || null) : null,
-            clientTimestampIso: clientTimestampIso || now.toISOString(),
-            biometricVerified: biometricVerified || false,
-            biometricDeviceType: biometricDeviceType || null,
-            biometricAuthTime: biometricVerified ? now : null,
-            mobileSignToken: null, // Queima token de uso único
-            mobileSignExpiresAt: null,
-            hasSignature: true,
-            hasActiveSignLink: false,
-          },
-        });
+        const oauthUpdateData = {
+          signatureMode: "ESCOLA_OAUTH",
+          verifiedEmail,
+          verifiedGoogleName: verifiedGoogleName || null,
+          verifiedGoogleSub: verifiedGoogleSub || null,
+          emailVerifiedAt: now,
+          signedAt: now,
+          signerIp: ip,
+          signerUserAgent: userAgent,
+          signatureData: signatureData || null, // Se o usuário também desenhou opcionalmente
+          biometricStrokeData: signatureData ? (biometricStrokeData || null) : null,
+          clientTimestampIso: clientTimestampIso || now.toISOString(),
+          biometricVerified: biometricVerified || false,
+          biometricDeviceType: biometricDeviceType || null,
+          biometricAuthTime: biometricVerified ? now : null,
+          mobileSignToken: null, // Queima token de uso único
+          mobileSignExpiresAt: null,
+          hasSignature: true,
+          hasActiveSignLink: false,
+        };
+
+        if (typeof (tx.pedagogicalMinuteParticipant as any).updateMany === "function") {
+          const atomicRes = await tx.pedagogicalMinuteParticipant.updateMany({
+            where: {
+              id: freshParticipant.id,
+              mobileSignToken: token,
+              signedAt: null,
+            },
+            data: oauthUpdateData,
+          });
+          if (atomicRes.count === 0) {
+            return {
+              ok: false as const,
+              status: 409,
+              error: "Este link de assinatura já foi utilizado em outra requisição simultânea.",
+            };
+          }
+        } else {
+          await tx.pedagogicalMinuteParticipant.update({
+            where: { id: freshParticipant.id },
+            data: oauthUpdateData,
+          });
+        }
 
         return { ok: true as const, studentId: freshParticipant.studentId };
       });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
 import { GoogleGenAI } from "@google/genai";
+import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const maxDuration = 60;
@@ -51,6 +52,8 @@ export async function POST(req: Request) {
 
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
+    const pseudonymizer = createAiPseudonymizer();
+    const maskedPrompt = pseudonymizer.maskText(prompt.trim());
 
     const systemInstruction = `Você é um assistente pedagógico oficial da plataforma Rede Ativa para instituições escolares.
 Sua missão é transformar a solicitação da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para envio via WhatsApp aos pais ou responsáveis.
@@ -90,7 +93,7 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
 
         const response = await ai.models.generateContent({
           model,
-          contents: `Crie um modelo de mensagem institucional escolar para WhatsApp sobre o seguinte assunto: "${prompt.trim()}". Responda estritamente em JSON com as chaves "title", "prefixText", "suffixText", "isAbsenceRelated".`,
+          contents: `Crie um modelo de mensagem institucional escolar para WhatsApp sobre o seguinte assunto: "${maskedPrompt}". Responda estritamente em JSON com as chaves "title", "prefixText", "suffixText", "isAbsenceRelated".`,
           config: {
             systemInstruction,
             responseMimeType: "application/json",
@@ -137,7 +140,7 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
         const interaction = await ai.interactions.create(
           {
             model: "gemini-3.5-flash-lite",
-            input: `Crie um modelo de mensagem institucional para: "${prompt.trim()}". Responda estritamente em JSON.`,
+            input: `Crie um modelo de mensagem institucional para: "${maskedPrompt}". Responda estritamente em JSON.`,
             system_instruction: systemInstruction,
           },
           {
@@ -157,10 +160,19 @@ Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
     }
 
     if (!responseText) {
-      const isKeyError = lastErrorMsg.toLowerCase().includes("api key not valid");
+      const lowerErr = lastErrorMsg.toLowerCase();
+      const isKeyError =
+        lowerErr.includes("api key not valid") ||
+        lowerErr.includes("403 forbidden") ||
+        lowerErr.includes("permission_denied");
+      const safeErrorMsg = isKeyError
+        ? "Chave da API Gemini inválida ou sem autorização para este serviço."
+        : lowerErr.includes("429") || lowerErr.includes("resource_exhausted")
+        ? "Limite temporário de requisições da API de IA atingido. Tente novamente em instantes."
+        : "Serviço de IA indisponível temporariamente. Tente novamente em instantes.";
       return NextResponse.json(
         {
-          error: `Google Gemini: ${lastErrorMsg || "Serviço de IA indisponível temporariamente. Tente novamente."}`,
+          error: safeErrorMsg,
           missingApiKey: isKeyError,
         },
         { status: 400 }

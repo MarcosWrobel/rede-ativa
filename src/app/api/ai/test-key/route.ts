@@ -60,7 +60,12 @@ export async function POST(req: Request) {
     }
 
     const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
-    const source = headerKey ? "informada_no_navegador" : bodyKey ? "informada_no_formulario" : "variavel_vercel";
+    const source =
+      bodyKey && bodyKey.length > 10
+        ? "informada_no_formulario"
+        : headerKey && headerKey.length > 10
+        ? "informada_no_navegador"
+        : "variavel_vercel";
 
     const ai = new GoogleGenAI({ apiKey: cleanApiKey });
 
@@ -106,7 +111,7 @@ export async function POST(req: Request) {
     if (respondingModel) {
       return NextResponse.json({
         success: true,
-        message: "Chave Gemini 100% funcional e conectada com sucesso ao Google AI!",
+        message: "Chave Gemini conectada e respondendo corretamente.",
         respondingModel,
         sampleReply,
         durationMs,
@@ -114,24 +119,21 @@ export async function POST(req: Request) {
       });
     }
 
-    // Se falhou, extrair mensagem detalhada da resposta do Google
-    let errorMessage = lastError?.message || String(lastError);
-    if (lastError?.body) {
-      try {
-        const parsed = JSON.parse(lastError.body);
-        const detail = Array.isArray(parsed)
-          ? parsed[0]?.error?.message
-          : parsed?.error?.message;
-        if (detail) errorMessage = detail;
-      } catch (parseError) {
-        console.debug("[AI Test Key JSON Parse Error]", parseError);
-      }
-    }
+    // Mapeia falhas conhecidas da API externa sem expor payload bruto de erro
+    const rawDetail = String(lastError?.message || "").toLowerCase();
+    const safeErrorMessage =
+      rawDetail.includes("api key not valid") || rawDetail.includes("403 forbidden")
+        ? "Chave da API recusada ou inválida."
+        : rawDetail.includes("429") || rawDetail.includes("resource_exhausted")
+        ? "Limite temporário de requisições da API atingido."
+        : rawDetail.includes("503") || rawDetail.includes("unavailable")
+        ? "Serviço externo temporariamente indisponível."
+        : "Não foi possível validar a conexão com o provedor de IA.";
 
     return NextResponse.json(
       {
         success: false,
-        error: `Google Gemini recusou a conexão: ${errorMessage}`,
+        error: safeErrorMessage,
         durationMs,
         source,
       },

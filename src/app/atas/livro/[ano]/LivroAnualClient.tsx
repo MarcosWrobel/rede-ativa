@@ -262,8 +262,7 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               Atendimento Pedagógico e Acompanhamento Escolar do <strong>{school.name}</strong>,
               destinado a lavrar eletronicamente todos os registros, atendimentos a familiares,
               deliberações da Equipe Pedagógica e encaminhamentos à Rede de Proteção da Criança
-              e do Adolescente, em estrito cumprimento à Lei Federal nº 14.063/2020, ao Estatuto
-              da Criança e do Adolescente (Lei nº 8.069/1990) e às normativas vigentes {networkHeader.authority}.
+              e do Adolescente, observando os procedimentos e normativas vigentes {networkHeader.authority}.
             </p>
           </div>
 

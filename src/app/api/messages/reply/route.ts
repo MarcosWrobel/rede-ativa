@@ -56,6 +56,7 @@ async function classifyReplyWithFallback({
     guardianName ? [guardianName] : []
   );
   const maskedText = pseudonymizer.maskText(rawText);
+  const maskedReasonTitle = reasonTitle ? pseudonymizer.maskText(reasonTitle) : "";
 
   const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^["']|["']$/g, "").trim();
 
@@ -69,7 +70,7 @@ Regras:
 3. Classifique "category" estritamente em um dos valores permitidos: SAUDE, TRANSPORTE, TRABALHO, VIAGEM_FAMILIAR, VULNERABILIDADE, SEM_JUSTIFICATIVA ou OUTROS.`;
 
     const inputPrompt = `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
-Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
+Motivo do contato escolar: ${maskedReasonTitle || "Busca Ativa Escolar"}
 Mensagem recebida do responsável via WhatsApp:
 """
 ${maskedText}

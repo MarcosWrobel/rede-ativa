@@ -9,6 +9,28 @@
   const alunosCapturados = new Map();
   let isScrolling = false;
 
+  const OFFICIAL_SYNC_HTTPS_HOSTS = new Set([
+    'redeativa.app.br',
+    'www.redeativa.app.br',
+    'app.redeativa.app.br',
+    'redeativa.com.br',
+    'www.redeativa.com.br',
+    'app.redeativa.com.br',
+    'registro-leopoldina.vercel.app',
+    'busca-ativa-leopoldina.vercel.app',
+  ]);
+
+  function isTrustedSyncServerUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    try {
+      const url = new URL(rawUrl.trim());
+      const host = url.hostname.toLowerCase();
+      if (url.protocol === 'https:' && OFFICIAL_SYNC_HTTPS_HOSTS.has(host)) return true;
+      if (url.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1')) return true;
+    } catch {}
+    return false;
+  }
+
   // Cria ou atualiza a interface flutuante
   function criarInterfaceFlutuante() {
     if (document.getElementById('leopoldina-floating-widget')) return;
@@ -169,7 +191,7 @@
             <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">URL do Servidor:</label>
-                <input id="leo-cfg-url" type="text" placeholder="https://seu-app.vercel.app" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace;" />
+                <input id="leo-cfg-url" type="text" placeholder="https://www.redeativa.app.br" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace;" />
               </div>
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">Chave de Sincronização:</label>
@@ -233,9 +255,14 @@
     })();
 
     const salvarConfigs = async () => {
+      const candidateUrl = inputUrl?.value?.trim() || 'https://www.redeativa.app.br';
+      if (!isTrustedSyncServerUrl(candidateUrl)) {
+        setStatus('❌ URL não autorizada. Utilize um endereço oficial Rede Ativa ou localhost.', '#ef4444');
+        return;
+      }
       if (chrome.storage && chrome.storage.local) {
         await chrome.storage.local.set({
-          leopoldina_server_url: inputUrl?.value?.trim() || '',
+          leopoldina_server_url: candidateUrl,
           leopoldina_sync_token: inputToken?.value?.trim() || '',
         });
       }
@@ -856,6 +883,11 @@
     const rawBaseUrl = (inputUrl?.value?.trim() || 'https://www.redeativa.app.br').replace(/\/+$/, '');
     const baseUrl = rawBaseUrl.replace(/^https?:\/\/redeativa\.app\.br(?=\/|$)/i, 'https://www.redeativa.app.br');
     const token = inputToken?.value?.trim() || '';
+
+    if (!isTrustedSyncServerUrl(baseUrl)) {
+      setStatus('❌ URL de servidor não autorizada. Envio bloqueado para proteger sua chave.', '#ef4444');
+      return;
+    }
 
     if (!token) {
       const settingsBox = document.getElementById('leo-settings-box');

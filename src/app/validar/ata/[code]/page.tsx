@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { ShieldCheck, AlertTriangle, Lock } from "lucide-react";
 import {
@@ -8,12 +9,39 @@ import {
   verifyAddendumChain,
 } from "@/lib/ataCrypto";
 import { formatParticipantRoleLabel } from "@/lib/participantKinship";
+import { checkRateLimit, hashIp, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 interface Props {
   params: Promise<{ code: string }>;
 }
 
 export default async function ValidarAtaPage({ params }: Props) {
+  const reqHeaders = await headers();
+  const rawIp =
+    reqHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    reqHeaders.get("x-real-ip")?.trim() ||
+    "unknown";
+  const rlCheck = await checkRateLimit(
+    `rl:public-ata-page:${hashIp(rawIp)}`,
+    RATE_LIMIT_POLICIES.PUBLIC_ATA_VERIFY
+  );
+
+  if (!rlCheck.success) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm text-center space-y-4">
+          <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h1 className="text-lg font-black text-slate-900">Limite de consultas excedido</h1>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Aguarde {rlCheck.retryAfterSeconds} segundos antes de realizar uma nova consulta de verificação.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const { code } = await params;
   let cleanCode = "";
   try {
@@ -113,19 +141,19 @@ export default async function ValidarAtaPage({ params }: Props) {
             )}
           </div>
           <span className="text-[10px] font-black uppercase tracking-widest bg-black/20 px-3 py-1 rounded-full">
-            Certidão de Autenticidade Digital
+            Verificação de Integridade
           </span>
           <h1 className="text-xl font-black mt-2">
             {!isAuthentic
               ? "Violação de integridade detectada"
               : isVoid
                 ? "Ata Tornada Sem Efeito"
-                : "Ata pedagógica autêntica"}
+                : "Ata pedagógica íntegra"}
           </h1>
           <p className="text-xs text-white/90 mt-1">
             {!isAuthentic
-              ? "O hash recalculado diverge do registro original."
-              : "Conferência oficial conforme Lei nº 14.063/2020 e ECA"}
+              ? "O código recalculado diverge do registro original."
+              : "Conferência de integridade com exibição de dados mascarados"}
           </p>
         </div>
 
@@ -203,9 +231,9 @@ export default async function ValidarAtaPage({ params }: Props) {
             </ul>
           </div>
 
-          {/* Integridade Criptográfica */}
+          {/* Código de verificação de integridade */}
           <div className="space-y-1.5 border-t border-slate-100 pt-4">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Hash SHA-256</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Código de verificação de integridade</span>
             <p className="font-mono text-[10px] text-slate-600 bg-slate-100 p-2.5 rounded-xl break-all">
               {minute.contentHash}
             </p>

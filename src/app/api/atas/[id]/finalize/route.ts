@@ -84,6 +84,7 @@ export async function POST(
       },
       verifyTenantOwnership: (minuteSchoolId) =>
         assertTenantOwnership(minuteSchoolId, currentSchool.id, authCheck.session),
+      session: authCheck.session,
     });
 
     if (alreadyFinalized) {

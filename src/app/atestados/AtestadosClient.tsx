@@ -652,9 +652,9 @@ export default function AtestadosClient({
                       </td>
 
                       <td className="px-3 py-3 text-slate-600 max-w-xs" title={j.notes || ""}>
-                        {j.notes?.includes("Power BI") && (
+                        {(j.notes?.includes("Power BI") || j.notes?.includes("arquivo de frequência")) && (
                           <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 mb-1 block w-fit">
-                            🏛️ Power BI / Amparo Legal
+                            🏛️ Amparo Legal
                           </span>
                         )}
                         <span className="truncate block">{j.notes || "—"}</span>

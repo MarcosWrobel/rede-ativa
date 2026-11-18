@@ -48,18 +48,16 @@ export async function GET(
       );
     }
 
-    // Regra de Fé Pública e Arquivo: PDF/A-1b oficial é exclusivo para atas lavradas (FINALIZED ou VOIDED)
     if (minute.status === "DRAFT") {
       return NextResponse.json(
         {
           error:
-            "A emissão de certidão arquivística em PDF/A-1b (ISO 19005-1) requer a lavratura prévia da ata com Fé Pública e PIN do servidor.",
+            "A emissão do arquivo PDF para preservação requer a lavratura prévia da ata com confirmação de autoria por PIN do servidor.",
         },
         { status: 400 }
       );
     }
 
-    // Sigilo Reforçado (ECA Art. 143 / JUR-02): se for confidencial, restringe à Gestão Escolar, SuperAdmin ou autor
     if (minute.isConfidential) {
       const isAuthor =
         minute.authorId === authCheck.userId ||
@@ -72,7 +70,7 @@ export async function GET(
         return NextResponse.json(
           {
             error:
-              "Acesso restrito. Este documento possui sigilo reforçado (ECA Art. 143) e só pode ser exportado pelo autor ou direção escolar.",
+              "Acesso restrito. Esta ata possui sigilo reforçado e só pode ser exportada pelo autor ou direção escolar.",
           },
           { status: 403 }
         );
@@ -131,7 +129,7 @@ export async function GET(
   } catch (error: any) {
     console.error("[GET /api/atas/[id]/pdfa] Erro:", error);
     return NextResponse.json(
-      { error: "Erro interno ao gerar certidão arquivística PDF/A-1b" },
+      { error: "Erro interno ao gerar arquivo PDF da ata" },
       { status: 500 }
     );
   }

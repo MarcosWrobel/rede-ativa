@@ -16,4 +16,4 @@ Este diretório preserva os **relatórios de auditoria point-in-time (snapshots 
 > [!NOTE]
 > Para consultar o **mapeamento arquitetural oficial por setores e escopos de auditoria**, acesse [`./MAPA_SETORES_AUDITORIA.md`](./MAPA_SETORES_AUDITORIA.md).
 >
-> Para consultar o **estado arquitetural vigente e unificado** do sistema (**21 models Prisma, 29 páginas SSR, 50 Route Handlers, 57 suítes e 418 testes aprovados**), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).
+> Para consultar o **estado arquitetural vigente e unificado** do sistema (**21 models Prisma, 30 páginas SSR, 53 Route Handlers, 7 módulos em `src/services/`, 45 libs em `src/lib/` e 74/77 suítes — 691 testes Vitest aprovados**), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).

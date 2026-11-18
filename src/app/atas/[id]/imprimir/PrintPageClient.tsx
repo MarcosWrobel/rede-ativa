@@ -90,10 +90,10 @@ export default function PrintPageClient({
             <a
               href={`/api/atas/${minute.id}/pdfa?download=1`}
               className="inline-flex items-center space-x-2 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition shadow-xs"
-              title="Baixar arquivo binário padronizado para preservação arquivística de longo prazo (ISO 19005-1 Level B)"
+              title="Baixar arquivo PDF para preservação"
             >
               <Download className="w-4 h-4 text-sky-600" />
-              <span>Baixar PDF/A</span>
+              <span>Baixar PDF</span>
             </a>
           )}
 
@@ -351,10 +351,10 @@ export default function PrintPageClient({
                   {p.documentNumber ? ` • Doc: ${p.documentNumber}` : ""}
                   {p.verifiedEmail
                     ? p.role === "ESTUDANTE"
-                      ? " • Ciência Discente (ECA Art. 12 / Lei 14.063/2020)"
-                      : " • Certificação Institucional Digital"
+                      ? " • Ciência discente verificada"
+                      : " • Confirmação institucional"
                     : p.biometricVerified
-                    ? " • Autenticação Biométrica FIDO2"
+                    ? " • Biometria do dispositivo"
                     : ""}
                 </p>
               </div>
@@ -362,19 +362,19 @@ export default function PrintPageClient({
           </div>
         </div>
 
-        {/* Rodapé Jurídico de Fé Pública e QR Code */}
+        {/* Rodapé de confirmação de autoria e QR Code */}
         {isFinal && (
           <div className="pt-6 border-t border-slate-200 font-sans flex items-center justify-between gap-4 text-xs print:pt-2.5 print:gap-3 print:break-inside-avoid">
             <div className="space-y-1 flex-1 print:space-y-0.5">
               <p className="font-bold text-slate-800 flex items-center space-x-1 print:text-[11px]">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 print:w-3.5 print:h-3.5" />
-                <span>Autenticidade digital — Lei nº 14.063/2020</span>
+                <span>Confirmação de autoria e integridade</span>
               </p>
               <p className="text-[10px] text-slate-500 leading-tight print:text-[9px]">
-                Documento oficial com integridade atestada por hash SHA-256 e código validador.
+                Documento com código de verificação de integridade e conferência pelo QR Code.
               </p>
               <p className="font-mono text-[9px] text-slate-600 break-all print:text-[8px]">
-                Hash SHA-256: {minute.contentHash}
+                Código de verificação de integridade: {minute.contentHash}
               </p>
               <div className="flex flex-wrap gap-x-4 text-[10px] text-slate-600 print:text-[9px]">
                 <p>

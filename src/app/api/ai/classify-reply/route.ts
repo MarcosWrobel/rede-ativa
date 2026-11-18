@@ -125,13 +125,16 @@ Regras:
       guardianName ? [guardianName] : []
     );
     const maskedReply = rawReply ? pseudonymizer.maskText(rawReply) : "";
+    const maskedReasonTitle = reasonTitle
+      ? pseudonymizer.maskText(reasonTitle)
+      : "Busca Ativa Escolar";
 
     const textPrompt = parsedImage
       ? `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
-Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
+Motivo do contato escolar: ${maskedReasonTitle}
 ${maskedReply ? `Texto auxiliar capturado do DOM:\n"""\n${maskedReply}\n"""\n` : ""}Analise a captura de tela da conversa do WhatsApp Web em anexo, extraia via OCR a resposta recebida da família (balões à esquerda) em "extractedRawReply" e gere a classificação e síntese formal.`
       : `Estudante: ${pseudonymizer.maskedStudentNames[0] || "Não informado"}
-Motivo do contato escolar: ${reasonTitle || "Busca Ativa Escolar"}
+Motivo do contato escolar: ${maskedReasonTitle}
 Mensagem recebida do responsável via WhatsApp:
 """
 ${maskedReply}

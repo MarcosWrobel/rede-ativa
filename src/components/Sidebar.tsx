@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
+import { isBootstrapAdminEmail } from "@/lib/roles";
 import { 
   Send, 
   History, 
@@ -88,10 +89,10 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
     setStoredPreference("sidebar_collapsed", String(nextState));
   };
 
-  const userEmail = (currentUser?.email || "").toLowerCase().trim();
   const isSuper =
     currentUser?.role === "SUPERADMIN" ||
-    userEmail === "marcos.wrobel@escola.pr.gov.br";
+    isBootstrapAdminEmail(currentUser?.email);
+  const isIntegrated = currentSchool?.edition === "PILOTO_INTEGRADA";
   const isSecretariat = currentUser?.role === "GESTAO_SECRETARIA" || isSuper;
   const isSchoolManager =
     currentUser?.role === "GESTOR_ESCOLAR" ||
@@ -108,7 +109,9 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           href: "/faltas",
           label: "Frequência",
           icon: AlertTriangle,
-          description: "Alertas de infrequência e SERP",
+          description: isIntegrated
+            ? "Alertas de infrequência e SERP"
+            : "Alertas de infrequência e acompanhamento",
         },
         {
           href: "/busca-ativa",
@@ -132,7 +135,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           href: "/alunos",
           label: "Estudantes e Turmas",
           icon: Users,
-          description: "Prontuário 360º e dossiê",
+          description: "Prontuário e histórico de acompanhamento",
         },
         {
           href: "/atestados",
@@ -144,7 +147,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           href: "/atas",
           label: "Livro de Atas",
           icon: BookOpenCheck,
-          description: "Atas e assinaturas com fé pública",
+          description: "Atas e confirmação de autoria por PIN",
         },
         {
           href: "/encaminhamentos",
@@ -246,7 +249,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
                 label: "Auditoria",
                 icon: ShieldCheck,
                 badge: "Admin",
-                description: "Registros imutáveis de ações",
+                description: "Histórico de ações e autoria",
               },
             ]
           : []),
@@ -323,7 +326,13 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
                   {currentSchool?.shortName || currentSchool?.name?.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "") || "Rede Ativa"}
                 </span>
                 <span className="text-[10px] text-sky-400 font-semibold tracking-wider uppercase block truncate">
-                  {currentSchool?.network === "MUNICIPAL" ? "SEMEC" : "SEED-PR"} • Busca Ativa
+                  {currentSchool?.network === "MUNICIPAL"
+                    ? "SEMEC"
+                    : currentSchool?.network === "PRIVADA"
+                    ? "Privada"
+                    : isIntegrated
+                    ? "SEED-PR"
+                    : "Rede Estadual"} • Busca Ativa
                 </span>
               </div>
             )}

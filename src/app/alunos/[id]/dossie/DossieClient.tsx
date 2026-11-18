@@ -15,8 +15,8 @@ import {
 } from "@/lib/whatsappProvider";
 import {
   computeDossierIntegritySeal,
-  formatMessageSeal,
   computeMessageContentHash,
+  verifyMessageIntegrity,
 } from "@/lib/messageCrypto";
 
 interface Props {
@@ -27,9 +27,11 @@ interface Props {
   snapshots: any[];
   minutes?: any[];
   school?: {
+    id?: string;
     name: string;
     city: string;
     nre: string;
+    network?: string;
     inepCode?: string;
     edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
   };
@@ -51,17 +53,23 @@ export default function DossieClient({
   emittedBy,
   emittedAtIso,
 }: Props) {
-  const isIntegrated = school?.edition ? school.edition === "PILOTO_INTEGRADA" : true;
+  const isIntegrated = school?.edition === "PILOTO_INTEGRADA";
   const lowAtt = student.lowAttendanceRecord;
   const detailMetrics = parseEnrollmentDetailMetrics(lowAtt?.enrollmentDetail);
   const cgm = student.cgm || detailMetrics.cgm || "Não informado";
 
   const [destinatario, setDestinatario] = useState(
-    "Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente (SERP)"
+    isIntegrated
+      ? "Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente (SERP)"
+      : "Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente"
   );
   const [showFullMessages, setShowFullMessages] = useState(false);
   const [anonymizeOtherMinors, setAnonymizeOtherMinors] = useState(true);
   const [includeConfidential, setIncludeConfidential] = useState(false);
+
+  const visibleMinutes = minutes.filter(
+    (m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)
+  );
 
   const totalLogs = student.messageLogs?.length || 0;
   const failedLogs = (student.messageLogs || []).filter(
@@ -76,10 +84,10 @@ export default function DossieClient({
       : "encontra-se em acompanhamento preventivo de assiduidade escolar";
     const failedClause =
       failedLogs > 0
-        ? ` (além de ${failedLogs} tentativa(s) frustrada(s) em número cadastral sem conta ativa no WhatsApp)`
+        ? ` (além de ${failedLogs} tentativa(s) sem entrega em número sem conta ativa no WhatsApp)`
         : "";
     const schoolUnit = school?.name || "Unidade Escolar";
-    return `Certificamos, para instrução processual perante a Rede de Proteção à Criança e ao Adolescente (Art. 56, inciso II da Lei nº 8.069/1990 — ECA e Art. 12, incisos VII e VIII da Lei nº 9.394/1996 — LDB), que a Equipe Pedagógica do(a) ${schoolUnit} realizou ${effectiveLogs} acionamento(s) de Busca Ativa Escolar com certificação digital${failedClause}, obtendo ${repliedLogs} retorno(s) familiar(es), e ${attendances.length} atendimento(s) presencial(is) com ata lavrada referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}. O presente dossiê reúne a cadeia de custódia e evidências probatórias sob fé pública documental (Lei Federal nº 14.063/2020 e MP nº 2.200-2/2001).`;
+    return `Registramos, para subsidiar o encaminhamento junto ao órgão destinatário conforme os procedimentos da rede, que a equipe pedagógica do(a) ${schoolUnit} realizou ${effectiveLogs} tentativa(s) de contato de busca ativa escolar${failedClause}, obtendo ${repliedLogs} retorno(s) da família e ${attendances.length} registro(s) de atendimento presencial referentes ao(à) estudante ${student.name}, que atualmente ${freqTxt}. Este relatório consolida o histórico de contatos, frequências e atas registradas pela unidade escolar.`;
   });
 
   const dossierIntegritySeal = computeDossierIntegritySeal({
@@ -89,7 +97,7 @@ export default function DossieClient({
     schoolId: student.schoolId || school?.inepCode || "school-default",
     schoolInep: school?.inepCode || null,
     totalMessages: totalLogs,
-    totalMinutes: (minutes || []).length,
+    totalMinutes: visibleMinutes.length,
     totalJustifications: justifications.length,
     emittedAtIso,
     emittedByEmail: emittedBy.email,
@@ -98,7 +106,7 @@ export default function DossieClient({
   useEffect(() => {
     const prevTitle = document.title;
     const cleanName = student.name.replace(/\s+/g, "_").slice(0, 35);
-    document.title = `Dossie_Busca_Ativa_${cgm !== "Não informado" ? cgm + "_" : ""}${cleanName}`;
+    document.title = `Relatorio_Acompanhamento_${cgm !== "Não informado" ? cgm + "_" : ""}${cleanName}`;
     return () => {
       document.title = prevTitle;
     };
@@ -123,7 +131,7 @@ export default function DossieClient({
             <div>
               <h1 className="text-base font-extrabold text-slate-900 flex items-center space-x-1.5">
                 <FileCheck2 className="w-5 h-5 text-emerald-600" />
-                <span>Emissão de Dossiê de Busca Ativa</span>
+                <span>Relatório de Acompanhamento Pedagógico</span>
               </h1>
             </div>
           </div>
@@ -134,7 +142,7 @@ export default function DossieClient({
             className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
           >
             <Printer className="w-4 h-4 text-amber-400" />
-            <span>Imprimir dossiê</span>
+            <span>Imprimir relatório</span>
           </button>
         </div>
 
@@ -148,14 +156,22 @@ export default function DossieClient({
               onChange={(e) => setDestinatario(e.target.value)}
               className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white font-medium"
             >
-              <option value="Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente (SERP)">
-                Conselho Tutelar / Rede de Proteção (SERP)
-              </option>
-              <option value="Sistema Educacional da Rede de Proteção — SERP / SEED-PR">
-                Sistema Educacional da Rede de Proteção (SERP / SEED-PR)
-              </option>
-              <option value="Ministério Público do Estado do Paraná — Promotoria da Infância e Juventude">
-                Ministério Público do Paraná (Promotoria da Infância e Juventude)
+              {isIntegrated ? (
+                <>
+                  <option value="Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente (SERP)">
+                    Conselho Tutelar / Rede de Proteção (SERP)
+                  </option>
+                  <option value="Sistema Educacional da Rede de Proteção — SERP / SEED-PR">
+                    Sistema Educacional da Rede de Proteção (SERP / SEED-PR)
+                  </option>
+                </>
+              ) : (
+                <option value="Conselho Tutelar / Rede de Proteção à Criança e ao Adolescente">
+                  Conselho Tutelar / Rede de Proteção
+                </option>
+              )}
+              <option value="Ministério Público — Promotoria da Infância e Juventude">
+                Ministério Público (Promotoria da Infância e Juventude)
               </option>
               <option value="Vara da Infância e da Juventude (Poder Judiciário)">
                 Vara da Infância e da Juventude (Poder Judiciário)
@@ -185,7 +201,7 @@ export default function DossieClient({
                 className="rounded border-slate-300 text-emerald-600"
               />
               <span className="text-slate-700 font-bold">
-                Anonimizar outros estudantes (ECA)
+                Anonimizar outros estudantes
               </span>
             </label>
 
@@ -218,17 +234,22 @@ export default function DossieClient({
 
       {/* FOLHA OFICIAL DO DOSSIÊ (A4) COM MOLDURA PERIMÉTRICA */}
       <article className="bg-white max-w-4xl mx-auto p-6 sm:p-10 rounded-2xl border-2 border-slate-800 shadow-sm text-slate-900 space-y-5 text-[12px] leading-snug print-page-frame print:space-y-3.5 print:shadow-none">
-        {/* 1. Cabeçalho Institucional Oficial */}
+        {/* 1. Cabeçalho Institucional */}
         <header className="border-b-2 border-slate-900 pb-4 flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
-              Governo do Estado do Paraná • SEED-PR • {school?.nre ? `NRE ${school.nre}` : "NRE Regional"} {school?.inepCode ? `• INEP: ${school.inepCode}` : ""}
+              {school?.network === "MUNICIPAL"
+                ? `Secretaria Municipal de Educação • ${school?.city || "Rede Municipal"}`
+                : school?.network === "PRIVADA"
+                ? `Instituição de Ensino • ${school?.city || ""}`
+                : `Rede Estadual de Ensino • ${school?.nre ? `NRE ${school.nre}` : "NRE Regional"}`}{" "}
+              {school?.inepCode ? `• INEP: ${school.inepCode}` : ""}
             </div>
             <h2 className="text-lg font-black uppercase tracking-tight text-slate-900">
               {school?.name || "Instituição de Ensino"}
             </h2>
             <div className="text-xs font-bold text-slate-800 pt-1">
-              DOSSIÊ INDIVIDUAL DE BUSCA ATIVA ESCOLAR E ACOMPANHAMENTO DE FREQUÊNCIA
+              HISTÓRICO DE ACOMPANHAMENTO PEDAGÓGICO E FREQUÊNCIA ESCOLAR
             </div>
             <div className="text-[11px] text-slate-600">
               Destinatário: <strong>{destinatario}</strong>
@@ -237,7 +258,7 @@ export default function DossieClient({
 
           <div className="text-right text-[10px] font-mono text-slate-600 shrink-0 space-y-0.5 border border-slate-300 rounded-lg p-2.5 bg-slate-50">
             <div>
-              <strong>EMISSÃO OFICIAL</strong>
+              <strong>REGISTRO DE EMISSÃO</strong>
             </div>
             <div>
               Data: {emittedDate.toLocaleDateString("pt-BR")}{" "}
@@ -249,11 +270,11 @@ export default function DossieClient({
             <div>Emitido por: {emittedBy.name}</div>
             {lowAtt?.serpProtocol && (
               <div className="font-bold text-slate-900">
-                Ficha SERP: #{lowAtt.serpProtocol}
+                {isIntegrated ? `Ficha SERP: #${lowAtt.serpProtocol}` : `Protocolo: #${lowAtt.serpProtocol}`}
               </div>
             )}
             <div className="pt-1 text-[9px] font-mono font-bold text-emerald-800 border-t border-slate-200 mt-1">
-              Selo de Integridade: {dossierIntegritySeal}
+              Código de Verificação: {dossierIntegritySeal}
             </div>
           </div>
         </header>
@@ -415,22 +436,22 @@ export default function DossieClient({
           )}
         </section>
 
-        {/* 4. Atas do Livro Oficial de Atendimento Pedagógico */}
+        {/* 4. Atas do Livro Digital de Atendimento Pedagógico */}
         <section className="space-y-2 break-inside-avoid">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
-            4. Atas de Atendimento Pedagógico ({minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length})
+            4. Atas de Atendimento Pedagógico ({visibleMinutes.length})
           </h3>
 
-          {minutes.filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential)).length === 0 ? (
+          {visibleMinutes.length === 0 ? (
             <p className="text-[11px] text-slate-600 border border-slate-200 rounded-lg p-2.5">
               Nenhuma ata registrada para este estudante.
             </p>
           ) : (
             <div className="space-y-2.5">
-              {minutes
-                .filter((m) => m.status === "FINALIZED" && (!m.isConfidential || includeConfidential))
-                .map((min) => {
+              {visibleMinutes.map((min) => {
                   const rawSummary = min.summary || "";
+                  const rawSubject = min.subject || "";
+                  const rawAgreements = min.agreementsSummary || "";
                   const linkedStudents = min.students?.map((s: any) => ({
                     id: s.studentId,
                     name: s.studentNameSnapshot,
@@ -439,6 +460,13 @@ export default function DossieClient({
                   const displaySummary = anonymizeOtherMinors
                     ? anonymizeOtherMinorsInText(rawSummary, student.id, linkedStudents)
                     : rawSummary;
+                  const displaySubject = anonymizeOtherMinors
+                    ? anonymizeOtherMinorsInText(rawSubject, student.id, linkedStudents)
+                    : rawSubject;
+                  const displayAgreements =
+                    anonymizeOtherMinors && rawAgreements
+                      ? anonymizeOtherMinorsInText(rawAgreements, student.id, linkedStudents)
+                      : rawAgreements;
 
                   return (
                     <div
@@ -447,7 +475,7 @@ export default function DossieClient({
                     >
                       <div className="flex justify-between font-bold border-b border-slate-200 pb-1">
                         <span>
-                          Ata nº {String(min.ataNumber).padStart(3, "0")}/{min.year} — {new Date(min.attendedAt).toLocaleDateString("pt-BR")} — {min.subject}
+                          Ata nº {String(min.ataNumber).padStart(3, "0")}/{min.year} — {new Date(min.attendedAt).toLocaleDateString("pt-BR")} — {displaySubject}
                         </span>
                         <span className="font-mono text-[10px] text-slate-500">
                           Cód: {min.verificationCode}
@@ -463,14 +491,14 @@ export default function DossieClient({
                         <strong>Síntese da Ata:</strong> {displaySummary}
                       </div>
 
-                      {min.agreementsSummary && (
+                      {displayAgreements && (
                         <div className="text-slate-700 bg-slate-50 p-1.5 rounded">
-                          <strong>Deliberações e Combinados:</strong> {min.agreementsSummary}
+                          <strong>Deliberações e Combinados:</strong> {displayAgreements}
                         </div>
                       )}
 
                       <div className="text-[9.5px] text-slate-400 font-mono">
-                        Hash SHA-256: {min.contentHash}
+                        Registro de integridade confirmado • Cód: {min.verificationCode}
                       </div>
                     </div>
                   );
@@ -514,7 +542,7 @@ export default function DossieClient({
           </section>
         )}
 
-        {/* 6. Histórico Completo e Auditado de Tentativas de Contato (Busca Ativa) */}
+        {/* 6. Histórico Completo de Tentativas de Contato (Busca Ativa) */}
         <section className="space-y-2">
           <h3 className="text-xs font-black uppercase tracking-wider bg-slate-100 border-l-4 border-slate-800 px-2.5 py-1">
             {attendances.length > 0 ? "6" : "5"}. Registro de Tentativas de Contato e Busca Ativa ({totalLogs})
@@ -532,7 +560,7 @@ export default function DossieClient({
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Motivo / Mensagem</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Telefone</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">Profissional</th>
-                  <th className="border border-slate-300 px-2 py-1.5 text-left">Selo SHA-256</th>
+                  <th className="border border-slate-300 px-2 py-1.5 text-left">Verificação</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-center">Retorno?</th>
                   <th className="border border-slate-300 px-2 py-1.5 text-left">
                     Manifestação da Família / Observações
@@ -541,21 +569,24 @@ export default function DossieClient({
               </thead>
               <tbody>
                 {student.messageLogs.map((log: any) => {
+                  const canonicalPayload = {
+                    studentId: student.id,
+                    schoolId: student.schoolId || school?.id || school?.inepCode || "",
+                    phoneUsed: log.phoneUsed || "",
+                    reasonTitle: log.reasonTitle || "",
+                    messageContent: log.messageContent || "",
+                    sentByName: log.sentByName || "",
+                    sentAt: log.sentAt,
+                    guardianReplied: Boolean(log.guardianReplied),
+                    replyNotes: log.replyNotes,
+                    replyCategory: log.replyCategory,
+                    repliedAt: log.repliedAt,
+                  };
+                  const integrityCheck = verifyMessageIntegrity(log.contentHash, canonicalPayload);
                   const messageHash =
                     log.contentHash ||
-                    computeMessageContentHash({
-                      studentId: student.id,
-                      schoolId: student.schoolId || school?.inepCode || "",
-                      phoneUsed: log.phoneUsed,
-                      reasonTitle: log.reasonTitle,
-                      messageContent: log.messageContent || "",
-                      sentByName: log.sentByName,
-                      sentAt: log.sentAt,
-                      guardianReplied: log.guardianReplied,
-                      replyNotes: log.replyNotes,
-                      replyCategory: log.replyCategory,
-                      repliedAt: log.repliedAt,
-                    });
+                    integrityCheck.calculatedHash ||
+                    computeMessageContentHash(canonicalPayload);
 
                   return (
                     <tr key={log.id} className="break-inside-avoid align-top">
@@ -586,9 +617,21 @@ export default function DossieClient({
                         {log.sentByName}
                       </td>
                       <td className="border border-slate-300 px-2 py-1 font-mono text-[9px]">
-                        <span className="block text-emerald-800 font-bold">
-                          {formatMessageSeal(messageHash)}
-                        </span>
+                        {log.contentHash ? (
+                          integrityCheck.valid ? (
+                            <span className="block text-emerald-800 font-bold">
+                              Cód. {messageHash.slice(0, 10).toUpperCase()} • Verificado
+                            </span>
+                          ) : (
+                            <span className="block text-amber-800 font-bold">
+                              Cód. {messageHash.slice(0, 10).toUpperCase()} • Divergência
+                            </span>
+                          )
+                        ) : (
+                          <span className="block text-slate-600 font-bold">
+                            {messageHash ? `Cód. ${messageHash.slice(0, 10).toUpperCase()}` : "Sem registro"}
+                          </span>
+                        )}
                         <span className="block text-slate-500 text-[8.5px]">
                           Status: {log.deliveryStatus || "SENT"}
                         </span>
@@ -660,12 +703,12 @@ export default function DossieClient({
           <div className="pt-4 border-t border-slate-300 text-[9px] text-slate-500 font-mono flex flex-wrap justify-between items-center gap-2">
             <div>
               <span className="font-bold text-slate-700 block">
-                CERTIDÃO ELETRÔNICA DE INTEGRIDADE — LEI Nº 14.063/2020 E MP Nº 2.200-2/2001
+                RELATÓRIO DE ACOMPANHAMENTO PEDAGÓGICO
               </span>
-              <span>Selo de Integridade do Dossiê: <strong className="text-emerald-800 font-mono">{dossierIntegritySeal}</strong></span>
+              <span>Código de Verificação: <strong className="text-emerald-800 font-mono">{dossierIntegritySeal}</strong></span>
             </div>
             <div className="text-right">
-              <span>Registros autenticados por hash SHA-256</span>
+              <span>Registros com verificação de integridade</span>
               <span className="block">Emissão: {emittedDate.toISOString()}</span>
             </div>
           </div>

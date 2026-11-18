@@ -102,24 +102,11 @@ export async function POST(req: Request) {
         );
 
         if (!explicitSchoolId && distinctSchoolIds.length > 1) {
-          // Se houver texto, tenta desambiguar pelo primeiro nome do estudante
-          let matchedByName: any = null;
-          if (incomingText) {
-            matchedByName = candidateLogs.find((l: any) => {
-              const firstName = l.student.name.split(" ")[0].toLowerCase();
-              return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
-            });
-          }
-
-          if (matchedByName) {
-            targetLog = matchedByName;
-          } else {
-            // Rejeita associação cega entre escolas distintas para evitar vazamento / IDOR passivo
-            return NextResponse.json({
-              ignored: true,
-              reason: "Número vinculado a múltiplos estabelecimentos de ensino sem identificação explícita de escola.",
-            });
-          }
+          // Proibição estrita de associação heurística entre escolas distintas (prevenção de IDOR passivo)
+          return NextResponse.json({
+            ignored: true,
+            reason: "Número vinculado a múltiplos estabelecimentos de ensino sem identificação explícita de escola.",
+          });
         } else {
           // Desambiguação de irmãos: se houver texto e múltiplos logs, tenta casar pelo primeiro nome do estudante
           if (incomingText && candidateLogs.length > 1) {

@@ -91,30 +91,7 @@ export async function verifyPin(pin: string, storedHash: string): Promise<boolea
   });
 }
 
-/**
- * Calcula a quantidade de dias úteis entre duas datas (ignorando finais de semana).
- */
-export function calculateBusinessDaysDiff(startDate: Date, endDate: Date = new Date()): number {
-  let count = 0;
-  const cur = new Date(startDate);
-  cur.setHours(0, 0, 0, 0);
-
-  const target = new Date(endDate);
-  target.setHours(0, 0, 0, 0);
-
-  if (cur >= target) return 0;
-
-  while (cur < target) {
-    cur.setDate(cur.getDate() + 1);
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) {
-      // Dia útil (segunda a sexta)
-      count++;
-    }
-  }
-
-  return count;
-}
+export { calculateBusinessDaysDiff } from "@/services/ataFinalizationService";
 
 export interface ServerPinCheckResult {
   ok: boolean;
@@ -123,11 +100,11 @@ export interface ServerPinCheckResult {
 }
 
 /**
- * Valida o PIN Pessoal de Fé Pública do servidor público antes de lavrar, aditar ou anular
- * atas oficiais (Lei nº 14.063/2020, Art. 4º, II — autoria pessoal intransferível).
+ * Valida o PIN Pessoal de confirmação do servidor antes de lavrar, aditar ou anular
+ * atas (autoria pessoal intransferível).
  *
- * - Se o registro do servidor existir no banco e `signingPinHash` for nulo, rejeita com 401
- *   (`PIN_REQUIRED`) exigindo o cadastro prévio do PIN (impedindo bypass por omissão).
+ * - Opera em fail-closed: se `userId`, `prismaClient.user.findUnique`, `userDb` ou `signingPinHash`
+ *   estiverem ausentes, rejeita com 401 (`PIN_REQUIRED`).
  * - Aplica trava progressiva temporária (5 minutos) após 3 tentativas incorretas consecutivas.
  */
 export async function verifyServerSigningPin(
@@ -136,7 +113,11 @@ export async function verifyServerSigningPin(
   rawProvidedPin?: unknown
 ): Promise<ServerPinCheckResult> {
   if (!userId || !prismaClient?.user?.findUnique) {
-    return { ok: true };
+    return {
+      ok: false,
+      status: 401,
+      error: "PIN_REQUIRED: Confirmação de autoria por PIN obrigatória.",
+    };
   }
 
   const userDb = await prismaClient.user.findUnique({
@@ -145,7 +126,11 @@ export async function verifyServerSigningPin(
   });
 
   if (!userDb) {
-    return { ok: true };
+    return {
+      ok: false,
+      status: 401,
+      error: "PIN_REQUIRED: Confirmação de autoria por PIN obrigatória.",
+    };
   }
 
   if (!userDb.signingPinHash) {
@@ -153,7 +138,7 @@ export async function verifyServerSigningPin(
       ok: false,
       status: 401,
       error:
-        "PIN_REQUIRED:Cadastre seu PIN Pessoal de Fé Pública antes de assinar ou averbar atos oficiais (Lei nº 14.063/2020).",
+        "PIN_REQUIRED:Cadastre seu PIN de confirmação antes de assinar ou confirmar atos.",
     };
   }
 
@@ -163,7 +148,7 @@ export async function verifyServerSigningPin(
     return {
       ok: false,
       status: 403,
-      error: `PIN de fé pública temporariamente bloqueado. Aguarde ${minsLeft} minuto(s) para tentar novamente.`,
+      error: `PIN de confirmação temporariamente bloqueado. Aguarde ${minsLeft} minuto(s) para tentar novamente.`,
     };
   }
 
@@ -172,7 +157,7 @@ export async function verifyServerSigningPin(
     return {
       ok: false,
       status: 401,
-      error: "PIN_REQUIRED:Informe seu PIN de fé pública para assinar este ato oficial.",
+      error: "PIN_REQUIRED:Informe seu PIN de confirmação para assinar este registro.",
     };
   }
 
@@ -196,8 +181,8 @@ export async function verifyServerSigningPin(
       ok: false,
       status: 401,
       error: shouldLock
-        ? "PIN de fé pública incorreto. Limite de 3 tentativas excedido. Bloqueado por 5 minutos."
-        : `PIN de fé pública incorreto. Tentativas restantes: ${3 - nextAttempts}.`,
+        ? "PIN de confirmação incorreto. Limite de 3 tentativas excedido. Bloqueado por 5 minutos."
+        : `PIN de confirmação incorreto. Tentativas restantes: ${3 - nextAttempts}.`,
     };
   }
 

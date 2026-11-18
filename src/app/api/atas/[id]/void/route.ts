@@ -6,6 +6,7 @@ import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
 import { checkRateLimit, resetRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
+import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -69,10 +70,24 @@ export async function POST(
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    // Exige validação do PIN de Fé Pública do gestor responsável pelo cancelamento com trava anti-brute-force
+    // Exige validação do PIN do gestor responsável pelo cancelamento com trava anti-brute-force
     const pinLockKey = `pin-fail:${authCheck.userId}`;
     const pinRateCheck = await checkRateLimit(pinLockKey, RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE);
     if (!pinRateCheck.success) {
+      await logAudit({
+        action: "SIGNING_PIN_LOCKOUT",
+        entityType: "User",
+        entityId: authCheck.userId,
+        details: {
+          reason: "Bloqueio temporário por excesso de tentativas incorretas de PIN (15 min)",
+          attemptedMinuteId: id,
+          retryAfterSeconds: pinRateCheck.retryAfterSeconds,
+        },
+        user: { id: authCheck.userId, name: authCheck.userName, email: authCheck.email },
+        schoolId: minute.schoolId || currentSchool.id,
+        req,
+      });
+
       return NextResponse.json(
         {
           error: `Muitas tentativas incorretas de PIN. Uso bloqueado por ${pinRateCheck.retryAfterSeconds} segundos.`,
@@ -89,15 +104,42 @@ export async function POST(
     await resetRateLimit(pinLockKey);
 
     const now = new Date();
-    const updated = await prisma.pedagogicalMinute.update({
-      where: { id },
-      data: {
-        status: "VOIDED",
-        voidedAt: now,
-        voidedByName: authCheck.userName || "Equipe Pedagógica",
-        voidedByEmail: authCheck.email,
-        voidReason: parsed.data.reason.trim(),
-      },
+    const runTx =
+      typeof prisma.$transaction === "function"
+        ? prisma.$transaction.bind(prisma)
+        : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
+
+    const updated = await runTx(async (tx) => {
+      await acquireMinuteWriteLock(tx, id);
+
+      const lockedMinute = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+      });
+
+      if (!lockedMinute) {
+        throw new Error("NOT_FOUND:Ata pedagógica não encontrada");
+      }
+
+      if (!assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, authCheck.session)) {
+        throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
+      }
+
+      if (lockedMinute.status !== "FINALIZED") {
+        throw new Error(
+          "STATUS_INVALID:Apenas atas lavradas (FINALIZED) podem receber averbação de cancelamento ('Tornada Sem Efeito'). Rascunhos devem ser descartados."
+        );
+      }
+
+      return await tx.pedagogicalMinute.update({
+        where: { id },
+        data: {
+          status: "VOIDED",
+          voidedAt: now,
+          voidedByName: authCheck.userName || "Equipe Pedagógica",
+          voidedByEmail: authCheck.email,
+          voidReason: parsed.data.reason.trim(),
+        },
+      });
     });
 
     await logAudit({
@@ -116,6 +158,16 @@ export async function POST(
 
     return NextResponse.json({ success: true, minute: updated });
   } catch (error: any) {
+    const msg = error?.message || "";
+    if (msg.startsWith("NOT_FOUND:")) {
+      return NextResponse.json({ error: msg.replace("NOT_FOUND:", "") }, { status: 404 });
+    }
+    if (msg.startsWith("FORBIDDEN:")) {
+      return NextResponse.json({ error: msg.replace("FORBIDDEN:", "") }, { status: 403 });
+    }
+    if (msg.startsWith("STATUS_INVALID:")) {
+      return NextResponse.json({ error: msg.replace("STATUS_INVALID:", "") }, { status: 400 });
+    }
     console.error("[POST /api/atas/[id]/void] Erro:", error);
     return NextResponse.json({ error: "Erro ao averbar cancelamento" }, { status: 500 });
   }

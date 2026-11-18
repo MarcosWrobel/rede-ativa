@@ -207,7 +207,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
       <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 transition-opacity ${isLoading ? "opacity-65" : "opacity-100"}`}>
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Total de Ocorrências Registradas
+            Total de Contatos Registrados
           </div>
           <div className="text-3xl font-extrabold text-slate-900 mt-2">
             {summary.total.toLocaleString("pt-BR")}
@@ -242,7 +242,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
             {reasonStats[0]?.reason || "Nenhum"}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            {reasonStats[0]?.count || 0} ocorrências ({reasonStats[0]?.percent || "0.0"}%)
+            {reasonStats[0]?.count || 0} registros ({reasonStats[0]?.percent || "0.0"}%)
           </div>
         </div>
       </div>
@@ -252,11 +252,11 @@ export default function RelatoriosClient({ initialSummary }: Props) {
         {/* Reasons Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
           <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-            1. Total de Ocorrências por Motivo de Contato
+            1. Total de Contatos por Motivo
           </h2>
           {reasonStats.length === 0 ? (
             <p className="text-xs text-slate-400 italic py-4">
-              Nenhuma ocorrência registrada para os filtros selecionados.
+              Nenhum registro encontrado para os filtros selecionados.
             </p>
           ) : (
             <div className="space-y-3">
@@ -285,7 +285,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
           {/* Pedagogas */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-              2. Ocorrências por Pedagoga Responsável
+              2. Contatos por Pedagoga Responsável
             </h2>
             {pedagogaStats.length === 0 ? (
               <p className="text-xs text-slate-400 italic py-4">
@@ -335,7 +335,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
                 </div>
                 <div className="text-xs font-semibold text-rose-800 mt-1">Sem WhatsApp</div>
                 <div className="text-[11px] text-rose-600 mt-0.5">
-                  {deliveryStats.failedPercent}% dos envios
+                  {deliveryStats.failedPercent}% dos contatos
                 </div>
               </div>
             </div>
@@ -348,7 +348,7 @@ export default function RelatoriosClient({ initialSummary }: Props) {
             </h2>
             {categoryStats.length === 0 ? (
               <p className="text-xs text-slate-400 italic py-3">
-                Nenhum retorno classificado por causa neste recorte temporal. Use o botão &ldquo;Formalizar &amp; Classificar com IA&rdquo; no Histórico para alimentar este indicador.
+                Nenhum retorno classificado por causa neste recorte temporal. Registre e revise o retorno no Histórico para alimentar este indicador.
               </p>
             ) : (
               <div className="space-y-3">

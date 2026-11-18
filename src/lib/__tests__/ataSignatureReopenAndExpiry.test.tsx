@@ -83,6 +83,9 @@ vi.mock("@/lib/escolaGoogleVerify", () => ({
   verifyParticipantIdentityMatch: vi.fn(),
 }));
 
+const VALID_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import { getParticipantSignatureSummary } from "@/components/ata/editor/signatureState";
 import { formatSignLinkValidity } from "@/components/ata/editor/signLinkValidity";
@@ -463,7 +466,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request(`http://localhost:3001/api/atas/sign-token/${firstToken}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA" }),
+          body: JSON.stringify({ signatureData: VALID_PNG_DATA_URL }),
         }),
         { params: Promise.resolve({ token: firstToken }) }
       );
@@ -500,7 +503,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request(`http://localhost:3001/api/atas/sign-token/${firstToken}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA" }),
+          body: JSON.stringify({ signatureData: VALID_PNG_DATA_URL }),
         }),
         { params: Promise.resolve({ token: firstToken }) }
       );
@@ -540,12 +543,12 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request(`http://localhost:3001/api/atas/sign-token/${secondToken}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA" }),
+          body: JSON.stringify({ signatureData: VALID_PNG_DATA_URL }),
         }),
         { params: Promise.resolve({ token: secondToken }) }
       );
       expect(signRenewedRes.status).toBe(200);
-      expect(storedSignatureData).toBe("data:image/png;base64,AAAAAAAAAAAAAAAAAAAA");
+      expect(storedSignatureData).toBe(VALID_PNG_DATA_URL);
     });
   });
 
@@ -753,7 +756,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request("http://localhost:3001/api/atas/sign-token/tok-race", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signatureData: "data:image/png;base64,AAAAAAAAAAAAAAAAAAAA" }),
+          body: JSON.stringify({ signatureData: VALID_PNG_DATA_URL }),
         }),
         { params: Promise.resolve({ token: "tok-race" }) }
       );

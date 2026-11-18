@@ -32,7 +32,7 @@ flowchart TD
     subgraph VERCEL ["Camada de Borda & Serverless (Vercel gru1)"]
         PROXY["src/proxy.ts (Edge JWT Guard)"]
         RL["src/lib/rateLimit.ts (Sliding Window)"]
-        API["Next.js 16 Route Handlers (50 endpoints)"]
+        API["Next.js 16 Route Handlers (53 endpoints)"]
     end
 
     subgraph CACHE ["Perímetro de Cache & Rate Limit (Opcional)"]
@@ -88,7 +88,7 @@ Localizado em [`src/lib/rateLimit.ts`](../src/lib/rateLimit.ts), o motor protege
 ### 2.5 Externalização de Arquivos Pesados Multi-Driver (`STORAGE-01`)
 - Gerenciado por [`src/lib/objectStorage.ts`](../src/lib/objectStorage.ts).
 - No cenário inicial, grava no PostgreSQL em Base64 (`physicalSignedScanData`), mas já calcula o hash de integridade `physicalScanSha256`.
-- Ao plugar um bucket, o envio passa a ser feito diretamente para o bucket, gravando `null` no banco de dados e zerando o peso das linhas no Neon.
+- Ao plugar credenciais de S3/R2 (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`) ou Vercel Blob (`BLOB_READ_WRITE_TOKEN`), o envio passa a ser feito diretamente para o bucket/blob, gravando `null` no banco de dados e zerando o peso das linhas no Neon.
 
 ---
 
@@ -149,8 +149,8 @@ Recomendamos o **Cloudflare R2** devido a:
    - **Branch de Desenvolvimento Isolada no `.env` Local:** Crie uma *branch* `dev` no Neon para apontar `DATABASE_URL` no `.env` local (onde rodam `npm run dev` e `rateLimitDistributed.test.ts`), evitando acordar a computação `main` de produção durante sessões de código.
 3. **Pool de Conexões (PgBouncer):** Mantenha sempre o endpoint `-pooler` em `DATABASE_URL` e conexão direta em `DIRECT_URL`:
    ```env
-   DATABASE_URL="postgresql://user:pass@ep-delicate-leaf-b6hzdz3t-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
-   DIRECT_URL="postgresql://user:pass@ep-delicate-leaf-b6hzdz3t.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+   DATABASE_URL="postgresql://usuario:senha@ep-exemplo-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+   DIRECT_URL="postgresql://usuario:senha@ep-exemplo.sa-east-1.aws.neon.tech/neondb?sslmode=require"
    ```
 
 ---

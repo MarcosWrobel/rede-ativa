@@ -59,6 +59,16 @@ const SCHOOL_CONTEXT_SELECT = {
   active: true,
   settingsJson: true,
   networkId: true,
+  educationNetwork: {
+    select: {
+      schools: {
+        where: { active: true, settingsJson: { not: null } },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+        select: { settingsJson: true },
+      },
+    },
+  },
   updatedAt: true,
 } as const;
 
@@ -135,10 +145,19 @@ interface SchoolSelectRecord {
   active?: boolean;
   settingsJson?: string | null;
   networkId?: string | null;
+  educationNetwork?: {
+    settingsJson?: string | null;
+    schools?: Array<{ settingsJson?: string | null }>;
+  } | null;
   updatedAt?: Date | string | null;
 }
 
 function mapSchoolRecordToContext(school: SchoolSelectRecord): SchoolContext {
+  const networkSettingsJson =
+    school.educationNetwork?.settingsJson ??
+    school.educationNetwork?.schools?.[0]?.settingsJson ??
+    null;
+
   return {
     id: school.id,
     inepCode: school.inepCode,
@@ -150,7 +169,7 @@ function mapSchoolRecordToContext(school: SchoolSelectRecord): SchoolContext {
     phone: school.phone,
     email: school.email,
     logoUrl: resolveSchoolLogoProxyUrl(school),
-    edition: resolveSchoolEdition(school),
+    edition: resolveSchoolEdition(school, networkSettingsJson),
   };
 }
 

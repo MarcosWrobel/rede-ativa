@@ -951,7 +951,7 @@ export default function HistoricoClient({
 
             <div className="flex justify-between items-center pt-3 border-t border-slate-200">
               <span className="text-[11px] text-slate-400">
-                A alteração será auditada com seu usuário.
+                A alteração será registrada com autoria.
               </span>
               <div className="flex space-x-2">
                 <button

@@ -4,10 +4,18 @@ const SYNC_HASH_PREFIX = "sha256:";
 const ENCRYPTION_ALGO = "aes-256-gcm";
 
 function getEncryptionKey(): Buffer {
-  const secret =
-    process.env.NEXTAUTH_SECRET ||
-    process.env.AUTH_SECRET ||
-    "rede-ativa-saas-sync-token-secret-fallback";
+  const secret = (process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "").trim();
+  if (!secret) {
+    if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") {
+      throw new Error(
+        "Configuração de criptografia ausente: defina NEXTAUTH_SECRET ou AUTH_SECRET em produção."
+      );
+    }
+    return crypto
+      .createHash("sha256")
+      .update("rede-ativa-dev-ephemeral-sync-key", "utf8")
+      .digest();
+  }
   return crypto.createHash("sha256").update(secret, "utf8").digest();
 }
 

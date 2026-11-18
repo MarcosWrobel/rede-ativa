@@ -25,12 +25,14 @@ interface Props {
   initialStudents: any[];
   classGroups: any[];
   isAdmin?: boolean;
+  isIntegrated?: boolean;
 }
 
 export default function AlunosClient({
   initialStudents,
   classGroups,
   isAdmin = false,
+  isIntegrated = false,
 }: Props) {
   const [students, setStudents] = useState<any[]>(initialStudents);
   const [classGroupList, setClassGroupList] = useState<any[]>(classGroups);
@@ -441,7 +443,7 @@ export default function AlunosClient({
                       <Link
                         href={`/alunos/${st.id}/dossie`}
                         className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition"
-                        title="Emitir Dossiê Oficial em PDF"
+                        title="Gerar histórico de acompanhamento em PDF"
                       >
                         <FileText className="w-3.5 h-3.5" />
                         <span>PDF</span>
@@ -774,6 +776,7 @@ export default function AlunosClient({
         onClose={() => setIsSereModalOpen(false)}
         existingClassGroups={classGroupList}
         isAdmin={isAdmin}
+        isIntegrated={isIntegrated}
         onImportComplete={({ students: nextStudents, classGroups: nextGroups, filterMissingPhone }) => {
           setStudents(nextStudents);
           setClassGroupList(nextGroups);

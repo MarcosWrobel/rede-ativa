@@ -303,7 +303,7 @@ export default function MobileSignClient({
           </div>
           <h1 className="text-xl font-black text-slate-900">Assinatura Concluída!</h1>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Sua assinatura digital foi registrada com fé pública e validade jurídica na ata do atendimento pedagógico. Você já pode fechar esta página.
+            Sua assinatura foi registrada na ata do atendimento pedagógico. Você já pode fechar esta página.
           </p>
 
           {successMode === "ESCOLA_OAUTH" && verifiedEmailSuccess && (
@@ -316,7 +316,7 @@ export default function MobileSignClient({
           {biometricVerified && (
             <div className="inline-flex items-center space-x-1 px-3 py-1 bg-sky-50 text-sky-800 text-[11px] font-bold rounded-full border border-sky-200">
               <Fingerprint className="w-3.5 h-3.5 text-sky-600" />
-              <span>Biometria do Dispositivo Autenticada (Lei nº 14.063/2020)</span>
+              <span>Biometria do dispositivo autenticada</span>
             </div>
           )}
         </div>
@@ -347,7 +347,7 @@ export default function MobileSignClient({
             <p className="font-extrabold text-slate-900 text-sm">{participantName}</p>
             <p className="text-[11px] text-slate-500">
               {participantRole === "ESTUDANTE"
-                ? "Estudante (Ciência e Escuta Ativa — ECA Art. 12)"
+                ? "Estudante (ciência do atendimento)"
                 : formatParticipantRoleLabel(participantRole)}
             </p>
           </div>
@@ -419,7 +419,7 @@ export default function MobileSignClient({
           <p className="text-[11px] text-slate-600 leading-relaxed">
             {isStudentOrStaff
               ? "Como estudante ou servidor, você pode assinar em 1 clique conectando sua conta institucional @escola do Google Classroom/Workspace."
-              : "Caso possua conta oficial @escola.pr.gov.br, você pode utilizá-la para assinar com fé pública digital."}
+              : "Caso possua conta oficial @escola.pr.gov.br, você pode utilizá-la para confirmar sua assinatura."}
           </p>
 
           {/* Estado Verificado: Conta Google reconhecida */}
@@ -492,7 +492,7 @@ export default function MobileSignClient({
               )}
             </div>
             <p className="text-[10px] text-slate-500 leading-tight">
-              A biometria comprova que a assinatura foi realizada pessoalmente pelo titular do aparelho (Lei nº 14.063/2020).
+              A biometria confirma que a assinatura foi realizada no aparelho pelo titular cadastrado.
             </p>
           </div>
         )}
@@ -540,7 +540,7 @@ export default function MobileSignClient({
 
         <p className="text-[10px] text-slate-400 text-center flex items-center justify-center space-x-1 pt-1">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Assinatura eletrônica com validade jurídica perante a SEED-PR e órgãos de controle</span>
+          <span>Registro vinculado ao atendimento escolar com confirmação de autoria</span>
         </p>
       </div>
     </div>

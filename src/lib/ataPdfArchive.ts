@@ -68,7 +68,7 @@ function buildXmpMetadata(minute: any, sha256Hex: string): string {
         xmlns:xmp="http://ns.adobe.com/xap/1.0/">
       <xmp:CreateDate>${createdIso}</xmp:CreateDate>
       <xmp:ModifyDate>${nowIso}</xmp:ModifyDate>
-      <xmp:CreatorTool>Rede Ativa SaaS - Livro Oficial de Atas Pedagógicas (Lei 14.063/2020)</xmp:CreatorTool>
+      <xmp:CreatorTool>Rede Ativa SaaS - Livro de Atas Pedagógicas</xmp:CreatorTool>
     </rdf:Description>
     <rdf:Description rdf:about=""
         xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/"
@@ -259,7 +259,7 @@ export async function generateAtaPdfA1b(
       borderColor: rgb(0.85, 0.2, 0.2),
       borderWidth: 1,
     });
-    currentPage.drawText("DOCUMENTO TORNADO SEM EFEITO POR AVERBAÇÃO OFICIAL (LEI 14.063/2020)", {
+    currentPage.drawText("DOCUMENTO TORNADO SEM EFEITO POR REGISTRO ADMINISTRATIVO", {
       x: MARGIN_LEFT + 10,
       y: y - 11,
       size: 8.5,
@@ -277,7 +277,7 @@ export async function generateAtaPdfA1b(
       borderColor: rgb(0.85, 0.5, 0.1),
       borderWidth: 1,
     });
-    currentPage.drawText("CONFIDENCIAL — SIGILO REFORÇADO (ESTATUTO DA CRIANÇA E DO ADOLESCENTE, ART. 143)", {
+    currentPage.drawText("CONFIDENCIAL — ACESSO RESTRITO À EQUIPE AUTORIZADA", {
       x: MARGIN_LEFT + 10,
       y: y - 11,
       size: 8,
@@ -542,7 +542,7 @@ export async function generateAtaPdfA1b(
   }
 
   const footX = MARGIN_LEFT;
-  currentPage.drawText("AUTENTICAÇÃO DIGITAL & PRESERVAÇÃO ARQUIVÍSTICA (LEI Nº 14.063/2020 • ISO 19005-1)", {
+  currentPage.drawText("CONFIRMAÇÃO DE AUTORIA E VERIFICAÇÃO DE INTEGRIDADE", {
     x: footX,
     y,
     size: 7.5,
@@ -551,7 +551,7 @@ export async function generateAtaPdfA1b(
   });
   y -= 10;
 
-  const authLine = `Lavrada por: ${minute.authorName || "Equipe Escolar"} (${minute.authorEmail || ""}) • Cargo: ${minute.authorRole || "PEDAGOGA"}`;
+  const authLine = `Registrada por: ${minute.authorName || "Equipe Escolar"} (${minute.authorEmail || ""}) • Cargo: ${minute.authorRole || "PEDAGOGA"}`;
   currentPage.drawText(authLine, {
     x: footX,
     y,
@@ -561,7 +561,7 @@ export async function generateAtaPdfA1b(
   });
   y -= 10;
 
-  const hashLine = `Hash SHA-256 Canônico: ${minute.contentHash || "Não emitido"}`;
+  const hashLine = `Código de verificação de integridade: ${minute.contentHash || "Não emitido"}`;
   currentPage.drawText(hashLine, {
     x: footX,
     y,

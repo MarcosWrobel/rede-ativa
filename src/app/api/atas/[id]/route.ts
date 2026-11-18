@@ -4,7 +4,7 @@ import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import { generateVerificationCode, canAccessConfidentialMinute, stripParticipantSecrets } from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import {
   mergeParticipantSignatures,
@@ -15,6 +15,8 @@ import { acquireMinuteWriteLock } from "@/lib/minuteLock";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const PNG_DATA_URL_MAX_CHARS = 700_000;
 
 const updateMinuteDraftSchema = z.object({
   category: z.string().optional(),
@@ -38,7 +40,20 @@ const updateMinuteDraftSchema = z.object({
         documentVerifiedByStaff: z.boolean().default(false),
         phone: z.string().optional().nullable(),
         signatureMode: z.string().default("PENDING"),
-        signatureData: z.string().optional().nullable(),
+        signatureData: z
+          .string()
+          .max(PNG_DATA_URL_MAX_CHARS, "Imagem de assinatura excede o tamanho máximo permitido (512KB).")
+          .refine(
+            (v) => v.trim().startsWith("data:image/png;base64,"),
+            "Formato de assinatura inválido: utilize apenas imagem PNG (data:image/png;base64,)."
+          )
+          .optional()
+          .nullable(),
+        biometricStrokeData: z
+          .string()
+          .max(200_000, "Dados vetoriais da assinatura excedem o limite permitido (200KB).")
+          .optional()
+          .nullable(),
         signedAt: z.string().optional().nullable(),
         clearSignature: z.boolean().optional(),
         biometricVerified: z.boolean().optional(),
@@ -64,7 +79,6 @@ const updateMinuteDraftSchema = z.object({
       })
     )
     .optional(),
-  physicalSignedScanData: z.string().optional().nullable(),
 });
 
 export async function GET(
@@ -239,19 +253,35 @@ export async function PATCH(
       );
     }
 
-    // REGRA DE OURO JURÍDICA: Se já foi lavrada (FINALIZED) ou cancelada (VOIDED),
-    // o registro é 100% imutável via PATCH. Vias físicas digitalizadas exigem o endpoint auditado /physical-scan.
+    if (!canAccessConfidentialMinute(existing, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
+        { status: 403 }
+      );
+    }
+
     if (existing.status !== "DRAFT") {
       return NextResponse.json(
         {
           error:
-            "Ata já lavrada e imutável juridicamente (Lei nº 14.063/2020). Qualquer retificação deve ser feita via Adendo ('Em tempo'), Despacho de Cancelamento ou anexo auditado em /physical-scan.",
+            "Após a confirmação, alterações são registradas em complemento vinculado à ata, preservando o histórico (ou via anexo físico).",
         },
         { status: 403 }
       );
     }
 
     const rawBody = await req.json();
+    if (
+      rawBody &&
+      typeof rawBody === "object" &&
+      Object.prototype.hasOwnProperty.call(rawBody, "physicalSignedScanData") &&
+      rawBody.physicalSignedScanData !== undefined
+    ) {
+      return NextResponse.json(
+        { error: "Anexos físicos digitalizados devem ser enviados exclusivamente pelo endpoint /api/atas/[id]/physical-scan." },
+        { status: 400 }
+      );
+    }
     const parsed = updateMinuteDraftSchema.safeParse(sanitizeMinutePayload(rawBody, "UPDATE"));
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
@@ -281,9 +311,15 @@ export async function PATCH(
         throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
       }
 
+      if (!canAccessConfidentialMinute(lockedMinute, authCheck.session)) {
+        throw new Error(
+          "FORBIDDEN:Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor."
+        );
+      }
+
       if (lockedMinute.status !== "DRAFT") {
         throw new Error(
-          "IMMUTABLE:Ata já lavrada e imutável juridicamente (Lei nº 14.063/2020). Qualquer retificação deve ser feita via Adendo ('Em tempo'), Despacho de Cancelamento ou anexo auditado em /physical-scan."
+          "IMMUTABLE:Após a confirmação, alterações são registradas em complemento vinculado à ata, preservando o histórico (ou via anexo físico)."
         );
       }
 
@@ -382,16 +418,6 @@ export async function PATCH(
               rawNotes: data.rawNotes,
               summary: data.summary,
               agreementsSummary: data.agreementsSummary,
-              physicalSignedScanData: data.physicalSignedScanData,
-              ...(data.physicalSignedScanData !== undefined
-                ? {
-                    hasPhysicalScan: Boolean(
-                      data.physicalSignedScanData ||
-                        lockedMinute.physicalScanStorageKey ||
-                        lockedMinute.physicalScanSha256
-                    ),
-                  }
-                : {}),
             },
             include: {
               students: true,
@@ -417,7 +443,7 @@ export async function PATCH(
       ipAddress: ip,
     });
 
-    return NextResponse.json({ success: true, minute: updated });
+    return NextResponse.json({ success: true, minute: stripParticipantSecrets(updated) });
   } catch (error: any) {
     const msg = error?.message || "";
     if (msg.startsWith("NOT_FOUND:")) {

@@ -26,6 +26,8 @@ import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
 
 interface Props {
   initialData: WeeklyDigestData;
+  schoolEdition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
+  schoolNetwork?: string;
   currentUser: {
     name: string;
     email: string;
@@ -33,7 +35,13 @@ interface Props {
   };
 }
 
-export default function BoletimClient({ initialData, currentUser }: Props) {
+export default function BoletimClient({
+  initialData,
+  schoolEdition,
+  schoolNetwork,
+  currentUser,
+}: Props) {
+  const isIntegrated = schoolEdition === "PILOTO_INTEGRADA";
   const [data, setData] = useState<WeeklyDigestData>(initialData);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -125,7 +133,11 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 print:border-slate-900 print:border-b-2 pb-4">
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Governo do Estado do Paraná • SEED-PR • NRE {data.school.nre}
+                {schoolNetwork === "MUNICIPAL"
+                  ? `Secretaria Municipal de Educação • ${data.school.city}`
+                  : schoolNetwork === "PRIVADA"
+                  ? `Instituição de Ensino • ${data.school.city}`
+                  : `Rede Estadual de Ensino • NRE ${data.school.nre}`}
               </div>
               <h2 className="text-xl font-black text-slate-900">
                 {data.school.name}
@@ -166,7 +178,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
               </div>
             </div>
 
-            {/* Card 2: SERP / Conselho Tutelar */}
+            {/* Card 2: Rede de Proteção / Conselho Tutelar */}
             <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/70 text-amber-900 flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-amber-700">Rede de Proteção</span>
@@ -177,7 +189,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                   {data.kpis.serpActiveCount}
                 </div>
                 <div className="text-xs font-medium text-amber-700">
-                  SERP / Conselho Tutelar
+                  {isIntegrated ? "SERP / Conselho Tutelar" : "Encaminhamentos externos"}
                 </div>
               </div>
               <div className="text-[11px] text-amber-600 pt-1 border-t border-amber-200/60">
@@ -324,7 +336,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                     <th className="py-2.5 px-3">Estudante / Turma</th>
                     <th className="py-2.5 px-3">Frequência</th>
                     <th className="py-2.5 px-3">Último Contato</th>
-                    <th className="py-2.5 px-3">SERP</th>
+                    <th className="py-2.5 px-3">{isIntegrated ? "SERP" : "Encaminhamento"}</th>
                     <th className="py-2.5 px-3 text-right print:hidden">Ações Rápidas</th>
                   </tr>
                 </thead>
@@ -396,7 +408,7 @@ export default function BoletimClient({ initialData, currentUser }: Props) {
                             <Link
                               href={`/alunos/${st.id}`}
                               className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold shadow-xs transition"
-                              title="Ver Prontuário 360º e emitir Dossiê"
+                              title="Ver Prontuário 360º e emitir relatório"
                             >
                               <span>Prontuário</span>
                               <ExternalLink className="w-3 h-3 text-slate-400" />

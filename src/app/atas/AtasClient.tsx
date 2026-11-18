@@ -579,7 +579,7 @@ export default function AtasClient({
                         <a
                           href={`/api/atas/${m.id}/pdfa?download=1`}
                           className="p-2 rounded-xl border border-slate-200 hover:bg-sky-50 hover:border-sky-200 text-slate-700 hover:text-sky-700 transition"
-                          title="Baixar Certidão Arquivística PDF/A-1b (ISO 19005-1 Level B)"
+                          title="Baixar arquivo PDF para preservação"
                         >
                           <Download className="w-4 h-4 text-sky-600" />
                         </a>
@@ -758,7 +758,7 @@ export default function AtasClient({
               </div>
               <div>
                 <h3 className="text-base font-black text-slate-900">
-                  Validação e Fé Pública Digital
+                  Validação de integridade
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
                   Ata nº {String(selectedMinuteForQr.ataNumber).padStart(3, "0")}/{selectedMinuteForQr.year}
@@ -831,11 +831,11 @@ export default function AtasClient({
               </div>
             </div>
 
-            {/* Aviso de Conformidade Legal */}
+            {/* Aviso de privacidade */}
             <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/60 text-[11px] text-amber-900 space-y-1">
-              <p className="font-bold">Privacidade e Fé Pública (ECA Arts. 17 e 143):</p>
+              <p className="font-bold">Privacidade na conferência pública:</p>
               <p className="text-amber-800 leading-relaxed text-[10px]">
-                O portal público de validação exibe apenas a Certidão Cega com confirmação de autenticidade e integridade criptográfica SHA-256 com nomes e documentos mascarados, protegendo o sigilo pedagógico.
+                A página pública de validação exibe apenas dados mascarados e a verificação de integridade, sem expor o conteúdo do atendimento.
               </p>
             </div>
           </div>

@@ -45,7 +45,7 @@ import {
   type DeliveryStatus,
   type ReplyCategory,
 } from "@/lib/whatsappProvider";
-import { formatMessageSeal } from "@/lib/messageCrypto";
+import { computeMessageContentHash, verifyMessageIntegrity } from "@/lib/messageCrypto";
 
 interface Props {
   initialStudent: any;
@@ -80,7 +80,7 @@ export default function ProntuarioClient({
   currentSchool,
   isAdmin,
 }: Props) {
-  const isIntegrated = currentSchool?.edition ? currentSchool.edition === "PILOTO_INTEGRADA" : true;
+  const isIntegrated = currentSchool?.edition === "PILOTO_INTEGRADA";
   const [student, setStudent] = useState<any>(initialStudent);
   const [contacts, setContacts] = useState<any[]>(initialContacts);
   const [justifications, setJustifications] = useState<any[]>(initialJustifications);
@@ -420,7 +420,7 @@ export default function ProntuarioClient({
             className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold shadow-xs transition"
           >
             <FileText className="w-3.5 h-3.5 text-amber-400" />
-            <span>Emitir Dossiê Oficial (PDF)</span>
+            <span>Histórico de acompanhamento (PDF)</span>
           </Link>
         </div>
       </div>
@@ -615,7 +615,7 @@ export default function ProntuarioClient({
                 Status Rede de Proteção
               </span>
               <div className="text-sm font-black text-purple-800 mt-2 truncate">
-                {lowAtt?.serpStatus || "Sem ficha SERP"}
+                {lowAtt?.serpStatus || (isIntegrated ? "Sem ficha SERP" : "Acompanhamento interno")}
               </div>
               <span className="text-[11px] font-mono text-slate-500">
                 {lowAtt?.serpProtocol ? `Protocolo #${lowAtt.serpProtocol}` : "Acompanhamento interno"}
@@ -643,7 +643,7 @@ export default function ProntuarioClient({
                   {isIntegrated ? "Evolução Semanal de Frequência (Série Histórica Power BI)" : "Evolução Semanal de Frequência Escolar"}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Linha vermelha tracejada indica o limite mínimo legal da LDB (75% de presença).
+                  Linha vermelha tracejada indica o patamar de referência de 75% de presença.
                 </p>
               </div>
               <span className="text-xs font-mono text-slate-500">
@@ -718,13 +718,20 @@ export default function ProntuarioClient({
             ) : (
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
                 {lowAtt ? (
-                  <>
-                    Leitura atual registrada: <strong>{lowAtt.attendancePercent.toFixed(1)}%</strong>{" "}
-                    ({lowAtt.enrollmentDetail || "Power BI"}). Novos snapshots semanais serão
-                    adicionados automaticamente a cada sincronização da extensão Power BI.
-                  </>
+                  isIntegrated ? (
+                    <>
+                      Leitura atual registrada: <strong>{lowAtt.attendancePercent.toFixed(1)}%</strong>{" "}
+                      ({lowAtt.enrollmentDetail || "Power BI"}). Novos snapshots semanais serão
+                      adicionados automaticamente a cada sincronização da extensão Power BI.
+                    </>
+                  ) : (
+                    <>
+                      Leitura atual registrada: <strong>{lowAtt.attendancePercent.toFixed(1)}%</strong>.
+                      Novos registros semanais serão atualizados a cada importação de frequência.
+                    </>
+                  )
                 ) : (
-                  "Ainda não há snapshots semanais gravados para este estudante."
+                  "Ainda não há registros semanais gravados para este estudante."
                 )}
               </div>
             )}
@@ -1011,10 +1018,10 @@ export default function ProntuarioClient({
               <div>
                 <h2 className="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center space-x-1.5">
                   <BookOpenCheck className="w-4 h-4 text-sky-600" />
-                  <span>1. Livro Oficial de Atas Pedagógicas</span>
+                  <span>1. Livro Digital de Atas Pedagógicas</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Atas lavradas com fé pública, assinatura em tela/mobile, hash SHA-256 e numeração sequencial oficial.
+                  Atas registradas com confirmação de autoria por PIN, assinatura em tela ou dispositivo móvel e numeração sequencial por escola.
                 </p>
               </div>
               <button
@@ -1277,7 +1284,7 @@ export default function ProntuarioClient({
             <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
               <MessageSquare className="w-4 h-4 text-sky-600" />
               <span>
-                2. Linha do Tempo Auditada de Acionamentos WhatsApp ({student.messageLogs?.length || 0})
+                2. Linha do Tempo de Contatos WhatsApp ({student.messageLogs?.length || 0})
               </span>
             </h2>
 
@@ -1287,7 +1294,27 @@ export default function ProntuarioClient({
               </p>
             ) : (
               <div className="space-y-3">
-                {student.messageLogs.map((log: any) => (
+                {student.messageLogs.map((log: any) => {
+                  const canonicalPayload = {
+                    studentId: student.id,
+                    schoolId: student.schoolId || currentSchool?.id || "",
+                    phoneUsed: log.phoneUsed || "",
+                    reasonTitle: log.reasonTitle || "",
+                    messageContent: log.messageContent || "",
+                    sentByName: log.sentByName || "",
+                    sentAt: log.sentAt,
+                    guardianReplied: Boolean(log.guardianReplied),
+                    replyNotes: log.replyNotes,
+                    replyCategory: log.replyCategory,
+                    repliedAt: log.repliedAt,
+                  };
+                  const integrityCheck = verifyMessageIntegrity(log.contentHash, canonicalPayload);
+                  const displayCode =
+                    log.contentHash ||
+                    integrityCheck.calculatedHash ||
+                    computeMessageContentHash(canonicalPayload);
+
+                  return (
                   <div
                     key={log.id}
                     className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1.5 text-xs"
@@ -1319,13 +1346,23 @@ export default function ProntuarioClient({
                           </span>
                         ) : null}
                         {log.contentHash ? (
-                          <span
-                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-[10px] border border-slate-200"
-                            title={`Selo Probatório SHA-256: ${log.contentHash}`}
-                          >
-                            <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                            <span>{formatMessageSeal(log.contentHash)}</span>
-                          </span>
+                          integrityCheck.valid ? (
+                            <span
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-mono text-[10px] border border-emerald-200 font-semibold"
+                              title="Integridade do registro verificada"
+                            >
+                              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                              <span>Cód. {String(displayCode).slice(0, 8)} • Verificado</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 font-mono text-[10px] border border-amber-200 font-semibold"
+                              title="Divergência detectada entre o código e os dados registrados"
+                            >
+                              <ShieldAlert className="w-3 h-3 text-amber-600" />
+                              <span>Cód. {String(displayCode).slice(0, 8)} • Divergência</span>
+                            </span>
+                          )
                         ) : null}
                       </div>
 
@@ -1376,7 +1413,8 @@ export default function ProntuarioClient({
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

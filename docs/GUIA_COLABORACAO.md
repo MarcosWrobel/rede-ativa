@@ -10,7 +10,7 @@ Antes de iniciar, certifique-se de ter instalado no seu computador:
 - **Node.js**: Versão LTS 20.x ou superior (verifique com `node -v`);
 - **npm**: Versão 10.x ou superior (verifique com `npm -v`);
 - **Git**: Configurado com seu nome e e-mail (`git config --global user.name` e `user.email`);
-- **Acesso ao GitHub**: Acesso de colaborador ao repositório [MarcosWrobel/busca-ativa-lepoldina](https://github.com/MarcosWrobel/busca-ativa-lepoldina), preferencialmente com chave SSH configurada.
+- **Acesso ao GitHub**: Acesso de colaborador ao repositório [MarcosWrobel/rede-ativa](https://github.com/MarcosWrobel/rede-ativa), preferencialmente com chave SSH configurada.
 
 ---
 
@@ -18,11 +18,11 @@ Antes de iniciar, certifique-se de ter instalado no seu computador:
 
 ### Passo 2.1: Clonar o Repositório
 ```bash
-git clone git@github.com:MarcosWrobel/busca-ativa-lepoldina.git
+git clone git@github.com:MarcosWrobel/rede-ativa.git
 # ou via HTTPS:
-# git clone https://github.com/MarcosWrobel/busca-ativa-lepoldina.git
+# git clone https://github.com/MarcosWrobel/rede-ativa.git
 
-cd busca-ativa-lepoldina
+cd rede-ativa
 ```
 
 ### Passo 2.2: Instalar as Dependências
@@ -66,9 +66,9 @@ ADMIN_EMAIL="seu.nome@escola.pr.gov.br"
 ENABLE_DEV_AUTH="true"
 NODE_ENV="development"
 
-# Chaves opcionais para testes de IA e sincronização
+# Chaves opcionais para testes de IA e fallback legado de sincronização (o padrão por escola usa syncTokenHash no banco)
 GEMINI_API_KEY="" # Opcional localmente (o sistema possui fallback determinístico offline)
-SYNC_API_TOKEN="token-para-testes-locais"
+# SYNC_API_TOKEN="token-global-legado-opcional"
 CRON_SECRET="segredo-para-testes-locais"
 ```
 
@@ -135,7 +135,7 @@ flowchart LR
    - Se alterar modelos em `prisma/schema.prisma`, execute `npx prisma db push` apenas na sua **branch Neon de desenvolvimento**.
 4. **Execute a Validação Obrigatória (Portão de Qualidade):**
    ```bash
-   # 1. Executar toda a suíte Vitest (418 testes em 57 suítes, incluindo adversarialQa.test.ts, whatsappReplyCaptureModal.test.tsx, atasArchiveUsability.test.ts, ataServices.test.ts, frequenciaSync.test.ts e egressAndCacheOptimization.test.ts)
+   # 1. Executar toda a suíte Vitest (74/77 suítes ativas aprovadas, 691 testes aprovados + 12 skipIf, incluindo adversarialQa.test.ts, whatsappReplyCaptureModal.test.tsx, atasArchiveUsability.test.ts, ataServices.test.ts, frequenciaSync.test.ts, egressAndCacheOptimization.test.ts e remediações setoriais)
    npm test
 
    # 2. Executar a compilação estrita de produção (Next.js 16 + Turbopack)
@@ -165,6 +165,6 @@ O repositório mantém instruções sincronizadas com a fonte canônica [`AI_CON
 ## 📌 6. Resumo das Regras de Ouro
 1. **Nunca apagar ou resetar o Leopoldina**: O INEP `41042730` é a unidade piloto fundadora permanente.
 2. **Multi-Tenancy Estrito**: Filtrar queries por `schoolId`, validar `active_school_id`, checar FKs e aplicar `assertTenantOwnership(...)` em APIs e SSR.
-3. **Fé Pública nas Atas**: Atas `FINALIZED` são imutáveis; exigem PIN do servidor na lavratura e adendos encadeados (*"Em tempo"*) para retificações.
+3. **Integridade das Atas & Regra 10 (`GEMINI.md`)**: Atas `FINALIZED` bloqueiam edição direta do texto original; exigem confirmação de autoria por PIN do servidor na lavratura e complementos encadeados (*"Em tempo"*) para retificações. Na UI visível e `aria-label`, nunca utilize termos como *"fé pública"* ou *"imutável"* (Seção 10 de [`GEMINI.md`](../GEMINI.md)).
 4. **LGPD / ECA**: Sempre pseudonimizar dados de menores via `src/lib/aiPseudonymizer.ts` antes de chamadas ao Google Gemini.
 5. **Portão de Qualidade**: `npm test` e `npm run build` 100% verdes antes de qualquer PR.
