@@ -26,8 +26,17 @@ export async function GET(req: Request) {
     let allowedCities = sessionNetworks
       .map((n: any) => (n.city || n.network?.city || "").trim())
       .filter(Boolean);
+    let allowedNetworkIds = sessionNetworks
+      .map((n: any) => (n.networkId || n.id || "").trim())
+      .filter(Boolean);
 
-    if (!isSuper && allowedCities.length === 0 && authCheck.userId && (prisma as any).userNetwork?.findMany) {
+    if (
+      !isSuper &&
+      allowedCities.length === 0 &&
+      allowedNetworkIds.length === 0 &&
+      authCheck.userId &&
+      (prisma as any).userNetwork?.findMany
+    ) {
       const dbNetworks = await prisma.userNetwork.findMany({
         where: { userId: authCheck.userId, active: true },
         include: { network: true },
@@ -35,15 +44,23 @@ export async function GET(req: Request) {
       allowedCities = dbNetworks
         .map((un: any) => (un.network?.city || "").trim())
         .filter(Boolean);
+      allowedNetworkIds = dbNetworks
+        .map((un: any) => (un.networkId || "").trim())
+        .filter(Boolean);
+    }
+
+    if (!isSuper && allowedCities.length === 0 && allowedNetworkIds.length === 0) {
+      return NextResponse.json(
+        { error: "Nenhuma rede municipal vinculada ao seu perfil." },
+        { status: 403 }
+      );
     }
 
     const rawCityParam = searchParams.get("city")?.trim();
-    const fallbackCity = allowedCities[0] || "Tibagi";
-    const requestedCity = rawCityParam || fallbackCity;
+    const requestedCity = rawCityParam || allowedCities[0] || "";
 
-    if (!isSuper) {
-      const effectiveAllowed = allowedCities.length > 0 ? allowedCities : ["Tibagi"];
-      const isCityAllowed = effectiveAllowed.some(
+    if (!isSuper && allowedCities.length > 0) {
+      const isCityAllowed = allowedCities.some(
         (c) => c.toLowerCase() === requestedCity.toLowerCase()
       );
       if (!isCityAllowed) {
@@ -54,12 +71,15 @@ export async function GET(req: Request) {
       }
     }
 
-    // 1. Busca todas as escolas municipais da cidade
+    // 1. Busca todas as escolas municipais da cidade (ou da rede vinculada)
     const municipalSchools = await prisma.school.findMany({
       where: {
         active: true,
         network: "MUNICIPAL",
         ...(requestedCity ? { city: { equals: requestedCity, mode: "insensitive" } } : {}),
+        ...(!isSuper && allowedCities.length === 0 && allowedNetworkIds.length > 0
+          ? { networkId: { in: allowedNetworkIds } }
+          : {}),
       },
       select: {
         id: true,

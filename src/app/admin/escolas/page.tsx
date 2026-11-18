@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
-import { checkIsAdmin } from "@/lib/roles";
+import { checkIsSuperAdmin, checkIsSecretariat, checkIsSchoolManager } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import AdminEscolasClient from "./AdminEscolasClient";
 
@@ -20,8 +20,14 @@ export default async function AdminEscolasPage() {
     redirect("/login");
   }
 
-  if (!checkIsAdmin(session)) {
-    redirect("/");
+  if (!checkIsSuperAdmin(session)) {
+    if (checkIsSecretariat(session)) {
+      redirect("/secretaria");
+    }
+    if (checkIsSchoolManager(session)) {
+      redirect("/gestao");
+    }
+    redirect("/busca-ativa");
   }
 
   const currentSchool = await getCurrentSchool(sessionUser?.schoolId);

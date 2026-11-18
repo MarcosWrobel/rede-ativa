@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authConfig } from "@/lib/auth.config";
-import { checkIsAdmin } from "@/lib/roles";
+import { checkIsAdmin, checkIsSuperAdmin } from "@/lib/roles";
 import {
   PUBLIC_PATHS,
   PUBLIC_PREFIXES,
@@ -58,7 +58,14 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 3. Restringe páginas administrativas (/auditoria, /equipe) exclusivamente ao perfil ADMIN
+  // 3. Restringe rotas sob /admin estritamente ao perfil SUPERADMIN
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    if (!checkIsSuperAdmin(session)) {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+  }
+
+  // 4. Restringe páginas administrativas (/auditoria, /equipe, /configuracoes) ao perfil ADMIN
   if (ADMIN_PAGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
     if (!checkIsAdmin(session)) {
       return NextResponse.redirect(new URL("/busca-ativa", req.url));

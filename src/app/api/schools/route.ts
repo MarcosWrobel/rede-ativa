@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireAdmin, isBootstrapAdminEmail } from "@/lib/permissions";
+import { checkIsSuperAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
@@ -160,6 +161,7 @@ export async function POST(req: Request) {
     const authCheck = await requireAdmin();
     if (!authCheck.ok) return authCheck.response;
 
+    const isSuper = checkIsSuperAdmin(authCheck.session);
     const effectiveRole = authCheck.role || (authCheck.session?.user as any)?.role;
     const isRoot = isBootstrapAdminEmail(authCheck.email) || effectiveRole === "SUPERADMIN" || effectiveRole === "ADMIN";
     const isSec = effectiveRole === "GESTAO_SECRETARIA";
@@ -179,8 +181,22 @@ export async function POST(req: Request) {
 
     const data = parsed.data;
 
+    // Restringe a definição manual de edição exclusivamente ao SuperAdmin
+    const rawSettings = (data.settings || {}) as Record<string, any>;
+    if (
+      !isSuper &&
+      (data.edition !== undefined ||
+        rawSettings.edition !== undefined ||
+        rawSettings.enablePowerBiSync !== undefined)
+    ) {
+      return NextResponse.json(
+        { error: "Apenas o SuperAdmin pode definir a edição da plataforma." },
+        { status: 403 }
+      );
+    }
+
     // Gestor de Secretaria Municipal só pode provisionar escolas municipais vinculadas ao seu município
-    if (!isRoot && isSec) {
+    if (!isSuper && isSec) {
       if (data.network !== "MUNICIPAL") {
         return NextResponse.json(
           { error: "Gestores de Secretaria Municipal só podem cadastrar unidades da rede MUNICIPAL." },
@@ -188,16 +204,29 @@ export async function POST(req: Request) {
         );
       }
       const sessionNets = ((authCheck.session?.user as any)?.networks as any[]) || [];
-      const allowedCities = sessionNets
+      let allowedCities = sessionNets
         .map((n: any) => (n.city || n.network?.city || "").toLowerCase().trim())
         .filter(Boolean);
-      if (allowedCities.length > 0 && !allowedCities.includes(data.city.toLowerCase().trim())) {
+
+      if (allowedCities.length === 0 && authCheck.userId && (prisma as any).userNetwork?.findMany) {
+        const dbNets = await prisma.userNetwork.findMany({
+          where: { userId: authCheck.userId, active: true },
+          include: { network: true },
+        });
+        allowedCities = dbNets
+          .map((un: any) => (un.network?.city || "").toLowerCase().trim())
+          .filter(Boolean);
+      }
+
+      if (allowedCities.length === 0 || !allowedCities.includes(data.city.toLowerCase().trim())) {
         return NextResponse.json(
           { error: `Você não possui autorização para provisionar unidades fora do seu município (${data.city}).` },
           { status: 403 }
         );
       }
     }
+
+    const effectiveNetwork = !isSuper && isSec ? "MUNICIPAL" : data.network;
 
     // 0. Proteção Inviolável da Escola Piloto Fundadora (INEP 41042730)
     if (data.inepCode === "41042730") {
@@ -222,7 +251,7 @@ export async function POST(req: Request) {
 
     // 2. Resolve Rede Municipal (SEMEC) se aplicável
     let networkId: string | undefined = undefined;
-    if (data.network === "MUNICIPAL") {
+    if (effectiveNetwork === "MUNICIPAL") {
       const cleanCity = data.city.trim();
       const semecId = `semec-${cleanCity.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-")}`;
       try {
@@ -246,20 +275,23 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve a Edição da Plataforma (Piloto Integrada vs Institucional Essencial)
-    // Herança: se não especificada, herda da SEMEC/Rede; se for a escola sede fundadora, é sempre PILOTO_INTEGRADA.
-    let effectiveEdition = data.edition || (data.settings as any)?.edition;
+    // Apenas SuperAdmin pode especificar edition manualmente; para demais perfis, herda da rede/município ou usa INSTITUCIONAL_ESSENCIAL.
+    let effectiveEdition: string | undefined = isSuper
+      ? data.edition || rawSettings.edition
+      : undefined;
+
     if (data.inepCode === "41042730") {
       effectiveEdition = "PILOTO_INTEGRADA";
-    } else if (!effectiveEdition && networkId) {
+    } else if (!effectiveEdition && networkId && typeof (prisma as any).school?.findFirst === "function") {
       try {
         const sibling = await prisma.school.findFirst({
           where: { networkId, active: true },
           select: { settingsJson: true },
         });
         if (sibling?.settingsJson) {
-          const parsed = JSON.parse(sibling.settingsJson);
-          if (parsed.edition) {
-            effectiveEdition = parsed.edition;
+          const parsedSibling = JSON.parse(sibling.settingsJson);
+          if (parsedSibling.edition) {
+            effectiveEdition = parsedSibling.edition;
           }
         }
       } catch {
@@ -267,9 +299,21 @@ export async function POST(req: Request) {
       }
     }
 
+    if (!isSuper && !effectiveEdition) {
+      effectiveEdition = "INSTITUCIONAL_ESSENCIAL";
+    }
+
+    const sanitizedSettings = data.settings
+      ? Object.fromEntries(
+          Object.entries(data.settings).filter(
+            ([k]) => isSuper || (k !== "edition" && k !== "enablePowerBiSync")
+          )
+        )
+      : null;
+
     const mergedSettings = effectiveEdition
-      ? { ...(data.settings || {}), edition: effectiveEdition }
-      : data.settings || null;
+      ? { ...(sanitizedSettings || {}), edition: effectiveEdition }
+      : sanitizedSettings || null;
 
     // 4. Cria a nova escola no banco de dados
     const createdSchool = await prisma.school.create({
@@ -278,8 +322,8 @@ export async function POST(req: Request) {
         name: data.name.trim(),
         city: data.city.trim(),
         state: data.state.trim().toUpperCase(),
-        nre: data.nre?.trim() || (data.network === "MUNICIPAL" ? `SEMEC ${data.city.trim()}` : "Ponta Grossa"),
-        network: data.network,
+        nre: data.nre?.trim() || (effectiveNetwork === "MUNICIPAL" ? `SEMEC ${data.city.trim()}` : "Ponta Grossa"),
+        network: effectiveNetwork,
         networkId,
         phone: data.phone?.trim() || null,
         email: data.email?.trim() || null,

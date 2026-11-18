@@ -100,7 +100,7 @@ export async function POST(req: Request) {
     const existing = await prisma.user.findUnique({
       where: { email: rawEmail },
       include: {
-        schools: { where: { schoolId: targetSchoolId } },
+        schools: true,
       },
     });
 
@@ -114,6 +114,10 @@ export async function POST(req: Request) {
           { status: 409 }
         );
       }
+
+      const hasOtherSchoolLinks =
+        (Boolean(existing.schoolId) && existing.schoolId !== targetSchoolId) ||
+        existing.schools.some((s) => s.schoolId !== targetSchoolId);
 
       // Usuário já existe no SaaS (ex: em outra escola) — adiciona o vínculo com a escola atual
       await prisma.userSchool.upsert({
@@ -132,22 +136,44 @@ export async function POST(req: Request) {
         },
       });
 
-      targetUser = await prisma.user.update({
-        where: { id: existing.id },
-        data: {
-          // Se o usuário não tinha schoolId primário, vincula a esta escola
-          ...(existing.schoolId ? {} : { schoolId: targetSchoolId }),
-          // Atualiza role se foi atribuído um perfil superior
-          ...(effectiveRole === "SUPERADMIN" || effectiveRole === "GESTAO_SECRETARIA" || effectiveRole === "GESTOR_ESCOLAR"
-            ? { role: effectiveRole }
-            : {}),
-          active: true,
-        },
-        include: {
-          schools: { where: { schoolId: targetSchoolId } },
-          _count: { select: { messageLogs: true, repliedLogs: true } },
-        },
-      });
+      if (!isCallerSuper && hasOtherSchoolLinks) {
+        // Preserva User.role e User.active globais quando o usuário possui vínculos em outras escolas
+        targetUser = existing.schoolId
+          ? await prisma.user.findUnique({
+              where: { id: existing.id },
+              include: {
+                schools: { where: { schoolId: targetSchoolId } },
+                _count: { select: { messageLogs: true, repliedLogs: true } },
+              },
+            })
+          : await prisma.user.update({
+              where: { id: existing.id },
+              data: { schoolId: targetSchoolId },
+              include: {
+                schools: { where: { schoolId: targetSchoolId } },
+                _count: { select: { messageLogs: true, repliedLogs: true } },
+              },
+            });
+      } else {
+        targetUser = await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            // Se o usuário não tinha schoolId primário, vincula a esta escola
+            ...(existing.schoolId ? {} : { schoolId: targetSchoolId }),
+            // Atualiza role se foi atribuído um perfil superior (respeitando usuário raiz)
+            ...(isBootstrapAdminEmail(existing.email)
+              ? { role: "SUPERADMIN" }
+              : effectiveRole === "SUPERADMIN" || effectiveRole === "GESTAO_SECRETARIA" || effectiveRole === "GESTOR_ESCOLAR"
+                ? { role: effectiveRole }
+                : {}),
+            active: true,
+          },
+          include: {
+            schools: { where: { schoolId: targetSchoolId } },
+            _count: { select: { messageLogs: true, repliedLogs: true } },
+          },
+        });
+      }
     } else {
       // Cria novo usuário na plataforma vinculado à escola ativa
       targetUser = await prisma.user.create({
@@ -285,31 +311,20 @@ export async function PUT(req: Request) {
     }
 
     const validRoles = ["SUPERADMIN", "ADMIN", "GESTAO_SECRETARIA", "GESTOR_ESCOLAR", "PEDAGOGA"];
-    let nextRole = target.role;
+    const currentLocalLink = target.schools.find((s) => s.schoolId === targetSchoolId);
+    let nextRole = currentLocalLink?.role || target.role;
     if (role !== undefined && validRoles.includes(role)) {
       nextRole = role;
     }
 
-    const nextActive = active !== undefined ? Boolean(active) : target.active;
+    const nextActive = active !== undefined ? Boolean(active) : currentLocalLink?.active ?? target.active;
     const nextName = name !== undefined && String(name).trim() ? String(name).trim() : target.name;
 
-    // Atualiza o perfil global do usuário
-    const updated = await prisma.user.update({
-      where: { id },
-      data: {
-        name: nextName,
-        role: isRoot ? "SUPERADMIN" : nextRole,
-        active: isRoot ? true : nextActive,
-      },
-      include: {
-        schools: { where: { schoolId: targetSchoolId } },
-        _count: {
-          select: { messageLogs: true, repliedLogs: true },
-        },
-      },
-    });
+    const hasOtherSchoolLinks =
+      (Boolean(target.schoolId) && target.schoolId !== targetSchoolId) ||
+      target.schools.some((s) => s.schoolId !== targetSchoolId);
 
-    // Atualiza também o vínculo local do usuário com esta escola ativa
+    // Atualiza o vínculo local do usuário com esta escola ativa
     await prisma.userSchool.upsert({
       where: {
         userId_schoolId: {
@@ -329,15 +344,52 @@ export async function PUT(req: Request) {
       },
     });
 
+    // Quando o operador não é SUPERADMIN e o usuário possui vínculos com outras escolas,
+    // não sobrescreve globalmente User.role nem User.active para as demais escolas
+    const updated =
+      !isCallerSuper && hasOtherSchoolLinks
+        ? await prisma.user.findUnique({
+            where: { id },
+            include: {
+              schools: { where: { schoolId: targetSchoolId } },
+              _count: {
+                select: { messageLogs: true, repliedLogs: true },
+              },
+            },
+          })
+        : await prisma.user.update({
+            where: { id },
+            data: {
+              name: nextName,
+              role: isRoot ? "SUPERADMIN" : nextRole,
+              active: isRoot ? true : nextActive,
+            },
+            include: {
+              schools: { where: { schoolId: targetSchoolId } },
+              _count: {
+                select: { messageLogs: true, repliedLogs: true },
+              },
+            },
+          });
+
     await logAudit({
-      action: nextActive === false && target.active === true ? "DEACTIVATE_USER" : "UPDATE_USER",
+      action: nextActive === false && (currentLocalLink?.active ?? target.active) === true ? "DEACTIVATE_USER" : "UPDATE_USER",
       entityType: "User",
-      entityId: updated.id,
+      entityId: updated?.id || id,
       details: {
-        targetEmail: updated.email,
+        targetEmail: updated?.email || target.email,
         schoolId: targetSchoolId,
-        before: { name: target.name, role: target.role, active: target.active },
-        after: { name: updated.name, role: nextRole, active: updated.active },
+        scopedToSchoolOnly: !isCallerSuper && hasOtherSchoolLinks,
+        before: {
+          name: target.name,
+          role: currentLocalLink?.role || target.role,
+          active: currentLocalLink?.active ?? target.active,
+        },
+        after: {
+          name: updated?.name || target.name,
+          role: nextRole,
+          active: isRoot ? true : nextActive,
+        },
       },
       user: {
         id: authCheck.userId,

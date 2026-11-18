@@ -24,19 +24,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const schoolId = (parsed.data.schoolId || parsed.data.targetSchoolId)!;
-    const isRootAdmin = isBootstrapAdminEmail(authCheck.email);
+    const schoolId = (parsed.data.schoolId || parsed.data.targetSchoolId)!.trim();
 
     // 1. Verifica se a escola existe e está ativa
     let targetSchool = await prisma.school.findUnique({
       where: { id: schoolId },
-      select: { id: true, name: true, inepCode: true, city: true, network: true, active: true },
+      select: { id: true, name: true, inepCode: true, city: true, network: true, networkId: true, active: true },
     });
 
     if (!targetSchool && (schoolId === "default-leopoldina" || schoolId === "41042730")) {
       targetSchool = await prisma.school.findFirst({
         where: { inepCode: "41042730" },
-        select: { id: true, name: true, inepCode: true, city: true, network: true, active: true },
+        select: { id: true, name: true, inepCode: true, city: true, network: true, networkId: true, active: true },
       });
     }
 
@@ -47,6 +46,7 @@ export async function POST(req: Request) {
         inepCode: "41042730",
         city: "Ponta Grossa",
         network: "ESTADUAL",
+        networkId: null,
         active: true,
       };
     }
@@ -59,32 +59,39 @@ export async function POST(req: Request) {
     const isSuper = isBootstrapAdminEmail(authCheck.email) || authCheck.role === "SUPERADMIN";
     const isSecretariat = authCheck.role === "GESTAO_SECRETARIA";
 
-    if (!isSuper && authCheck.userId) {
+    if (!isSuper) {
       let isAuthorized = false;
 
-      // Se for gestor da secretaria, verifica se a escola pertence à sua rede ou município
-      if (isSecretariat) {
+      // Se for gestor da secretaria, verifica se a escola pertence à sua rede ou município (rede MUNICIPAL)
+      if (isSecretariat && authCheck.userId) {
         const userNetworks = await prisma.userNetwork.findMany({
           where: { userId: authCheck.userId, active: true },
           include: { network: true },
         });
-        const networkIds = userNetworks.map((un) => un.networkId);
-        const networkCities = userNetworks.map((un) => un.network.city.toUpperCase());
+        const userNetworkIds = userNetworks.map((un) => un.networkId);
+        const municipalNetworkCities = userNetworks
+          .filter((un) => (un.network.type || "MUNICIPAL").toUpperCase() === "MUNICIPAL")
+          .map((un) => un.network.city.trim().toUpperCase())
+          .filter(Boolean);
 
-        if (
-          ((targetSchool as any).networkId && networkIds.includes((targetSchool as any).networkId)) ||
-          networkCities.includes(targetSchool.city.toUpperCase())
-        ) {
+        const matchesNetworkId =
+          Boolean(targetSchool.networkId) && userNetworkIds.includes(targetSchool.networkId!);
+        const matchesMunicipalCity =
+          targetSchool.network === "MUNICIPAL" &&
+          Boolean(targetSchool.city) &&
+          municipalNetworkCities.includes(targetSchool.city.trim().toUpperCase());
+
+        if (matchesNetworkId || matchesMunicipalCity) {
           isAuthorized = true;
         }
       }
 
-      if (!isAuthorized) {
+      if (!isAuthorized && authCheck.userId) {
         const membership = await prisma.userSchool.findUnique({
           where: {
             userId_schoolId: {
               userId: authCheck.userId,
-              schoolId,
+              schoolId: targetSchool.id,
             },
           },
         });
@@ -101,7 +108,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Atualiza o schoolId padrão no perfil do usuário no banco
+    // 3. Atualiza o schoolId padrão no perfil do usuário no banco com o ID canônico resolvido
     if (authCheck.userId || authCheck.email) {
       try {
         await prisma.user.updateMany({
@@ -111,7 +118,7 @@ export async function POST(req: Request) {
               ...(authCheck.email ? [{ email: authCheck.email.toLowerCase().trim() }] : []),
             ],
           },
-          data: { schoolId },
+          data: { schoolId: targetSchool.id },
         });
       } catch (err) {
         console.warn("[POST /api/auth/switch-school] Aviso ao sincronizar schoolId no perfil do usuário:", err);
@@ -122,12 +129,12 @@ export async function POST(req: Request) {
       await logAudit({
         action: "UPDATE_USER",
         entityType: "SchoolContext",
-        entityId: schoolId,
+        entityId: targetSchool.id,
         schoolId: targetSchool.id,
         details: {
           switchedTo: targetSchool.name,
           inepCode: targetSchool.inepCode,
-          network: (targetSchool as any).network,
+          network: targetSchool.network,
         },
         user: {
           id: authCheck.userId,
@@ -147,11 +154,11 @@ export async function POST(req: Request) {
         name: targetSchool.name,
         inepCode: targetSchool.inepCode,
         city: targetSchool.city,
-        network: (targetSchool as any).network || "ESTADUAL",
+        network: targetSchool.network || "ESTADUAL",
       },
     });
 
-    response.cookies.set("active_school_id", schoolId, {
+    response.cookies.set("active_school_id", targetSchool.id, {
       path: "/",
       maxAge: 60 * 60 * 24 * 30, // 30 dias
       httpOnly: true,

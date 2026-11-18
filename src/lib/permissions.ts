@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Session } from "next-auth";
 import { auth } from "./auth";
+import { prisma } from "./prisma";
 import {
   BOOTSTRAP_ADMIN_EMAIL,
   checkIsAdmin,
@@ -139,7 +140,7 @@ export async function requireAdmin(): Promise<AuthCheckSuccess | AuthCheckFailur
 }
 
 /**
- * Exige perfil de Gestor na escola alvo (Nível 3), Secretaria da Rede (Nível 2) ou SuperAdmin (Nível 1).
+ * Exige perfil de Gestor na escola alvo (Nível 3), Secretaria da Rede vinculada (Nível 2) ou SuperAdmin (Nível 1).
  */
 export async function requireSchoolAdmin(targetSchoolId?: string | null): Promise<AuthCheckSuccess | AuthCheckFailure> {
   const authCheck = await requireAuth();
@@ -150,7 +151,38 @@ export async function requireSchoolAdmin(targetSchoolId?: string | null): Promis
   }
 
   const effectiveSchoolId = targetSchoolId || authCheck.schoolId;
-  const isManager = checkIsSchoolManager(authCheck.session, effectiveSchoolId);
+  let isManager = checkIsSchoolManager(authCheck.session, effectiveSchoolId);
+
+  if (!isManager && effectiveSchoolId && authCheck.role === "GESTAO_SECRETARIA") {
+    const targetSchool = await prisma.school.findUnique({
+      where: { id: effectiveSchoolId },
+      select: { id: true, networkId: true, network: true, city: true, active: true },
+    });
+
+    if (targetSchool && targetSchool.active !== false) {
+      let sessionForCheck = authCheck.session;
+      const sessionNetworks = authCheck.session.user?.networks || [];
+      if (sessionNetworks.length === 0 && authCheck.userId && (prisma as any).userNetwork?.findMany) {
+        const dbNetworks = await prisma.userNetwork.findMany({
+          where: { userId: authCheck.userId, active: true },
+          include: { network: { select: { id: true, city: true, type: true } } },
+        });
+        sessionForCheck = {
+          ...authCheck.session,
+          user: {
+            ...authCheck.session.user,
+            networks: dbNetworks.map((un) => ({
+              networkId: un.networkId,
+              role: un.role,
+              city: un.network.city,
+              type: un.network.type,
+            })),
+          },
+        };
+      }
+      isManager = checkIsSchoolManager(sessionForCheck, effectiveSchoolId, targetSchool);
+    }
+  }
 
   if (!isManager) {
     return {

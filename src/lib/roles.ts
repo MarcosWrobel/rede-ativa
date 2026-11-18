@@ -119,14 +119,25 @@ export interface AuthSessionLike {
       schoolId?: string;
       role?: string;
       active?: boolean;
+      networkId?: string | null;
+      network?: string | null;
+      city?: string | null;
     }>;
     networks?: Array<{
       id?: string;
       networkId?: string;
       city?: string;
-      network?: { city?: string };
+      type?: string;
+      network?: { city?: string; type?: string };
     }>;
   } | null;
+}
+
+export interface TargetSchoolLike {
+  id?: string | null;
+  networkId?: string | null;
+  network?: string | null;
+  city?: string | null;
 }
 
 /**
@@ -177,31 +188,66 @@ export function checkIsSecretariat(
 
 /**
  * Valida se o usuário tem privilégio de Gestor na escola (Nível 3 ou superior).
+ * Para GESTAO_SECRETARIA, exige vínculo efetivo da escola alvo com uma rede vinculada ao usuário
+ * (por networkId ou escola MUNICIPAL no município de uma rede municipal vinculada).
  */
 export function checkIsSchoolManager(
   session: AuthSessionLike | null | undefined,
-  schoolId?: string | null
+  schoolId?: string | null,
+  targetSchool?: TargetSchoolLike | null
 ): boolean {
   if (checkIsSuperAdmin(session)) return true;
   if (!session?.user?.email || session.user.active === false) return false;
 
   const role = session.user.role;
-  if (role === "GESTAO_SECRETARIA") return true;
 
-  // Se nenhum schoolId foi especificado, verifica se o usuário possui cargo de gestor
+  // Se nenhum schoolId foi especificado, verifica se o usuário possui cargo de gestor escolar
   if (!schoolId) {
     return role === "ADMIN" || role === "GESTOR_ESCOLAR";
   }
 
-  // Se schoolId foi especificado, valida se o usuário possui vínculo de gestão com esta escola específica
+  // Se schoolId foi especificado, valida se o usuário possui vínculo direto de gestão com esta escola específica
   const userSchools = session.user.schools || [];
-  const schoolLink = userSchools.find((s) => s.schoolId === schoolId);
-  if (schoolLink) {
-    return (
+  const schoolLink = userSchools.find((s) => s.schoolId === schoolId || s.id === schoolId);
+  if (schoolLink && schoolLink.active !== false) {
+    if (
       schoolLink.role === "ADMIN" ||
       schoolLink.role === "GESTOR_ESCOLAR" ||
       schoolLink.role === "GESTAO_SECRETARIA"
-    );
+    ) {
+      return true;
+    }
+  }
+
+  // Para GESTAO_SECRETARIA, valida se a escola alvo pertence a uma rede vinculada ao usuário
+  if (role === "GESTAO_SECRETARIA") {
+    const userNetworks = session.user.networks || [];
+    if (userNetworks.length === 0) return false;
+
+    const allowedNetworkIds = userNetworks
+      .map((n) => n.networkId || n.id)
+      .filter((id): id is string => Boolean(id));
+    const allowedMunicipalCities = userNetworks
+      .filter((n) => (n.type || n.network?.type || "MUNICIPAL").toUpperCase() === "MUNICIPAL")
+      .map((n) => (n.city || n.network?.city || "").trim().toUpperCase())
+      .filter(Boolean);
+
+    const candidate = targetSchool || schoolLink;
+    if (!candidate) return false;
+
+    if (candidate.networkId && allowedNetworkIds.includes(candidate.networkId)) {
+      return true;
+    }
+
+    if (
+      candidate.network === "MUNICIPAL" &&
+      candidate.city &&
+      allowedMunicipalCities.includes(candidate.city.trim().toUpperCase())
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   // Vínculo pelo schoolId primário do usuário

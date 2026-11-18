@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSchoolAdmin, requireSuperAdmin } from "@/lib/permissions";
+import { checkIsSuperAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
@@ -121,7 +122,7 @@ export async function PUT(
     // Busca o registro atual da escola para validações de integridade
     const currentSchoolRecord = await prisma.school.findUnique({
       where: { id },
-      select: { inepCode: true, name: true },
+      select: { inepCode: true, name: true, network: true, networkId: true },
     });
 
     if (!currentSchoolRecord) {
@@ -143,8 +144,32 @@ export async function PUT(
       );
     }
 
-    // Se estiver alterando o INEP, verifica se não colide com outra escola
-    if (data.inepCode && data.inepCode !== currentSchoolRecord.inepCode) {
+    // Restrição de autoelevação de edição e metadados estruturais exclusivamente ao SuperAdmin
+    const isSuper = checkIsSuperAdmin(authCheck.session);
+    const rawNetworkIdProvided =
+      rawBody !== null &&
+      typeof rawBody === "object" &&
+      Object.prototype.hasOwnProperty.call(rawBody, "networkId");
+    const hasRestrictedMetadata =
+      data.edition !== undefined ||
+      data.settings !== undefined ||
+      data.settingsJson !== undefined ||
+      rawNetworkIdProvided ||
+      (data.inepCode !== undefined && data.inepCode !== currentSchoolRecord.inepCode) ||
+      (data.network !== undefined && data.network !== currentSchoolRecord.network);
+
+    if (!isSuper && hasRestrictedMetadata) {
+      return NextResponse.json(
+        {
+          error:
+            "Apenas o SuperAdmin pode alterar edição, configurações avançadas, INEP ou rede da instituição.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Se estiver alterando o INEP (somente SuperAdmin), verifica se não colide com outra escola
+    if (isSuper && data.inepCode && data.inepCode !== currentSchoolRecord.inepCode) {
       const collision = await prisma.school.findFirst({
         where: {
           inepCode: data.inepCode,
@@ -161,7 +186,7 @@ export async function PUT(
     }
 
     let finalSettingsJson: string | undefined = undefined;
-    if (data.settings !== undefined || data.settingsJson !== undefined || data.edition !== undefined) {
+    if (isSuper && (data.settings !== undefined || data.settingsJson !== undefined || data.edition !== undefined)) {
       let currentSettingsObj: Record<string, any> = {};
       try {
         const existingSchool = await prisma.school.findUnique({
@@ -194,15 +219,15 @@ export async function PUT(
       where: { id },
       data: {
         ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-        ...(data.inepCode?.trim() ? { inepCode: data.inepCode.trim() } : {}),
+        ...(isSuper && data.inepCode?.trim() ? { inepCode: data.inepCode.trim() } : {}),
         ...(data.city?.trim() ? { city: data.city.trim() } : {}),
         ...(data.state?.trim() ? { state: data.state.trim().toUpperCase() } : {}),
         ...(data.nre?.trim() ? { nre: data.nre.trim() } : {}),
-        ...(data.network ? { network: data.network } : {}),
+        ...(isSuper && data.network ? { network: data.network } : {}),
         ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
         ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
         ...(shouldUpdateLogoUrl ? { logoUrl: data.logoUrl?.trim() || null } : {}),
-        ...(finalSettingsJson !== undefined ? { settingsJson: finalSettingsJson } : {}),
+        ...(isSuper && finalSettingsJson !== undefined ? { settingsJson: finalSettingsJson } : {}),
       },
       select: {
         id: true,

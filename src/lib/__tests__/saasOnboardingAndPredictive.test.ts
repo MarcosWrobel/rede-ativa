@@ -140,7 +140,10 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
         expect.objectContaining({
           data: expect.objectContaining({
             inepCode: "41049999",
-            settingsJson: JSON.stringify({ district: "Sede Urbana" }),
+            settingsJson: JSON.stringify({
+              district: "Sede Urbana",
+              edition: "INSTITUCIONAL_ESSENCIAL",
+            }),
           }),
         })
       );
@@ -151,7 +154,12 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
     it("deve calcular indicadores preditivos e emitir recomendações na rota da secretaria", async () => {
       vi.mocked(requireAuth).mockResolvedValueOnce({
         ok: true,
-        session: { user: { role: "GESTAO_SECRETARIA" } },
+        session: {
+          user: {
+            role: "GESTAO_SECRETARIA",
+            networks: [{ networkId: "semec-tibagi", city: "Tibagi" }],
+          },
+        },
         userId: "sec-1",
         email: "secretario@tibagi.pr.gov.br",
         role: "GESTAO_SECRETARIA",

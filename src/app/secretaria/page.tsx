@@ -31,40 +31,108 @@ export default async function SecretariaPage({ searchParams }: Props) {
   }
 
   const userNetworks = ((session.user as any)?.networks as any[]) || [];
-  const allowedCities = userNetworks
+  let allowedCities = userNetworks
     .map((n: any) => (n.city || n.network?.city || "").trim())
     .filter(Boolean);
 
-  const requestedCity = resolvedSearchParams.city?.trim();
-  let defaultCity = requestedCity || allowedCities[0] || "Tibagi";
-
-  if (!isSuper) {
-    const effectiveAllowed = allowedCities.length > 0 ? allowedCities : ["Tibagi"];
-    const matchesAllowed = effectiveAllowed.some(
-      (c) => c.toLowerCase() === defaultCity.toLowerCase()
-    );
-    if (!matchesAllowed) {
-      defaultCity = effectiveAllowed[0];
-    }
+  if (!isSuper && allowedCities.length === 0 && (session.user as any)?.id) {
+    const dbNetworks = await prisma.userNetwork.findMany({
+      where: { userId: (session.user as any).id, active: true },
+      include: { network: true },
+    });
+    allowedCities = dbNetworks
+      .map((un: any) => (un.network?.city || "").trim())
+      .filter(Boolean);
   }
+
+  // Sem rede municipal vinculada: renderiza estado vazio seguro sem fallback hardcoded
+  if (!isSuper && allowedCities.length === 0) {
+    return (
+      <SecretariaClient
+        city="Nenhuma rede vinculada"
+        availableCities={[]}
+        metrics={{
+          totalSchools: 0,
+          totalStudents: 0,
+          totalClasses: 0,
+          criticalStudentsCount: 0,
+          networkAverageAttendance: 100,
+          messagesSentThisMonth: 0,
+        }}
+        initialSchools={[]}
+        predictiveData={{
+          totalCategorizedReplies: 0,
+          criticalRate: 0,
+          causesBreakdown: [],
+          recommendations: [],
+        }}
+        isSuperAdmin={false}
+        currentUser={{
+          name: session.user.name || "Gestor SEMEC",
+          email: session.user.email || "",
+        }}
+      />
+    );
+  }
+
+  const requestedCity = resolvedSearchParams.city?.trim();
 
   // Buscar cidades disponíveis na rede municipal (restrito às redes autorizadas se não for SuperAdmin)
   const availableMunicipalCities = await prisma.school.findMany({
     where: {
       active: true,
       network: "MUNICIPAL",
-      ...(!isSuper && allowedCities.length > 0
+      ...(!isSuper
         ? { OR: allowedCities.map((c) => ({ city: { equals: c, mode: "insensitive" as const } })) }
-        : !isSuper
-          ? { city: { equals: defaultCity, mode: "insensitive" as const } }
-          : {}),
+        : {}),
     },
     select: { city: true },
     distinct: ["city"],
+    orderBy: { city: "asc" },
   });
   const availableCities = Array.from(new Set(availableMunicipalCities.map((c) => c.city).filter(Boolean)));
-  if (!availableCities.includes(defaultCity)) {
+
+  let defaultCity = requestedCity || allowedCities[0] || availableCities[0] || "";
+  if (!isSuper) {
+    const matchesAllowed = allowedCities.some(
+      (c) => c.toLowerCase() === defaultCity.toLowerCase()
+    );
+    if (!matchesAllowed) {
+      defaultCity = allowedCities[0];
+    }
+  }
+
+  if (defaultCity && !availableCities.includes(defaultCity)) {
     availableCities.unshift(defaultCity);
+  }
+
+  if (!defaultCity) {
+    return (
+      <SecretariaClient
+        city="Nenhuma rede cadastrada"
+        availableCities={[]}
+        metrics={{
+          totalSchools: 0,
+          totalStudents: 0,
+          totalClasses: 0,
+          criticalStudentsCount: 0,
+          networkAverageAttendance: 100,
+          messagesSentThisMonth: 0,
+        }}
+        initialSchools={[]}
+        predictiveData={{
+          totalCategorizedReplies: 0,
+          criticalRate: 0,
+          causesBreakdown: [],
+          recommendations: [],
+        }}
+        isSuperAdmin={isSuper}
+        currentUser={{
+          name: session.user.name || "Gestor SEMEC",
+          email: session.user.email || "",
+        }}
+      />
+    );
   }
 
   const municipalSchools = await prisma.school.findMany({

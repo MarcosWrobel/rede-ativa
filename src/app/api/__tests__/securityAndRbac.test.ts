@@ -146,11 +146,36 @@ describe("Isolamento de Endpoints Públicos e Webhooks (Middleware)", () => {
       expect(checkIsAdmin(superAdminSession)).toBe(true);
     });
 
-    it("Nível 2 - Gestão Secretaria (SEMEC) tem acesso à sua rede e escolas vinculadas", () => {
+    it("Nível 2 - Gestão Secretaria (SEMEC) tem acesso apenas à sua rede e escolas vinculadas", () => {
       expect(checkIsSuperAdmin(semecSession)).toBe(false);
       expect(checkIsSecretariat(semecSession, "semec-tibagi")).toBe(true);
       expect(checkIsSecretariat(semecSession, "semec-outro-municipio")).toBe(false);
-      expect(checkIsSchoolManager(semecSession, "escola-david-federmann")).toBe(true);
+      // Sem metadados de vínculo ou para escola de outro município/rede estadual, deve negar
+      expect(checkIsSchoolManager(semecSession, "escola-david-federmann")).toBe(false);
+      expect(
+        checkIsSchoolManager(semecSession, "escola-david-federmann", {
+          id: "escola-david-federmann",
+          networkId: "semec-tibagi",
+          network: "MUNICIPAL",
+          city: "Tibagi",
+        })
+      ).toBe(true);
+      expect(
+        checkIsSchoolManager(semecSession, "escola-outra-cidade", {
+          id: "escola-outra-cidade",
+          networkId: "semec-castro",
+          network: "MUNICIPAL",
+          city: "Castro",
+        })
+      ).toBe(false);
+      expect(
+        checkIsSchoolManager(semecSession, "escola-estadual-tibagi", {
+          id: "escola-estadual-tibagi",
+          networkId: null,
+          network: "ESTADUAL",
+          city: "Tibagi",
+        })
+      ).toBe(false);
     });
 
     it("Nível 3 - Gestor Escolar tem acesso de gestão à sua escola mas não à secretaria", () => {
