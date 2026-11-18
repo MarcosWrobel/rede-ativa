@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +72,7 @@ export async function GET(req: Request) {
       ];
     }
 
-    const [actionItems, allSchoolActions, classes] = await Promise.all([
+    const [rawActionItems, rawAllSchoolActions, classes] = await Promise.all([
       prisma.pedagogicalActionItem.findMany({
         where,
         take: limit,
@@ -84,6 +85,9 @@ export async function GET(req: Request) {
           minute: {
             select: {
               id: true,
+              schoolId: true,
+              authorId: true,
+              authorEmail: true,
               ataNumber: true,
               year: true,
               subject: true,
@@ -121,13 +125,29 @@ export async function GET(req: Request) {
           status: true,
           dueDate: true,
           responsible: true,
+          minute: {
+            select: {
+              isConfidential: true,
+              schoolId: true,
+              authorId: true,
+              authorEmail: true,
+            },
+          },
         },
       }),
       prisma.classGroup.findMany({
+        where: { schoolId: school.id },
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),
     ]);
+
+    const actionItems = rawActionItems.filter((item) =>
+      canAccessConfidentialMinute(item.minute, authCheck.session)
+    );
+    const allSchoolActions = rawAllSchoolActions.filter((item) =>
+      canAccessConfidentialMinute(item.minute, authCheck.session)
+    );
 
     // Calcula métricas analíticas
     let total = allSchoolActions.length;

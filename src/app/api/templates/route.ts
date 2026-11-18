@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getCurrentSchool, isDefaultSchoolContext } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export async function GET(req: Request) {
@@ -17,7 +17,9 @@ export async function GET(req: Request) {
 
     const where: any = {
       active: true,
-      OR: [{ schoolId: currentSchool.id }, { schoolId: null }],
+      ...(isDefaultSchoolContext(currentSchool)
+        ? { OR: [{ schoolId: currentSchool.id }, { schoolId: null }] }
+        : { schoolId: currentSchool.id }),
     };
     if (segment && segment !== "TODOS") {
       where.AND = [{ OR: [{ segment }, { segment: "TODOS" }] }];

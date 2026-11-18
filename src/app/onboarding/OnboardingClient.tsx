@@ -511,10 +511,10 @@ export default function OnboardingClient({
             <div className="border-b border-slate-100 pb-4">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <ImageIcon className="w-5 h-5 text-emerald-600" />
-                <span>Passo 2: Brasão Oficial & Cabeçalho de Fé Pública</span>
+                <span>Passo 2: Brasão Oficial & Cabeçalho Institucional</span>
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                Faça upload do brasão municipal ou estadual. Ele será aplicado automaticamente em todas as atas, certidões e relatórios oficiais em conformidade com a Lei 14.063/2020.
+                Faça upload do brasão municipal ou estadual. Ele será aplicado nos cabeçalhos das atas, documentos e relatórios gerados pela instituição.
               </p>
             </div>
 

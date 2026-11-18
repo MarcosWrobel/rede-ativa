@@ -106,7 +106,7 @@ export default function AuditoriaClient({ initialLogs }: Props) {
             <span>Trilha de Auditoria & Conformidade</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Registro imutável de todas as interações com dados sensíveis escolares, e-mail institucional, IP de origem e carimbo de data/hora.
+            Registro cronológico de operações com identificação do usuário, IP de origem e carimbo de data/hora.
           </p>
         </div>
         <div className="text-xs text-slate-500 font-medium">

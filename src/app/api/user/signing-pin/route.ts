@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { validatePinFormat, hashPin, verifyPin } from "@/lib/signingPin";
+import { getCurrentSchool } from "@/lib/currentSchool";
 import { verifyEscolaGoogleIdToken } from "@/lib/escolaGoogleVerify";
 import { z } from "zod";
 
@@ -85,6 +86,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const auditSchoolId = currentSchool?.id || authCheck.schoolId || user.schoolId || null;
+
     // 1. Ação SETUP (primeiro cadastro do PIN)
     if (parsed.data.action === "setup") {
       if (user.signingPinHash) {
@@ -112,7 +116,7 @@ export async function POST(req: Request) {
       });
 
       await logAudit({
-        schoolId: authCheck.schoolId || user.schoolId || null,
+        schoolId: auditSchoolId,
         user: {
           id: user.id,
           name: user.name,
@@ -121,7 +125,7 @@ export async function POST(req: Request) {
         action: "SETUP_SIGNING_PIN",
         entityType: "User",
         entityId: user.id,
-        details: { ip, message: "Cadastro inicial do PIN de fé pública realizado com sucesso." },
+        details: { ip, message: "Cadastro inicial do PIN de autoria realizado com sucesso." },
         ipAddress: ip,
       });
 
@@ -160,6 +164,28 @@ export async function POST(req: Request) {
           },
         });
 
+        await logAudit({
+          schoolId: auditSchoolId,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+          },
+          action: shouldLock ? "SIGNING_PIN_LOCKOUT" : "CHANGE_SIGNING_PIN",
+          entityType: "User",
+          entityId: user.id,
+          details: {
+            ip,
+            success: false,
+            attempts: nextAttempts,
+            locked: shouldLock,
+            message: shouldLock
+              ? "PIN de autoria bloqueado por 5 minutos após 3 tentativas incorretas."
+              : "Tentativa incorreta de verificação do PIN atual durante alteração.",
+          },
+          ipAddress: ip,
+        });
+
         return NextResponse.json(
           {
             error: shouldLock
@@ -188,7 +214,7 @@ export async function POST(req: Request) {
       });
 
       await logAudit({
-        schoolId: authCheck.schoolId || user.schoolId || null,
+        schoolId: auditSchoolId,
         user: {
           id: user.id,
           name: user.name,
@@ -197,7 +223,7 @@ export async function POST(req: Request) {
         action: "CHANGE_SIGNING_PIN",
         entityType: "User",
         entityId: user.id,
-        details: { ip, message: "Alteração de PIN de fé pública concluída com sucesso." },
+        details: { ip, message: "Alteração de PIN de autoria concluída com sucesso." },
         ipAddress: ip,
       });
 
@@ -243,7 +269,7 @@ export async function POST(req: Request) {
       });
 
       await logAudit({
-        schoolId: authCheck.schoolId || user.schoolId || null,
+        schoolId: auditSchoolId,
         user: {
           id: user.id,
           name: user.name,

@@ -485,7 +485,7 @@ export default function AdminClient({
               <span>Eventos Recentes de Auditoria & Segurança</span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Trilha imutável de conformidade LGPD e acessos institucionais
+              Registro cronológico de operações e acessos institucionais
             </p>
           </div>
           <Link href="/auditoria" className="text-xs font-bold text-indigo-600 hover:underline">

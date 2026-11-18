@@ -7,6 +7,7 @@ import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
 import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone } from "@/lib/sereParser";
 import { safeQueryList } from "@/lib/safePhase3Queries";
+import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
 
 export const maxDuration = 60;
 
@@ -198,6 +199,7 @@ export async function POST(req: Request) {
     let reactivatedCount = 0;
     let movedTurmaCount = 0;
     let skippedExistingCount = 0;
+    const pendingCgmUpdates = new Map<string, string>();
 
     // 4. Pareamento em memória O(N)
     for (const item of students) {
@@ -235,11 +237,9 @@ export async function POST(req: Request) {
           continue;
         }
 
-        let nextCgm = matched.cgm;
         if (!matched.cgm && cleanCgm && !usedCgms.has(cleanCgm)) {
-          nextCgm = cleanCgm;
+          pendingCgmUpdates.set(matched.id, cleanCgm);
           usedCgms.add(cleanCgm);
-          cgmsBound++;
         }
 
         const nextPhone = cleanPhone || matched.phone || "";
@@ -254,7 +254,6 @@ export async function POST(req: Request) {
         const needsSchoolBind = Boolean(schoolId && !matched.schoolId);
 
         if (
-          nextCgm !== matched.cgm ||
           nextPhone !== matched.phone ||
           nextGuardian !== matched.guardianName ||
           changedClass ||
@@ -267,7 +266,6 @@ export async function POST(req: Request) {
           toUpdate.push({
             id: matched.id,
             data: {
-              cgm: nextCgm,
               phone: nextPhone,
               guardianName: nextGuardian,
               classGroupId: targetClassGroupId,
@@ -275,7 +273,7 @@ export async function POST(req: Request) {
               ...(needsSchoolBind ? { schoolId } : {}),
             },
           });
-        } else {
+        } else if (!pendingCgmUpdates.has(matched.id)) {
           skippedExistingCount++;
         }
       } else {
@@ -318,6 +316,11 @@ export async function POST(req: Request) {
           })
         )
       );
+    }
+
+    // 6b. Vinculação resiliente de CGMs pendentes (blindada contra colisão concorrente P2002)
+    if (pendingCgmUpdates.size > 0) {
+      cgmsBound = await applyPendingCgmUpdatesSafely(prisma as any, pendingCgmUpdates);
     }
 
     // 7. Inativação opcional de alunos Transferidos / Desistentes no SERE
@@ -369,7 +372,7 @@ export async function POST(req: Request) {
         turmasUpdated,
         studentsReceived: students.length,
         createdCount,
-        updatedCount: toUpdate.length,
+        updatedCount: new Set([...toUpdate.map((u) => u.id), ...pendingCgmUpdates.keys()]).size,
         movedTurmaCount,
         reactivatedCount,
         cgmsBound,
@@ -442,7 +445,7 @@ export async function POST(req: Request) {
         turmasCreated,
         turmasUpdated,
         createdCount,
-        updatedCount: toUpdate.length,
+        updatedCount: new Set([...toUpdate.map((u) => u.id), ...pendingCgmUpdates.keys()]).size,
         movedTurmaCount,
         reactivatedCount,
         cgmsBound,

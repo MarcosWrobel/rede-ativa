@@ -96,13 +96,20 @@ export async function dispatchAndPersistMessage(
     };
   }
 
+  let validatedTemplateId: string | null = null;
   if (templateId) {
     const template = await prisma.messageTemplate.findUnique({
       where: { id: templateId },
       select: { id: true, schoolId: true },
     });
+    if (!template) {
+      return {
+        ok: false,
+        status: 404,
+        error: "Modelo de mensagem não encontrado.",
+      };
+    }
     if (
-      template &&
       template.schoolId &&
       !assertTenantOwnership(template.schoolId, currentSchoolId, session)
     ) {
@@ -112,6 +119,7 @@ export async function dispatchAndPersistMessage(
         error: "Modelo de mensagem não pertence a esta instituição.",
       };
     }
+    validatedTemplateId = template.id;
   }
 
   const digits = normalizeWhatsAppPhone(customPhone || student.phone);
@@ -141,7 +149,7 @@ export async function dispatchAndPersistMessage(
   const log = await prisma.messageLog.create({
     data: {
       studentId: student.id,
-      templateId: templateId || null,
+      templateId: validatedTemplateId,
       reasonTitle,
       messageContent,
       phoneUsed: digits,

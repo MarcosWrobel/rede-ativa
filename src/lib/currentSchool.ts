@@ -35,6 +35,16 @@ export const DEFAULT_SCHOOL: SchoolContext = {
   edition: "PILOTO_INTEGRADA",
 };
 
+/**
+ * Identifica estritamente se o contexto pertence à Escola Piloto Fundadora (INEP 41042730).
+ */
+export function isDefaultSchoolContext(
+  school: { id?: string | null; inepCode?: string | null } | null | undefined
+): boolean {
+  if (!school) return false;
+  return school.inepCode === "41042730" || school.id === "default-leopoldina";
+}
+
 // Select enxuto: omite `logoUrl` (que pode conter SVG/imagem Base64 > 1 MB) e `syncTokenHash`
 const SCHOOL_CONTEXT_SELECT = {
   id: true,

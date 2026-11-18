@@ -32,6 +32,8 @@ export async function POST(
       rawBody = null;
     }
 
+    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+
     // Proteção Anti-Brute-Force contra adivinhação de PIN de Fé Pública (SEC-08)
     const pinLockKey = `pin-fail:${authCheck.userId}`;
     const pinRateCheck = await checkRateLimit(pinLockKey, RATE_LIMIT_POLICIES.PIN_BRUTE_FORCE);
@@ -46,7 +48,7 @@ export async function POST(
           retryAfterSeconds: pinRateCheck.retryAfterSeconds,
         },
         user: { id: authCheck.userId, name: authCheck.userName, email: authCheck.email },
-        schoolId: authCheck.schoolId || "global",
+        schoolId: currentSchool?.id || authCheck.schoolId || null,
         req,
       });
 
@@ -68,8 +70,6 @@ export async function POST(
 
     // PIN validado com sucesso: reseta eventuais falhas anteriores
     await resetRateLimit(pinLockKey);
-
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
 
     const { minute: finalized, alreadyFinalized } = await executeMinuteFinalization({
       prisma,

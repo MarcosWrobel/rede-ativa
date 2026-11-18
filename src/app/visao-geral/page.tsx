@@ -119,7 +119,7 @@ export default async function DashboardPage() {
         },
         {
           title: "Livro de Atas",
-          desc: "Lavratura de atas pedagógicas com fé pública, termos aditivos e livro anual.",
+          desc: "Lavratura de atas pedagógicas com confirmação de autoria por PIN, termos aditivos e livro anual.",
           href: "/atas",
           icon: BookOpenCheck,
           color: "bg-indigo-50 text-indigo-700 border-indigo-200",

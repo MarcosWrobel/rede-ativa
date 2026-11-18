@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { z } from "zod";
 import { justificationTypeEnum } from "@/lib/schemas";
 
@@ -104,6 +105,7 @@ export async function GET(req: Request) {
         },
       }),
       prisma.classGroup.findMany({
+        where: { schoolId: school.id },
         select: { id: true, name: true, shift: true },
         orderBy: { name: "asc" },
       }),
@@ -144,8 +146,15 @@ export async function POST(req: Request) {
       include: { classGroup: true },
     });
 
-    if (!student || (student.schoolId && student.schoolId !== school.id && authCheck.role !== "ADMIN")) {
+    if (!student) {
       return NextResponse.json({ error: "Estudante não encontrado nesta instituição." }, { status: 404 });
+    }
+
+    if (!assertTenantOwnership(student.schoolId, school.id, authCheck.session)) {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
     }
 
     // Grava início e fim no horário civil de Brasília (-03:00)

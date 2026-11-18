@@ -98,6 +98,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           await logAudit({
             action: "LOGIN_DENIED",
             entityType: "User",
+            schoolId: null,
             details: { reason: "CONTA_NAO_AUTORIZADA_NA_PLATAFORMA", email },
             user: { name: user.name || "Visitante Externo", email },
           });
@@ -109,6 +110,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           await logAudit({
             action: "LOGIN_DENIED",
             entityType: "User",
+            schoolId: null,
             details: { reason: "FORA_DA_LISTA_AUTORIZADA", email },
             user: { name: user.name || email.split("@")[0], email },
           });
@@ -121,6 +123,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             action: "LOGIN_DENIED",
             entityType: "User",
             entityId: existingUser.id,
+            schoolId: existingUser.schoolId ?? null,
             details: { reason: "CONTA_DESATIVADA", email },
             user: { id: existingUser.id, name: existingUser.name, email },
           });
@@ -157,6 +160,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           action: "USER_LOGIN",
           entityType: "User",
           entityId: dbUser.id,
+          schoolId: dbUser.schoolId ?? null,
           details: { provider: account?.provider || "google", email, role: dbUser.role },
           user: { id: dbUser.id, name: dbUser.name, email: dbUser.email },
         });

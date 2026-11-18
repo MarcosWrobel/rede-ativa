@@ -1003,7 +1003,7 @@ export default function SecretariaClient({
                   <span>Diretrizes Executivas e Recomendações de Intervenção Municipal</span>
                 </h4>
                 <span className="text-[11px] font-medium text-slate-500">
-                  Respaldo: Art. 56 do ECA & Art. 12 da LDB
+                  Acompanhamento consolidado de frequência e busca ativa na rede
                 </span>
               </div>
 

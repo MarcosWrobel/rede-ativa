@@ -14,4 +14,6 @@ Este diretório preserva os **relatórios de auditoria point-in-time (snapshots 
 | **10/11/2026 (`PERF-01` — Neon Launch)** | [`2026-11-10_OTIMIZACAO_EGRESS_CACHE_NEON.md`](./2026-11-10_OTIMIZACAO_EGRESS_CACHE_NEON.md) — Relatório técnico de redução de egress, cache multi-camadas, proxy CDN de brasões, projeções SQL de anexos Base64, auth zero-write da extensão e guia de reversão controlada para auditorias. | **57 suítes / 418 testes** |
 
 > [!NOTE]
+> Para consultar o **mapeamento arquitetural oficial por setores e escopos de auditoria**, acesse [`./MAPA_SETORES_AUDITORIA.md`](./MAPA_SETORES_AUDITORIA.md).
+>
 > Para consultar o **estado arquitetural vigente e unificado** do sistema (**21 models Prisma, 29 páginas SSR, 50 Route Handlers, 57 suítes e 418 testes aprovados**), consulte sempre [`../ARQUITETURA_E_ENGENHARIA.md`](../ARQUITETURA_E_ENGENHARIA.md).

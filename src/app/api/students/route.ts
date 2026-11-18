@@ -80,6 +80,19 @@ export async function POST(req: Request) {
     const cleanCgm = cgm ? cgm.replace(/\D/g, "") || null : null;
     const formattedName = name.toUpperCase();
 
+    if (cleanCgm && typeof (prisma as any).student?.findUnique === "function") {
+      const existingCgm = await prisma.student.findUnique({
+        where: { cgm: cleanCgm },
+        select: { id: true },
+      });
+      if (existingCgm) {
+        return NextResponse.json(
+          { error: "O CGM informado já está cadastrado em outra matrícula no sistema." },
+          { status: 409 }
+        );
+      }
+    }
+
     const student = await prisma.student.create({
       data: {
         cgm: cleanCgm,
@@ -113,6 +126,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json(student);
   } catch (error: any) {
+    if (
+      error?.code === "P2002" ||
+      String(error?.message || "").toLowerCase().includes("unique constraint")
+    ) {
+      return NextResponse.json(
+        { error: "O CGM informado já está cadastrado em outra matrícula no sistema." },
+        { status: 409 }
+      );
+    }
     console.error("Erro ao cadastrar estudante:", error);
     return NextResponse.json({ error: "Erro ao cadastrar estudante." }, { status: 500 });
   }
@@ -163,6 +185,23 @@ export async function PUT(req: Request) {
       cgm !== undefined ? (cgm ? cgm.replace(/\D/g, "") || null : null) : previous?.cgm;
     const formattedName = name ? name.toUpperCase() : previous?.name;
 
+    if (
+      cleanCgm &&
+      cleanCgm !== previous.cgm &&
+      typeof (prisma as any).student?.findUnique === "function"
+    ) {
+      const existingCgm = await prisma.student.findUnique({
+        where: { cgm: cleanCgm },
+        select: { id: true },
+      });
+      if (existingCgm && existingCgm.id !== id) {
+        return NextResponse.json(
+          { error: "O CGM informado já está cadastrado em outra matrícula no sistema." },
+          { status: 409 }
+        );
+      }
+    }
+
     const student = await prisma.student.update({
       where: { id },
       data: {
@@ -195,6 +234,15 @@ export async function PUT(req: Request) {
 
     return NextResponse.json(student);
   } catch (error: any) {
+    if (
+      error?.code === "P2002" ||
+      String(error?.message || "").toLowerCase().includes("unique constraint")
+    ) {
+      return NextResponse.json(
+        { error: "O CGM informado já está cadastrado em outra matrícula no sistema." },
+        { status: 409 }
+      );
+    }
     console.error("Erro ao atualizar estudante:", error);
     return NextResponse.json({ error: "Erro ao atualizar estudante." }, { status: 500 });
   }
