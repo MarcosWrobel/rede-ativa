@@ -152,6 +152,13 @@ dialog.dialog-xl:modal {
   max-width: min(96vw, 62rem);
 }
 
+dialog.dialog-focus:modal {
+  max-width: min(96vw, 1380px);
+  width: min(96vw, 1380px);
+  height: min(94vh, 920px);
+  max-height: 94vh;
+}
+
 dialog.dialog-full:modal,
 dialog.dialog-ata:modal {
   max-width: min(98vw, 1560px) !important;
@@ -163,6 +170,11 @@ dialog::backdrop {
   overscroll-behavior: contain;
   background-color: rgba(15, 23, 42, 0.48);
   backdrop-filter: blur(2px);
+}
+
+dialog.dialog-focus::backdrop {
+  background-color: rgba(2, 6, 23, 0.75);
+  backdrop-filter: blur(4px);
 }
 
 /* Modern Web Guidance: checkbox (custom appearance: none + :indeterminate + 44px hit target) */

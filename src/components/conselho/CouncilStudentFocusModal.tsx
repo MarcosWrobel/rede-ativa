@@ -349,9 +349,9 @@ export default function CouncilStudentFocusModal({
         e.preventDefault();
         requestAction({ type: "close" });
       }}
-      className="m-auto w-[min(96vw,1380px)] max-w-none h-[min(94vh,920px)] max-h-[94vh] p-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 shadow-2xl overscroll-contain backdrop:bg-slate-950/75 backdrop:overscroll-contain backdrop:overflow-hidden"
+      className="dialog-focus m-auto w-[min(96vw,1380px)] max-w-none h-[min(94vh,920px)] max-h-[94vh] p-0 rounded-2xl bg-transparent shadow-2xl overscroll-contain backdrop:bg-slate-950/75 backdrop:overscroll-contain backdrop:overflow-hidden"
     >
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col w-full h-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
         {/* Cabeçalho de navegação do Modo Foco */}
         <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -470,7 +470,7 @@ export default function CouncilStudentFocusModal({
         <div
           id={unsavedNoticeId}
           aria-live="polite"
-          className={`px-5 py-2.5 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/60 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 ${
+          className={`px-5 py-2.5 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 ${
             pendingAction ? "visible" : "hidden"
           }`}
         >
@@ -500,7 +500,7 @@ export default function CouncilStudentFocusModal({
         </div>
 
         {/* Corpo em 2 colunas */}
-        <div className="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950 p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Coluna Esquerda: Componentes Curriculares ordenados por criticidade */}
           <section
             aria-label="Componentes curriculares do estudante"
@@ -549,11 +549,11 @@ export default function CouncilStudentFocusModal({
                       key={cell.subjectId}
                       className={`rounded-xl border p-3.5 transition ${
                         isDirty
-                          ? "border-sky-400 bg-sky-50/70 dark:border-sky-600 dark:bg-sky-950/30"
+                          ? "border-sky-400 bg-sky-50 dark:border-sky-600 dark:bg-sky-950/60"
                           : cell.isBelowAvg
-                          ? "border-rose-200 bg-rose-50/50 dark:border-rose-900/80 dark:bg-rose-950/20"
+                          ? "border-rose-200 bg-rose-50 dark:border-rose-900/80 dark:bg-rose-950/50"
                           : cell.hasAlertDescriptor
-                          ? "border-amber-200 bg-amber-50/40 dark:border-amber-900/70 dark:bg-amber-950/20"
+                          ? "border-amber-200 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/50"
                           : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
                       }`}
                     >

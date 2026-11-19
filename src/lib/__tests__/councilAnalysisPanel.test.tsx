@@ -484,6 +484,45 @@ describe("Painel de Análise e Modo Telão do Conselho de Classe", () => {
     expect(normalizedHtml).not.toContain("Salvar parecer e tags");
   });
 
+  it("garante largura expandida e superfície opaca no CouncilStudentFocusModal e globals.css", () => {
+    const board = createSyntheticBoard();
+    const analytics = buildClassCouncilAnalytics(board, 2);
+
+    const html = renderToString(
+      React.createElement(CouncilStudentFocusModal, {
+        open: true,
+        onClose: vi.fn(),
+        board,
+        activeTrimester: 2,
+        students: analytics.students,
+        currentIndex: 0,
+        onSelectIndex: vi.fn(),
+        hideSensitiveTags: false,
+        onToggleHideSensitiveTags: vi.fn(),
+        onOpenFullFicha: vi.fn(),
+        onCardUpdated: vi.fn(),
+        onMatrixSaved: vi.fn(async () => {}),
+        onNotify: vi.fn(),
+        readOnly: false,
+      })
+    );
+
+    expect(html).toContain("<dialog");
+    expect(html).toContain("dialog-focus");
+    expect(html).toContain("bg-slate-50 dark:bg-slate-950");
+    expect(html).toContain("border-slate-200 dark:border-slate-700");
+
+    const globalsCss = fs.readFileSync(
+      path.join(process.cwd(), "src/app/globals.css"),
+      "utf8"
+    );
+    expect(globalsCss).toContain("dialog.dialog-focus:modal");
+    expect(globalsCss).toContain("max-width: min(96vw, 1380px)");
+    expect(globalsCss).toContain("width: min(96vw, 1380px)");
+    expect(globalsCss).toContain("dialog.dialog-focus::backdrop");
+    expect(globalsCss).toContain("overscroll-behavior: contain");
+  });
+
   it("cumpre as diretrizes de UX Writing (sem termos proibidos ou jargão técnico na interface)", () => {
     const filesToCheck = [
       "src/components/conselho/councilAnalytics.ts",
