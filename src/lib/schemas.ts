@@ -483,6 +483,33 @@ export const councilGenerateMinuteSchema = z.object({
   isConfidential: z.boolean().optional(),
 });
 
+export const councilTeacherLinkCreateSchema = z.object({
+  trimester: councilTrimesterEnum,
+  subjectId: z.string().trim().min(1).max(100).optional().nullable(),
+  expiresInDays: z.number().int().min(1).max(30).optional().default(7),
+});
+
+export const councilTeacherPortalAuthSchema = z.object({
+  googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
+});
+
+export const councilTeacherPortalSubmitSchema = z.object({
+  googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
+  subjectId: z.string().trim().min(1, "Selecione o componente curricular.").max(100),
+  entries: z
+    .array(
+      z.object({
+        studentId: z.string().trim().min(1).max(100),
+        descriptorCodes: z
+          .array(councilDescriptorCodeSchema)
+          .max(5)
+          .transform((arr) => Array.from(new Set(arr)).sort((a, b) => a - b)),
+      })
+    )
+    .min(1, "Informe ao menos um estudante para salvar.")
+    .max(200, "Limite máximo de estudantes por turma excedido."),
+});
+
 // ---------------------------------------------------------------------------
 // SINCRONIZAÇÃO DO BI APRENDIZAGEM ESTADUAL (EXTENSÃO POWER BI -> CONSELHO)
 // ---------------------------------------------------------------------------

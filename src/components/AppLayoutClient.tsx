@@ -53,7 +53,8 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
     pathname === "/preview-landing" ||
     pathname.startsWith("/impacto/") ||
     pathname.startsWith("/validar/ata/") ||
-    pathname.startsWith("/assinar/ata/");
+    pathname.startsWith("/assinar/ata/") ||
+    pathname.startsWith("/conselho-classe/professor/");
 
   if (isStandalonePage) {
     return <main className="min-h-screen bg-slate-50">{children}</main>;

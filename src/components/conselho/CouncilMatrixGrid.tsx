@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { CheckCheck, Filter, Save, Search, UserRound } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import {
+  CheckCheck,
+  Filter,
+  Link2,
+  RefreshCw,
+  Save,
+  Search,
+  UserRound,
+} from "lucide-react";
+import CouncilTeacherLinkModal from "./CouncilTeacherLinkModal";
 import {
   COUNCIL_DESCRIPTORS,
   COUNCIL_ENROLLMENT_STATUS_LABELS,
   COUNCIL_STUDENT_TAG_OPTIONS,
+  formatCouncilGradePtBr,
   getCardBelowAvgForTrimester,
   getStudentInitials,
   isBelowAverageGradeUi,
@@ -19,7 +29,6 @@ interface MatrixCellDraft {
   studentId: string;
   subjectId: string;
   descriptorCodes: number[];
-  grade: number | null;
 }
 
 type MatrixFilterMode = "ALL" | "ALERTS" | "BELOW_AVG";
@@ -53,11 +62,36 @@ export default function CouncilMatrixGrid({
   const [filterMode, setFilterMode] = useState<MatrixFilterMode>("ALL");
   const [dirtyCells, setDirtyCells] = useState<Map<string, MatrixCellDraft>>(new Map());
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [teacherLinkModalOpen, setTeacherLinkModalOpen] = useState(false);
+  const [teacherLinkSubjectId, setTeacherLinkSubjectId] = useState<string | null>(null);
 
-  // Limpa rascunhos locais pendentes ao trocar o trimestre ou recarregar o conselho
+  const onMatrixSavedRef = useRef(onMatrixSaved);
+  onMatrixSavedRef.current = onMatrixSaved;
+  const savingRef = useRef(saving);
+  savingRef.current = saving;
+  const syncingRef = useRef(syncing);
+  syncingRef.current = syncing;
+
+  // Limpa rascunhos locais pendentes ao trocar o trimestre ou o conselho
   useEffect(() => {
     setDirtyCells(new Map());
   }, [activeTrimester, board.id]);
+
+  // Atualização leve em segundo plano enquanto a aba estiver visível para sincronizar envios docentes
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      if (savingRef.current || syncingRef.current) {
+        return;
+      }
+      void onMatrixSavedRef.current();
+    }, 15_000);
+
+    return () => clearInterval(timer);
+  }, [board.id, activeTrimester]);
 
   const activeSubjects = useMemo(
     () => board.subjects.filter((s) => s.active),
@@ -84,17 +118,21 @@ export default function CouncilMatrixGrid({
     return map;
   }, [board.studentCards, activeTrimester]);
 
-  function getCellState(studentId: string, subjectId: string): MatrixCellDraft {
+  const activeStudentCards = useMemo(() => {
+    const ativos = board.studentCards.filter((c) => c.enrollmentStatus === "ATIVO");
+    return ativos.length > 0 ? ativos : board.studentCards;
+  }, [board.studentCards]);
+
+  function getCellDescriptorCodes(studentId: string, subjectId: string): number[] {
     const key = cellKey(studentId, subjectId);
     const dirty = dirtyCells.get(key);
-    if (dirty) return dirty;
+    if (dirty) return dirty.descriptorCodes;
     const persisted = persistedEntryMap.get(key);
-    return {
-      studentId,
-      subjectId,
-      descriptorCodes: persisted ? [...persisted.descriptorCodes] : [],
-      grade: persisted ? persisted.grade : null,
-    };
+    return persisted ? [...persisted.descriptorCodes] : [];
+  }
+
+  function getCellGrade(studentId: string, subjectId: string): number | null {
+    return persistedEntryMap.get(cellKey(studentId, subjectId))?.grade ?? null;
   }
 
   function updateCellDraft(nextCell: MatrixCellDraft) {
@@ -112,34 +150,19 @@ export default function CouncilMatrixGrid({
 
   function toggleDescriptorCode(studentId: string, subjectId: string, code: number) {
     if (readOnly) return;
-    const current = getCellState(studentId, subjectId);
-    const exists = current.descriptorCodes.includes(code);
+    const currentCodes = getCellDescriptorCodes(studentId, subjectId);
+    const exists = currentCodes.includes(code);
     const nextCodes = exists
-      ? current.descriptorCodes.filter((c) => c !== code)
-      : [...current.descriptorCodes, code];
+      ? currentCodes.filter((c) => c !== code)
+      : [...currentCodes, code];
     updateCellDraft({
-      ...current,
+      studentId,
+      subjectId,
       descriptorCodes: nextCodes,
     });
   }
 
-  function handleGradeChange(studentId: string, subjectId: string, rawVal: string) {
-    if (readOnly) return;
-    const current = getCellState(studentId, subjectId);
-    const clean = rawVal.trim().replace(",", ".");
-    if (!clean) {
-      updateCellDraft({ ...current, grade: null });
-      return;
-    }
-    const num = Number.parseFloat(clean);
-    if (!Number.isFinite(num)) return;
-    updateCellDraft({
-      ...current,
-      grade: Math.max(0, Math.min(100, num)),
-    });
-  }
-
-  function handleFillEmptyWithOne(subjectId: string) {
+  function handleFillEmptyWithAtende(subjectId: string) {
     if (readOnly) return;
     setDirtyCells((prev) => {
       const next = new Map(prev);
@@ -152,7 +175,6 @@ export default function CouncilMatrixGrid({
             studentId: card.studentId,
             subjectId,
             descriptorCodes: [1],
-            grade: existing?.grade ?? null,
           });
         }
       }
@@ -171,16 +193,16 @@ export default function CouncilMatrixGrid({
 
       if (filterMode === "ALERTS") {
         return activeSubjects.some((subj) => {
-          const state = getCellState(card.studentId, subj.id);
-          return state.descriptorCodes.some((c) => c === 2 || c === 3 || c === 4);
+          const codes = getCellDescriptorCodes(card.studentId, subj.id);
+          return codes.some((c) => c === 2 || c === 3 || c === 4);
         });
       }
 
       if (filterMode === "BELOW_AVG") {
         const persistedBelow = getCardBelowAvgForTrimester(card, activeTrimester).length > 0;
         const matrixBelow = activeSubjects.some((subj) => {
-          const state = getCellState(card.studentId, subj.id);
-          return isBelowAverageGradeUi(state.grade);
+          const grade = getCellGrade(card.studentId, subj.id);
+          return isBelowAverageGradeUi(grade);
         });
         return persistedBelow || matrixBelow;
       }
@@ -216,6 +238,22 @@ export default function CouncilMatrixGrid({
     }
   }
 
+  async function handleManualSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await onMatrixSaved();
+      onNotify("Lançamentos sincronizados.", "success");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function openTeacherLinkModal(subjectId: string | null) {
+    setTeacherLinkSubjectId(subjectId);
+    setTeacherLinkModalOpen(true);
+  }
+
   if (activeSubjects.length === 0) {
     return (
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 text-center space-y-3">
@@ -237,7 +275,7 @@ export default function CouncilMatrixGrid({
 
   return (
     <div className="space-y-4">
-      {/* Legenda dos Descritivos 1..5 */}
+      {/* Legenda das Tags Pedagógicas */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           {COUNCIL_DESCRIPTORS.map((d) => (
@@ -245,14 +283,14 @@ export default function CouncilMatrixGrid({
               key={d.code}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold ${d.badgeClass}`}
             >
-              <strong className="font-black">{d.code}</strong>
-              <span>{d.fullLabel}</span>
+              <strong className="font-black">{d.shortLabel}</strong>
+              {d.shortLabel !== d.fullLabel && <span>— {d.fullLabel}</span>}
             </span>
           ))}
         </div>
 
-        {/* Barra de Filtros e Ação de Salvamento */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+        {/* Barra de Filtros, Link Docente, Sincronização e Salvamento */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-2 flex-1">
             <div className="relative flex-1 min-w-[220px] max-w-sm">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -275,30 +313,52 @@ export default function CouncilMatrixGrid({
                 className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100"
               >
                 <option value="ALL">Todos os estudantes ({board.studentCards.length})</option>
-                <option value="ALERTS">Com alertas (2, 3, 4)</option>
+                <option value="ALERTS">Com alertas (Dificuldade, Conduta, Infrequência)</option>
                 <option value="BELOW_AVG">Abaixo da média</option>
               </select>
             </div>
           </div>
 
-          {!readOnly && (
-            <div className="flex items-center gap-2">
-              {dirtyCells.size > 0 && (
-                <span className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
-                  {dirtyCells.size} {dirtyCells.size === 1 ? "célula alterada" : "células alteradas"}
-                </span>
-              )}
-              <button
-                type="button"
-                disabled={saving || dirtyCells.size === 0}
-                onClick={handleSaveMatrix}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{saving ? "Salvando..." : "Salvar matriz"}</span>
-              </button>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={handleManualSync}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <span>{syncing ? "Sincronizando..." : "Sincronizar lançamentos"}</span>
+            </button>
+
+            {!readOnly && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openTeacherLinkModal(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900 text-xs font-bold text-sky-900 dark:text-sky-200 transition cursor-pointer"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Link para professores</span>
+                </button>
+
+                {dirtyCells.size > 0 && (
+                  <span className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
+                    {dirtyCells.size} {dirtyCells.size === 1 ? "célula alterada" : "células alteradas"}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  disabled={saving || dirtyCells.size === 0}
+                  onClick={handleSaveMatrix}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{saving ? "Salvando..." : "Salvar matriz"}</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -311,8 +371,8 @@ export default function CouncilMatrixGrid({
       >
         <table className="w-full border-separate border-spacing-0 text-xs">
           <caption className="sr-only">
-            Lançamento de descritivos de 1 a 5 por estudante e componente curricular no{" "}
-            {activeTrimester}º trimestre
+            Lançamento de descritivos por estudante e componente curricular no {activeTrimester}º
+            trimestre
           </caption>
           <thead className="sticky top-0 z-20 bg-slate-100 dark:bg-slate-800">
             <tr>
@@ -322,35 +382,54 @@ export default function CouncilMatrixGrid({
               >
                 Estudante
               </th>
-              {activeSubjects.map((subj) => (
-                <th
-                  key={subj.id}
-                  scope="col"
-                  className="border-b border-r border-slate-200 dark:border-slate-700 p-2.5 text-left align-top min-w-[190px] bg-slate-100 dark:bg-slate-800"
-                >
-                  <div className="space-y-1">
-                    <div className="font-extrabold text-slate-900 dark:text-white leading-tight">
-                      {subj.name}
-                    </div>
-                    {subj.teacherName && (
-                      <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400 truncate">
-                        {subj.teacherName}
+              {activeSubjects.map((subj) => {
+                const totalCount = activeStudentCards.length;
+                const filledCount = activeStudentCards.reduce((acc, card) => {
+                  const codes = getCellDescriptorCodes(card.studentId, subj.id);
+                  return codes.length > 0 ? acc + 1 : acc;
+                }, 0);
+
+                return (
+                  <th
+                    key={subj.id}
+                    scope="col"
+                    className="border-b border-r border-slate-200 dark:border-slate-700 p-2.5 text-left align-top min-w-[240px] bg-slate-100 dark:bg-slate-800"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="font-extrabold text-slate-900 dark:text-white leading-tight">
+                        {subj.name}
                       </div>
-                    )}
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => handleFillEmptyWithOne(subj.id)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100/80 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-900 dark:text-emerald-200 text-[10px] font-bold transition cursor-pointer"
-                        title="Preenche com código 1 apenas os estudantes ativos sem descritivo lançado neste componente"
-                      >
-                        <CheckCheck className="w-3 h-3" />
-                        <span>Vazios = 1</span>
-                      </button>
-                    )}
-                  </div>
-                </th>
-              ))}
+                      <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400 truncate">
+                        {subj.teacherName
+                          ? `${subj.teacherName} • ${filledCount}/${totalCount}`
+                          : `${filledCount}/${totalCount} avaliados`}
+                      </div>
+                      {!readOnly && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleFillEmptyWithAtende(subj.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100/80 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-900 dark:text-emerald-200 text-[10px] font-bold transition cursor-pointer"
+                            title="Preenche com a tag Atende apenas os estudantes ativos sem registro neste componente"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            <span>Preencher vazios: Atende</span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Gerar link para professores de ${subj.name}`}
+                            onClick={() => openTeacherLinkModal(subj.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-100/80 dark:bg-sky-950/60 hover:bg-sky-200 dark:hover:bg-sky-900 text-sky-900 dark:text-sky-200 text-[10px] font-bold transition cursor-pointer"
+                          >
+                            <Link2 className="w-3 h-3" />
+                            <span>Link</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
 
@@ -449,9 +528,11 @@ export default function CouncilMatrixGrid({
                     </th>
 
                     {activeSubjects.map((subj) => {
-                      const state = getCellState(card.studentId, subj.id);
+                      const descriptorCodes = getCellDescriptorCodes(card.studentId, subj.id);
+                      const grade = getCellGrade(card.studentId, subj.id);
+                      const formattedGrade = formatCouncilGradePtBr(grade);
+                      const gradeIsBelow = isBelowAverageGradeUi(grade);
                       const isDirty = dirtyCells.has(cellKey(card.studentId, subj.id));
-                      const gradeIsBelow = isBelowAverageGradeUi(state.grade);
 
                       return (
                         <td
@@ -468,54 +549,46 @@ export default function CouncilMatrixGrid({
                           }`}
                         >
                           <div className="space-y-1.5">
-                            <div className="flex items-center gap-1">
+                            {formattedGrade !== null && (
+                              <div>
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${
+                                    gradeIsBelow
+                                      ? "border-rose-300 bg-rose-50 dark:bg-rose-950/60 dark:border-rose-800 text-rose-800 dark:text-rose-200"
+                                      : "border-slate-200 bg-slate-100 dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                                  }`}
+                                >
+                                  {gradeIsBelow
+                                    ? `Nota ${formattedGrade} • Abaixo da média`
+                                    : `Nota ${formattedGrade}`}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center gap-1">
                               {COUNCIL_DESCRIPTORS.map((d) => {
-                                const selected = state.descriptorCodes.includes(d.code);
+                                const selected = descriptorCodes.includes(d.code);
                                 return (
                                   <button
                                     key={d.code}
                                     type="button"
                                     disabled={readOnly}
                                     aria-pressed={selected}
-                                    aria-label={`${card.student.name} — ${subj.name} — Descritivo ${d.code}: ${d.fullLabel}`}
+                                    aria-label={`${card.student.name} — ${subj.name} — ${d.shortLabel}: ${d.fullLabel}`}
                                     onClick={() =>
                                       toggleDescriptorCode(card.studentId, subj.id, d.code)
                                     }
-                                    title={`${d.code}: ${d.fullLabel}`}
-                                    className={`w-7 h-7 rounded-lg border text-xs font-extrabold transition cursor-pointer disabled:cursor-not-allowed ${
+                                    title={d.fullLabel}
+                                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer disabled:cursor-not-allowed ${
                                       selected
                                         ? d.activeClass
-                                        : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                                     }`}
                                   >
-                                    {d.code}
+                                    {d.shortLabel}
                                   </button>
                                 );
                               })}
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-semibold text-slate-500">
-                                Nota:
-                              </span>
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                step="0.1"
-                                disabled={readOnly}
-                                aria-label={`Nota de ${card.student.name} em ${subj.name}`}
-                                placeholder="—"
-                                value={state.grade !== null ? String(state.grade) : ""}
-                                onChange={(e) =>
-                                  handleGradeChange(card.studentId, subj.id, e.target.value)
-                                }
-                                className={`w-16 rounded-lg border px-2 py-1 text-[11px] font-bold ${
-                                  gradeIsBelow
-                                    ? "border-rose-400 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200"
-                                    : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-                                }`}
-                              />
                             </div>
                           </div>
                         </td>
@@ -528,6 +601,19 @@ export default function CouncilMatrixGrid({
           </tbody>
         </table>
       </div>
+
+      {!readOnly && (
+        <CouncilTeacherLinkModal
+          open={teacherLinkModalOpen}
+          onClose={() => setTeacherLinkModalOpen(false)}
+          boardId={board.id}
+          classNameLabel={board.classGroup.name}
+          activeTrimester={activeTrimester}
+          subjects={board.subjects}
+          initialSubjectId={teacherLinkSubjectId}
+          onNotify={onNotify}
+        />
+      )}
     </div>
   );
 }

@@ -5,13 +5,14 @@
 
 export const PUBLIC_PATHS = ["/", "/login", "/impacto", "/preview-landing"];
 
-export const PUBLIC_PREFIXES = ["/validar/ata/", "/assinar/ata/"];
+export const PUBLIC_PREFIXES = ["/validar/ata/", "/assinar/ata/", "/conselho-classe/professor/"];
 
 export const SELF_AUTH_API_PREFIXES = [
   "/api/auth/",
   "/api/frequencia/sync",
   "/api/serp/sync",
   "/api/conselho-classe/sync",
+  "/api/conselho-classe/teacher-portal/",
   "/api/messages/pending",
   "/api/atas/public/",
   "/api/atas/sign-token/",

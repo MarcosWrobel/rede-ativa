@@ -246,6 +246,8 @@ export interface CouncilSubjectEntryRecord {
   trimester: number;
   descriptorCodes: number[];
   grade: number | null;
+  updatedByEmail?: string | null;
+  updatedAt?: string | Date;
 }
 
 export interface CouncilStudentSummary {
@@ -431,6 +433,19 @@ export function isBelowAverageGradeUi(grade: number | null | undefined): boolean
   if (grade === null || grade === undefined || Number.isNaN(grade)) return false;
   if (grade <= 10) return grade < 6;
   return grade < 60;
+}
+
+export function formatCouncilGradePtBr(grade: number | null | undefined): string | null {
+  if (grade === null || grade === undefined || !Number.isFinite(grade)) return null;
+  const rounded = Math.round(grade * 100) / 100;
+  if (Number.isInteger(rounded)) {
+    return `${rounded},0`;
+  }
+  const oneDecimal = Math.round(rounded * 10);
+  if (Math.abs(rounded * 10 - oneDecimal) < 1e-6) {
+    return rounded.toFixed(1).replace(".", ",");
+  }
+  return rounded.toFixed(2).replace(".", ",");
 }
 
 export function getStudentInitials(fullName: string): string {

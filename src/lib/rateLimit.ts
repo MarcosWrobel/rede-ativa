@@ -56,6 +56,12 @@ export const RATE_LIMIT_POLICIES = {
     windowMs: 60 * 1000, // 60 req/min
     failMode: "open" as const,
   },
+  COUNCIL_TEACHER_PORTAL: {
+    name: "COUNCIL_TEACHER_PORTAL",
+    limit: 60,
+    windowMs: 60 * 1000, // 60 req/min (comporta múltiplos docentes no mesmo Wi-Fi escolar)
+    failMode: "open" as const,
+  },
 } as const;
 
 export interface RateLimitResult {
