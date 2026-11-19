@@ -239,6 +239,7 @@ export interface PreCouncilSubjectConversation {
   agreements: string;
   conversationStatus: PreCouncilConversationStatus;
   conversationDate: string | null;
+  teacherSubmittedAt?: string | null;
   digitalAckEmail: string | null;
   digitalAckName: string | null;
   digitalAckAt: string | null;

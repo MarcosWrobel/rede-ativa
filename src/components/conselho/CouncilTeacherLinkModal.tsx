@@ -124,7 +124,7 @@ export default function CouncilTeacherLinkModal({
     <ModalDialog
       open={open}
       onClose={onClose}
-      title="Link para professores"
+      title="Link do Pré-Conselho (Docentes)"
       subtitle={`${classNameLabel} • ${activeTrimester}º Trimestre`}
     >
       <div className="space-y-4 text-xs">
@@ -132,8 +132,8 @@ export default function CouncilTeacherLinkModal({
           <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
           <p className="leading-relaxed">
             O professor acessa com a conta institucional <strong>@escola.pr.gov.br</strong>,
-            consulta a nota importada e marca apenas as tags do componente. Selos de saúde e
-            pareceres permanecem ocultos.
+            preenche as tags da matriz, indica estudantes em acompanhamento e confirma a ciência
+            após a conversa. Selos de saúde e pareceres permanecem ocultos.
           </p>
         </div>
 

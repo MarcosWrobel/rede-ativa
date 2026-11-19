@@ -17,10 +17,14 @@ import {
   councilTrimesterUpdateSchema,
 } from "@/lib/schemas";
 import {
+  buildConversationFromSubject,
+  buildInitialPreCouncilData,
+  canConversationConfirmDigitalAck,
   DEFAULT_PRE_COUNCIL_OBJECTIVE,
   DEFAULT_PRE_COUNCIL_PEDAGOGUE_ROLE,
   getDefaultPreCouncilPeriodLabel,
   getTodayYmdSaoPaulo,
+  mergeSubjectsIntoPreCouncilConversations,
   parsePreCouncilData,
 } from "@/components/conselho/preCouncilUtils";
 import type {
@@ -1045,10 +1049,15 @@ async function validateAndSerializePreCouncilData(params: {
   const currentTrimester = existingTrimesters.find((t) => t.trimester === trimester) || null;
   const existingParsed = parsePreCouncilData(currentTrimester?.preCouncilJson);
 
-  // Preserva estritamente ciências digitais verificadas pelo servidor contra sobrescrita pelo cliente
+  // Preserva estritamente ciências digitais e envios docentes verificados pelo servidor
   const existingAckById = new Map<
     string,
-    { digitalAckEmail: string | null; digitalAckName: string | null; digitalAckAt: string | null }
+    {
+      digitalAckEmail: string | null;
+      digitalAckName: string | null;
+      digitalAckAt: string | null;
+      teacherSubmittedAt: string | null;
+    }
   >();
   if (existingParsed) {
     for (const row of existingParsed.conversations) {
@@ -1056,6 +1065,7 @@ async function validateAndSerializePreCouncilData(params: {
         digitalAckEmail: row.digitalAckEmail,
         digitalAckName: row.digitalAckName,
         digitalAckAt: row.digitalAckAt,
+        teacherSubmittedAt: row.teacherSubmittedAt ?? null,
       });
     }
   }
@@ -1075,6 +1085,7 @@ async function validateAndSerializePreCouncilData(params: {
         agreements: (conv.agreements || "").trim(),
         conversationStatus: conv.conversationStatus === "COMPLETED" ? "COMPLETED" : "PENDING",
         conversationDate: conv.conversationDate?.trim() || null,
+        teacherSubmittedAt: preservedAck?.teacherSubmittedAt ?? null,
         digitalAckEmail: preservedAck?.digitalAckEmail ?? null,
         digitalAckName: preservedAck?.digitalAckName ?? null,
         digitalAckAt: preservedAck?.digitalAckAt ?? null,
@@ -1682,11 +1693,39 @@ export interface TeacherPortalStudentItem {
   }>;
 }
 
+export interface TeacherPortalPreCouncilConversationSummary {
+  id: string;
+  subjectId: string | null;
+  subjectName: string;
+  teacherName: string;
+  teacherEmail: string | null;
+  monitoredStudentIds: string[];
+  monitoredStudentsNotes: string;
+  agreements: string;
+  conversationStatus: "PENDING" | "COMPLETED";
+  conversationDate: string | null;
+  teacherSubmittedAt: string | null;
+  digitalAckEmail: string | null;
+  digitalAckName: string | null;
+  digitalAckAt: string | null;
+  canConfirmAck: boolean;
+}
+
+export interface TeacherPortalPreCouncilSummary {
+  periodLabel: string;
+  objectiveText: string;
+  responsiblePedagogueName: string;
+  responsiblePedagogueRole: string;
+  synthesis: PreCouncilSynthesis;
+  conversationsBySubjectId: Record<string, TeacherPortalPreCouncilConversationSummary>;
+}
+
 export interface TeacherPortalCouncilContext {
   boardId: string;
   year: number;
   trimester: 1 | 2 | 3;
   lockedSubjectId: string | null;
+  lockedConversationId?: string | null;
   schoolName: string;
   classGroup: {
     id: string;
@@ -1697,10 +1736,11 @@ export interface TeacherPortalCouncilContext {
   trimesterStatus: string;
   subjects: TeacherPortalSubjectOption[];
   students: TeacherPortalStudentItem[];
+  preCouncil: TeacherPortalPreCouncilSummary;
 }
 
 /**
- * Carrega o contexto seguro do Conselho de Classe para o Portal do Professor (@escola.pr.gov.br).
+ * Carrega o contexto seguro do Conselho de Classe e Pré-Conselho para o Portal do Professor (@escola.pr.gov.br).
  * Aplica filtragem estrita LGPD/ECA: omite integralmente selos de saúde (ALUNO_COM_LAUDO / AEE),
  * flags de necessidades especiais e pareceres qualitativos sigilosos.
  */
@@ -1709,8 +1749,17 @@ export async function getTeacherPortalCouncilContext(params: {
   boardId: string;
   trimester: 1 | 2 | 3;
   lockedSubjectId: string | null;
+  lockedConversationId?: string | null;
+  includeCgm?: boolean;
 }): Promise<TeacherPortalCouncilContext> {
-  const { schoolId, boardId, trimester, lockedSubjectId } = params;
+  const {
+    schoolId,
+    boardId,
+    trimester,
+    lockedSubjectId,
+    lockedConversationId = null,
+    includeCgm = true,
+  } = params;
 
   const boardHeader = await prisma.classCouncilBoard.findUnique({
     where: { id: boardId },
@@ -1790,6 +1839,46 @@ export async function getTeacherPortalCouncilContext(params: {
 
   const activeSubjectIdSet = new Set(filteredSubjects.map((s) => s.id));
   const trimesterRecord = (board.trimesters || []).find((t) => t.trimester === trimester) || null;
+  const parsedPreCouncil =
+    parsePreCouncilData(trimesterRecord?.preCouncilJson) ??
+    buildInitialPreCouncilData({
+      trimester,
+      subjects: activeSubjects,
+    });
+
+  const validStudentIdSet = new Set(
+    (board.studentCards || []).filter((c) => Boolean(c.student)).map((c) => c.studentId)
+  );
+
+  const conversationsBySubjectId: Record<string, TeacherPortalPreCouncilConversationSummary> = {};
+  for (const subj of filteredSubjects) {
+    const matchedConv =
+      parsedPreCouncil.conversations.find((c) => c.subjectId === subj.id) ||
+      parsedPreCouncil.conversations.find(
+        (c) => c.subjectName.trim().toLowerCase() === subj.name.trim().toLowerCase()
+      ) ||
+      buildConversationFromSubject(subj);
+
+    conversationsBySubjectId[subj.id] = {
+      id: matchedConv.id,
+      subjectId: subj.id,
+      subjectName: matchedConv.subjectName || subj.name,
+      teacherName: matchedConv.teacherName || subj.teacherName || "",
+      teacherEmail: matchedConv.teacherEmail || subj.teacherEmail || null,
+      monitoredStudentIds: matchedConv.monitoredStudentIds.filter((id) =>
+        validStudentIdSet.has(id)
+      ),
+      monitoredStudentsNotes: matchedConv.monitoredStudentsNotes,
+      agreements: matchedConv.agreements,
+      conversationStatus: matchedConv.conversationStatus,
+      conversationDate: matchedConv.conversationDate,
+      teacherSubmittedAt: matchedConv.teacherSubmittedAt ?? null,
+      digitalAckEmail: matchedConv.digitalAckEmail,
+      digitalAckName: matchedConv.digitalAckName,
+      digitalAckAt: matchedConv.digitalAckAt,
+      canConfirmAck: canConversationConfirmDigitalAck(matchedConv),
+    };
+  }
 
   const students: TeacherPortalStudentItem[] = (board.studentCards || [])
     .filter((card) => Boolean(card.student))
@@ -1797,7 +1886,7 @@ export async function getTeacherPortalCouncilContext(params: {
     .map((card) => ({
       studentId: card.studentId,
       name: card.student.name,
-      cgm: card.student.cgm ?? null,
+      cgm: includeCgm ? (card.student.cgm ?? null) : null,
       enrollmentStatus: card.enrollmentStatus,
       attendancePercent: card.student.lowAttendanceRecord?.attendancePercent ?? null,
       subjectEntries: (card.subjectEntries || [])
@@ -1815,6 +1904,7 @@ export async function getTeacherPortalCouncilContext(params: {
     year: board.year,
     trimester,
     lockedSubjectId,
+    lockedConversationId,
     schoolName: schoolRecord?.name || "Instituição de Ensino",
     classGroup: {
       id: board.classGroup.id,
@@ -1831,13 +1921,61 @@ export async function getTeacherPortalCouncilContext(params: {
       displayOrder: s.displayOrder,
     })),
     students,
+    preCouncil: {
+      periodLabel: parsedPreCouncil.periodLabel,
+      objectiveText: parsedPreCouncil.objectiveText,
+      responsiblePedagogueName: parsedPreCouncil.responsiblePedagogueName,
+      responsiblePedagogueRole: parsedPreCouncil.responsiblePedagogueRole,
+      synthesis: parsedPreCouncil.synthesis,
+      conversationsBySubjectId,
+    },
   };
 }
 
 /**
- * Persiste os lançamentos de tags pedagógicas de um componente curricular enviados pelo professor
- * autenticado com @escola.pr.gov.br, preservando notas já extraídas do BI e recalculando alertas.
+ * Persiste os lançamentos de tags pedagógicas da matriz, aportes prévios do Pré-Conselho
+ * e eventual confirmação de ciência docente via conta institucional @escola.pr.gov.br.
  */
+function assertPreCouncilConversationAccessAndAck(params: {
+  target: PreCouncilSubjectConversation | null;
+  cleanEmail: string;
+  confirmAck: boolean;
+}) {
+  const { target, cleanEmail, confirmAck } = params;
+  if (target) {
+    const targetEmail = (target.teacherEmail || "").trim().toLowerCase();
+    if (targetEmail && targetEmail !== cleanEmail) {
+      throw new CouncilDomainError(
+        `Este componente está vinculado a outro docente (${target.teacherName || targetEmail}). Solicite ajuste à equipe pedagógica se necessário.`,
+        403
+      );
+    }
+    if (confirmAck) {
+      if (!canConversationConfirmDigitalAck(target)) {
+        throw new CouncilDomainError(
+          "A confirmação de ciência fica disponível após o registro da conversa ou dos combinados pela equipe pedagógica.",
+          400
+        );
+      }
+      const existingAckEmail = (target.digitalAckEmail || "").trim().toLowerCase();
+      if (existingAckEmail && existingAckEmail !== cleanEmail) {
+        throw new CouncilDomainError(
+          `A ciência deste componente já foi confirmada por ${target.digitalAckName || existingAckEmail}.`,
+          409
+        );
+      }
+    }
+    return;
+  }
+
+  if (confirmAck) {
+    throw new CouncilDomainError(
+      "A confirmação de ciência fica disponível após o registro da conversa ou dos combinados pela equipe pedagógica.",
+      400
+    );
+  }
+}
+
 export async function submitTeacherPortalSubjectEntries(params: {
   schoolId: string;
   boardId: string;
@@ -1846,7 +1984,12 @@ export async function submitTeacherPortalSubjectEntries(params: {
   subjectId: string;
   verifiedEmail: string;
   verifiedName: string;
-  entries: Array<{ studentId: string; descriptorCodes: number[] }>;
+  entries?: Array<{ studentId: string; descriptorCodes: number[] }>;
+  preCouncil?: {
+    monitoredStudentIds: string[];
+    monitoredStudentsNotes: string;
+  };
+  confirmAck?: boolean;
 }) {
   const {
     schoolId,
@@ -1856,7 +1999,9 @@ export async function submitTeacherPortalSubjectEntries(params: {
     subjectId,
     verifiedEmail,
     verifiedName,
-    entries,
+    entries = [],
+    preCouncil: preCouncilContribution,
+    confirmAck = false,
   } = params;
 
   if (lockedSubjectId && lockedSubjectId !== subjectId) {
@@ -1905,6 +2050,42 @@ export async function submitTeacherPortalSubjectEntries(params: {
   await ensureTrimestersForBoard(prisma, schoolId, boardId, cleanName, cleanEmail);
   await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, board.classGroupId);
 
+  if (preCouncilContribution && preCouncilContribution.monitoredStudentIds.length > 0) {
+    const distinctIds = Array.from(new Set(preCouncilContribution.monitoredStudentIds));
+    const matchedCards = await prisma.studentCouncilCard.findMany({
+      where: {
+        boardId,
+        schoolId,
+        studentId: { in: distinctIds },
+      },
+      select: { studentId: true },
+    });
+    if (matchedCards.length !== distinctIds.length) {
+      throw new CouncilDomainError(
+        "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
+        400
+      );
+    }
+  }
+
+  const currentTriPrecheck = await prisma.classCouncilTrimester.findUnique({
+    where: { boardId_trimester: { boardId, trimester } },
+    select: { preCouncilJson: true },
+  });
+  const precheckData = parsePreCouncilData(currentTriPrecheck?.preCouncilJson);
+  const precheckConv = precheckData
+    ? precheckData.conversations.find((c) => c.subjectId === subject.id) ??
+      precheckData.conversations.find(
+        (c) => c.subjectName.trim().toLowerCase() === subject.name.trim().toLowerCase()
+      ) ??
+      null
+    : null;
+  assertPreCouncilConversationAccessAndAck({
+    target: precheckConv,
+    cleanEmail,
+    confirmAck,
+  });
+
   const nextTeacherEmail = existingTeacherEmail || cleanEmail;
   const nextTeacherName = (subject.teacherName || "").trim() || cleanName;
 
@@ -1918,27 +2099,138 @@ export async function submitTeacherPortalSubjectEntries(params: {
     });
   }
 
-  const saved = await saveCouncilMatrixBatch({
-    schoolId,
-    boardId,
-    payload: {
-      trimester,
-      entries: entries.map((entry) => ({
-        studentId: entry.studentId,
-        subjectId: subject.id,
-        descriptorCodes: entry.descriptorCodes,
-      })),
-    },
-    userEmail: cleanEmail,
+  let updatedCount = 0;
+  if (entries.length > 0) {
+    const saved = await saveCouncilMatrixBatch({
+      schoolId,
+      boardId,
+      payload: {
+        trimester,
+        entries: entries.map((entry) => ({
+          studentId: entry.studentId,
+          subjectId: subject.id,
+          descriptorCodes: entry.descriptorCodes,
+        })),
+      },
+      userEmail: cleanEmail,
+    });
+    updatedCount = saved.updatedCount;
+  }
+
+  const nowIso = new Date().toISOString();
+  const todayYmd = getTodayYmdSaoPaulo();
+
+  const preCouncilOutcome = await prisma.$transaction(async (tx) => {
+    const [trimesters, activeSubjects] = await Promise.all([
+      tx.classCouncilTrimester.findMany({
+        where: { boardId, schoolId },
+        select: { trimester: true, preCouncilJson: true },
+      }),
+      tx.classCouncilSubject.findMany({
+        where: { boardId, schoolId, active: true },
+        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      }),
+    ]);
+
+    const currentTri = trimesters.find((t) => t.trimester === trimester) || null;
+    const basePreCouncil =
+      parsePreCouncilData(currentTri?.preCouncilJson) ??
+      buildInitialPreCouncilData({
+        trimester,
+        subjects: activeSubjects,
+      });
+
+    const merged = mergeSubjectsIntoPreCouncilConversations(
+      basePreCouncil.conversations,
+      activeSubjects
+    );
+
+    let conversations = [...merged.conversations];
+    let targetIndex = conversations.findIndex((c) => c.subjectId === subject.id);
+    if (targetIndex < 0) {
+      targetIndex = conversations.findIndex(
+        (c) => c.subjectName.trim().toLowerCase() === subject.name.trim().toLowerCase()
+      );
+    }
+    if (targetIndex < 0) {
+      conversations.push(buildConversationFromSubject(subject));
+      targetIndex = conversations.length - 1;
+    }
+
+    const target = conversations[targetIndex];
+    const targetEmail = (target.teacherEmail || "").trim().toLowerCase();
+    assertPreCouncilConversationAccessAndAck({
+      target,
+      cleanEmail,
+      confirmAck,
+    });
+
+    const hasTeacherSubmission = entries.length > 0 || preCouncilContribution !== undefined;
+
+    const updatedConv: PreCouncilSubjectConversation = {
+      ...target,
+      subjectId: target.subjectId || subject.id,
+      subjectName: target.subjectName || subject.name,
+      teacherEmail: targetEmail || nextTeacherEmail,
+      teacherName: target.teacherName.trim() || nextTeacherName,
+      ...(preCouncilContribution !== undefined
+        ? {
+            monitoredStudentIds: Array.from(new Set(preCouncilContribution.monitoredStudentIds)),
+            monitoredStudentsNotes: preCouncilContribution.monitoredStudentsNotes.trim(),
+          }
+        : {}),
+      ...(hasTeacherSubmission ? { teacherSubmittedAt: nowIso } : {}),
+      ...(confirmAck
+        ? {
+            conversationStatus: "COMPLETED",
+            conversationDate: target.conversationDate || todayYmd,
+            digitalAckEmail: cleanEmail,
+            digitalAckName: cleanName,
+            digitalAckAt: nowIso,
+          }
+        : {}),
+    };
+
+    conversations = conversations.map((c, idx) => (idx === targetIndex ? updatedConv : c));
+
+    const nextPreCouncil: PreCouncilData = {
+      ...basePreCouncil,
+      conversations,
+    };
+
+    await tx.classCouncilTrimester.upsert({
+      where: { boardId_trimester: { boardId, trimester } },
+      create: {
+        schoolId,
+        boardId,
+        trimester,
+        status: "IN_PROGRESS",
+        preCouncilJson: JSON.stringify(nextPreCouncil),
+        updatedByName: cleanName,
+        updatedByEmail: cleanEmail,
+      },
+      update: {
+        preCouncilJson: JSON.stringify(nextPreCouncil),
+      },
+    });
+
+    return {
+      conversationId: updatedConv.id,
+      ackConfirmed: confirmAck,
+      digitalAckAt: updatedConv.digitalAckAt,
+    };
   });
 
   return {
-    updatedCount: saved.updatedCount,
-    trimester: saved.trimester,
+    updatedCount,
+    trimester,
     subjectId: subject.id,
     subjectName: subject.name,
     teacherName: nextTeacherName,
     teacherEmail: nextTeacherEmail,
+    conversationId: preCouncilOutcome.conversationId,
+    ackConfirmed: preCouncilOutcome.ackConfirmed,
+    digitalAckAt: preCouncilOutcome.digitalAckAt,
   };
 }
 

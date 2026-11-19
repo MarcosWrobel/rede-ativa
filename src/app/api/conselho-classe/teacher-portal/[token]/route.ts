@@ -126,25 +126,52 @@ export async function PUT(
       verifiedEmail,
       verifiedName,
       entries: parsed.data.entries,
+      preCouncil: parsed.data.preCouncil,
+      confirmAck: parsed.data.confirmAck,
     });
 
-    await logAudit({
-      action: "TEACHER_SUBMIT_COUNCIL_SUBJECT",
-      entityType: "ClassCouncilBoard",
-      entityId: tokenCheck.payload.boardId,
-      schoolId: tokenCheck.payload.schoolId,
-      details: {
-        boardId: tokenCheck.payload.boardId,
-        subjectId: result.subjectId,
-        trimester: result.trimester,
-        updatedCount: result.updatedCount,
-      },
-      user: {
-        name: verifiedName,
-        email: verifiedEmail,
-      },
-      req,
-    });
+    if ((parsed.data.entries?.length ?? 0) > 0 || parsed.data.preCouncil !== undefined) {
+      await logAudit({
+        action: "TEACHER_SUBMIT_COUNCIL_SUBJECT",
+        entityType: "ClassCouncilBoard",
+        entityId: tokenCheck.payload.boardId,
+        schoolId: tokenCheck.payload.schoolId,
+        details: {
+          boardId: tokenCheck.payload.boardId,
+          subjectId: result.subjectId,
+          trimester: result.trimester,
+          updatedCount: result.updatedCount,
+          hasPreCouncilNotes: Boolean(parsed.data.preCouncil),
+          monitoredCount: parsed.data.preCouncil?.monitoredStudentIds.length ?? 0,
+        },
+        user: {
+          name: verifiedName,
+          email: verifiedEmail,
+        },
+        req,
+      });
+    }
+
+    if (result.ackConfirmed) {
+      await logAudit({
+        action: "TEACHER_ACK_PRE_COUNCIL",
+        entityType: "ClassCouncilTrimester",
+        entityId: tokenCheck.payload.boardId,
+        schoolId: tokenCheck.payload.schoolId,
+        details: {
+          boardId: tokenCheck.payload.boardId,
+          trimester: result.trimester,
+          conversationId: result.conversationId,
+          subjectId: result.subjectId,
+          subjectName: result.subjectName,
+        },
+        user: {
+          name: verifiedName,
+          email: verifiedEmail,
+        },
+        req,
+      });
+    }
 
     const council = await getTeacherPortalCouncilContext({
       schoolId: tokenCheck.payload.schoolId,

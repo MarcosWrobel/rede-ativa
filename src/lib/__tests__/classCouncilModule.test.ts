@@ -531,18 +531,24 @@ import {
   verifyPreCouncilTeacherToken,
 } from "@/lib/councilTeacherToken";
 import {
-  buildInitialPreCouncilData,
-  buildPreCouncilStudentAlertsBySubject,
   buildCitedStudentsSummary,
+  buildInitialPreCouncilData,
+  buildLiveAlertsFromDraft,
+  buildPreCouncilStudentAlertsBySubject,
+  canConversationConfirmDigitalAck,
+  clearTeacherPortalLocalDraft,
+  getMatrixFillStatsBySubject,
   getPreCouncilProgress,
+  loadTeacherPortalLocalDraft,
   mergeSubjectsIntoPreCouncilConversations,
   parsePreCouncilData,
+  saveTeacherPortalLocalDraft,
 } from "@/components/conselho/preCouncilUtils";
 import { PUBLIC_PREFIXES, SELF_AUTH_API_PREFIXES } from "@/lib/proxyConstants";
 import { loadStudent360Bundle } from "@/lib/safePhase3Queries";
 import CouncilStudent360Section from "@/components/conselho/CouncilStudent360Section";
 import CouncilMatrixGrid from "@/components/conselho/CouncilMatrixGrid";
-import CouncilPreCouncilModal from "@/components/conselho/CouncilPreCouncilModal";
+import CouncilPreCouncilTab from "@/components/conselho/CouncilPreCouncilTab";
 import ProfessorConselhoClient from "@/app/conselho-classe/professor/[token]/ProfessorConselhoClient";
 import ProfessorPreConselhoClient from "@/app/conselho-classe/pre-conselho/[token]/ProfessorPreConselhoClient";
 import ConselhoPrintClient from "@/app/conselho-classe/[boardId]/imprimir/ConselhoPrintClient";
@@ -1042,7 +1048,9 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       "src/components/conselho/CouncilTrimesterOverviewTab.tsx",
       "src/components/conselho/CouncilMatrixGrid.tsx",
       "src/components/conselho/CouncilTeacherLinkModal.tsx",
-      "src/components/conselho/CouncilPreCouncilModal.tsx",
+      "src/components/conselho/CouncilPreCouncilTab.tsx",
+      "src/components/conselho/CouncilPreCouncilConversationsView.tsx",
+      "src/components/conselho/CouncilPreCouncilSynthesisAckView.tsx",
       "src/components/conselho/preCouncilUtils.ts",
       "src/components/conselho/CouncilStudentFichaModal.tsx",
       "src/components/conselho/CouncilPostMeetingTab.tsx",
@@ -2839,10 +2847,8 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       expect(printHtml).toContain("Pedagoga Alpha");
       expect(printHtml).toContain("Pedagoga Responsável");
 
-      const modalEmptyRender = renderToString(
-        React.createElement(CouncilPreCouncilModal, {
-          open: false,
-          onClose: () => {},
+      const preCouncilTabHtml = renderToString(
+        React.createElement(CouncilPreCouncilTab, {
           board: {
             id: "board-a1",
             schoolId: "school-a",
@@ -2858,19 +2864,495 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
             seatingMapMode: "REVEZAMENTO_MENSAL",
             seatingMapNotes: null,
             classGroup: { id: "cg-a1", name: "6º Ano A", segment: "FUNDAMENTAL", shift: "MANHA" },
-            subjects: [],
+            subjects: [
+              {
+                id: "subj-a1",
+                schoolId: "school-a",
+                boardId: "board-a1",
+                name: "Língua Portuguesa",
+                teacherName: "Prof. Helena",
+                teacherEmail: null,
+                displayOrder: 0,
+                active: true,
+              },
+            ],
             trimesters: [],
             studentCards: [],
           },
           activeTrimester: 1,
           trimesterRecord: null,
           hideSensitiveTags: false,
+          onOpenStudentModal: () => {},
+          onOpenSubjectsModal: () => {},
           onTrimesterUpdated: () => {},
-          onRefreshBoard: async () => {},
+          onMatrixSaved: async () => {},
           onNotify: () => {},
         })
       );
-      expect(modalEmptyRender).toBe("");
+      expect(preCouncilTabHtml).toContain("Matriz Geral");
+      expect(preCouncilTabHtml).toContain("Conversas por Componente");
+      expect(preCouncilTabHtml).toContain("Síntese e Ciência");
+      expect(preCouncilTabHtml).toContain("Link do Pré-Conselho");
+      expect(preCouncilTabHtml).toContain("Imprimir A4");
+    } finally {
+      if (prevDevAuth === undefined) {
+        delete process.env.ENABLE_DEV_AUTH;
+      } else {
+        process.env.ENABLE_DEV_AUTH = prevDevAuth;
+      }
+    }
+  });
+
+  it("calcula alertas ao vivo, estatísticas por componente e protege rascunho local docente sem armazenar credenciais", () => {
+    expect(
+      canConversationConfirmDigitalAck({
+        conversationStatus: "PENDING",
+        agreements: "",
+      })
+    ).toBe(false);
+    expect(
+      canConversationConfirmDigitalAck({
+        conversationStatus: "PENDING",
+        agreements: "Retomar atividades avaliativas",
+      })
+    ).toBe(true);
+    expect(
+      canConversationConfirmDigitalAck({
+        conversationStatus: "COMPLETED",
+        agreements: "",
+      })
+    ).toBe(true);
+
+    const liveAlerts = buildLiveAlertsFromDraft({
+      students: [
+        {
+          studentId: "stu-a1",
+          name: "Ana Clara Souza",
+          enrollmentStatus: "ATIVO",
+          attendancePercent: 70,
+          grade: 5.5,
+        },
+        {
+          studentId: "stu-a2",
+          name: "Bruno Oliveira",
+          enrollmentStatus: "ATIVO",
+          attendancePercent: 95,
+          grade: 8.5,
+        },
+        {
+          studentId: "stu-a3",
+          name: "Carlos Inativo",
+          enrollmentStatus: "TRANSFERIDO",
+          attendancePercent: 40,
+          grade: 3.0,
+        },
+      ],
+      descriptorCodesByStudentId: {
+        "stu-a1": [2, 4],
+        "stu-a2": [1],
+        "stu-a3": [2],
+      },
+    });
+    expect(liveAlerts).toHaveLength(1);
+    expect(liveAlerts[0].studentId).toBe("stu-a1");
+    expect(liveAlerts[0].reasons).toEqual([
+      "Nota 5,5",
+      "Dificuldade",
+      "Infrequência",
+      "Freq. 70%",
+    ]);
+
+    const stats = getMatrixFillStatsBySubject(
+      {
+        id: "board-a1",
+        schoolId: "school-a",
+        classGroupId: "cg-a1",
+        year: 2026,
+        peerLeaderStudentId: null,
+        peerLeaderName: null,
+        teacherLeaderStudentId: null,
+        teacherLeaderName: null,
+        externalEvalEd1Percent: null,
+        externalEvalEd2Percent: null,
+        externalEvalEd3Percent: null,
+        seatingMapMode: "REVEZAMENTO_MENSAL",
+        seatingMapNotes: null,
+        classGroup: { id: "cg-a1", name: "6º Ano A", segment: "FUNDAMENTAL", shift: "MANHA" },
+        subjects: [
+          {
+            id: "subj-a1",
+            schoolId: "school-a",
+            boardId: "board-a1",
+            name: "Língua Portuguesa",
+            teacherName: "Prof. Helena",
+            teacherEmail: null,
+            displayOrder: 0,
+            active: true,
+          },
+        ],
+        trimesters: [],
+        studentCards: [
+          {
+            id: "card-1",
+            schoolId: "school-a",
+            boardId: "board-a1",
+            studentId: "stu-a1",
+            enrollmentStatus: "ATIVO",
+            externalEvalEd1Percent: null,
+            externalEvalEd2Percent: null,
+            externalEvalEd3Percent: null,
+            tags: [],
+            hasSensitiveHealthTag: false,
+            trimester1Opinion: null,
+            trimester2Opinion: null,
+            trimester3Opinion: null,
+            trimester1BelowAvgJson: null,
+            trimester2BelowAvgJson: null,
+            trimester3BelowAvgJson: null,
+            student: {
+              id: "stu-a1",
+              name: "Ana",
+              cgm: "1001",
+              active: true,
+              isSpecialNeeds: false,
+              isExchangeStudent: false,
+              age: 12,
+              lowAttendanceRecord: { attendancePercent: 80 },
+            },
+            subjectEntries: [
+              {
+                id: "e1",
+                schoolId: "school-a",
+                cardId: "card-1",
+                subjectId: "subj-a1",
+                trimester: 1,
+                grade: 7.5,
+                descriptorCodes: [1],
+                updatedByEmail: "helena@escola.pr.gov.br",
+              },
+            ],
+          },
+          {
+            id: "card-2",
+            schoolId: "school-a",
+            boardId: "board-a1",
+            studentId: "stu-a2",
+            enrollmentStatus: "ATIVO",
+            externalEvalEd1Percent: null,
+            externalEvalEd2Percent: null,
+            externalEvalEd3Percent: null,
+            tags: [],
+            hasSensitiveHealthTag: false,
+            trimester1Opinion: null,
+            trimester2Opinion: null,
+            trimester3Opinion: null,
+            trimester1BelowAvgJson: null,
+            trimester2BelowAvgJson: null,
+            trimester3BelowAvgJson: null,
+            student: {
+              id: "stu-a2",
+              name: "Bruno",
+              cgm: "1002",
+              active: true,
+              isSpecialNeeds: false,
+              isExchangeStudent: false,
+              age: 12,
+              lowAttendanceRecord: { attendancePercent: 90 },
+            },
+            subjectEntries: [],
+          },
+        ],
+      },
+      1
+    );
+    expect(stats["subj-a1"]).toEqual({
+      filledCount: 1,
+      totalActiveCount: 2,
+      alertCount: 0,
+      belowAvgCount: 0,
+    });
+
+    const prevWindow = (globalThis as any).window;
+    const prevLocalStorage = (globalThis as any).localStorage;
+    const store = new Map<string, string>();
+    const mockStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, String(v));
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    };
+    (globalThis as any).window = { ...(prevWindow || {}), localStorage: mockStorage };
+    (globalThis as any).localStorage = mockStorage;
+    try {
+      saveTeacherPortalLocalDraft("board-a1", 1, "subj-a1", "Helena@escola.pr.gov.br", {
+        descriptorByStudentId: { "stu-a1": [4, 2, 2] },
+        monitoredStudentIds: ["stu-a1", "stu-a1"],
+        monitoredStudentsNotes: "Necessita acompanhamento em leitura",
+      });
+
+      const savedKeys = Array.from(store.keys());
+      expect(savedKeys).toHaveLength(1);
+      expect(savedKeys[0]).toMatch(/^redeativa_precouncil_draft_board-a1_1_subj-a1_helena@escola\.pr\.gov\.br$/);
+      const rawStored = store.get(savedKeys[0])!;
+      expect(rawStored).not.toContain("googleIdToken");
+      expect(rawStored).not.toContain("dev-mock-token");
+
+      const restored = loadTeacherPortalLocalDraft(
+        "board-a1",
+        1,
+        "subj-a1",
+        "helena@escola.pr.gov.br"
+      );
+      expect(restored).not.toBeNull();
+      expect(restored!.descriptorByStudentId["stu-a1"]).toEqual([2, 4]);
+      expect(restored!.monitoredStudentIds).toEqual(["stu-a1"]);
+      expect(restored!.monitoredStudentsNotes).toBe("Necessita acompanhamento em leitura");
+
+      clearTeacherPortalLocalDraft("board-a1", 1, "subj-a1", "helena@escola.pr.gov.br");
+      expect(
+        loadTeacherPortalLocalDraft("board-a1", 1, "subj-a1", "helena@escola.pr.gov.br")
+      ).toBeNull();
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as any).window;
+      } else {
+        (globalThis as any).window = prevWindow;
+      }
+      if (prevLocalStorage === undefined) {
+        delete (globalThis as any).localStorage;
+      } else {
+        (globalThis as any).localStorage = prevLocalStorage;
+      }
+    }
+  });
+
+  it("consolida Matriz e Pré-Conselho no portal docente com atomicidade, preservação de combinados e retrocompatibilidade do link antigo", async () => {
+    const prevDevAuth = process.env.ENABLE_DEV_AUTH;
+    process.env.ENABLE_DEV_AUTH = "true";
+
+    try {
+      // Seed com dados sensíveis para verificar filtragem estrita no portal
+      hoisted.db.cards[0].tags = ["ALUNO_COM_LAUDO", "AEE"];
+      hoisted.db.cards[0].trimester1Opinion = "Parecer sigiloso médico";
+      hoisted.db.trimesters[0].preCouncilJson = JSON.stringify({
+        version: 1,
+        periodLabel: "1º Trimestre",
+        objectiveText: "Objetivo oficial",
+        responsiblePedagogueName: "Pedagoga Alpha",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "subj-a2",
+            subjectId: "subj-a2",
+            subjectName: "Matemática",
+            teacherName: "Prof. Marcos",
+            teacherEmail: null,
+            monitoredStudentIds: [],
+            monitoredStudentsNotes: "",
+            agreements: "Pedagoga registrou combinado prévio",
+            conversationStatus: "PENDING",
+            conversationDate: null,
+            teacherSubmittedAt: null,
+            digitalAckEmail: null,
+            digitalAckName: null,
+            digitalAckAt: null,
+          },
+        ],
+        synthesis: {
+          mainDifficulties: "Cálculo mental",
+          priorityStudents: "Ana Clara Souza",
+          attendanceIssues: "",
+          behaviorIssues: "",
+          pedagogicalActions: "Agendar reunião",
+        },
+      });
+
+      const teacherToken = createCouncilTeacherToken({
+        schoolId: "school-a",
+        boardId: "board-a1",
+        trimester: 1,
+        subjectId: null,
+      });
+
+      // 1. POST retorna contexto com preCouncil e sem selos clínicos/pareceres
+      const postRes = await postTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken.token }) }
+      );
+      expect(postRes.status).toBe(200);
+      const postBody = await postRes.json();
+      expect(postBody.council.preCouncil).toBeDefined();
+      expect(postBody.council.preCouncil.conversationsBySubjectId["subj-a2"].canConfirmAck).toBe(
+        true
+      );
+      expect(JSON.stringify(postBody)).not.toContain("ALUNO_COM_LAUDO");
+      expect(JSON.stringify(postBody)).not.toContain("Parecer sigiloso médico");
+
+      // 2. Bloqueia FK traversal de outro tenant em monitoredStudentIds (400)
+      const crossTenantRes = await putTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+            subjectId: "subj-a2",
+            entries: [{ studentId: "stu-a1", descriptorCodes: [2] }],
+            preCouncil: {
+              monitoredStudentIds: ["stu-b1"],
+              monitoredStudentsNotes: "Tentativa cruzada",
+            },
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken.token }) }
+      );
+      expect(crossTenantRes.status).toBe(400);
+      expect(hoisted.db.entries.filter((e) => e.subjectId === "subj-a2")).toHaveLength(0);
+
+      // 3. Atomicidade: confirmAck: true em subj-a1 (ainda sem conversa nem combinados) falha com 400
+      //    e NÃO grava parcialmente entries na matriz nem reivindica subject.teacherEmail
+      const prematureAckRes = await putTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:helena@escola.pr.gov.br",
+            subjectId: "subj-a1",
+            entries: [{ studentId: "stu-a1", descriptorCodes: [2, 4] }],
+            preCouncil: {
+              monitoredStudentIds: ["stu-a1"],
+              monitoredStudentsNotes: "Precisa reforço",
+            },
+            confirmAck: true,
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken.token }) }
+      );
+      expect(prematureAckRes.status).toBe(400);
+      expect(hoisted.db.entries.filter((e) => e.subjectId === "subj-a1")).toHaveLength(0);
+      expect(hoisted.db.subjects.find((s) => s.id === "subj-a1")?.teacherEmail).toBeNull();
+
+      // 4. Salva matriz + observações prévias em subj-a2 sem apagar agreements/synthesis da pedagoga
+      const saveOnlyRes = await putTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+            subjectId: "subj-a2",
+            entries: [{ studentId: "stu-a1", descriptorCodes: [2] }],
+            preCouncil: {
+              monitoredStudentIds: ["stu-a1"],
+              monitoredStudentsNotes: "Dificuldade em frações",
+            },
+            confirmAck: false,
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken.token }) }
+      );
+      expect(saveOnlyRes.status).toBe(200);
+      const saveOnlyBody = await saveOnlyRes.json();
+      expect(saveOnlyBody.result.updatedCount).toBe(1);
+      expect(saveOnlyBody.result.ackConfirmed).toBe(false);
+      expect(hoisted.auditCalls.some((c) => c.action === "TEACHER_SUBMIT_COUNCIL_SUBJECT")).toBe(
+        true
+      );
+      expect(hoisted.auditCalls.some((c) => c.action === "TEACHER_ACK_PRE_COUNCIL")).toBe(false);
+
+      const savedPre = parsePreCouncilData(hoisted.db.trimesters[0].preCouncilJson)!;
+      const convMat = savedPre.conversations.find((c) => c.subjectId === "subj-a2")!;
+      expect(convMat.agreements).toBe("Pedagoga registrou combinado prévio");
+      expect(savedPre.synthesis.mainDifficulties).toBe("Cálculo mental");
+      expect(convMat.monitoredStudentIds).toEqual(["stu-a1"]);
+      expect(convMat.monitoredStudentsNotes).toBe("Dificuldade em frações");
+      expect(convMat.teacherSubmittedAt).toBeTruthy();
+
+      // 5. Confirma ciência pelo fluxo unificado após combinados registrados -> audita TEACHER_ACK_PRE_COUNCIL
+      const ackRes = await putTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+            subjectId: "subj-a2",
+            entries: [{ studentId: "stu-a1", descriptorCodes: [1] }],
+            preCouncil: {
+              monitoredStudentIds: ["stu-a1"],
+              monitoredStudentsNotes: "Dificuldade em frações revisada",
+            },
+            confirmAck: true,
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken.token }) }
+      );
+      expect(ackRes.status).toBe(200);
+      const ackBody = await ackRes.json();
+      expect(ackBody.result.ackConfirmed).toBe(true);
+      expect(ackBody.result.digitalAckAt).toBeTruthy();
+      const ackAudit = hoisted.auditCalls.find((c) => c.action === "TEACHER_ACK_PRE_COUNCIL");
+      expect(ackAudit).toBeDefined();
+      expect(ackAudit.schoolId).toBe("school-a");
+
+      // 6. Compatibilidade retroativa em /pre-council-portal/[token]:
+      //    POST retorna preCouncil + council sem CGM (1001) e PUT aceita payload unificado
+      const legacyPreToken = createPreCouncilTeacherToken({
+        schoolId: "school-a",
+        boardId: "board-a1",
+        trimester: 1,
+        conversationId: null,
+      });
+      const legacyPost = await postPreCouncilPortalRoute(
+        new Request(
+          `http://localhost/api/conselho-classe/pre-council-portal/${legacyPreToken.token}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+            }),
+          }
+        ),
+        { params: Promise.resolve({ token: legacyPreToken.token }) }
+      );
+      expect(legacyPost.status).toBe(200);
+      const legacyPostBody = await legacyPost.json();
+      expect(legacyPostBody.council).toBeDefined();
+      const serializedLegacyPost = JSON.stringify(legacyPostBody);
+      expect(serializedLegacyPost).not.toContain("1001");
+      expect(serializedLegacyPost).not.toContain("ALUNO_COM_LAUDO");
+
+      const legacyUnifiedPut = await putPreCouncilPortalRoute(
+        new Request(
+          `http://localhost/api/conselho-classe/pre-council-portal/${legacyPreToken.token}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              googleIdToken: "dev-mock-token:marcos.unificado@escola.pr.gov.br",
+              subjectId: "subj-a2",
+              entries: [{ studentId: "stu-a2", descriptorCodes: [1] }],
+              preCouncil: {
+                monitoredStudentIds: ["stu-a1"],
+                monitoredStudentsNotes: "Atualizado pelo link antigo",
+              },
+              confirmAck: false,
+            }),
+          }
+        ),
+        { params: Promise.resolve({ token: legacyPreToken.token }) }
+      );
+      expect(legacyUnifiedPut.status).toBe(200);
+      const legacyUnifiedPutBody = await legacyUnifiedPut.json();
+      expect(legacyUnifiedPutBody.council).toBeDefined();
+      expect(JSON.stringify(legacyUnifiedPutBody)).not.toContain("1001");
     } finally {
       if (prevDevAuth === undefined) {
         delete process.env.ENABLE_DEV_AUTH;

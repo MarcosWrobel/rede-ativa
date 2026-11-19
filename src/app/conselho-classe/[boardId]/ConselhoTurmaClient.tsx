@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ClipboardCheck,
   FileText,
-  Grid3X3,
   LayoutGrid,
   MessageSquareText,
   Presentation,
@@ -16,9 +15,8 @@ import {
 import CouncilHeaderMetadataCard from "@/components/conselho/CouncilHeaderMetadataCard";
 import CouncilSubjectsManagerModal from "@/components/conselho/CouncilSubjectsManagerModal";
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
-import CouncilPreCouncilModal from "@/components/conselho/CouncilPreCouncilModal";
 import CouncilAnalysisPanel from "@/components/conselho/CouncilAnalysisPanel";
-import CouncilMatrixGrid from "@/components/conselho/CouncilMatrixGrid";
+import CouncilPreCouncilTab from "@/components/conselho/CouncilPreCouncilTab";
 import CouncilSeatingMapTab from "@/components/conselho/CouncilSeatingMapTab";
 import CouncilTrimesterOverviewTab from "@/components/conselho/CouncilTrimesterOverviewTab";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
@@ -39,7 +37,7 @@ import {
   type CouncilTrimesterRecord,
 } from "@/components/conselho/types";
 
-type ActiveTabKey = "analysis" | "matrix" | "seating-map" | "students" | "overview" | "post-council";
+type ActiveTabKey = "analysis" | "pre-council" | "seating-map" | "students" | "overview" | "post-council";
 
 interface ConselhoTurmaClientProps {
   initialBoard: CouncilBoardDetailRecord;
@@ -59,7 +57,6 @@ export default function ConselhoTurmaClient({
   const [activeTab, setActiveTab] = useState<ActiveTabKey>("analysis");
   const [hideSensitiveTags, setHideSensitiveTags] = useState(false);
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
-  const [isPreCouncilModalOpen, setIsPreCouncilModalOpen] = useState(false);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
@@ -142,9 +139,9 @@ export default function ConselhoTurmaClient({
     []
   );
 
-  const tabItems: Array<{ key: ActiveTabKey; label: string; icon: typeof Grid3X3 }> = [
+  const tabItems: Array<{ key: ActiveTabKey; label: string; icon: typeof ClipboardCheck }> = [
     { key: "analysis", label: "Painel de Análise", icon: Presentation },
-    { key: "matrix", label: "Matriz por Componente", icon: Grid3X3 },
+    { key: "pre-council", label: "Pré-Conselho", icon: ClipboardCheck },
     { key: "seating-map", label: "Mapa de Sala", icon: LayoutGrid },
     { key: "students", label: "Fichas dos Estudantes", icon: Users },
     { key: "overview", label: "Observações da Turma", icon: FileText },
@@ -218,7 +215,7 @@ export default function ConselhoTurmaClient({
         hideSensitiveTags={hideSensitiveTags}
         onToggleHideSensitiveTags={() => setHideSensitiveTags((prev) => !prev)}
         onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
-        onOpenPreCouncilModal={() => setIsPreCouncilModalOpen(true)}
+        onOpenPreCouncilModal={() => setActiveTab("pre-council")}
         preCouncilProgress={preCouncilProgress}
         onOpenPdfImportModal={() => setIsPdfImportModalOpen(true)}
         onOpenSeatingMap={() => setActiveTab("seating-map")}
@@ -279,13 +276,16 @@ export default function ConselhoTurmaClient({
           />
         )}
 
-        {activeTab === "matrix" && (
-          <CouncilMatrixGrid
+        {activeTab === "pre-council" && (
+          <CouncilPreCouncilTab
             board={board}
             activeTrimester={activeTrimester}
+            trimesterRecord={activeTrimesterRecord}
+            currentUserName={currentUserName}
             hideSensitiveTags={hideSensitiveTags}
             onOpenStudentModal={(card) => setEditingCardId(card.studentId)}
             onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
+            onTrimesterUpdated={handleTrimesterUpdated}
             onMatrixSaved={refreshBoard}
             onNotify={notify}
             readOnly={!canEdit}
@@ -434,20 +434,6 @@ export default function ConselhoTurmaClient({
         initialSubjects={board.subjects}
         availableSourceBoards={availableSourceBoards}
         onSubjectsUpdated={handleSubjectsUpdated}
-        onNotify={notify}
-        readOnly={!canEdit}
-      />
-
-      <CouncilPreCouncilModal
-        open={isPreCouncilModalOpen}
-        onClose={() => setIsPreCouncilModalOpen(false)}
-        board={board}
-        activeTrimester={activeTrimester}
-        trimesterRecord={activeTrimesterRecord}
-        currentUserName={currentUserName}
-        hideSensitiveTags={hideSensitiveTags}
-        onTrimesterUpdated={handleTrimesterUpdated}
-        onRefreshBoard={refreshBoard}
         onNotify={notify}
         readOnly={!canEdit}
       />

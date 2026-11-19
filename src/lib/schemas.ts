@@ -589,31 +589,65 @@ export const councilPreCouncilLinkCreateSchema = z.object({
   expiresInDays: z.number().int().min(1).max(30).optional().default(7),
 });
 
-export const councilPreCouncilAckSubmitSchema = z.object({
-  googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
-  conversationId: z.string().trim().min(1, "Selecione o componente curricular.").max(100),
+export const councilTeacherPortalPreCouncilContributionSchema = z.object({
+  monitoredStudentIds: z
+    .array(z.string().trim().min(1).max(100))
+    .max(120)
+    .optional()
+    .default([])
+    .transform((arr) => Array.from(new Set(arr))),
+  monitoredStudentsNotes: z.string().trim().max(3000).optional().default(""),
 });
+
+export const councilTeacherPortalEntrySchema = z.object({
+  studentId: z.string().trim().min(1).max(100),
+  descriptorCodes: z
+    .array(councilDescriptorCodeSchema)
+    .max(5)
+    .transform((arr) => Array.from(new Set(arr)).sort((a, b) => a - b)),
+});
+
+export const councilPreCouncilAckSubmitSchema = z
+  .object({
+    googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
+    conversationId: z.string().trim().min(1).max(100).optional(),
+    subjectId: z.string().trim().min(1).max(100).optional(),
+    entries: z
+      .array(councilTeacherPortalEntrySchema)
+      .max(200, "Limite máximo de estudantes por turma excedido.")
+      .optional(),
+    preCouncil: councilTeacherPortalPreCouncilContributionSchema.optional(),
+    confirmAck: z.boolean().optional(),
+  })
+  .refine((d) => Boolean(d.conversationId) || Boolean(d.subjectId), {
+    message: "Selecione o componente curricular.",
+  });
 
 export const councilTeacherPortalAuthSchema = z.object({
   googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
 });
 
-export const councilTeacherPortalSubmitSchema = z.object({
-  googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
-  subjectId: z.string().trim().min(1, "Selecione o componente curricular.").max(100),
-  entries: z
-    .array(
-      z.object({
-        studentId: z.string().trim().min(1).max(100),
-        descriptorCodes: z
-          .array(councilDescriptorCodeSchema)
-          .max(5)
-          .transform((arr) => Array.from(new Set(arr)).sort((a, b) => a - b)),
-      })
-    )
-    .min(1, "Informe ao menos um estudante para salvar.")
-    .max(200, "Limite máximo de estudantes por turma excedido."),
-});
+export const councilTeacherPortalSubmitSchema = z
+  .object({
+    googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
+    subjectId: z.string().trim().min(1, "Selecione o componente curricular.").max(100),
+    entries: z
+      .array(councilTeacherPortalEntrySchema)
+      .max(200, "Limite máximo de estudantes por turma excedido.")
+      .optional(),
+    preCouncil: councilTeacherPortalPreCouncilContributionSchema.optional(),
+    confirmAck: z.boolean().optional().default(false),
+  })
+  .refine(
+    (d) =>
+      (Array.isArray(d.entries) && d.entries.length > 0) ||
+      d.preCouncil !== undefined ||
+      d.confirmAck === true,
+    {
+      message:
+        "Informe ao menos um estudante para salvar ou confirme a ciência do Pré-Conselho.",
+    }
+  );
 
 // ---------------------------------------------------------------------------
 // SINCRONIZAÇÃO DO BI APRENDIZAGEM ESTADUAL (EXTENSÃO POWER BI -> CONSELHO)

@@ -1,4 +1,9 @@
 import {
+  getStoredPreference,
+  removeStoredPreference,
+  setStoredPreference,
+} from "@/lib/storageKeys";
+import {
   isBelowAverageGradeUi,
   type CouncilBoardDetailRecord,
   type CouncilStudentCardRecord,
@@ -90,6 +95,7 @@ function normalizeConversation(
     agreements: normalizeString(obj.agreements),
     conversationStatus: normalizeConversationStatus(obj.conversationStatus),
     conversationDate: normalizeDateYmd(obj.conversationDate),
+    teacherSubmittedAt: normalizeNullableString(obj.teacherSubmittedAt),
     digitalAckEmail: normalizeNullableString(obj.digitalAckEmail),
     digitalAckName: normalizeNullableString(obj.digitalAckName),
     digitalAckAt: normalizeNullableString(obj.digitalAckAt),
@@ -155,6 +161,7 @@ export function buildConversationFromSubject(
     agreements: "",
     conversationStatus: "PENDING",
     conversationDate: null,
+    teacherSubmittedAt: null,
     digitalAckEmail: null,
     digitalAckName: null,
     digitalAckAt: null,
@@ -460,4 +467,219 @@ export function formatPreCouncilDateTimePtBr(iso: string | null | undefined): st
     hour: "2-digit",
     minute: "2-digit",
   }).format(dt);
+}
+
+/**
+ * A confirmação de ciência docente fica liberada após o registro da conversa
+ * ou dos combinados/encaminhamentos pela equipe pedagógica.
+ */
+export function canConversationConfirmDigitalAck(
+  conv: Pick<PreCouncilSubjectConversation, "conversationStatus" | "agreements"> | null | undefined
+): boolean {
+  if (!conv) return false;
+  return conv.conversationStatus === "COMPLETED" || conv.agreements.trim().length > 0;
+}
+
+export interface SubjectMatrixFillStats {
+  filledCount: number;
+  totalActiveCount: number;
+  alertCount: number;
+  belowAvgCount: number;
+}
+
+export function getMatrixFillStatsBySubject(
+  board: CouncilBoardDetailRecord,
+  trimester: CouncilTrimesterNumber
+): Record<string, SubjectMatrixFillStats> {
+  const activeSubjects = board.subjects.filter((s) => s.active);
+  const ativos = board.studentCards.filter((c) => c.enrollmentStatus === "ATIVO");
+  const targetCards = ativos.length > 0 ? ativos : board.studentCards;
+  const result: Record<string, SubjectMatrixFillStats> = {};
+
+  for (const subj of activeSubjects) {
+    let filledCount = 0;
+    let alertCount = 0;
+    let belowAvgCount = 0;
+
+    for (const card of targetCards) {
+      const entry = card.subjectEntries.find(
+        (e) => e.subjectId === subj.id && e.trimester === trimester
+      );
+      const codes = entry?.descriptorCodes || [];
+      if (codes.length > 0) filledCount++;
+      if (codes.some((code) => ATTENTION_DESCRIPTOR_SET.has(code))) alertCount++;
+      if (isBelowAverageGradeUi(entry?.grade ?? null)) belowAvgCount++;
+    }
+
+    result[subj.id] = {
+      filledCount,
+      totalActiveCount: targetCards.length,
+      alertCount,
+      belowAvgCount,
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Calcula alertas ao vivo a partir das tags marcadas pelo docente na Etapa 1,
+ * nota importada e frequência acumulada, sem expor selos clínicos.
+ */
+export function buildLiveAlertsFromDraft(params: {
+  students: Array<{
+    studentId: string;
+    name: string;
+    enrollmentStatus: string;
+    attendancePercent: number | null;
+    grade: number | null;
+  }>;
+  descriptorCodesByStudentId: Record<string, number[]>;
+}): PreCouncilStudentAlert[] {
+  const alerts: PreCouncilStudentAlert[] = [];
+
+  for (const st of params.students) {
+    if (st.enrollmentStatus !== "ATIVO") continue;
+    const descriptorCodes = params.descriptorCodesByStudentId[st.studentId] || [];
+    const grade = st.grade ?? null;
+    const attendancePercent = st.attendancePercent ?? null;
+    const isBelowAvg = isBelowAverageGradeUi(grade);
+    const isLowAttendance = attendancePercent !== null && attendancePercent < 75;
+    const hasAttentionDescriptor = descriptorCodes.some((code) =>
+      ATTENTION_DESCRIPTOR_SET.has(code)
+    );
+
+    if (!isBelowAvg && !isLowAttendance && !hasAttentionDescriptor) {
+      continue;
+    }
+
+    const reasons: string[] = [];
+    if (isBelowAvg && grade !== null) {
+      reasons.push(`Nota ${grade.toFixed(1).replace(".", ",")}`);
+    }
+    if (descriptorCodes.includes(2)) reasons.push("Dificuldade");
+    if (descriptorCodes.includes(3)) reasons.push("Conduta");
+    if (descriptorCodes.includes(4)) reasons.push("Infrequência");
+    if (isLowAttendance && attendancePercent !== null) {
+      reasons.push(`Freq. ${attendancePercent.toFixed(0)}%`);
+    }
+
+    alerts.push({
+      studentId: st.studentId,
+      studentName: st.name,
+      grade,
+      attendancePercent,
+      descriptorCodes: [...descriptorCodes],
+      isBelowAvg,
+      isLowAttendance,
+      hasAttentionDescriptor,
+      reasons,
+    });
+  }
+
+  alerts.sort((a, b) => {
+    const scoreA =
+      (a.isBelowAvg ? 4 : 0) + (a.isLowAttendance ? 2 : 0) + (a.hasAttentionDescriptor ? 1 : 0);
+    const scoreB =
+      (b.isBelowAvg ? 4 : 0) + (b.isLowAttendance ? 2 : 0) + (b.hasAttentionDescriptor ? 1 : 0);
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return a.studentName.localeCompare(b.studentName, "pt-BR");
+  });
+
+  return alerts;
+}
+
+export interface TeacherPortalLocalDraft {
+  version: 1;
+  savedAt: string;
+  descriptorByStudentId: Record<string, number[]>;
+  monitoredStudentIds: string[];
+  monitoredStudentsNotes: string;
+}
+
+export function buildTeacherPortalDraftKeySuffix(
+  boardId: string,
+  trimester: number,
+  subjectId: string,
+  verifiedEmail: string
+): string {
+  const cleanEmail = verifiedEmail.trim().toLowerCase();
+  return `precouncil_draft_${boardId.trim()}_${trimester}_${subjectId.trim()}_${cleanEmail}`;
+}
+
+export function loadTeacherPortalLocalDraft(
+  boardId: string,
+  trimester: number,
+  subjectId: string,
+  verifiedEmail: string
+): TeacherPortalLocalDraft | null {
+  if (!boardId || !subjectId || !verifiedEmail) return null;
+  const raw = getStoredPreference(
+    buildTeacherPortalDraftKeySuffix(boardId, trimester, subjectId, verifiedEmail),
+    ""
+  );
+  if (!raw) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.version !== 1) return null;
+
+    const rawDescriptors =
+      obj.descriptorByStudentId && typeof obj.descriptorByStudentId === "object"
+        ? (obj.descriptorByStudentId as Record<string, unknown>)
+        : {};
+    const descriptorByStudentId: Record<string, number[]> = {};
+    for (const [stId, val] of Object.entries(rawDescriptors)) {
+      if (!Array.isArray(val)) continue;
+      descriptorByStudentId[stId] = Array.from(
+        new Set(val.filter((n): n is number => typeof n === "number" && n >= 1 && n <= 5))
+      ).sort((a, b) => a - b);
+    }
+
+    return {
+      version: 1,
+      savedAt: typeof obj.savedAt === "string" ? obj.savedAt : "",
+      descriptorByStudentId,
+      monitoredStudentIds: normalizeUniqueStringIds(obj.monitoredStudentIds),
+      monitoredStudentsNotes:
+        typeof obj.monitoredStudentsNotes === "string" ? obj.monitoredStudentsNotes : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveTeacherPortalLocalDraft(
+  boardId: string,
+  trimester: number,
+  subjectId: string,
+  verifiedEmail: string,
+  draft: Omit<TeacherPortalLocalDraft, "version" | "savedAt">
+): void {
+  if (!boardId || !subjectId || !verifiedEmail) return;
+  const payload: TeacherPortalLocalDraft = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    descriptorByStudentId: draft.descriptorByStudentId,
+    monitoredStudentIds: normalizeUniqueStringIds(draft.monitoredStudentIds),
+    monitoredStudentsNotes: draft.monitoredStudentsNotes,
+  };
+  setStoredPreference(
+    buildTeacherPortalDraftKeySuffix(boardId, trimester, subjectId, verifiedEmail),
+    JSON.stringify(payload)
+  );
+}
+
+export function clearTeacherPortalLocalDraft(
+  boardId: string,
+  trimester: number,
+  subjectId: string,
+  verifiedEmail: string
+): void {
+  if (!boardId || !subjectId || !verifiedEmail) return;
+  removeStoredPreference(
+    buildTeacherPortalDraftKeySuffix(boardId, trimester, subjectId, verifiedEmail)
+  );
 }

@@ -23,6 +23,7 @@ import {
   type CouncilEnrollmentStatus,
   type CouncilStudentCardRecord,
   type CouncilTrimesterNumber,
+  type PreCouncilData,
 } from "./types";
 
 interface MatrixCellDraft {
@@ -42,6 +43,9 @@ interface CouncilMatrixGridProps {
   onMatrixSaved: () => Promise<void>;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
+  preCouncilData?: PreCouncilData | null;
+  onOpenConversation?: (subjectId: string) => void;
+  onOpenUnifiedTeacherLink?: (subjectId: string | null) => void;
 }
 
 function cellKey(studentId: string, subjectId: string): string {
@@ -57,6 +61,9 @@ export default function CouncilMatrixGrid({
   onMatrixSaved,
   onNotify,
   readOnly = false,
+  preCouncilData = null,
+  onOpenConversation,
+  onOpenUnifiedTeacherLink,
 }: CouncilMatrixGridProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState<MatrixFilterMode>("ALL");
@@ -250,6 +257,10 @@ export default function CouncilMatrixGrid({
   }
 
   function openTeacherLinkModal(subjectId: string | null) {
+    if (onOpenUnifiedTeacherLink) {
+      onOpenUnifiedTeacherLink(subjectId);
+      return;
+    }
     setTeacherLinkSubjectId(subjectId);
     setTeacherLinkModalOpen(true);
   }
@@ -388,6 +399,11 @@ export default function CouncilMatrixGrid({
                   const codes = getCellDescriptorCodes(card.studentId, subj.id);
                   return codes.length > 0 ? acc + 1 : acc;
                 }, 0);
+                const preConv = preCouncilData?.conversations.find(
+                  (c) =>
+                    c.subjectId === subj.id ||
+                    c.subjectName.trim().toLowerCase() === subj.name.trim().toLowerCase()
+                );
 
                 return (
                   <th
@@ -404,28 +420,58 @@ export default function CouncilMatrixGrid({
                           ? `${subj.teacherName} • ${filledCount}/${totalCount}`
                           : `${filledCount}/${totalCount} avaliados`}
                       </div>
-                      {!readOnly && (
+                      {preConv && (
                         <div className="flex flex-wrap items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleFillEmptyWithAtende(subj.id)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100/80 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-900 dark:text-emerald-200 text-[10px] font-bold transition cursor-pointer"
-                            title="Preenche com a tag Atende apenas os estudantes ativos sem registro neste componente"
-                          >
-                            <CheckCheck className="w-3 h-3" />
-                            <span>Preencher vazios: Atende</span>
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Gerar link para professores de ${subj.name}`}
-                            onClick={() => openTeacherLinkModal(subj.id)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-100/80 dark:bg-sky-950/60 hover:bg-sky-200 dark:hover:bg-sky-900 text-sky-900 dark:text-sky-200 text-[10px] font-bold transition cursor-pointer"
-                          >
-                            <Link2 className="w-3 h-3" />
-                            <span>Link</span>
-                          </button>
+                          {preConv.teacherSubmittedAt && (
+                            <span className="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 text-[9px] font-bold">
+                              Enviado
+                            </span>
+                          )}
+                          {preConv.conversationStatus === "COMPLETED" && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 text-[9px] font-bold">
+                              Conversa
+                            </span>
+                          )}
+                          {preConv.digitalAckEmail && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 text-[9px] font-bold">
+                              Ciência
+                            </span>
+                          )}
                         </div>
                       )}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {!readOnly && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleFillEmptyWithAtende(subj.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100/80 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-900 dark:text-emerald-200 text-[10px] font-bold transition cursor-pointer"
+                              title="Preenche com a tag Atende apenas os estudantes ativos sem registro neste componente"
+                            >
+                              <CheckCheck className="w-3 h-3" />
+                              <span>Preencher vazios: Atende</span>
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Gerar link para professores de ${subj.name}`}
+                              onClick={() => openTeacherLinkModal(subj.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-100/80 dark:bg-sky-950/60 hover:bg-sky-200 dark:hover:bg-sky-900 text-sky-900 dark:text-sky-200 text-[10px] font-bold transition cursor-pointer"
+                            >
+                              <Link2 className="w-3 h-3" />
+                              <span>Link</span>
+                            </button>
+                          </>
+                        )}
+                        {onOpenConversation && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenConversation(subj.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-100/80 dark:bg-indigo-950/60 hover:bg-indigo-200 dark:hover:bg-indigo-900 text-indigo-900 dark:text-indigo-200 text-[10px] font-bold transition cursor-pointer"
+                          >
+                            <span>Conversa</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </th>
                 );
@@ -602,7 +648,7 @@ export default function CouncilMatrixGrid({
         </table>
       </div>
 
-      {!readOnly && (
+      {!readOnly && !onOpenUnifiedTeacherLink && (
         <CouncilTeacherLinkModal
           open={teacherLinkModalOpen}
           onClose={() => setTeacherLinkModalOpen(false)}

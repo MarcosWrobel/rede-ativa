@@ -17,6 +17,9 @@ import type {
   CouncilTrimesterNumber,
   PreCouncilSynthesis,
 } from "@/components/conselho/types";
+import ProfessorConselhoClient, {
+  type TeacherPortalCouncilContext,
+} from "@/app/conselho-classe/professor/[token]/ProfessorConselhoClient";
 
 interface PreCouncilPortalConversation {
   id: string;
@@ -92,6 +95,8 @@ export default function ProfessorPreConselhoClient({
   const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [preCouncil, setPreCouncil] = useState<PreCouncilPortalContext | null>(null);
+  const [council, setCouncil] = useState<TeacherPortalCouncilContext | null>(null);
+  const [suggestedSubjectId, setSuggestedSubjectId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string>("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -124,7 +129,9 @@ export default function ProfessorPreConselhoClient({
           verifiedEmail?: string;
           verifiedName?: string;
           suggestedConversationId?: string | null;
+          suggestedSubjectId?: string | null;
           preCouncil?: PreCouncilPortalContext;
+          council?: TeacherPortalCouncilContext | null;
         } = await res.json();
 
         if (!res.ok || !data.preCouncil || !data.verifiedEmail) {
@@ -137,6 +144,8 @@ export default function ProfessorPreConselhoClient({
         setVerifiedEmail(data.verifiedEmail);
         setVerifiedName(data.verifiedName || data.verifiedEmail);
         setPreCouncil(data.preCouncil);
+        setCouncil(data.council ?? null);
+        setSuggestedSubjectId(data.suggestedSubjectId ?? null);
         setSelectedConversationId(
           data.suggestedConversationId || data.preCouncil.conversations[0]?.id || ""
         );
@@ -146,6 +155,8 @@ export default function ProfessorPreConselhoClient({
         setVerifiedEmail(null);
         setVerifiedName(null);
         setPreCouncil(null);
+        setCouncil(null);
+        setSuggestedSubjectId(null);
       } finally {
         setAuthLoading(false);
       }
@@ -310,6 +321,8 @@ export default function ProfessorPreConselhoClient({
     setVerifiedEmail(null);
     setVerifiedName(null);
     setPreCouncil(null);
+    setCouncil(null);
+    setSuggestedSubjectId(null);
     setSelectedConversationId("");
     setSubmitFeedback(null);
     setAuthError(null);
@@ -406,6 +419,32 @@ export default function ProfessorPreConselhoClient({
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (council && googleIdToken && verifiedEmail) {
+    return (
+      <ProfessorConselhoClient
+        token={token}
+        schoolName={schoolName}
+        classNameLabel={classNameLabel}
+        segmentLabel={segmentLabel}
+        shiftLabel={shiftLabel}
+        year={year}
+        trimester={trimester}
+        lockedSubjectName={lockedSubjectName}
+        googleClientId={googleClientId}
+        enableDevAuth={enableDevAuth}
+        portalApiBase="/api/conselho-classe/pre-council-portal"
+        preloadedSession={{
+          googleIdToken,
+          verifiedEmail,
+          verifiedName: verifiedName || verifiedEmail,
+          council,
+          suggestedSubjectId,
+          onLogout: handleLogoutTeacher,
+        }}
+      />
     );
   }
 
