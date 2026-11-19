@@ -1165,31 +1165,71 @@
 
   function calcularLimitesVisiveisMatriz(grid) {
     const gridRect = grid.getBoundingClientRect();
-    const midViewport = grid.querySelector('.mid-viewport');
-    const colHeaderWrap =
-      grid.querySelector('.columnHeaders') ||
-      grid.querySelector('[role="rowgroup"]');
+    const colHeaderWrap = grid.querySelector('.columnHeaders');
     const rowHeaderWrap = grid.querySelector('.rowHeaders');
-    const bodyWrap = grid.querySelector('.bodyCells') || midViewport;
+    const bodyWrap = grid.querySelector('.bodyCells');
+    const bodyViewport = bodyWrap
+      ? (bodyWrap.closest('.mid-viewport') || bodyWrap.querySelector('.mid-viewport') || bodyWrap)
+      : null;
     const cornerEl =
       grid.querySelector('.corner') ||
       grid.querySelector('.pivotTableCorner');
 
-    const midRect = midViewport ? midViewport.getBoundingClientRect() : gridRect;
-    const colRect = colHeaderWrap ? colHeaderWrap.getBoundingClientRect() : gridRect;
+    const colRect = colHeaderWrap ? colHeaderWrap.getBoundingClientRect() : null;
     const rowHeaderRect = rowHeaderWrap ? rowHeaderWrap.getBoundingClientRect() : null;
-    const bodyRect = bodyWrap ? bodyWrap.getBoundingClientRect() : gridRect;
+    const bodyRect = bodyWrap ? bodyWrap.getBoundingClientRect() : null;
+    const bodyVpRect = bodyViewport ? bodyViewport.getBoundingClientRect() : null;
     const cornerRect = cornerEl ? cornerEl.getBoundingClientRect() : null;
 
-    const dataLeft = Math.max(
-      gridRect.left,
-      cornerRect ? cornerRect.right : 0,
-      rowHeaderRect ? rowHeaderRect.right : 0,
-      colRect.left
-    );
-    const dataRight = Math.min(gridRect.right - 12, midRect.right - 4, colRect.right, bodyRect.right);
-    const dataTop = Math.max(gridRect.top, colRect.bottom, bodyRect.top);
-    const dataBottom = Math.min(gridRect.bottom - 12, midRect.bottom - 4, bodyRect.bottom);
+    // Estima borda esquerda real dos dados a partir dos cabeçalhos de linha/canto
+    let dataLeft = gridRect.left;
+    if (cornerRect && cornerRect.width > 10 && cornerRect.right > dataLeft) {
+      dataLeft = cornerRect.right;
+    }
+    if (rowHeaderRect && rowHeaderRect.width > 10 && rowHeaderRect.right > dataLeft) {
+      dataLeft = rowHeaderRect.right;
+    }
+    if (colRect && colRect.width > 20 && colRect.left > dataLeft) {
+      dataLeft = colRect.left;
+    }
+
+    // Estima borda superior real dos dados (nunca usando .mid-viewport do cabeçalho)
+    let dataTop = gridRect.top;
+    if (colRect && colRect.height > 10 && colRect.bottom > dataTop && colRect.bottom < gridRect.bottom - 20) {
+      dataTop = colRect.bottom;
+    } else {
+      const triHeaders = Array.from(grid.querySelectorAll('.columnHeaders [role="columnheader"], .columnHeaders .pivotTableCellWrap'));
+      let maxTriBottom = 0;
+      for (let i = 0; i < triHeaders.length; i++) {
+        const txt = getElementFullText(triHeaders[i]);
+        if (/^[123]\s*[º°o]?\s*tri$/i.test(txt) || /^total$/i.test(txt)) {
+          const r = triHeaders[i].getBoundingClientRect();
+          if (r.height > 0 && r.bottom > maxTriBottom && r.bottom < gridRect.bottom - 20) {
+            maxTriBottom = r.bottom;
+          }
+        }
+      }
+      if (maxTriBottom > dataTop) dataTop = maxTriBottom;
+    }
+
+    const useBodyRect = bodyRect && bodyRect.width > 80 && bodyRect.height > 60;
+    const useBodyVp = bodyVpRect && bodyVpRect.width > 80 && bodyVpRect.height > 60;
+
+    if (useBodyRect && bodyRect.left > dataLeft) {
+      dataLeft = Math.max(dataLeft, bodyRect.left);
+    }
+    if (useBodyRect && bodyRect.top > dataTop) {
+      dataTop = Math.max(dataTop, bodyRect.top);
+    }
+
+    let dataRight = gridRect.right - 8;
+    if (colRect && colRect.width > 80) dataRight = Math.min(dataRight, colRect.right);
+    if (useBodyVp) dataRight = Math.min(dataRight, bodyVpRect.right);
+    if (useBodyRect && bodyRect.right <= gridRect.right + 4) dataRight = Math.min(dataRight, bodyRect.right);
+
+    let dataBottom = gridRect.bottom - 8;
+    if (useBodyVp) dataBottom = Math.min(dataBottom, bodyVpRect.bottom);
+    if (useBodyRect && bodyRect.bottom <= gridRect.bottom + 4) dataBottom = Math.min(dataBottom, bodyRect.bottom);
 
     return {
       gridRect,
@@ -1199,27 +1239,63 @@
       dataBottom,
       rowHeaderLeft: rowHeaderRect ? rowHeaderRect.left : gridRect.left,
       rowHeaderRight: rowHeaderRect ? rowHeaderRect.right : dataLeft,
-      colHeaderTop: colRect.top,
-      colHeaderBottom: colRect.bottom,
+      colHeaderTop: colRect ? colRect.top : gridRect.top,
+      colHeaderBottom: dataTop,
     };
+  }
+
+  function expandToColumnHeaderBox(leafEl, expectedText, headerRoot) {
+    let current = leafEl;
+    const targetNorm = normText(expectedText);
+    for (let depth = 0; depth < 4 && current && current.parentElement; depth++) {
+      const parent = current.parentElement;
+      if (headerRoot && !headerRoot.contains(parent)) break;
+      const parentText = getElementFullText(parent);
+      if (normText(parentText) !== targetNorm) break;
+      current = parent;
+      if (current.matches && current.matches('[role="columnheader"]')) break;
+    }
+    return current.getBoundingClientRect();
   }
 
   function getVisibleMapaColumnSignature(grid) {
     if (!grid) return '';
     const bounds = calcularLimitesVisiveisMatriz(grid);
+    const headerRoot = grid.querySelector('.columnHeaders') || grid;
     const nodes = Array.from(
-      grid.querySelectorAll('.columnHeaders .pivotTableCellWrap, .columnHeaders [role="columnheader"], [role="columnheader"]')
+      headerRoot.querySelectorAll('.pivotTableCellWrap, [role="columnheader"]')
     );
+    const seen = new Set();
     const visibleNames = [];
     for (let i = 0; i < nodes.length; i++) {
       const txt = getElementFullText(nodes[i]);
-      if (!txt || /^[123]\s*[º°o]?\s*tri$/i.test(txt)) continue;
-      const r = nodes[i].getBoundingClientRect();
-      if (r.right >= bounds.dataLeft && r.left <= bounds.dataRight && /\s-\s*\d{2,6}$/.test(txt)) {
-        visibleNames.push(txt);
+      if (!txt || /^[123]\s*[º°o]?\s*tri$/i.test(txt) || /^total$/i.test(txt)) continue;
+      if (/\s-\s*\d{2,6}$/.test(txt) && !seen.has(txt)) {
+        const r = nodes[i].getBoundingClientRect();
+        if (r.width > 0 && r.right >= bounds.dataLeft && r.left <= bounds.dataRight) {
+          seen.add(txt);
+          visibleNames.push(txt);
+        }
       }
     }
     return visibleNames.join('|');
+  }
+
+  function getVisibleMapaRowSignature(grid) {
+    if (!grid) return '';
+    const rowHeaderRoot = grid.querySelector('.rowHeaders') || grid;
+    const nodes = Array.from(rowHeaderRoot.querySelectorAll('.pivotTableCellWrap, [role="rowheader"]'));
+    const cgms = [];
+    const seen = new Set();
+    for (let i = 0; i < nodes.length; i++) {
+      const txt = getElementFullText(nodes[i]);
+      const m = txt.match(/-\s*(\d{8,11})\s*$/);
+      if (m && !seen.has(m[1])) {
+        seen.add(m[1]);
+        cgms.push(m[1]);
+      }
+    }
+    return cgms.join('|');
   }
 
   function extrairMapaNotasVisiveis() {
@@ -1227,35 +1303,36 @@
     if (!grid) return { novos: 0, bounds: null };
 
     const bounds = calcularLimitesVisiveisMatriz(grid);
-    if (bounds.dataRight <= bounds.dataLeft + 40 || bounds.dataBottom <= bounds.dataTop + 30) {
+    if (bounds.dataRight <= bounds.dataLeft + 40 || bounds.dataBottom <= bounds.dataTop + 20) {
       return { novos: 0, bounds };
     }
 
     const TOL = 2;
-
-    // 1. Coleta cabeçalhos de disciplina (<NOME> - <CÓDIGO>) com Viewport Guard horizontal estrito
+    const headerRoot = grid.querySelector('.columnHeaders') || grid;
     const rawHeaderNodes = Array.from(
-      grid.querySelectorAll('.columnHeaders .pivotTableCellWrap, .columnHeaders [role="columnheader"], [role="columnheader"]')
+      headerRoot.querySelectorAll('.pivotTableCellWrap, [role="columnheader"]')
     );
     const leafHeaderNodes = rawHeaderNodes.filter(
       (el) => !rawHeaderNodes.some((other) => other !== el && other.contains(el))
     );
 
-    const visibleDisciplines = [];
+    const discCandidatesMap = new Map();
     const subColCandidates = [];
 
     for (let i = 0; i < leafHeaderNodes.length; i++) {
       const el = leafHeaderNodes[i];
       const text = getElementFullText(el);
       if (!text) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
+      const leafRect = el.getBoundingClientRect();
+      if (leafRect.width <= 0 || leafRect.height <= 0) continue;
 
       const triMatch = text.match(/^([123])\s*[º°o]?\s*tri$/i);
       if (triMatch) {
+        const triRect = expandToColumnHeaderBox(el, text, headerRoot);
         subColCandidates.push({
           trimester: parseInt(triMatch[1], 10),
-          rect,
+          rect: triRect,
+          centerX: (triRect.left + triRect.right) / 2,
         });
         continue;
       }
@@ -1266,29 +1343,54 @@
         if (upperCheck === 'ALUNO' || upperCheck.includes('SERIE') || upperCheck.includes('PERIODO')) {
           continue;
         }
-        // Viewport Guard Horizontal: cabeçalho da disciplina deve estar 100% dentro [dataLeft, dataRight]
-        if (rect.left >= bounds.dataLeft - TOL && rect.right <= bounds.dataRight + TOL && rect.width >= 60) {
-          visibleDisciplines.push({
+        const boxRect = expandToColumnHeaderBox(el, text, headerRoot);
+        if (boxRect.width < 20) continue;
+
+        const key = `${discMatch[2]}|${text}`;
+        const prev = discCandidatesMap.get(key);
+        if (!prev || boxRect.width > (prev.right - prev.left)) {
+          discCandidatesMap.set(key, {
             disciplinaRaw: text,
             subjectCode: discMatch[2],
-            left: rect.left,
-            right: rect.right,
-            bottom: rect.bottom,
+            left: boxRect.left,
+            right: boxRect.right,
+            centerX: (boxRect.left + boxRect.right) / 2,
+            bottom: boxRect.bottom,
           });
         }
       }
     }
 
-    if (visibleDisciplines.length === 0 || subColCandidates.length === 0) {
+    const sortedDisciplines = Array.from(discCandidatesMap.values()).sort(
+      (a, b) => a.centerX - b.centerX
+    );
+
+    if (sortedDisciplines.length === 0 || subColCandidates.length === 0) {
       return { novos: 0, bounds };
     }
 
-    // Estima largura mediana das subcolunas para descartar eventuais subcolunas parcialmente cortadas na borda
-    const widths = subColCandidates.map((s) => s.rect.width).sort((a, b) => a - b);
-    const medianSubWidth = widths[Math.floor(widths.length / 2)] || 32;
-    const minSubWidth = Math.max(16, medianSubWidth * 0.65);
+    // Define território horizontal de cada disciplina entre vizinhas
+    const discWithTerritory = sortedDisciplines.map((d, idx) => {
+      const prev = idx > 0 ? sortedDisciplines[idx - 1] : null;
+      const next = idx < sortedDisciplines.length - 1 ? sortedDisciplines[idx + 1] : null;
+      const terrLeft = prev ? (prev.centerX + d.centerX) / 2 : Math.min(d.left - 80, bounds.dataLeft - 20);
+      const terrRight = next ? (d.centerX + next.centerX) / 2 : Math.max(d.right + 120, bounds.dataRight + 20);
+      return {
+        ...d,
+        terrLeft,
+        terrRight,
+        isHeaderFullyVisible:
+          d.left >= bounds.dataLeft - TOL &&
+          d.right <= bounds.dataRight + TOL,
+        subsByTri: new Map(),
+      };
+    });
 
-    const visibleSubColumns = [];
+    // Filtra subcolunas integralmente visíveis na área de dados (descartando bordas cortadas)
+    const widths = subColCandidates.map((s) => s.rect.width).sort((a, b) => a - b);
+    const medianSubWidth = widths[Math.floor(widths.length / 2)] || 28;
+    const minSubWidth = Math.max(14, medianSubWidth * 0.6);
+
     for (let i = 0; i < subColCandidates.length; i++) {
       const sub = subColCandidates[i];
       const r = sub.rect;
@@ -1299,31 +1401,44 @@
       ) {
         continue;
       }
-      const centerX = (r.left + r.right) / 2;
-      const parentDisc = visibleDisciplines.find(
-        (d) =>
-          centerX >= d.left - 2 &&
-          centerX <= d.right + 2 &&
-          r.left >= d.left - 3 &&
-          r.right <= d.right + 3
-      );
-      if (!parentDisc) continue;
 
-      visibleSubColumns.push({
-        trimester: sub.trimester,
-        subjectCode: parentDisc.subjectCode,
-        disciplinaRaw: parentDisc.disciplinaRaw,
-        left: r.left,
-        right: r.right,
-        centerX,
-      });
+      const ownerDisc = discWithTerritory.find(
+        (d) => sub.centerX >= d.terrLeft && sub.centerX <= d.terrRight
+      );
+      if (!ownerDisc || !ownerDisc.isHeaderFullyVisible) continue;
+
+      if (!ownerDisc.subsByTri.has(sub.trimester)) {
+        ownerDisc.subsByTri.set(sub.trimester, {
+          trimester: sub.trimester,
+          subjectCode: ownerDisc.subjectCode,
+          disciplinaRaw: ownerDisc.disciplinaRaw,
+          left: r.left,
+          right: r.right,
+          centerX: sub.centerX,
+        });
+      }
+    }
+
+    // Viewport Guard Horizontal Estrito: somente disciplinas com cabeçalho e os 3 trimestres visíveis
+    const visibleSubColumns = [];
+    for (let i = 0; i < discWithTerritory.length; i++) {
+      const disc = discWithTerritory[i];
+      if (!disc.isHeaderFullyVisible) continue;
+      if (!disc.subsByTri.has(1) || !disc.subsByTri.has(2) || !disc.subsByTri.has(3)) {
+        continue;
+      }
+      visibleSubColumns.push(
+        disc.subsByTri.get(1),
+        disc.subsByTri.get(2),
+        disc.subsByTri.get(3)
+      );
     }
 
     if (visibleSubColumns.length === 0) {
       return { novos: 0, bounds };
     }
 
-    // 2. Coleta rowHeaders (<NOME> - <CGM>) com Viewport Guard vertical estrito
+    // 2. Coleta rowHeaders (<NOME> - <CGM>) com suporte a linhas compactas (>= 6px) e Viewport Guard vertical
     const rowHeaderRoot = grid.querySelector('.rowHeaders') || grid;
     const rawRowHeaderNodes = Array.from(
       rowHeaderRoot.querySelectorAll('.pivotTableCellWrap, [role="rowheader"]')
@@ -1332,7 +1447,7 @@
       (el) => !rawRowHeaderNodes.some((other) => other !== el && other.contains(el))
     );
 
-    const visibleRows = [];
+    const visibleRowsMap = new Map();
     for (let i = 0; i < leafRowNodes.length; i++) {
       const el = leafRowNodes[i];
       const text = getElementFullText(el);
@@ -1344,20 +1459,24 @@
       if (/S[EÉ]RIE|PER[IÍ]ODO|SEM SERIA[CÇ][AÃ]O/i.test(cleanNome)) continue;
 
       const rect = el.getBoundingClientRect();
-      if (rect.height < 12 || rect.top < bounds.dataTop - TOL || rect.bottom > bounds.dataBottom + TOL) {
+      if (rect.height < 6 || rect.top < bounds.dataTop - TOL || rect.bottom > bounds.dataBottom + TOL) {
         continue;
       }
 
-      visibleRows.push({
-        cgm: m[2],
-        nome: `${cleanNome} - ${m[2]}`,
-        top: rect.top,
-        bottom: rect.bottom,
-        centerY: (rect.top + rect.bottom) / 2,
-        height: rect.height,
-      });
+      const existing = visibleRowsMap.get(m[2]);
+      if (!existing || rect.height > existing.height) {
+        visibleRowsMap.set(m[2], {
+          cgm: m[2],
+          nome: `${cleanNome} - ${m[2]}`,
+          top: rect.top,
+          bottom: rect.bottom,
+          centerY: (rect.top + rect.bottom) / 2,
+          height: rect.height,
+        });
+      }
     }
 
+    const visibleRows = Array.from(visibleRowsMap.values());
     if (visibleRows.length === 0) {
       return { novos: 0, bounds };
     }
@@ -1393,20 +1512,26 @@
       const cx = (rect.left + rect.right) / 2;
       const cy = (rect.top + rect.bottom) / 2;
 
-      // Pareia subcoluna (eixo X) e estudante (eixo Y)
       const matchedSub = visibleSubColumns.find(
-        (sub) => cx >= sub.left - 2 && cx <= sub.right + 2
+        (sub) => cx >= sub.left - 3 && cx <= sub.right + 3
       );
       if (!matchedSub) continue;
 
-      const matchedRow = visibleRows.find(
-        (row) => cy >= row.top - 2 && cy <= row.bottom + 2
-      );
+      let matchedRow = null;
+      let bestDistY = Infinity;
+      for (let rIdx = 0; rIdx < visibleRows.length; rIdx++) {
+        const row = visibleRows[rIdx];
+        const distY = Math.abs(cy - row.centerY);
+        const maxDistY = Math.max(8, row.height * 0.65);
+        if (distY <= maxDistY && distY < bestDistY) {
+          bestDistY = distY;
+          matchedRow = row;
+        }
+      }
       if (!matchedRow) continue;
 
       const cellKey = `${matchedRow.cgm}|${matchedSub.subjectCode}|${matchedSub.trimester}`;
-      const existing = councilMapaCellsMap.get(cellKey);
-      if (!existing) {
+      if (!councilMapaCellsMap.has(cellKey)) {
         novos++;
       }
       councilMapaCellsMap.set(cellKey, {
@@ -1441,7 +1566,7 @@
 
   function findScrollContainers(root) {
     const candidates = Array.from(
-      (root || document).querySelectorAll('.mid-viewport, .innerContainer, [role="grid"], .tableEx, .pivotTable, .scroll-wrapper')
+      (root || document).querySelectorAll('.bodyCells, .mid-viewport, .innerContainer, [role="grid"], .tableEx, .pivotTable, .scroll-wrapper')
     );
     const vTarget = candidates.find((el) => el.scrollHeight > el.clientHeight + 8) || null;
     const hTarget = candidates.find((el) => el.scrollWidth > el.clientWidth + 8) || null;
@@ -1463,66 +1588,143 @@
     } catch {}
   }
 
-  function dragHorizontalScrollbarStep(grid, deltaPx) {
-    const bars = Array.from((grid || document).querySelectorAll('.scroll-bar-part-bar'));
-    const horizBar = bars.find((bar) => {
-      const track = bar.parentElement;
-      if (!track) return false;
-      const tr = track.getBoundingClientRect();
-      const br = bar.getBoundingClientRect();
-      return tr.width > tr.height * 2 && tr.width > br.width + 6;
-    });
-    if (!horizBar) return false;
+  function findScrollbarThumb(root, orientation) {
+    const scopes = [];
+    if (root) scopes.push(root);
+    const outer =
+      root && root !== document && root.closest
+        ? root.closest('.innerContainer, .pivotTable, .visualContainer')
+        : null;
+    if (outer && outer !== root) scopes.push(outer);
+    if (scopes.length === 0) scopes.push(document);
 
-    const br = horizBar.getBoundingClientRect();
+    for (let sIdx = 0; sIdx < scopes.length; sIdx++) {
+      const bars = Array.from(scopes[sIdx].querySelectorAll('.scroll-bar-part-bar'));
+      const matched = bars.find((bar) => {
+        const track = bar.parentElement;
+        if (!track) return false;
+        const tr = track.getBoundingClientRect();
+        const br = bar.getBoundingClientRect();
+        if (orientation === 'horizontal') {
+          return tr.width > tr.height * 2 && tr.width > br.width + 6;
+        }
+        return tr.height > tr.width * 2 && tr.height > br.height + 6;
+      });
+      if (matched) return matched;
+    }
+    return null;
+  }
+
+  function dragScrollbarThumb(bar, orientation, deltaPx) {
+    if (!bar) return false;
+    const br = bar.getBoundingClientRect();
     const startX = br.left + br.width / 2;
     const startY = br.top + br.height / 2;
-    const endX = startX + deltaPx;
+    const endX = orientation === 'horizontal' ? startX + deltaPx : startX;
+    const endY = orientation === 'vertical' ? startY + deltaPx : startY;
 
     try {
-      horizBar.dispatchEvent(new MouseEvent('mousedown', { clientX: startX, clientY: startY, bubbles: true }));
-      document.dispatchEvent(new MouseEvent('mousemove', { clientX: endX, clientY: startY, bubbles: true }));
-      document.dispatchEvent(new MouseEvent('mouseup', { clientX: endX, clientY: startY, bubbles: true }));
+      if (typeof PointerEvent === 'function') {
+        bar.dispatchEvent(new PointerEvent('pointerdown', { clientX: startX, clientY: startY, bubbles: true, pointerId: 1 }));
+      }
+      bar.dispatchEvent(new MouseEvent('mousedown', { clientX: startX, clientY: startY, bubbles: true }));
+      if (typeof PointerEvent === 'function') {
+        document.dispatchEvent(new PointerEvent('pointermove', { clientX: endX, clientY: endY, bubbles: true, pointerId: 1 }));
+      }
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: endX, clientY: endY, bubbles: true }));
+      if (typeof PointerEvent === 'function') {
+        document.dispatchEvent(new PointerEvent('pointerup', { clientX: endX, clientY: endY, bubbles: true, pointerId: 1 }));
+      }
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: endX, clientY: endY, bubbles: true }));
       return true;
     } catch {
       return false;
     }
   }
 
-  async function scanVerticalPass(vTarget, direction, extractFn, statusPrefix) {
-    if (!vTarget) {
+  function dragHorizontalScrollbarStep(grid, deltaPx) {
+    const horizBar = findScrollbarThumb(grid, 'horizontal');
+    return dragScrollbarThumb(horizBar, 'horizontal', deltaPx);
+  }
+
+  function dragVerticalScrollbarStep(grid, deltaPx) {
+    const vertBar = findScrollbarThumb(grid, 'vertical');
+    return dragScrollbarThumb(vertBar, 'vertical', deltaPx);
+  }
+
+  function getRowSignatureFallback(root) {
+    const rows = Array.from((root || document).querySelectorAll('[role="row"], .row, .tr'));
+    return rows
+      .slice(0, 8)
+      .map((r) => normText(r.innerText).slice(0, 40))
+      .filter(Boolean)
+      .join('|');
+  }
+
+  async function scanVerticalPass(vTarget, direction, extractFn, statusPrefix, opts) {
+    const grid = opts?.grid || null;
+    const wheelArea = opts?.wheelArea || vTarget || grid;
+    const vertBar = findScrollbarThumb(grid || document, 'vertical');
+
+    if (!vTarget && !vertBar) {
       extractFn();
       return;
     }
 
-    const stepSize = Math.max(120, Math.floor((vTarget.clientHeight || 400) * 0.55));
+    const stepSize = vTarget
+      ? Math.max(120, Math.floor((vTarget.clientHeight || 400) * 0.55))
+      : 260;
     let idleTicks = 0;
+    let guardSteps = 0;
 
-    while (isScrolling) {
+    while (isScrolling && guardSteps < 80) {
+      guardSteps++;
       extractFn();
       setStatus(statusPrefix(), '#0284c7');
 
-      const prevTop = vTarget.scrollTop;
-      const maxTop = Math.max(0, vTarget.scrollHeight - vTarget.clientHeight);
-      const atEdge =
-        direction > 0 ? prevTop >= maxTop - 4 : prevTop <= 4;
+      let usedNative = false;
+      if (vTarget && vTarget.scrollHeight > vTarget.clientHeight + 8) {
+        const prevTop = vTarget.scrollTop;
+        const maxTop = Math.max(0, vTarget.scrollHeight - vTarget.clientHeight);
+        const atEdge = direction > 0 ? prevTop >= maxTop - 4 : prevTop <= 4;
 
-      if (atEdge) {
-        await new Promise((r) => setTimeout(r, 450));
-        extractFn();
+        if (atEdge) {
+          await new Promise((r) => setTimeout(r, 400));
+          extractFn();
+          break;
+        }
+
+        vTarget.scrollTop = Math.max(0, Math.min(maxTop, prevTop + direction * stepSize));
+        if (Math.abs(vTarget.scrollTop - prevTop) >= 2) {
+          usedNative = true;
+          idleTicks = 0;
+          await new Promise((r) => setTimeout(r, 240));
+          continue;
+        }
+      }
+
+      // Fallback para barra de rolagem virtualizada do Power BI
+      const beforeSig = grid ? getVisibleMapaRowSignature(grid) : getRowSignatureFallback(document);
+      const currentVertBar = findScrollbarThumb(grid || document, 'vertical');
+      if (currentVertBar) {
+        const br = currentVertBar.getBoundingClientRect();
+        const thumbStep = Math.max(18, Math.round(br.height * 0.45));
+        dragScrollbarThumb(currentVertBar, 'vertical', direction * thumbStep);
+      } else if (!usedNative && wheelArea) {
+        dispatchWheel(wheelArea, 0, direction * 260);
+      } else {
         break;
       }
 
-      vTarget.scrollTop = Math.max(0, Math.min(maxTop, prevTop + direction * stepSize));
-      if (Math.abs(vTarget.scrollTop - prevTop) < 2) {
-        dispatchWheel(vTarget, 0, direction * stepSize);
+      await new Promise((r) => setTimeout(r, 280));
+      extractFn();
+      const afterSig = grid ? getVisibleMapaRowSignature(grid) : getRowSignatureFallback(document);
+      if (afterSig === beforeSig) {
         idleTicks++;
+        if (idleTicks >= 3) break;
       } else {
         idleTicks = 0;
       }
-
-      await new Promise((r) => setTimeout(r, 250));
-      if (idleTicks >= 6) break;
     }
   }
 
@@ -1541,10 +1743,20 @@
     const btn = document.getElementById('leo-btn-autoscroll');
     if (btn) btn.innerHTML = '<span>⏸️</span> Pausar Rastreamento';
 
-    // Retorna para o início horizontal/vertical antes de iniciar a serpentina
+    // Retorna para o início horizontal e vertical antes de iniciar a serpentina
     if (hTarget) hTarget.scrollLeft = 0;
     if (vTarget) vTarget.scrollTop = 0;
-    await new Promise((r) => setTimeout(r, 300));
+    const initHorizBar = findScrollbarThumb(grid, 'horizontal');
+    if (initHorizBar) {
+      const tr = initHorizBar.parentElement.getBoundingClientRect();
+      dragScrollbarThumb(initHorizBar, 'horizontal', -(tr.width + 40));
+    }
+    const initVertBar = findScrollbarThumb(grid, 'vertical');
+    if (initVertBar) {
+      const tr = initVertBar.parentElement.getBoundingClientRect();
+      dragScrollbarThumb(initVertBar, 'vertical', -(tr.height + 40));
+    }
+    await new Promise((r) => setTimeout(r, 350));
 
     let sliceIdx = 0;
     let direction = 1; // 1 = desce (slices pares), -1 = sobe (slices ímpares)
@@ -1562,28 +1774,34 @@
         vTarget,
         direction,
         () => extrairMapaNotasVisiveis(),
-        () => `Serpentina 2D (fatia ${sliceIdx + 1})... ${councilMapaCellsMap.size} notas capturadas.`
+        () => `Serpentina 2D (fatia ${sliceIdx + 1})... ${councilMapaCellsMap.size} notas capturadas.`,
+        { grid, wheelArea }
       );
 
       if (!isScrolling) break;
 
-      // Avança horizontalmente para a próxima fatia de disciplinas
+      // Avança horizontalmente para a próxima fatia de disciplinas preservando ~55% de sobreposição
+      let movedNativeHoriz = false;
       if (hTarget && hTarget.scrollWidth > hTarget.clientWidth + 8) {
         const prevLeft = hTarget.scrollLeft;
         const maxLeft = Math.max(0, hTarget.scrollWidth - hTarget.clientWidth);
         if (prevLeft >= maxLeft - 4) break;
         hTarget.scrollLeft = Math.min(maxLeft, prevLeft + horizStep);
         await new Promise((r) => setTimeout(r, 320));
-        if (Math.abs(hTarget.scrollLeft - prevLeft) < 2) {
-          stuckHorizontal++;
-          if (stuckHorizontal >= 3) break;
-        } else {
+        if (Math.abs(hTarget.scrollLeft - prevLeft) >= 2) {
+          movedNativeHoriz = true;
           stuckHorizontal = 0;
         }
-      } else {
+      }
+
+      if (!movedNativeHoriz) {
         const beforeSig = getVisibleMapaColumnSignature(grid);
-        const moved = dragHorizontalScrollbarStep(grid, 70);
-        if (!moved) {
+        const horizBar = findScrollbarThumb(grid, 'horizontal');
+        if (horizBar) {
+          const br = horizBar.getBoundingClientRect();
+          const thumbStep = Math.max(18, Math.round(br.width * 0.45));
+          dragScrollbarThumb(horizBar, 'horizontal', thumbStep);
+        } else {
           dispatchWheel(wheelArea, horizStep, 0);
         }
         await new Promise((r) => setTimeout(r, 360));
@@ -1612,8 +1830,9 @@
     const { vTarget, hTarget } = findScrollContainers(document);
     const extractFn =
       mode === 'APRENDIZAGEM_TURMA' ? extrairAbaTurmaVisivel : extrairAbaEscolaVisivel;
+    const vertBar = findScrollbarThumb(document, 'vertical');
 
-    if (!vTarget) {
+    if (!vTarget && !vertBar) {
       extractFn();
       if (hTarget) {
         const prevLeft = hTarget.scrollLeft;
@@ -1637,7 +1856,7 @@
     const btn = document.getElementById('leo-btn-autoscroll');
     if (btn) btn.innerHTML = '<span>⏸️</span> Pausar Rastreamento';
 
-    vTarget.scrollTop = 0;
+    if (vTarget) vTarget.scrollTop = 0;
     if (hTarget) hTarget.scrollLeft = 0;
     await new Promise((r) => setTimeout(r, 250));
 

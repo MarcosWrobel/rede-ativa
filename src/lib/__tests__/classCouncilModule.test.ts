@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import React from "react";
 import { renderToString } from "react-dom/server";
 
@@ -1274,7 +1275,7 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
     expect(serializedAudit).not.toContain("4.8");
   });
 
-  it("extension/content.js implementa Viewport Guard 2D e Map indexado por cgm|subjectCode|trimester e rota /sync sanitiza HTTP 500", async () => {
+  it("extension/content.js extrai corretamente MAPA com linhas compactas (11px), múltiplos .mid-viewport e Viewport Guard 2D e rota /sync sanitiza HTTP 500", async () => {
     const contentJs = fs.readFileSync(
       path.resolve(process.cwd(), "extension/content.js"),
       "utf8"
@@ -1288,6 +1289,322 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
     expect(contentJs).toContain("bounds.dataBottom");
     expect(contentJs).toContain("/api/conselho-classe/sync");
     expect(contentJs).toContain("isTrustedSyncServerUrl");
+    expect(contentJs).not.toContain("rect.height < 12");
+
+    // Simula DOM compacto real do Power BI (múltiplos .mid-viewport, linha 11px, título estreito e colunas cortadas nas bordas)
+    type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+    const mkRect = (left: number, top: number, right: number, bottom: number): Rect => ({
+      left,
+      top,
+      right,
+      bottom,
+      width: Math.max(0, right - left),
+      height: Math.max(0, bottom - top),
+    });
+
+    class FakeEl {
+      id = "";
+      classes: string[];
+      attrs: Record<string, string>;
+      innerText = "";
+      textContent = "";
+      _innerHTML = "";
+      style: Record<string, string> = {};
+      parentElement: FakeEl | null = null;
+      children: FakeEl[] = [];
+      listeners: Record<string, Array<(e?: any) => void>> = {};
+      rect: Rect;
+      scrollTop = 0;
+      scrollLeft = 0;
+      scrollHeight = 0;
+      clientHeight = 0;
+      scrollWidth = 0;
+      clientWidth = 0;
+
+      constructor(opts: {
+        classes?: string[];
+        attrs?: Record<string, string>;
+        text?: string;
+        rect?: Rect;
+        id?: string;
+      } = {}) {
+        this.classes = opts.classes || [];
+        this.attrs = opts.attrs || {};
+        this.innerText = opts.text || "";
+        this.textContent = opts.text || "";
+        this.rect = opts.rect || mkRect(0, 0, 0, 0);
+        if (opts.id) this.id = opts.id;
+      }
+
+      set innerHTML(val: string) {
+        this._innerHTML = val;
+      }
+      get innerHTML() {
+        return this._innerHTML;
+      }
+
+      append(...nodes: FakeEl[]) {
+        for (const n of nodes) {
+          n.parentElement = this;
+          this.children.push(n);
+        }
+        return this;
+      }
+      appendChild(node: FakeEl) {
+        this.append(node);
+        return node;
+      }
+      getAttribute(k: string) {
+        if (k === "id") return this.id || null;
+        return this.attrs[k] ?? null;
+      }
+      setAttribute(k: string, v: string) {
+        if (k === "id") this.id = v;
+        this.attrs[k] = v;
+      }
+      getBoundingClientRect() {
+        return this.rect;
+      }
+      contains(other: FakeEl | null): boolean {
+        let cur = other;
+        while (cur) {
+          if (cur === this) return true;
+          cur = cur.parentElement;
+        }
+        return false;
+      }
+      matchesSimple(sel: string): boolean {
+        const s = sel.trim();
+        if (s === "*") return true;
+        if (s.startsWith("#")) return this.id === s.slice(1);
+        if (s.startsWith(".")) return this.classes.includes(s.slice(1));
+        const attrMatch = s.match(/^\[([^=\]]+)="([^"]+)"\]$/);
+        if (attrMatch) return this.attrs[attrMatch[1]] === attrMatch[2];
+        return false;
+      }
+      matches(selector: string): boolean {
+        return selector.split(",").some((part) => {
+          const tokens = part.trim().split(/\s+/);
+          if (tokens.length === 1) return this.matchesSimple(tokens[0]);
+          if (!this.matchesSimple(tokens[tokens.length - 1])) return false;
+          let cur: FakeEl | null = this.parentElement;
+          let idx = tokens.length - 2;
+          while (cur && idx >= 0) {
+            if (cur.matchesSimple(tokens[idx])) idx--;
+            cur = cur.parentElement;
+          }
+          return idx < 0;
+        });
+      }
+      closest(selector: string): FakeEl | null {
+        let cur: FakeEl | null = this;
+        while (cur) {
+          if (cur.matches(selector)) return cur;
+          cur = cur.parentElement;
+        }
+        return null;
+      }
+      querySelectorAll(selector: string): FakeEl[] {
+        const out: FakeEl[] = [];
+        const visit = (node: FakeEl) => {
+          for (const child of node.children) {
+            if (child.matches(selector)) out.push(child);
+            visit(child);
+          }
+        };
+        visit(this);
+        return out;
+      }
+      querySelector(selector: string): FakeEl | null {
+        return this.querySelectorAll(selector)[0] ?? null;
+      }
+      addEventListener(ev: string, fn: (e?: any) => void) {
+        (this.listeners[ev] ||= []).push(fn);
+      }
+      async click() {
+        await Promise.all(
+          (this.listeners.click || []).map((fn) => fn({ stopPropagation: () => {} }))
+        );
+      }
+    }
+
+    const root = new FakeEl({ id: "root", rect: mkRect(0, 0, 1200, 800) });
+    const bodyEl = new FakeEl({ id: "body", rect: mkRect(0, 0, 1200, 800) });
+    root.append(bodyEl);
+
+    const grid = new FakeEl({
+      classes: ["pivotTable"],
+      attrs: { role: "grid" },
+      text: "ALUNO - CGM\nADILSON MARTINS JUNIOR - 1012704492\n1ºTri\n2ºTri\n3ºTri",
+      rect: mkRect(100, 100, 800, 520),
+    });
+    const colHeaders = new FakeEl({ classes: ["columnHeaders"], rect: mkRect(300, 100, 790, 160) });
+    // Primeiro .mid-viewport dentro de .columnHeaders (armadilha de altura 60px!)
+    const colHeaderMidVp = new FakeEl({ classes: ["mid-viewport"], rect: mkRect(300, 100, 790, 160) });
+    colHeaders.append(colHeaderMidVp);
+
+    // 1) Coluna FISICA - 901 parcialmente cortada à esquerda (sem 1ºTri dentro de dataLeft=300)
+    const fisOuter = new FakeEl({
+      attrs: { role: "columnheader" },
+      text: "FISICA - 901",
+      rect: mkRect(240, 102, 340, 128),
+    });
+    const fisTri2 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "2ºTri", rect: mkRect(301, 130, 320, 158) });
+    const fisTri3 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "3ºTri", rect: mkRect(321, 130, 340, 158) });
+
+    // 2) Coluna GEOGRAFIA - 401 inteiramente visível, com nó folha de título estreito (54px) dentro de columnheader largo (140px)
+    const geoOuter = new FakeEl({
+      attrs: { role: "columnheader" },
+      text: "GEOGRAFIA - 401",
+      rect: mkRect(350, 102, 490, 128),
+    });
+    const geoLeaf = new FakeEl({
+      classes: ["pivotTableCellWrap"],
+      text: "GEOGRAFIA - 401",
+      rect: mkRect(393, 102, 447, 128), // 54px (< 60px)!
+    });
+    geoOuter.append(geoLeaf);
+    const geoTri1 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "1ºTri", rect: mkRect(352, 130, 384, 158) });
+    const geoTri2 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "2ºTri", rect: mkRect(385, 130, 417, 158) });
+    const geoTri3 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "3ºTri", rect: mkRect(418, 130, 450, 158) });
+    const geoTotal = new FakeEl({ classes: ["pivotTableCellWrap"], text: "Total", rect: mkRect(451, 130, 488, 158) });
+
+    // 3) Coluna HISTORIA - 501 parcialmente cortada à direita (right 820 > dataRight 790)
+    const histOuter = new FakeEl({
+      attrs: { role: "columnheader" },
+      text: "HISTORIA - 501",
+      rect: mkRect(680, 102, 820, 128),
+    });
+    const histTri1 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "1ºTri", rect: mkRect(682, 130, 714, 158) });
+    const histTri2 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "2ºTri", rect: mkRect(715, 130, 747, 158) });
+    const histTri3 = new FakeEl({ classes: ["pivotTableCellWrap"], text: "3ºTri", rect: mkRect(748, 130, 780, 158) });
+
+    colHeaderMidVp.append(
+      fisOuter, fisTri2, fisTri3,
+      geoOuter, geoTri1, geoTri2, geoTri3, geoTotal,
+      histOuter, histTri1, histTri2, histTri3
+    );
+
+    // Linha de estudante compacta de 11px (< 12px!)
+    const rowHeaders = new FakeEl({ classes: ["rowHeaders"], rect: mkRect(100, 160, 300, 510) });
+    const rowStu = new FakeEl({
+      classes: ["pivotTableCellWrap"],
+      text: "ADILSON MARTINS JUNIOR - 1012704492",
+      rect: mkRect(104, 164, 298, 175), // height = 11px
+    });
+    rowHeaders.append(rowStu);
+
+    const bodyMidVp = new FakeEl({ classes: ["mid-viewport"], rect: mkRect(300, 160, 790, 510) });
+    const bodyCells = new FakeEl({ classes: ["bodyCells"], rect: mkRect(300, 160, 790, 510) });
+    bodyMidVp.append(bodyCells);
+
+    // Células de nota: cortadas (FISICA, HISTORIA) e visíveis (GEOGRAFIA)
+    bodyCells.append(
+      new FakeEl({ classes: ["pivotTableCellWrap"], text: "4,5", rect: mkRect(301, 164, 320, 175) }), // FISICA cortada -> ignorar
+      new FakeEl({ classes: ["pivotTableCellWrap"], text: "10,0", rect: mkRect(352, 164, 384, 175) }), // GEO 1ºTri -> capturar
+      new FakeEl({ classes: ["pivotTableCellWrap"], text: "9,5", rect: mkRect(385, 164, 417, 175) }), // GEO 2ºTri -> capturar
+      new FakeEl({ classes: ["pivotTableCellWrap"], text: "6,4", rect: mkRect(418, 164, 450, 175) }), // GEO 3ºTri -> capturar
+      new FakeEl({ classes: ["pivotTableCellWrap"], text: "8,4", rect: mkRect(682, 164, 714, 175) }) // HISTORIA cortada -> ignorar
+    );
+
+    grid.append(colHeaders, rowHeaders, bodyMidVp);
+    bodyEl.append(grid);
+
+    // Botões sintéticos do widget para acionar copiarJSON sem esperar timer de load
+    let copiedJson = "";
+    const scheduledFns: Array<() => void> = [];
+    const btnById = new Map<string, FakeEl>();
+
+    const fakeDoc: any = {
+      readyState: "loading",
+      body: bodyEl,
+      querySelectorAll: (sel: string) => root.querySelectorAll(sel),
+      querySelector: (sel: string) => root.querySelector(sel),
+      getElementById: (id: string) => root.querySelector(`#${id}`) || btnById.get(id) || null,
+      createElement: () => {
+        const el = new FakeEl();
+        Object.defineProperty(el, "innerHTML", {
+          set(html: string) {
+            el._innerHTML = html;
+            const matches = html.matchAll(/id="([^"]+)"/g);
+            for (const m of matches) {
+              if (!btnById.has(m[1])) {
+                const sub = new FakeEl({ id: m[1] });
+                btnById.set(m[1], sub);
+                el.append(sub);
+              }
+            }
+          },
+          get() {
+            return el._innerHTML;
+          },
+        });
+        return el;
+      },
+      addEventListener: () => {},
+      dispatchEvent: () => {},
+    };
+
+    const winListeners = new Map<string, Array<(e?: any) => void>>();
+    const sandbox: any = {
+      window: {
+        addEventListener: (ev: string, fn: (e?: any) => void) => {
+          const arr = winListeners.get(ev) || [];
+          arr.push(fn);
+          winListeners.set(ev, arr);
+        },
+        dispatchEvent: () => {},
+      },
+      document: fakeDoc,
+      navigator: {
+        clipboard: {
+          writeText: async (text: string) => {
+            copiedJson = text;
+          },
+        },
+      },
+      chrome: {},
+      setTimeout: (fn: () => void) => {
+        scheduledFns.push(fn);
+        return scheduledFns.length;
+      },
+      clearTimeout: () => {},
+      console: { log: () => {}, warn: () => {}, error: () => {} },
+      URL,
+      Set,
+      Map,
+      Array,
+      Math,
+      Number,
+      String,
+      RegExp,
+      JSON,
+      Date,
+      Promise,
+      parseFloat,
+      parseInt,
+      isNaN,
+      alert: () => {},
+    };
+    sandbox.window.window = sandbox.window;
+
+    vm.runInNewContext(contentJs, sandbox, { filename: "extension/content.js" });
+    for (const fn of winListeners.get("load") || []) fn();
+    for (const fn of scheduledFns) fn();
+
+    await btnById.get("leo-btn-copy-json")!.click();
+    const extractedPayload = JSON.parse(copiedJson);
+    expect(extractedPayload.notasMapa).toEqual([
+      {
+        cgm: "1012704492",
+        nome: "ADILSON MARTINS JUNIOR - 1012704492",
+        disciplinaRaw: "GEOGRAFIA - 401",
+        disciplinaCode: "401",
+        nota1Tri: 10,
+        nota2Tri: 9.5,
+        nota3Tri: 6.4,
+      },
+    ]);
 
     hoisted.currentSchool.edition = "PILOTO_INTEGRADA";
     hoisted.forceDbError = true;
