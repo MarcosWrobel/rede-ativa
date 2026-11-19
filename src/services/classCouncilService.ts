@@ -10,11 +10,24 @@ import {
   councilGenerateMinuteSchema,
   councilMatrixBatchSaveSchema,
   councilPostActionItemSchema,
+  councilPreCouncilSchema,
   councilSeatingMapLayoutSchema,
   councilStudentCardUpdateSchema,
   councilSubjectsBatchSchema,
   councilTrimesterUpdateSchema,
 } from "@/lib/schemas";
+import {
+  DEFAULT_PRE_COUNCIL_OBJECTIVE,
+  DEFAULT_PRE_COUNCIL_PEDAGOGUE_ROLE,
+  getDefaultPreCouncilPeriodLabel,
+  getTodayYmdSaoPaulo,
+  parsePreCouncilData,
+} from "@/components/conselho/preCouncilUtils";
+import type {
+  PreCouncilData,
+  PreCouncilSubjectConversation,
+  PreCouncilSynthesis,
+} from "@/components/conselho/types";
 
 export const COUNCIL_DESCRIPTOR_LABELS: Record<number, string> = {
   1: "Atende às expectativas propostas para o componente/itinerário",
@@ -870,74 +883,223 @@ export async function updateCouncilTrimester(params: {
         )
       : undefined;
 
-  return prisma.classCouncilTrimester.upsert({
-    where: { boardId_trimester: { boardId, trimester: payload.trimester } },
-    create: {
-      schoolId,
-      boardId,
-      trimester: payload.trimester,
-      status: payload.status ?? "IN_PROGRESS",
-      positivePoints: payload.positivePoints?.trim() || null,
-      attentionPoints: payload.attentionPoints?.trim() || null,
-      plannedActions: payload.plannedActions?.trim() || null,
-      postCouncilHeldAt: parsedHeldAt ?? null,
-      postCouncilAdvances: payload.postCouncilAdvances?.trim() || null,
-      postCouncilWhatWorked: payload.postCouncilWhatWorked?.trim() || null,
-      postCouncilRecognizedAttitudes: payload.postCouncilRecognizedAttitudes?.trim() || null,
-      postCouncilCriticalSubjects: payload.postCouncilCriticalSubjects?.trim() || null,
-      postCouncilPerformanceFactors: payload.postCouncilPerformanceFactors?.trim() || null,
-      postCouncilBehaviorAttendance: payload.postCouncilBehaviorAttendance?.trim() || null,
-      postCouncilWhatToImprove: payload.postCouncilWhatToImprove?.trim() || null,
-      postCouncilHowTeachersCanHelp: payload.postCouncilHowTeachersCanHelp?.trim() || null,
-      postCouncilCommitments: payload.postCouncilCommitments?.trim() || null,
-      postCouncilActionItemsJson: serializedActions ?? null,
-      updatedByName: userName,
-      updatedByEmail: userEmail,
-    },
-    update: {
-      ...(payload.status !== undefined ? { status: payload.status } : {}),
-      ...(payload.positivePoints !== undefined
-        ? { positivePoints: payload.positivePoints?.trim() || null }
-        : {}),
-      ...(payload.attentionPoints !== undefined
-        ? { attentionPoints: payload.attentionPoints?.trim() || null }
-        : {}),
-      ...(payload.plannedActions !== undefined
-        ? { plannedActions: payload.plannedActions?.trim() || null }
-        : {}),
-      ...(parsedHeldAt !== undefined ? { postCouncilHeldAt: parsedHeldAt } : {}),
-      ...(payload.postCouncilAdvances !== undefined
-        ? { postCouncilAdvances: payload.postCouncilAdvances?.trim() || null }
-        : {}),
-      ...(payload.postCouncilWhatWorked !== undefined
-        ? { postCouncilWhatWorked: payload.postCouncilWhatWorked?.trim() || null }
-        : {}),
-      ...(payload.postCouncilRecognizedAttitudes !== undefined
-        ? { postCouncilRecognizedAttitudes: payload.postCouncilRecognizedAttitudes?.trim() || null }
-        : {}),
-      ...(payload.postCouncilCriticalSubjects !== undefined
-        ? { postCouncilCriticalSubjects: payload.postCouncilCriticalSubjects?.trim() || null }
-        : {}),
-      ...(payload.postCouncilPerformanceFactors !== undefined
-        ? { postCouncilPerformanceFactors: payload.postCouncilPerformanceFactors?.trim() || null }
-        : {}),
-      ...(payload.postCouncilBehaviorAttendance !== undefined
-        ? { postCouncilBehaviorAttendance: payload.postCouncilBehaviorAttendance?.trim() || null }
-        : {}),
-      ...(payload.postCouncilWhatToImprove !== undefined
-        ? { postCouncilWhatToImprove: payload.postCouncilWhatToImprove?.trim() || null }
-        : {}),
-      ...(payload.postCouncilHowTeachersCanHelp !== undefined
-        ? { postCouncilHowTeachersCanHelp: payload.postCouncilHowTeachersCanHelp?.trim() || null }
-        : {}),
-      ...(payload.postCouncilCommitments !== undefined
-        ? { postCouncilCommitments: payload.postCouncilCommitments?.trim() || null }
-        : {}),
-      ...(serializedActions !== undefined ? { postCouncilActionItemsJson: serializedActions } : {}),
-      updatedByName: userName,
-      updatedByEmail: userEmail,
-    },
+  return prisma.$transaction(async (tx) => {
+    let serializedPreCouncil: string | null | undefined = undefined;
+    if (payload.preCouncil !== undefined) {
+      serializedPreCouncil = await validateAndSerializePreCouncilData({
+        client: tx,
+        schoolId,
+        boardId,
+        trimester: payload.trimester,
+        preCouncil: payload.preCouncil,
+      });
+    }
+
+    return tx.classCouncilTrimester.upsert({
+      where: { boardId_trimester: { boardId, trimester: payload.trimester } },
+      create: {
+        schoolId,
+        boardId,
+        trimester: payload.trimester,
+        status: payload.status ?? "IN_PROGRESS",
+        positivePoints: payload.positivePoints?.trim() || null,
+        attentionPoints: payload.attentionPoints?.trim() || null,
+        plannedActions: payload.plannedActions?.trim() || null,
+        preCouncilJson: serializedPreCouncil ?? null,
+        postCouncilHeldAt: parsedHeldAt ?? null,
+        postCouncilAdvances: payload.postCouncilAdvances?.trim() || null,
+        postCouncilWhatWorked: payload.postCouncilWhatWorked?.trim() || null,
+        postCouncilRecognizedAttitudes: payload.postCouncilRecognizedAttitudes?.trim() || null,
+        postCouncilCriticalSubjects: payload.postCouncilCriticalSubjects?.trim() || null,
+        postCouncilPerformanceFactors: payload.postCouncilPerformanceFactors?.trim() || null,
+        postCouncilBehaviorAttendance: payload.postCouncilBehaviorAttendance?.trim() || null,
+        postCouncilWhatToImprove: payload.postCouncilWhatToImprove?.trim() || null,
+        postCouncilHowTeachersCanHelp: payload.postCouncilHowTeachersCanHelp?.trim() || null,
+        postCouncilCommitments: payload.postCouncilCommitments?.trim() || null,
+        postCouncilActionItemsJson: serializedActions ?? null,
+        updatedByName: userName,
+        updatedByEmail: userEmail,
+      },
+      update: {
+        ...(payload.status !== undefined ? { status: payload.status } : {}),
+        ...(payload.positivePoints !== undefined
+          ? { positivePoints: payload.positivePoints?.trim() || null }
+          : {}),
+        ...(payload.attentionPoints !== undefined
+          ? { attentionPoints: payload.attentionPoints?.trim() || null }
+          : {}),
+        ...(payload.plannedActions !== undefined
+          ? { plannedActions: payload.plannedActions?.trim() || null }
+          : {}),
+        ...(serializedPreCouncil !== undefined ? { preCouncilJson: serializedPreCouncil } : {}),
+        ...(parsedHeldAt !== undefined ? { postCouncilHeldAt: parsedHeldAt } : {}),
+        ...(payload.postCouncilAdvances !== undefined
+          ? { postCouncilAdvances: payload.postCouncilAdvances?.trim() || null }
+          : {}),
+        ...(payload.postCouncilWhatWorked !== undefined
+          ? { postCouncilWhatWorked: payload.postCouncilWhatWorked?.trim() || null }
+          : {}),
+        ...(payload.postCouncilRecognizedAttitudes !== undefined
+          ? { postCouncilRecognizedAttitudes: payload.postCouncilRecognizedAttitudes?.trim() || null }
+          : {}),
+        ...(payload.postCouncilCriticalSubjects !== undefined
+          ? { postCouncilCriticalSubjects: payload.postCouncilCriticalSubjects?.trim() || null }
+          : {}),
+        ...(payload.postCouncilPerformanceFactors !== undefined
+          ? { postCouncilPerformanceFactors: payload.postCouncilPerformanceFactors?.trim() || null }
+          : {}),
+        ...(payload.postCouncilBehaviorAttendance !== undefined
+          ? { postCouncilBehaviorAttendance: payload.postCouncilBehaviorAttendance?.trim() || null }
+          : {}),
+        ...(payload.postCouncilWhatToImprove !== undefined
+          ? { postCouncilWhatToImprove: payload.postCouncilWhatToImprove?.trim() || null }
+          : {}),
+        ...(payload.postCouncilHowTeachersCanHelp !== undefined
+          ? { postCouncilHowTeachersCanHelp: payload.postCouncilHowTeachersCanHelp?.trim() || null }
+          : {}),
+        ...(payload.postCouncilCommitments !== undefined
+          ? { postCouncilCommitments: payload.postCouncilCommitments?.trim() || null }
+          : {}),
+        ...(serializedActions !== undefined ? { postCouncilActionItemsJson: serializedActions } : {}),
+        updatedByName: userName,
+        updatedByEmail: userEmail,
+      },
+    });
   });
+}
+
+async function validateAndSerializePreCouncilData(params: {
+  client: Prisma.TransactionClient | typeof prisma;
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  preCouncil: z.infer<typeof councilPreCouncilSchema> | null;
+}): Promise<string | null> {
+  const { client, schoolId, boardId, trimester, preCouncil } = params;
+  if (preCouncil === null) {
+    return null;
+  }
+
+  const seenIds = new Set<string>();
+  const distinctSubjectIds = new Set<string>();
+  const distinctStudentIds = new Set<string>();
+
+  for (const conv of preCouncil.conversations) {
+    const cleanId = conv.id.trim();
+    if (seenIds.has(cleanId)) {
+      throw new CouncilDomainError(
+        "Existem linhas do Pré-Conselho com identificador duplicado.",
+        400
+      );
+    }
+    seenIds.add(cleanId);
+
+    if (conv.subjectId) {
+      distinctSubjectIds.add(conv.subjectId.trim());
+    }
+    for (const studentId of conv.monitoredStudentIds || []) {
+      distinctStudentIds.add(studentId.trim());
+    }
+  }
+
+  if (distinctSubjectIds.size > 0) {
+    const subjectIdsArr = Array.from(distinctSubjectIds);
+    const matchedSubjects = await client.classCouncilSubject.findMany({
+      where: {
+        id: { in: subjectIdsArr },
+        boardId,
+        schoolId,
+      },
+      select: { id: true },
+    });
+    if (matchedSubjects.length !== subjectIdsArr.length) {
+      throw new CouncilDomainError(
+        "Um ou mais componentes curriculares do Pré-Conselho não pertencem a esta turma ou instituição.",
+        400
+      );
+    }
+  }
+
+  if (distinctStudentIds.size > 0) {
+    const studentIdsArr = Array.from(distinctStudentIds);
+    const matchedCards = await client.studentCouncilCard.findMany({
+      where: {
+        boardId,
+        schoolId,
+        studentId: { in: studentIdsArr },
+      },
+      select: { studentId: true },
+    });
+    if (matchedCards.length !== studentIdsArr.length) {
+      throw new CouncilDomainError(
+        "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
+        400
+      );
+    }
+  }
+
+  const existingTrimesters = await client.classCouncilTrimester.findMany({
+    where: { boardId, schoolId },
+    select: { trimester: true, preCouncilJson: true },
+  });
+  const currentTrimester = existingTrimesters.find((t) => t.trimester === trimester) || null;
+  const existingParsed = parsePreCouncilData(currentTrimester?.preCouncilJson);
+
+  // Preserva estritamente ciências digitais verificadas pelo servidor contra sobrescrita pelo cliente
+  const existingAckById = new Map<
+    string,
+    { digitalAckEmail: string | null; digitalAckName: string | null; digitalAckAt: string | null }
+  >();
+  if (existingParsed) {
+    for (const row of existingParsed.conversations) {
+      existingAckById.set(row.id, {
+        digitalAckEmail: row.digitalAckEmail,
+        digitalAckName: row.digitalAckName,
+        digitalAckAt: row.digitalAckAt,
+      });
+    }
+  }
+
+  const normalizedConversations: PreCouncilSubjectConversation[] = preCouncil.conversations.map(
+    (conv) => {
+      const cleanId = conv.id.trim();
+      const preservedAck = existingAckById.get(cleanId);
+      return {
+        id: cleanId,
+        subjectId: conv.subjectId?.trim() || null,
+        subjectName: conv.subjectName.trim(),
+        teacherName: (conv.teacherName || "").trim(),
+        teacherEmail: conv.teacherEmail?.trim() ? conv.teacherEmail.trim().toLowerCase() : null,
+        monitoredStudentIds: Array.from(new Set(conv.monitoredStudentIds || [])),
+        monitoredStudentsNotes: (conv.monitoredStudentsNotes || "").trim(),
+        agreements: (conv.agreements || "").trim(),
+        conversationStatus: conv.conversationStatus === "COMPLETED" ? "COMPLETED" : "PENDING",
+        conversationDate: conv.conversationDate?.trim() || null,
+        digitalAckEmail: preservedAck?.digitalAckEmail ?? null,
+        digitalAckName: preservedAck?.digitalAckName ?? null,
+        digitalAckAt: preservedAck?.digitalAckAt ?? null,
+      };
+    }
+  );
+
+  const normalized: PreCouncilData = {
+    version: 1,
+    periodLabel: preCouncil.periodLabel.trim() || getDefaultPreCouncilPeriodLabel(trimester),
+    objectiveText: (preCouncil.objectiveText || "").trim() || DEFAULT_PRE_COUNCIL_OBJECTIVE,
+    responsiblePedagogueName: (preCouncil.responsiblePedagogueName || "").trim(),
+    responsiblePedagogueRole:
+      (preCouncil.responsiblePedagogueRole || "").trim() || DEFAULT_PRE_COUNCIL_PEDAGOGUE_ROLE,
+    conversations: normalizedConversations,
+    synthesis: {
+      mainDifficulties: (preCouncil.synthesis.mainDifficulties || "").trim(),
+      priorityStudents: (preCouncil.synthesis.priorityStudents || "").trim(),
+      attendanceIssues: (preCouncil.synthesis.attendanceIssues || "").trim(),
+      behaviorIssues: (preCouncil.synthesis.behaviorIssues || "").trim(),
+      pedagogicalActions: (preCouncil.synthesis.pedagogicalActions || "").trim(),
+    },
+  };
+
+  return JSON.stringify(normalized);
 }
 
 export async function saveCouncilMatrixBatch(params: {
@@ -1778,4 +1940,332 @@ export async function submitTeacherPortalSubjectEntries(params: {
     teacherName: nextTeacherName,
     teacherEmail: nextTeacherEmail,
   };
+}
+
+export interface PreCouncilTeacherPortalConversation {
+  id: string;
+  subjectId: string | null;
+  subjectName: string;
+  teacherName: string;
+  teacherEmail: string | null;
+  monitoredStudents: Array<{
+    studentId: string;
+    name: string;
+  }>;
+  monitoredStudentsNotes: string;
+  agreements: string;
+  conversationStatus: "PENDING" | "COMPLETED";
+  conversationDate: string | null;
+  digitalAckEmail: string | null;
+  digitalAckName: string | null;
+  digitalAckAt: string | null;
+}
+
+export interface PreCouncilTeacherPortalContext {
+  boardId: string;
+  year: number;
+  trimester: 1 | 2 | 3;
+  lockedConversationId: string | null;
+  schoolName: string;
+  classGroup: {
+    id: string;
+    name: string;
+    segment: string;
+    shift: string;
+  };
+  periodLabel: string;
+  objectiveText: string;
+  responsiblePedagogueName: string;
+  responsiblePedagogueRole: string;
+  conversations: PreCouncilTeacherPortalConversation[];
+  synthesis: PreCouncilSynthesis;
+}
+
+export async function getSavedPreCouncilForLink(params: {
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  conversationId?: string | null;
+}): Promise<{
+  preCouncil: PreCouncilData;
+  matchedConversation: PreCouncilSubjectConversation | null;
+}> {
+  const { schoolId, boardId, trimester, conversationId } = params;
+
+  const trimesters = await prisma.classCouncilTrimester.findMany({
+    where: { boardId, schoolId },
+    select: { trimester: true, preCouncilJson: true },
+  });
+  const trimesterRecord = trimesters.find((t) => t.trimester === trimester) || null;
+  const parsed = parsePreCouncilData(trimesterRecord?.preCouncilJson);
+
+  if (!parsed || parsed.conversations.length === 0) {
+    throw new CouncilDomainError(
+      "Salve o Pré-Conselho deste trimestre com ao menos um componente antes de gerar o link de ciência.",
+      400
+    );
+  }
+
+  let matchedConversation: PreCouncilSubjectConversation | null = null;
+  if (conversationId) {
+    matchedConversation =
+      parsed.conversations.find((c) => c.id === conversationId) || null;
+    if (!matchedConversation) {
+      throw new CouncilDomainError(
+        "Componente do Pré-Conselho não encontrado neste trimestre.",
+        404
+      );
+    }
+  }
+
+  return {
+    preCouncil: parsed,
+    matchedConversation,
+  };
+}
+
+/**
+ * Carrega o contexto LGPD-safe do Pré-Conselho para ciência docente via @escola.pr.gov.br.
+ * Omite integralmente selos de saúde, CGM, telefone e pareceres qualitativos sigilosos.
+ */
+export async function getPreCouncilTeacherPortalContext(params: {
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  lockedConversationId: string | null;
+}): Promise<PreCouncilTeacherPortalContext> {
+  const { schoolId, boardId, trimester, lockedConversationId } = params;
+
+  const [board, schoolRecord] = await Promise.all([
+    prisma.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      include: {
+        classGroup: { select: { id: true, name: true, segment: true, shift: true } },
+        trimesters: {
+          where: { trimester },
+        },
+        studentCards: {
+          orderBy: { student: { name: "asc" } },
+          include: {
+            student: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    }),
+    prisma.school?.findUnique
+      ? prisma.school.findUnique({
+          where: { id: schoolId },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!board) {
+    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+  }
+  if (board.schoolId !== schoolId) {
+    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+  }
+
+  const trimesterRecord = (board.trimesters || []).find((t) => t.trimester === trimester) || null;
+  const preCouncil = parsePreCouncilData(trimesterRecord?.preCouncilJson);
+
+  if (!preCouncil || preCouncil.conversations.length === 0) {
+    throw new CouncilDomainError(
+      "O Pré-Conselho deste trimestre ainda não possui conversas registradas.",
+      404
+    );
+  }
+
+  let visibleConversations = preCouncil.conversations;
+  if (lockedConversationId) {
+    const matched = visibleConversations.find((c) => c.id === lockedConversationId);
+    if (!matched) {
+      throw new CouncilDomainError(
+        "O componente curricular associado a este link não está mais disponível.",
+        404
+      );
+    }
+    visibleConversations = [matched];
+  }
+
+  const studentNameById = new Map<string, string>();
+  for (const card of board.studentCards || []) {
+    if (card.student?.name) {
+      studentNameById.set(card.studentId, card.student.name);
+    }
+  }
+
+  return {
+    boardId: board.id,
+    year: board.year,
+    trimester,
+    lockedConversationId,
+    schoolName: schoolRecord?.name || "Instituição de Ensino",
+    classGroup: {
+      id: board.classGroup.id,
+      name: board.classGroup.name,
+      segment: board.classGroup.segment,
+      shift: board.classGroup.shift,
+    },
+    periodLabel: preCouncil.periodLabel,
+    objectiveText: preCouncil.objectiveText,
+    responsiblePedagogueName: preCouncil.responsiblePedagogueName,
+    responsiblePedagogueRole: preCouncil.responsiblePedagogueRole,
+    conversations: visibleConversations.map((c) => ({
+      id: c.id,
+      subjectId: c.subjectId,
+      subjectName: c.subjectName,
+      teacherName: c.teacherName,
+      teacherEmail: c.teacherEmail,
+      monitoredStudents: c.monitoredStudentIds
+        .map((stId) => {
+          const name = studentNameById.get(stId);
+          return name ? { studentId: stId, name } : null;
+        })
+        .filter((item): item is { studentId: string; name: string } => Boolean(item)),
+      monitoredStudentsNotes: c.monitoredStudentsNotes,
+      agreements: c.agreements,
+      conversationStatus: c.conversationStatus,
+      conversationDate: c.conversationDate,
+      digitalAckEmail: c.digitalAckEmail,
+      digitalAckName: c.digitalAckName,
+      digitalAckAt: c.digitalAckAt,
+    })),
+    synthesis: preCouncil.synthesis,
+  };
+}
+
+/**
+ * Registra ciência digital verificada (@escola.pr.gov.br) para um componente do Pré-Conselho.
+ */
+export async function confirmPreCouncilTeacherAck(params: {
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  lockedConversationId: string | null;
+  conversationId: string;
+  verifiedEmail: string;
+  verifiedName: string;
+}) {
+  const {
+    schoolId,
+    boardId,
+    trimester,
+    lockedConversationId,
+    conversationId,
+    verifiedEmail,
+    verifiedName,
+  } = params;
+
+  if (lockedConversationId && lockedConversationId !== conversationId) {
+    throw new CouncilDomainError("Este link é exclusivo para outro componente curricular.", 403);
+  }
+
+  const cleanEmail = verifiedEmail.trim().toLowerCase();
+  const cleanName = verifiedName.trim() || cleanEmail.split("@")[0];
+  const ackAtIso = new Date().toISOString();
+  const todayYmd = getTodayYmdSaoPaulo();
+
+  return prisma.$transaction(async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      select: { id: true, schoolId: true },
+    });
+
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (board.schoolId !== schoolId) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    const trimesters = await tx.classCouncilTrimester.findMany({
+      where: { boardId, schoolId },
+      select: { trimester: true, preCouncilJson: true },
+    });
+    const trimesterRecord = trimesters.find((t) => t.trimester === trimester) || null;
+    const preCouncil = parsePreCouncilData(trimesterRecord?.preCouncilJson);
+
+    if (!preCouncil) {
+      throw new CouncilDomainError(
+        "O Pré-Conselho deste trimestre ainda não foi salvo.",
+        404
+      );
+    }
+
+    const targetIndex = preCouncil.conversations.findIndex((c) => c.id === conversationId);
+    if (targetIndex < 0) {
+      throw new CouncilDomainError(
+        "Componente curricular do Pré-Conselho não encontrado.",
+        404
+      );
+    }
+
+    const target = preCouncil.conversations[targetIndex];
+    const existingTeacherEmail = (target.teacherEmail || "").trim().toLowerCase();
+    if (existingTeacherEmail && existingTeacherEmail !== cleanEmail) {
+      throw new CouncilDomainError(
+        `Este componente está vinculado a outro docente (${target.teacherName || existingTeacherEmail}). Solicite ajuste à equipe pedagógica se necessário.`,
+        403
+      );
+    }
+
+    const existingAckEmail = (target.digitalAckEmail || "").trim().toLowerCase();
+    if (existingAckEmail && existingAckEmail !== cleanEmail) {
+      throw new CouncilDomainError(
+        `A ciência deste componente já foi confirmada por ${target.digitalAckName || existingAckEmail}.`,
+        409
+      );
+    }
+
+    const updatedConv: PreCouncilSubjectConversation = {
+      ...target,
+      teacherEmail: existingTeacherEmail || cleanEmail,
+      teacherName: target.teacherName.trim() || cleanName,
+      conversationStatus: "COMPLETED",
+      conversationDate: target.conversationDate || todayYmd,
+      digitalAckEmail: cleanEmail,
+      digitalAckName: cleanName,
+      digitalAckAt: ackAtIso,
+    };
+
+    const nextPreCouncil: PreCouncilData = {
+      ...preCouncil,
+      conversations: preCouncil.conversations.map((c, idx) =>
+        idx === targetIndex ? updatedConv : c
+      ),
+    };
+
+    await tx.classCouncilTrimester.upsert({
+      where: { boardId_trimester: { boardId, trimester } },
+      create: {
+        schoolId,
+        boardId,
+        trimester,
+        status: "IN_PROGRESS",
+        preCouncilJson: JSON.stringify(nextPreCouncil),
+        updatedByName: cleanName,
+        updatedByEmail: cleanEmail,
+      },
+      update: {
+        preCouncilJson: JSON.stringify(nextPreCouncil),
+      },
+    });
+
+    return {
+      conversationId: updatedConv.id,
+      subjectName: updatedConv.subjectName,
+      teacherName: updatedConv.teacherName,
+      digitalAckEmail: cleanEmail,
+      digitalAckName: cleanName,
+      digitalAckAt: ackAtIso,
+      trimester,
+    };
+  });
 }

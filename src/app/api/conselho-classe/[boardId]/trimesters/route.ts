@@ -57,6 +57,18 @@ export async function PATCH(
       userEmail: authCheck.email,
     });
 
+    const preCouncilAuditSummary =
+      parsed.data.preCouncil !== undefined
+        ? {
+            hasPreCouncil: parsed.data.preCouncil !== null,
+            preCouncilTotalCount: parsed.data.preCouncil?.conversations.length ?? 0,
+            preCouncilCompletedCount:
+              parsed.data.preCouncil?.conversations.filter(
+                (c) => c.conversationStatus === "COMPLETED"
+              ).length ?? 0,
+          }
+        : {};
+
     await logAudit({
       action: "UPDATE_COUNCIL_TRIMESTER",
       entityType: "ClassCouncilTrimester",
@@ -66,6 +78,7 @@ export async function PATCH(
         boardId,
         trimester: trimesterRecord.trimester,
         status: trimesterRecord.status,
+        ...preCouncilAuditSummary,
       },
       user: {
         id: authCheck.userId,

@@ -12,6 +12,14 @@ import {
   type SeatingMapPrintPerspective,
 } from "@/components/conselho/seatingMapUtils";
 import {
+  buildInitialPreCouncilData,
+  DEFAULT_PRE_COUNCIL_ACK_STATEMENT,
+  DEFAULT_PRE_COUNCIL_PEDAGOGUE_ROLE,
+  formatPreCouncilDatePtBr,
+  formatPreCouncilDateTimePtBr,
+  parsePreCouncilData,
+} from "@/components/conselho/preCouncilUtils";
+import {
   COUNCIL_ACTION_RESPONSIBLE_LABELS,
   COUNCIL_DESCRIPTORS,
   COUNCIL_ENROLLMENT_STATUS_LABELS,
@@ -28,7 +36,7 @@ import {
   type SchoolPrintMeta,
 } from "@/components/conselho/types";
 
-export type CouncilPrintMode = "turma" | "pos-conselho" | "aluno" | "mapa-sala";
+export type CouncilPrintMode = "turma" | "pre-conselho" | "pos-conselho" | "aluno" | "mapa-sala";
 
 interface AnonymizedOpinions {
   t1: string;
@@ -146,14 +154,26 @@ export default function ConselhoPrintClient({
     [board.studentCards]
   );
 
+  const preCouncilData = useMemo(
+    () =>
+      parsePreCouncilData(trimesterRecord?.preCouncilJson) ??
+      buildInitialPreCouncilData({
+        trimester,
+        subjects: board.subjects,
+      }),
+    [trimesterRecord?.preCouncilJson, trimester, board.subjects]
+  );
+
   const docTitle =
     mode === "turma"
       ? `Ficha Trimestral da Turma — ${trimester}º Trimestre / ${board.year}`
-      : mode === "pos-conselho"
-        ? `Ata de Reunião de Pós-Conselho — ${trimester}º Trimestre / ${board.year}`
-        : mode === "mapa-sala"
-          ? `Mapa de Sala — ${selectedSeatingMap ? `${selectedSeatingMap.name} • ` : ""}${board.year}`
-          : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
+      : mode === "pre-conselho"
+        ? `PRÉ-CONSELHO DE CLASSE — ${preCouncilData.periodLabel} / ${board.year}`
+        : mode === "pos-conselho"
+          ? `Ata de Reunião de Pós-Conselho — ${trimester}º Trimestre / ${board.year}`
+          : mode === "mapa-sala"
+            ? `Mapa de Sala — ${selectedSeatingMap ? `${selectedSeatingMap.name} • ` : ""}${board.year}`
+            : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
 
   return (
     <div className={`${mode === "mapa-sala" ? "max-w-7xl" : "max-w-5xl"} mx-auto space-y-5`}>
@@ -179,6 +199,7 @@ export default function ConselhoPrintClient({
             className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100"
           >
             <option value="turma">Ficha da Turma</option>
+            <option value="pre-conselho">Pré-Conselho de Classe</option>
             <option value="pos-conselho">Reunião de Pós-Conselho</option>
             <option value="aluno">Ficha Individual do Estudante</option>
             <option value="mapa-sala">Mapa de Sala (A4 Paisagem)</option>
@@ -261,7 +282,7 @@ export default function ConselhoPrintClient({
             </select>
           )}
 
-          {mode !== "pos-conselho" && mode !== "mapa-sala" && (
+          {mode !== "pre-conselho" && mode !== "pos-conselho" && mode !== "mapa-sala" && (
             <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -469,6 +490,197 @@ export default function ConselhoPrintClient({
                 <p className="whitespace-pre-line">{trimesterRecord?.plannedActions || "—"}</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* MODO 1B: PRÉ-CONSELHO DE CLASSE (3 PÁGINAS) */}
+        {mode === "pre-conselho" && (
+          <div className="space-y-5 text-xs">
+            <section className="space-y-1">
+              <h3 className="text-xs font-black text-slate-900">Objetivo</h3>
+              <p className="text-[11px] leading-relaxed text-slate-800 whitespace-pre-line">
+                {preCouncilData.objectiveText}
+              </p>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="text-xs font-black text-slate-900">
+                Registro de Conversas Individuais por Componente Curricular
+              </h3>
+              <table className="w-full border-collapse border border-slate-400 text-[10.5px]">
+                <thead className="print:table-header-group">
+                  <tr className="bg-slate-100 text-slate-900 text-left">
+                    <th className="border border-slate-400 p-2 w-[18%] font-bold">
+                      Componente Curricular
+                    </th>
+                    <th className="border border-slate-400 p-2 w-[16%] font-bold">Docente</th>
+                    <th className="border border-slate-400 p-2 w-[33%] font-bold">
+                      Estudantes em Acompanhamento
+                    </th>
+                    <th className="border border-slate-400 p-2 w-[33%] font-bold">
+                      Combinados / Encaminhamentos
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preCouncilData.conversations.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="border border-slate-400 p-4 text-center text-slate-500"
+                      >
+                        Nenhum componente curricular registrado para este Pré-Conselho.
+                      </td>
+                    </tr>
+                  ) : (
+                    preCouncilData.conversations.map((conv) => {
+                      const studentNames = conv.monitoredStudentIds
+                        .map((id) => cardByStudentId.get(id)?.student.name)
+                        .filter((n): n is string => Boolean(n));
+
+                      return (
+                        <tr key={conv.id} className="break-inside-avoid align-top">
+                          <td className="border border-slate-400 p-2 font-bold text-slate-900">
+                            {conv.subjectName}
+                          </td>
+                          <td className="border border-slate-400 p-2 text-slate-800">
+                            {conv.teacherName || "—"}
+                          </td>
+                          <td className="border border-slate-400 p-2 text-slate-800">
+                            <div className="min-h-[28px] space-y-1">
+                              {studentNames.length > 0 && (
+                                <p className="font-semibold leading-snug">
+                                  {studentNames.join(", ")}
+                                </p>
+                              )}
+                              {conv.monitoredStudentsNotes && (
+                                <p className="whitespace-pre-line text-slate-700 leading-snug">
+                                  {conv.monitoredStudentsNotes}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="border border-slate-400 p-2 text-slate-800">
+                            <div className="min-h-[28px] whitespace-pre-line leading-snug">
+                              {conv.agreements || ""}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </section>
+
+            {/* Síntese do Pré-Conselho da Turma */}
+            <section className="space-y-3 break-inside-avoid pt-2">
+              <h3 className="text-xs font-black uppercase tracking-wide text-slate-900">
+                SÍNTESE DO PRÉ-CONSELHO DA TURMA
+              </h3>
+
+              {(
+                [
+                  {
+                    label: "Principais dificuldades identificadas na turma:",
+                    value: preCouncilData.synthesis.mainDifficulties,
+                    lines: 2,
+                  },
+                  {
+                    label: "Estudantes que necessitam de maior acompanhamento pedagógico:",
+                    value: preCouncilData.synthesis.priorityStudents,
+                    lines: 3,
+                  },
+                  {
+                    label: "Questões relacionadas à frequência:",
+                    value: preCouncilData.synthesis.attendanceIssues,
+                    lines: 2,
+                  },
+                  {
+                    label: "Questões relacionadas ao comportamento/convivência:",
+                    value: preCouncilData.synthesis.behaviorIssues,
+                    lines: 2,
+                  },
+                  {
+                    label: "Encaminhamentos que ficarão sob responsabilidade da equipe pedagógica:",
+                    value: preCouncilData.synthesis.pedagogicalActions,
+                    lines: 3,
+                  },
+                ] as const
+              ).map((field) => (
+                <div key={field.label} className="space-y-1">
+                  <p className="text-[11px] font-bold text-slate-900">{field.label}</p>
+                  {field.value ? (
+                    <div className="rounded-lg border border-slate-300 bg-slate-50/40 p-2 text-[11px] whitespace-pre-line text-slate-800 leading-relaxed">
+                      {field.value}
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 pt-1">
+                      {Array.from({ length: field.lines }).map((_, lineIdx) => (
+                        <div key={lineIdx} className="border-b border-slate-400 h-4" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+
+            {/* Registro de Ciência dos Docentes (Página 3) */}
+            <section className="space-y-2.5 print:break-before-page pt-2">
+              <div className="space-y-1">
+                <h3 className="text-xs font-black text-slate-900">
+                  Registro de Ciência dos Docentes
+                </h3>
+                <p className="text-[11px] leading-relaxed text-slate-800">
+                  {DEFAULT_PRE_COUNCIL_ACK_STATEMENT}
+                </p>
+              </div>
+
+              <table className="w-full border-collapse border border-slate-400 text-[10.5px]">
+                <thead className="print:table-header-group">
+                  <tr className="bg-slate-100 text-slate-900 text-left">
+                    <th className="border border-slate-400 p-2 w-[24%] font-bold">
+                      Professor(a)
+                    </th>
+                    <th className="border border-slate-400 p-2 w-[26%] font-bold">
+                      Componente Curricular
+                    </th>
+                    <th className="border border-slate-400 p-2 w-[34%] font-bold">Assinatura</th>
+                    <th className="border border-slate-400 p-2 w-[16%] font-bold">Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preCouncilData.conversations.map((conv) => (
+                    <tr key={`ack-${conv.id}`} className="break-inside-avoid">
+                      <td className="border border-slate-400 p-2 font-semibold text-slate-900">
+                        {conv.teacherName || "—"}
+                      </td>
+                      <td className="border border-slate-400 p-2 text-slate-800">
+                        {conv.subjectName}
+                      </td>
+                      <td className="border border-slate-400 p-2 text-slate-800">
+                        {conv.digitalAckEmail ? (
+                          <div className="text-[9.5px] leading-snug">
+                            <span className="font-bold block">
+                              Ciência digital confirmada por{" "}
+                              {conv.digitalAckName || conv.digitalAckEmail}
+                            </span>
+                            <span className="text-slate-600">{conv.digitalAckEmail}</span>
+                          </div>
+                        ) : (
+                          <div className="min-h-[24px]" />
+                        )}
+                      </td>
+                      <td className="border border-slate-400 p-2 text-slate-800">
+                        {conv.digitalAckAt
+                          ? formatPreCouncilDateTimePtBr(conv.digitalAckAt)
+                          : formatPreCouncilDatePtBr(conv.conversationDate) || ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
           </div>
         )}
 
@@ -863,22 +1075,35 @@ export default function ConselhoPrintClient({
         })()}
 
         {/* Rodapé de Assinaturas Físicas A4 */}
-        <footer
-          className={`${
-            mode === "mapa-sala" ? "pt-4" : "pt-8"
-          } grid grid-cols-2 gap-8 text-center text-[11px] print:break-inside-avoid`}
-        >
-          <div>
-            <div className="border-t border-slate-800 pt-1 font-semibold">
-              Equipe Pedagógica / Coordenação
+        {mode === "pre-conselho" ? (
+          <footer className="pt-10 flex justify-center text-center text-[11px] print:break-inside-avoid">
+            <div className="w-80">
+              <div className="border-t border-slate-800 pt-1.5 font-bold text-slate-900">
+                {preCouncilData.responsiblePedagogueName || "Equipe Pedagógica"}
+              </div>
+              <div className="text-slate-700">
+                {preCouncilData.responsiblePedagogueRole || DEFAULT_PRE_COUNCIL_PEDAGOGUE_ROLE}
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="border-t border-slate-800 pt-1 font-semibold">
-              Direção Escolar
+          </footer>
+        ) : (
+          <footer
+            className={`${
+              mode === "mapa-sala" ? "pt-4" : "pt-8"
+            } grid grid-cols-2 gap-8 text-center text-[11px] print:break-inside-avoid`}
+          >
+            <div>
+              <div className="border-t border-slate-800 pt-1 font-semibold">
+                Equipe Pedagógica / Coordenação
+              </div>
             </div>
-          </div>
-        </footer>
+            <div>
+              <div className="border-t border-slate-800 pt-1 font-semibold">
+                Direção Escolar
+              </div>
+            </div>
+          </footer>
+        )}
       </div>
     </div>
   );

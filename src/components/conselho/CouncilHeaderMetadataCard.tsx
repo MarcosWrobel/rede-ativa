@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   BookOpen,
+  ClipboardList,
   Eye,
   EyeOff,
   FileUp,
@@ -30,6 +31,8 @@ interface CouncilHeaderMetadataCardProps {
   hideSensitiveTags: boolean;
   onToggleHideSensitiveTags: () => void;
   onOpenSubjectsModal: () => void;
+  onOpenPreCouncilModal?: () => void;
+  preCouncilProgress?: { completed: number; total: number } | null;
   onOpenPdfImportModal?: () => void;
   onOpenSeatingMap?: () => void;
   onBoardUpdated: (updated: CouncilBoardDetailRecord) => void;
@@ -51,6 +54,8 @@ export default function CouncilHeaderMetadataCard({
   hideSensitiveTags,
   onToggleHideSensitiveTags,
   onOpenSubjectsModal,
+  onOpenPreCouncilModal,
+  preCouncilProgress,
   onOpenPdfImportModal,
   onOpenSeatingMap,
   onBoardUpdated,
@@ -215,6 +220,22 @@ export default function CouncilHeaderMetadataCard({
             <BookOpen className="w-3.5 h-3.5 text-sky-600" />
             <span>Componentes</span>
           </button>
+
+          {onOpenPreCouncilModal && (
+            <button
+              type="button"
+              onClick={onOpenPreCouncilModal}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-bold text-indigo-900 dark:text-indigo-200 transition cursor-pointer"
+            >
+              <ClipboardList className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Pré-Conselho</span>
+              {preCouncilProgress && preCouncilProgress.total > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-extrabold leading-none">
+                  {preCouncilProgress.completed}/{preCouncilProgress.total}
+                </span>
+              )}
+            </button>
+          )}
 
           {!readOnly && onOpenPdfImportModal && (
             <button

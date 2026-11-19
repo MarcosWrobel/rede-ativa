@@ -458,12 +458,69 @@ export const councilPostActionItemSchema = z.object({
   dueDate: z.string().optional().nullable(),
 });
 
+const councilPreCouncilDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+export const councilPreCouncilConversationSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  subjectId: z.string().trim().min(1).max(100).optional().nullable(),
+  subjectName: z.string().trim().min(1, "Nome do componente é obrigatório").max(160),
+  teacherName: z.string().trim().max(200).optional().default(""),
+  teacherEmail: z
+    .string()
+    .trim()
+    .email("E-mail docente inválido")
+    .max(200)
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  monitoredStudentIds: z
+    .array(z.string().trim().min(1).max(100))
+    .max(120)
+    .optional()
+    .default([])
+    .transform((arr) => Array.from(new Set(arr))),
+  monitoredStudentsNotes: z.string().trim().max(3000).optional().default(""),
+  agreements: z.string().trim().max(3000).optional().default(""),
+  conversationStatus: z.enum(["PENDING", "COMPLETED"]).optional().default("PENDING"),
+  conversationDate: z
+    .string()
+    .trim()
+    .regex(councilPreCouncilDateRegex, "Data inválida (use AAAA-MM-DD)")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+});
+
+export const councilPreCouncilSynthesisSchema = z.object({
+  mainDifficulties: z.string().trim().max(4000).optional().default(""),
+  priorityStudents: z.string().trim().max(4000).optional().default(""),
+  attendanceIssues: z.string().trim().max(4000).optional().default(""),
+  behaviorIssues: z.string().trim().max(4000).optional().default(""),
+  pedagogicalActions: z.string().trim().max(4000).optional().default(""),
+});
+
+export const councilPreCouncilSchema = z.object({
+  version: z.literal(1).default(1),
+  periodLabel: z.string().trim().min(1, "Informe o período de referência").max(120),
+  objectiveText: z.string().trim().max(2000).optional().default(""),
+  responsiblePedagogueName: z.string().trim().max(200).optional().default(""),
+  responsiblePedagogueRole: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
+    .default("Pedagoga Responsável"),
+  conversations: z.array(councilPreCouncilConversationSchema).max(60),
+  synthesis: councilPreCouncilSynthesisSchema,
+});
+
 export const councilTrimesterUpdateSchema = z.object({
   trimester: councilTrimesterEnum,
   status: z.enum(["IN_PROGRESS", "CONSOLIDATED"]).optional(),
   positivePoints: z.string().trim().max(5000).optional().nullable(),
   attentionPoints: z.string().trim().max(5000).optional().nullable(),
   plannedActions: z.string().trim().max(5000).optional().nullable(),
+  preCouncil: councilPreCouncilSchema.nullable().optional(),
   postCouncilHeldAt: z.string().optional().nullable(),
   postCouncilAdvances: z.string().trim().max(4000).optional().nullable(),
   postCouncilWhatWorked: z.string().trim().max(4000).optional().nullable(),
@@ -524,6 +581,17 @@ export const councilTeacherLinkCreateSchema = z.object({
   trimester: councilTrimesterEnum,
   subjectId: z.string().trim().min(1).max(100).optional().nullable(),
   expiresInDays: z.number().int().min(1).max(30).optional().default(7),
+});
+
+export const councilPreCouncilLinkCreateSchema = z.object({
+  trimester: councilTrimesterEnum,
+  conversationId: z.string().trim().min(1).max(100).optional().nullable(),
+  expiresInDays: z.number().int().min(1).max(30).optional().default(7),
+});
+
+export const councilPreCouncilAckSubmitSchema = z.object({
+  googleIdToken: z.string().trim().min(1, "Credencial Google institucional é obrigatória."),
+  conversationId: z.string().trim().min(1, "Selecione o componente curricular.").max(100),
 });
 
 export const councilTeacherPortalAuthSchema = z.object({

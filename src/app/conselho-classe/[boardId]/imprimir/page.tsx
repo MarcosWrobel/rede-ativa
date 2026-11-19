@@ -77,7 +77,10 @@ export default async function ConselhoPrintPage({
   const sp = searchParams ? await searchParams : {};
   const rawMode = sp?.mode;
   const initialMode: CouncilPrintMode =
-    rawMode === "pos-conselho" || rawMode === "aluno" || rawMode === "mapa-sala"
+    rawMode === "pre-conselho" ||
+    rawMode === "pos-conselho" ||
+    rawMode === "aluno" ||
+    rawMode === "mapa-sala"
       ? rawMode
       : "turma";
 

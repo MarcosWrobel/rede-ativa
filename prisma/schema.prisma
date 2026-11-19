@@ -591,6 +591,9 @@ model ClassCouncilTrimester {
   attentionPoints                 String?           // Pontos de atenção / desafios
   plannedActions                  String?           // Ações planejadas pela equipe
 
+  // Fluxo de Pré-Conselho da Turma (JSON versionado validado via Zod: conversas por componente, síntese e ciência docente)
+  preCouncilJson                  String?
+
   // Ata de Reunião de Pós-Conselho com Estudantes (Autoavaliação Coletiva)
   postCouncilHeldAt               DateTime?
   // Eixo 1: Pontos Positivos

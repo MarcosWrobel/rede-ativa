@@ -208,6 +208,7 @@ export interface CouncilTrimesterRecord {
   positivePoints: string | null;
   attentionPoints: string | null;
   plannedActions: string | null;
+  preCouncilJson?: string | null;
   postCouncilHeldAt: string | Date | null;
   postCouncilAdvances: string | null;
   postCouncilWhatWorked: string | null;
@@ -223,6 +224,42 @@ export interface CouncilTrimesterRecord {
   updatedByName: string | null;
   updatedByEmail: string | null;
   updatedAt: string | Date;
+}
+
+export type PreCouncilConversationStatus = "PENDING" | "COMPLETED";
+
+export interface PreCouncilSubjectConversation {
+  id: string;
+  subjectId: string | null;
+  subjectName: string;
+  teacherName: string;
+  teacherEmail: string | null;
+  monitoredStudentIds: string[];
+  monitoredStudentsNotes: string;
+  agreements: string;
+  conversationStatus: PreCouncilConversationStatus;
+  conversationDate: string | null;
+  digitalAckEmail: string | null;
+  digitalAckName: string | null;
+  digitalAckAt: string | null;
+}
+
+export interface PreCouncilSynthesis {
+  mainDifficulties: string;
+  priorityStudents: string;
+  attendanceIssues: string;
+  behaviorIssues: string;
+  pedagogicalActions: string;
+}
+
+export interface PreCouncilData {
+  version: 1;
+  periodLabel: string;
+  objectiveText: string;
+  responsiblePedagogueName: string;
+  responsiblePedagogueRole: string;
+  conversations: PreCouncilSubjectConversation[];
+  synthesis: PreCouncilSynthesis;
 }
 
 export interface CouncilBelowAvgItem {

@@ -64,6 +64,7 @@ export default async function ConselhoTurmaPage({
       initialBoard={board}
       availableSourceBoards={availableSourceBoards}
       canEdit={canEdit}
+      currentUserName={session.user.name || ""}
     />
   );
 }

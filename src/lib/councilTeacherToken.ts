@@ -152,3 +152,150 @@ export function verifyCouncilTeacherToken(
     return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
   }
 }
+
+export interface PreCouncilTeacherTokenPayload {
+  v: 1;
+  purpose: "PRE_COUNCIL";
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  conversationId: string | null;
+  exp: number;
+}
+
+export type VerifyPreCouncilTeacherTokenResult =
+  | { ok: true; payload: PreCouncilTeacherTokenPayload }
+  | { ok: false; reason: "invalid" | "expired"; error: string };
+
+function getPreCouncilSigningKey(): Buffer {
+  const secret = (process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "").trim();
+  if (!secret) {
+    if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") {
+      throw new Error(
+        "Configuração de criptografia ausente: defina NEXTAUTH_SECRET ou AUTH_SECRET em produção."
+      );
+    }
+    return crypto
+      .createHash("sha256")
+      .update("rede-ativa-dev-ephemeral-pre-council-teacher-key", "utf8")
+      .digest();
+  }
+  return crypto
+    .createHash("sha256")
+    .update(`pre-council-teacher-link:${secret}`, "utf8")
+    .digest();
+}
+
+/**
+ * Emite token stateless com domínio criptográfico exclusivo para ciência docente no Pré-Conselho.
+ */
+export function createPreCouncilTeacherToken(params: {
+  schoolId: string;
+  boardId: string;
+  trimester: 1 | 2 | 3;
+  conversationId?: string | null;
+  expiresInDays?: number;
+  nowMs?: number;
+}): { token: string; expiresAt: Date; payload: PreCouncilTeacherTokenPayload } {
+  const schoolId = params.schoolId.trim();
+  const boardId = params.boardId.trim();
+  if (!schoolId || !boardId) {
+    throw new Error("Identificadores de escola e conselho são obrigatórios para gerar o link.");
+  }
+
+  const days = Math.max(1, Math.min(30, Math.trunc(params.expiresInDays ?? 7)));
+  const nowMs = params.nowMs ?? Date.now();
+  const exp = nowMs + days * 24 * 60 * 60 * 1000;
+
+  const payload: PreCouncilTeacherTokenPayload = {
+    v: 1,
+    purpose: "PRE_COUNCIL",
+    schoolId,
+    boardId,
+    trimester: params.trimester,
+    conversationId: params.conversationId?.trim() || null,
+    exp,
+  };
+
+  const payloadB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const sigB64 = signPayloadEncoded(payloadB64, getPreCouncilSigningKey());
+
+  return {
+    token: `${payloadB64}.${sigB64}`,
+    expiresAt: new Date(exp),
+    payload,
+  };
+}
+
+/**
+ * Valida integridade criptográfica e prazo de expiração do token de ciência docente do Pré-Conselho.
+ */
+export function verifyPreCouncilTeacherToken(
+  token: string,
+  nowMs: number = Date.now()
+): VerifyPreCouncilTeacherTokenResult {
+  const clean = typeof token === "string" ? token.trim() : "";
+  if (!clean) {
+    return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+  }
+
+  const dotParts = clean.split(".");
+  if (dotParts.length !== 2 || !dotParts[0] || !dotParts[1]) {
+    return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+  }
+
+  const [payloadB64, sigB64] = dotParts;
+
+  try {
+    const key = getPreCouncilSigningKey();
+    const expectedSigB64 = signPayloadEncoded(payloadB64, key);
+
+    if (!safeCompareStrings(sigB64, expectedSigB64)) {
+      return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+    }
+
+    const decodedJson = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const parsed: unknown = JSON.parse(decodedJson);
+
+    if (!parsed || typeof parsed !== "object") {
+      return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    const trimester = obj.trimester;
+    if (
+      obj.v !== 1 ||
+      obj.purpose !== "PRE_COUNCIL" ||
+      typeof obj.schoolId !== "string" ||
+      !obj.schoolId.trim() ||
+      typeof obj.boardId !== "string" ||
+      !obj.boardId.trim() ||
+      (trimester !== 1 && trimester !== 2 && trimester !== 3) ||
+      (obj.conversationId !== null &&
+        (typeof obj.conversationId !== "string" || !obj.conversationId.trim())) ||
+      typeof obj.exp !== "number" ||
+      !Number.isFinite(obj.exp)
+    ) {
+      return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+    }
+
+    if (nowMs >= obj.exp) {
+      return { ok: false, reason: "expired", error: EXPIRED_TOKEN_ERROR };
+    }
+
+    return {
+      ok: true,
+      payload: {
+        v: 1,
+        purpose: "PRE_COUNCIL",
+        schoolId: obj.schoolId.trim(),
+        boardId: obj.boardId.trim(),
+        trimester,
+        conversationId: obj.conversationId ? obj.conversationId.trim() : null,
+        exp: obj.exp,
+      },
+    };
+  } catch {
+    return { ok: false, reason: "invalid", error: INVALID_TOKEN_ERROR };
+  }
+}
