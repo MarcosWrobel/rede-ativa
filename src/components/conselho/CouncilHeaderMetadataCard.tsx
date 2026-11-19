@@ -6,6 +6,7 @@ import {
   BookOpen,
   Eye,
   EyeOff,
+  FileUp,
   Printer,
   Save,
   ChevronDown,
@@ -29,6 +30,7 @@ interface CouncilHeaderMetadataCardProps {
   hideSensitiveTags: boolean;
   onToggleHideSensitiveTags: () => void;
   onOpenSubjectsModal: () => void;
+  onOpenPdfImportModal?: () => void;
   onBoardUpdated: (updated: CouncilBoardDetailRecord) => void;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
@@ -48,6 +50,7 @@ export default function CouncilHeaderMetadataCard({
   hideSensitiveTags,
   onToggleHideSensitiveTags,
   onOpenSubjectsModal,
+  onOpenPdfImportModal,
   onBoardUpdated,
   onNotify,
   readOnly = false,
@@ -199,6 +202,17 @@ export default function CouncilHeaderMetadataCard({
             <BookOpen className="w-3.5 h-3.5 text-sky-600" />
             <span>Componentes</span>
           </button>
+
+          {!readOnly && onOpenPdfImportModal && (
+            <button
+              type="button"
+              onClick={onOpenPdfImportModal}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-xs font-bold text-sky-900 dark:text-sky-200 transition cursor-pointer"
+            >
+              <FileUp className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+              <span>Importar PDF SERE</span>
+            </button>
+          )}
 
           <button
             type="button"

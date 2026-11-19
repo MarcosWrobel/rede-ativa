@@ -8,7 +8,7 @@ import {
   BookOpen,
   Calendar,
   ClipboardList,
-  Puzzle,
+  FileUp,
   Search,
   Users,
 } from "lucide-react";
@@ -180,34 +180,29 @@ export default function ConselhoIndexClient({
         </div>
       )}
 
-      {canUseBiScraper && canEdit && (
+      {canEdit && (
         <div className="rounded-2xl border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/40 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-start gap-2.5">
-            <Puzzle className="w-4 h-4 text-sky-700 dark:text-sky-300 mt-0.5 shrink-0" />
+            <FileUp className="w-4 h-4 text-sky-700 dark:text-sky-300 mt-0.5 shrink-0" />
             <div className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
               <strong className="font-bold text-slate-900 dark:text-white">
-                Importar notas pelo BI Aprendizagem Estadual:
+                Importação de notas via PDF do SERE:
               </strong>{" "}
-              abra as abas <span className="font-semibold">MAPA</span>,{" "}
-              <span className="font-semibold">TURMA</span> ou{" "}
-              <span className="font-semibold">ESCOLA</span> no Power BI com a Extensão Rede Ativa (v1.7.0)
-              para preencher notas trimestrais, componentes curriculares e lista abaixo da média.
+              abra uma turma abaixo e clique em <span className="font-semibold">Importar PDF SERE</span>{" "}
+              para enviar o Relatório de Acompanhamento Trimestral (incluindo os dois arquivos de
+              matriz da 3ª série) e preencher notas, componentes curriculares e lista abaixo de 6,0.
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 text-xs font-bold">
-            <Link
-              href="/faltas"
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-700 text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/50 transition"
-            >
-              Chave e extensão
-            </Link>
-            <Link
-              href="/gestao"
-              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >
-              Gestão Escolar
-            </Link>
-          </div>
+          {canUseBiScraper && (
+            <div className="flex items-center gap-2 shrink-0 text-xs font-bold">
+              <Link
+                href="/gestao"
+                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                Gestão Escolar
+              </Link>
+            </div>
+          )}
         </div>
       )}
 

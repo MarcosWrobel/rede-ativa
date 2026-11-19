@@ -67,7 +67,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes ativos passem (703 testes aprovados em 75 suítes Vitest — 78 arquivos no total com 3 `skipIf` de banco isolado e 4 casos de Redis/Postgres em `rateLimitDistributed.test.ts` —, incluindo `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts` a `sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes ativos passem (720 testes aprovados em 76 suítes Vitest — 79 arquivos no total com 3 `skipIf` de banco isolado e 4 casos de Redis/Postgres em `rateLimitDistributed.test.ts` —, incluindo `sereCouncilPdfImport.test.ts`, `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts` a `sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -144,28 +144,29 @@ A interface deve seguir os princípios de alta clareza operacional, concisão co
 ---
 
 ## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
-- **Contadores Verificados do Repositório:** **26 models Prisma** (`prisma/schema.prisma`), **33 páginas `page.tsx`** (`src/app/`), **61 Route Handlers `route.ts`** (`src/app/api/`), **9 módulos em `src/services/`**, **45 bibliotecas em `src/lib/`** e **75 suítes aprovadas (78 arquivos, 3 `skipIf` de banco isolado) / 703 testes Vitest aprovados (12 `skipIf`, 715 no total)** + **Extensão MV3 `v1.7.0`**.
+- **Contadores Verificados do Repositório:** **26 models Prisma** (`prisma/schema.prisma`), **33 páginas `page.tsx`** (`src/app/`), **62 Route Handlers `route.ts`** (`src/app/api/`), **10 módulos em `src/services/`**, **46 bibliotecas em `src/lib/`** e **76 suítes aprovadas (79 arquivos, 3 `skipIf` de banco isolado) / 720 testes Vitest aprovados (12 `skipIf`, 732 no total)** + **Extensão MV3 `v1.7.0`**.
 - **Estrutura de Referência:**
   ```text
   src/
-  ├── app/                 # 33 páginas SSR + 61 Route Handlers REST (/api/*)
+  ├── app/                 # 33 páginas SSR + 62 Route Handlers REST (/api/*)
   │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
   │   ├── /login           # Login institucional Google OAuth / dev condicional
   │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))
   │   ├── /preview-landing # Demonstração e simulador interativo público
-  │   ├── /conselho-classe # Acompanhamento Trimestral de Turmas e Pós-Conselho
+  │   ├── /conselho-classe # Acompanhamento Trimestral de Turmas e Pós-Conselho (com importação PDF SERE)
   │   └── ...              # Demais rotas operacionais, RBAC e portais QR (/validar, /assinar)
-  ├── services/            # 9 módulos de domínio, transações, sync e mensageria
+  ├── services/            # 10 módulos de domínio, transações, sync e mensageria
   │   ├── ataParticipantService.ts
   │   ├── ataFinalizationService.ts
   │   ├── classCouncilService.ts
   │   ├── classCouncilBiSyncService.ts
+  │   ├── classCouncilSerePdfService.ts
   │   ├── frequencySyncService.ts
   │   ├── messageDispatchService.ts
   │   └── messaging/       # Contratos e capacidade isolados (piloto Evolution MSG-*)
   ├── components/ata/editor/ # Subcomponentes acessíveis e tipagem estrita do editor de atas
   ├── components/conselho/   # Subcomponentes modulares do Conselho de Classe e Pós-Conselho
-  └── lib/                 # 45 bibliotecas (segurança multi-tenant, criptografia SHA-256, IA e parsers)
+  └── lib/                 # 46 bibliotecas (segurança multi-tenant, criptografia SHA-256, IA e parsers)
   ```
 - **Pacote da Extensão MV3:** O build gera `/public/extensao-rede-ativa.zip` como artefato principal (mantendo `/public/extensao-leopoldina.zip` automaticamente como alias de retrocompatibilidade).
 

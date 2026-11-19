@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import CouncilHeaderMetadataCard from "@/components/conselho/CouncilHeaderMetadataCard";
 import CouncilSubjectsManagerModal from "@/components/conselho/CouncilSubjectsManagerModal";
+import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
 import CouncilMatrixGrid from "@/components/conselho/CouncilMatrixGrid";
 import CouncilTrimesterOverviewTab from "@/components/conselho/CouncilTrimesterOverviewTab";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
@@ -50,6 +51,7 @@ export default function ConselhoTurmaClient({
   const [activeTab, setActiveTab] = useState<ActiveTabKey>("matrix");
   const [hideSensitiveTags, setHideSensitiveTags] = useState(false);
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
+  const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -198,6 +200,7 @@ export default function ConselhoTurmaClient({
         hideSensitiveTags={hideSensitiveTags}
         onToggleHideSensitiveTags={() => setHideSensitiveTags((prev) => !prev)}
         onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
+        onOpenPdfImportModal={() => setIsPdfImportModalOpen(true)}
         onBoardUpdated={setBoard}
         onNotify={notify}
         readOnly={!canEdit}
@@ -386,6 +389,17 @@ export default function ConselhoTurmaClient({
         onNotify={notify}
         readOnly={!canEdit}
       />
+
+      {canEdit && (
+        <CouncilSerePdfImportModal
+          open={isPdfImportModalOpen}
+          onClose={() => setIsPdfImportModalOpen(false)}
+          boardId={board.id}
+          classNameLabel={board.classGroup.name}
+          onBoardUpdated={setBoard}
+          onNotify={notify}
+        />
+      )}
 
       <CouncilStudentFichaModal
         open={Boolean(editingCard)}
