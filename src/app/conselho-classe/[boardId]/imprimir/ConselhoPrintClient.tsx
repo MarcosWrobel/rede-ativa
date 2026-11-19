@@ -4,6 +4,14 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
 import {
+  formatShortStudentName,
+  getDisplayGridForPerspective,
+  getEffectiveDoorSideForPerspective,
+  getEffectiveTeacherDeskForPerspective,
+  parseSeatingMapStore,
+  type SeatingMapPrintPerspective,
+} from "@/components/conselho/seatingMapUtils";
+import {
   COUNCIL_ACTION_RESPONSIBLE_LABELS,
   COUNCIL_DESCRIPTORS,
   COUNCIL_ENROLLMENT_STATUS_LABELS,
@@ -20,7 +28,7 @@ import {
   type SchoolPrintMeta,
 } from "@/components/conselho/types";
 
-export type CouncilPrintMode = "turma" | "pos-conselho" | "aluno";
+export type CouncilPrintMode = "turma" | "pos-conselho" | "aluno" | "mapa-sala";
 
 interface AnonymizedOpinions {
   t1: string;
@@ -36,6 +44,8 @@ interface ConselhoPrintClientProps {
   initialStudentId: string | null;
   initialHideHealthTags: boolean;
   anonymizedOpinionsByStudentId: Record<string, AnonymizedOpinions>;
+  initialMapId?: string | null;
+  initialPerspective?: SeatingMapPrintPerspective;
 }
 
 function getSchoolNetworkHeader(school: SchoolPrintMeta) {
@@ -68,6 +78,8 @@ export default function ConselhoPrintClient({
   initialStudentId,
   initialHideHealthTags,
   anonymizedOpinionsByStudentId,
+  initialMapId = null,
+  initialPerspective = "ROOM",
 }: ConselhoPrintClientProps) {
   const [mode, setMode] = useState<CouncilPrintMode>(initialMode);
   const [trimester, setTrimester] = useState<CouncilTrimesterNumber>(initialTrimester);
@@ -75,6 +87,18 @@ export default function ConselhoPrintClient({
     initialStudentId || board.studentCards[0]?.studentId || ""
   );
   const [hideHealthTags, setHideHealthTags] = useState<boolean>(initialHideHealthTags);
+  const seatingMapStore = useMemo(
+    () => parseSeatingMapStore(board.seatingMapLayoutJson),
+    [board.seatingMapLayoutJson]
+  );
+  const [selectedMapId, setSelectedMapId] = useState<string>(
+    () =>
+      (initialMapId && seatingMapStore.maps.some((m) => m.id === initialMapId)
+        ? initialMapId
+        : seatingMapStore.activeMapId ?? seatingMapStore.maps[0]?.id ?? "")
+  );
+  const [seatingPerspective, setSeatingPerspective] =
+    useState<SeatingMapPrintPerspective>(initialPerspective);
 
   const networkHeader = getSchoolNetworkHeader(school);
   const schoolLogo = school.logoUrl || "/logo.svg";
@@ -109,15 +133,34 @@ export default function ConselhoPrintClient({
     return ops.t3;
   }, [selectedStudentCard, anonymizedOpinionsByStudentId, trimester]);
 
+  const selectedSeatingMap = useMemo(
+    () =>
+      seatingMapStore.maps.find((m) => m.id === selectedMapId) ??
+      seatingMapStore.maps[0] ??
+      null,
+    [seatingMapStore.maps, selectedMapId]
+  );
+
+  const cardByStudentId = useMemo(
+    () => new Map(board.studentCards.map((c) => [c.studentId, c])),
+    [board.studentCards]
+  );
+
   const docTitle =
     mode === "turma"
       ? `Ficha Trimestral da Turma — ${trimester}º Trimestre / ${board.year}`
       : mode === "pos-conselho"
         ? `Ata de Reunião de Pós-Conselho — ${trimester}º Trimestre / ${board.year}`
-        : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
+        : mode === "mapa-sala"
+          ? `Mapa de Sala — ${selectedSeatingMap ? `${selectedSeatingMap.name} • ` : ""}${board.year}`
+          : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className={`${mode === "mapa-sala" ? "max-w-7xl" : "max-w-5xl"} mx-auto space-y-5`}>
+      {mode === "mapa-sala" && (
+        <style>{"@media print { @page { size: A4 landscape; margin: 8mm; } }"}</style>
+      )}
+
       {/* Barra de Controle (Oculta na Impressão) */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Link
@@ -138,18 +181,70 @@ export default function ConselhoPrintClient({
             <option value="turma">Ficha da Turma</option>
             <option value="pos-conselho">Reunião de Pós-Conselho</option>
             <option value="aluno">Ficha Individual do Estudante</option>
+            <option value="mapa-sala">Mapa de Sala (A4 Paisagem)</option>
           </select>
 
-          <select
-            aria-label="Trimestre para impressão"
-            value={trimester}
-            onChange={(e) => setTrimester(Number(e.target.value) as CouncilTrimesterNumber)}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100"
-          >
-            <option value={1}>1º Trimestre</option>
-            <option value={2}>2º Trimestre</option>
-            <option value={3}>3º Trimestre</option>
-          </select>
+          {mode !== "mapa-sala" && (
+            <select
+              aria-label="Trimestre para impressão"
+              value={trimester}
+              onChange={(e) => setTrimester(Number(e.target.value) as CouncilTrimesterNumber)}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100"
+            >
+              <option value={1}>1º Trimestre</option>
+              <option value={2}>2º Trimestre</option>
+              <option value={3}>3º Trimestre</option>
+            </select>
+          )}
+
+          {mode === "mapa-sala" && seatingMapStore.maps.length > 0 && (
+            <select
+              aria-label="Selecionar versão do mapa de sala"
+              value={selectedSeatingMap?.id ?? ""}
+              onChange={(e) => setSelectedMapId(e.target.value)}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100 max-w-[220px]"
+            >
+              {seatingMapStore.maps.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                  {seatingMapStore.activeMapId === m.id ? " (Vigente)" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {mode === "mapa-sala" && (
+            <div
+              role="group"
+              aria-label="Orientação do mapa de sala para impressão"
+              className="inline-flex items-center rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5"
+            >
+              <button
+                type="button"
+                aria-pressed={seatingPerspective === "ROOM"}
+                onClick={() => setSeatingPerspective("ROOM")}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  seatingPerspective === "ROOM"
+                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-300"
+                }`}
+              >
+                Visão da sala (quadro no topo)
+              </button>
+              <button
+                type="button"
+                aria-pressed={seatingPerspective === "TEACHER"}
+                onClick={() => setSeatingPerspective("TEACHER")}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  seatingPerspective === "TEACHER"
+                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-300"
+                }`}
+              >
+                Visão do professor (quadro na base)
+              </button>
+            </div>
+          )}
 
           {mode === "aluno" && (
             <select
@@ -166,7 +261,7 @@ export default function ConselhoPrintClient({
             </select>
           )}
 
-          {mode !== "pos-conselho" && (
+          {mode !== "pos-conselho" && mode !== "mapa-sala" && (
             <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -190,7 +285,11 @@ export default function ConselhoPrintClient({
       </div>
 
       {/* Folha A4 de Impressão */}
-      <div className="bg-white p-6 sm:p-8 rounded-2xl border-2 border-slate-800 text-slate-900 space-y-5 print:p-4 print:rounded-none print:border print:shadow-none">
+      <div
+        className={`bg-white rounded-2xl border-2 border-slate-800 text-slate-900 print:rounded-none print:border print:shadow-none ${
+          mode === "mapa-sala" ? "p-4 sm:p-5 space-y-3 print:p-2 print:space-y-2" : "p-6 sm:p-8 space-y-5 print:p-4"
+        }`}
+      >
         {/* Cabeçalho Institucional Dinâmico */}
         <header className="border-b-2 border-slate-900 pb-3 flex items-center justify-between gap-4">
           <div className="w-16 h-16 shrink-0 flex items-center justify-center print:w-14 print:h-14">
@@ -585,8 +684,190 @@ export default function ConselhoPrintClient({
           </div>
         )}
 
+        {/* MODO 4: MAPA DE SALA (A4 PAISAGEM LIMPA) */}
+        {mode === "mapa-sala" && (() => {
+          if (!selectedSeatingMap) {
+            return (
+              <div className="rounded-xl border border-slate-300 p-6 text-center text-xs text-slate-600">
+                Nenhum mapa de sala salvo para esta turma até o momento.
+              </div>
+            );
+          }
+
+          const grid = getDisplayGridForPerspective(selectedSeatingMap, seatingPerspective);
+          const deskPos = getEffectiveTeacherDeskForPerspective(
+            selectedSeatingMap.teacherDeskPosition,
+            seatingPerspective
+          );
+          const doorSide = getEffectiveDoorSideForPerspective(
+            selectedSeatingMap.doorSide,
+            seatingPerspective
+          );
+
+          const positionedSet = new Set(
+            selectedSeatingMap.seats
+              .map((s) => s.studentId)
+              .filter((id): id is string => Boolean(id))
+          );
+          const unassignedActive = board.studentCards.filter(
+            (c) => c.enrollmentStatus === "ATIVO" && !positionedSet.has(c.studentId)
+          );
+
+          const frontStrip = (
+            <div className="space-y-1">
+              <div className="mx-auto max-w-md border-2 border-slate-900 bg-slate-100 py-1 px-3 text-center text-[10px] font-black uppercase tracking-widest">
+                Quadro / Frente da sala
+              </div>
+              <div
+                className={`flex items-center justify-between gap-2 text-[10px] font-bold ${
+                  doorSide === "RIGHT" ? "flex-row-reverse" : ""
+                }`}
+              >
+                {doorSide !== "NONE" ? (
+                  <span className="px-2 py-0.5 border border-slate-700 rounded text-slate-800">
+                    Porta
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <div
+                  className={`flex-1 flex ${
+                    deskPos === "LEFT"
+                      ? "justify-start"
+                      : deskPos === "RIGHT"
+                      ? "justify-end"
+                      : "justify-center"
+                  }`}
+                >
+                  <span className="px-3 py-0.5 border border-slate-800 rounded bg-slate-50">
+                    Mesa do professor
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+
+          const rowHeaders = (
+            <div
+              className="grid gap-1.5"
+              style={{
+                gridTemplateColumns: `repeat(${selectedSeatingMap.columns}, minmax(0, 1fr))`,
+              }}
+            >
+              {grid.colIndices.map((colIdx) => (
+                <div
+                  key={`print-col-${colIdx}`}
+                  className="text-center text-[10px] font-black uppercase border-b border-slate-400 pb-0.5"
+                >
+                  Fila {colIdx + 1}
+                </div>
+              ))}
+            </div>
+          );
+
+          return (
+            <div className="space-y-2.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border border-slate-300 rounded-lg px-3 py-1.5 bg-slate-50 text-[11px]">
+                <span>
+                  <strong>Regime:</strong>{" "}
+                  {COUNCIL_SEATING_MAP_LABELS[
+                    board.seatingMapMode as CouncilSeatingMapMode
+                  ] || board.seatingMapMode}
+                </span>
+                {selectedSeatingMap.effectiveDate && (
+                  <span>
+                    <strong>Vigência:</strong>{" "}
+                    {selectedSeatingMap.effectiveDate.split("-").reverse().join("/")}
+                  </span>
+                )}
+                <span>
+                  <strong>Orientação:</strong>{" "}
+                  {seatingPerspective === "TEACHER"
+                    ? "Visão do professor (quadro na base)"
+                    : "Visão da sala (quadro no topo)"}
+                </span>
+              </div>
+
+              {seatingPerspective === "ROOM" && (
+                <>
+                  {frontStrip}
+                  {rowHeaders}
+                </>
+              )}
+
+              <div
+                className="grid gap-1.5"
+                style={{
+                  gridTemplateColumns: `repeat(${selectedSeatingMap.columns}, minmax(0, 1fr))`,
+                }}
+              >
+                {grid.rowsGrid.flatMap((rowCells) =>
+                  rowCells.map(({ seat, logicalCol, logicalRow, positionLabel }) => {
+                    const studentCard = seat.studentId
+                      ? cardByStudentId.get(seat.studentId) ?? null
+                      : null;
+
+                    if (seat.blocked) {
+                      return (
+                        <div
+                          key={`print-${logicalCol}-${logicalRow}`}
+                          className="border border-dashed border-slate-300 rounded-md p-1.5 min-h-[42px] flex flex-col justify-between bg-slate-50/50 text-slate-400"
+                        >
+                          <span className="text-[9px] font-bold">{positionLabel}</span>
+                          <span className="text-[9px] text-center">Espaço livre</span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={`print-${logicalCol}-${logicalRow}`}
+                        className="border border-slate-700 rounded-md p-1.5 min-h-[42px] flex flex-col justify-between bg-white"
+                      >
+                        <span className="text-[9px] font-bold text-slate-500 leading-none">
+                          {positionLabel}
+                        </span>
+                        <div className="text-[11px] font-bold text-slate-900 leading-tight text-center py-0.5">
+                          {studentCard ? formatShortStudentName(studentCard.student.name) : "—"}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {seatingPerspective === "TEACHER" && (
+                <>
+                  {rowHeaders}
+                  {frontStrip}
+                </>
+              )}
+
+              {(selectedSeatingMap.notes || unassignedActive.length > 0) && (
+                <div className="border border-slate-300 rounded-lg p-2 text-[10px] space-y-1">
+                  {selectedSeatingMap.notes && (
+                    <p>
+                      <strong>Observações:</strong> {selectedSeatingMap.notes}
+                    </p>
+                  )}
+                  {unassignedActive.length > 0 && (
+                    <p>
+                      <strong>Estudantes sem carteira associada ({unassignedActive.length}):</strong>{" "}
+                      {unassignedActive.map((c) => c.student.name).join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Rodapé de Assinaturas Físicas A4 */}
-        <footer className="pt-8 grid grid-cols-2 gap-8 text-center text-[11px] print:break-inside-avoid">
+        <footer
+          className={`${
+            mode === "mapa-sala" ? "pt-4" : "pt-8"
+          } grid grid-cols-2 gap-8 text-center text-[11px] print:break-inside-avoid`}
+        >
           <div>
             <div className="border-t border-slate-800 pt-1 font-semibold">
               Equipe Pedagógica / Coordenação

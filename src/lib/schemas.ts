@@ -363,6 +363,42 @@ export const councilStudentTagEnum = z.enum([
 
 export const councilDescriptorCodeSchema = z.number().int().min(1).max(5);
 
+export const councilTeacherDeskPositionEnum = z.enum(["LEFT", "CENTER", "RIGHT"]);
+
+export const councilDoorSideEnum = z.enum(["LEFT", "RIGHT", "NONE"]);
+
+export const councilSeatingMapSeatSchema = z.object({
+  col: z.number().int().min(0).max(7),
+  row: z.number().int().min(0).max(11),
+  studentId: z.string().trim().min(1).max(100).nullable(),
+  blocked: z.boolean().optional(),
+});
+
+export const councilSeatingMapVersionSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1, "Nome do mapa é obrigatório").max(100),
+  effectiveDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")
+    .nullable()
+    .optional(),
+  columns: z.number().int().min(2).max(8),
+  rows: z.number().int().min(1).max(12),
+  teacherDeskPosition: councilTeacherDeskPositionEnum.default("CENTER"),
+  doorSide: councilDoorSideEnum.default("LEFT"),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  seats: z.array(councilSeatingMapSeatSchema).max(96),
+  createdAt: z.string().trim().min(1).max(64),
+  updatedAt: z.string().trim().min(1).max(64),
+});
+
+export const councilSeatingMapLayoutSchema = z.object({
+  version: z.literal(1),
+  activeMapId: z.string().trim().min(1).max(80).nullable(),
+  maps: z.array(councilSeatingMapVersionSchema).max(24),
+});
+
 export const councilBoardUpsertSchema = z.object({
   classGroupId: z.string().trim().min(1, "Turma é obrigatória").max(100),
   year: z.number().int().min(2024).max(2100),
@@ -375,6 +411,7 @@ export const councilBoardUpsertSchema = z.object({
   externalEvalEd3Percent: z.number().min(0).max(100).optional().nullable(),
   seatingMapMode: councilSeatingMapModeEnum.optional().default("REVEZAMENTO_MENSAL"),
   seatingMapNotes: z.string().trim().max(2000).optional().nullable(),
+  seatingMapLayout: councilSeatingMapLayoutSchema.optional().nullable(),
 });
 
 export const councilBoardMetadataUpdateSchema = councilBoardUpsertSchema.partial().omit({

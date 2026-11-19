@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   FileText,
   Grid3X3,
+  LayoutGrid,
   MessageSquareText,
   Presentation,
   Printer,
@@ -17,6 +18,7 @@ import CouncilSubjectsManagerModal from "@/components/conselho/CouncilSubjectsMa
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
 import CouncilAnalysisPanel from "@/components/conselho/CouncilAnalysisPanel";
 import CouncilMatrixGrid from "@/components/conselho/CouncilMatrixGrid";
+import CouncilSeatingMapTab from "@/components/conselho/CouncilSeatingMapTab";
 import CouncilTrimesterOverviewTab from "@/components/conselho/CouncilTrimesterOverviewTab";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
 import CouncilStudentFichaModal from "@/components/conselho/CouncilStudentFichaModal";
@@ -35,7 +37,7 @@ import {
   type CouncilTrimesterRecord,
 } from "@/components/conselho/types";
 
-type ActiveTabKey = "analysis" | "matrix" | "students" | "overview" | "post-council";
+type ActiveTabKey = "analysis" | "matrix" | "seating-map" | "students" | "overview" | "post-council";
 
 interface ConselhoTurmaClientProps {
   initialBoard: CouncilBoardDetailRecord;
@@ -131,6 +133,7 @@ export default function ConselhoTurmaClient({
   const tabItems: Array<{ key: ActiveTabKey; label: string; icon: typeof Grid3X3 }> = [
     { key: "analysis", label: "Painel de Análise", icon: Presentation },
     { key: "matrix", label: "Matriz por Componente", icon: Grid3X3 },
+    { key: "seating-map", label: "Mapa de Sala", icon: LayoutGrid },
     { key: "students", label: "Fichas dos Estudantes", icon: Users },
     { key: "overview", label: "Observações da Turma", icon: FileText },
     { key: "post-council", label: "Reunião de Pós-Conselho", icon: MessageSquareText },
@@ -204,6 +207,7 @@ export default function ConselhoTurmaClient({
         onToggleHideSensitiveTags={() => setHideSensitiveTags((prev) => !prev)}
         onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
         onOpenPdfImportModal={() => setIsPdfImportModalOpen(true)}
+        onOpenSeatingMap={() => setActiveTab("seating-map")}
         onBoardUpdated={setBoard}
         onNotify={notify}
         readOnly={!canEdit}
@@ -269,6 +273,17 @@ export default function ConselhoTurmaClient({
             onOpenStudentModal={(card) => setEditingCardId(card.studentId)}
             onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
             onMatrixSaved={refreshBoard}
+            onNotify={notify}
+            readOnly={!canEdit}
+          />
+        )}
+
+        {activeTab === "seating-map" && (
+          <CouncilSeatingMapTab
+            board={board}
+            activeTrimester={activeTrimester}
+            hideSensitiveTags={hideSensitiveTags}
+            onBoardUpdated={setBoard}
             onNotify={notify}
             readOnly={!canEdit}
           />

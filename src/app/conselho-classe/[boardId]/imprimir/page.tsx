@@ -31,6 +31,8 @@ export default async function ConselhoPrintPage({
     trimester?: string;
     studentId?: string;
     hideHealthTags?: string;
+    mapId?: string;
+    perspective?: string;
   }>;
 }) {
   const session = await auth();
@@ -75,7 +77,9 @@ export default async function ConselhoPrintPage({
   const sp = searchParams ? await searchParams : {};
   const rawMode = sp?.mode;
   const initialMode: CouncilPrintMode =
-    rawMode === "pos-conselho" || rawMode === "aluno" ? rawMode : "turma";
+    rawMode === "pos-conselho" || rawMode === "aluno" || rawMode === "mapa-sala"
+      ? rawMode
+      : "turma";
 
   const parsedTri = sp?.trimester ? Number.parseInt(sp.trimester, 10) : 1;
   const initialTrimester: CouncilTrimesterNumber =
@@ -155,6 +159,8 @@ export default async function ConselhoPrintPage({
       initialStudentId={requestedStudentId}
       initialHideHealthTags={sp?.hideHealthTags === "1"}
       anonymizedOpinionsByStudentId={anonymizedOpinionsByStudentId}
+      initialMapId={sp?.mapId?.trim() || null}
+      initialPerspective={sp?.perspective === "teacher" ? "TEACHER" : "ROOM"}
     />
   );
 }

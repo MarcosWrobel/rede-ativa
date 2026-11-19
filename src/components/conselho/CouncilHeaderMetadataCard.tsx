@@ -31,6 +31,7 @@ interface CouncilHeaderMetadataCardProps {
   onToggleHideSensitiveTags: () => void;
   onOpenSubjectsModal: () => void;
   onOpenPdfImportModal?: () => void;
+  onOpenSeatingMap?: () => void;
   onBoardUpdated: (updated: CouncilBoardDetailRecord) => void;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
@@ -51,6 +52,7 @@ export default function CouncilHeaderMetadataCard({
   onToggleHideSensitiveTags,
   onOpenSubjectsModal,
   onOpenPdfImportModal,
+  onOpenSeatingMap,
   onBoardUpdated,
   onNotify,
   readOnly = false,
@@ -174,10 +176,21 @@ export default function CouncilHeaderMetadataCard({
               <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
               {activeSubjectsCount} componentes curriculares
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
-              Mapa: {COUNCIL_SEATING_MAP_LABELS[seatingMapMode] || seatingMapMode}
-            </span>
+            {onOpenSeatingMap ? (
+              <button
+                type="button"
+                onClick={onOpenSeatingMap}
+                className="inline-flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 hover:underline font-semibold cursor-pointer"
+              >
+                <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Mapa: {COUNCIL_SEATING_MAP_LABELS[seatingMapMode] || seatingMapMode}</span>
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
+                Mapa: {COUNCIL_SEATING_MAP_LABELS[seatingMapMode] || seatingMapMode}
+              </span>
+            )}
             {(board.peerLeaderName || board.teacherLeaderName) && (
               <span className="inline-flex items-center gap-1.5">
                 <Award className="w-3.5 h-3.5 text-amber-600" />

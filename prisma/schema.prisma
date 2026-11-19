@@ -541,6 +541,7 @@ model ClassCouncilBoard {
   // Organização do Mapa de Sala
   seatingMapMode         String   @default("REVEZAMENTO_MENSAL") // SEMANAL | REVEZAMENTO_MENSAL | FIXO | PERSONALIZADO
   seatingMapNotes        String?
+  seatingMapLayoutJson   String?  // JSON versionado com histórico de mapas de sala da turma
 
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt

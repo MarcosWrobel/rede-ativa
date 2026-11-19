@@ -305,6 +305,7 @@ export interface CouncilBoardDetailRecord {
   externalEvalEd3Percent: number | null;
   seatingMapMode: string;
   seatingMapNotes: string | null;
+  seatingMapLayoutJson?: string | null;
   classGroup: CouncilClassGroupSummary;
   subjects: CouncilSubjectRecord[];
   trimesters: CouncilTrimesterRecord[];

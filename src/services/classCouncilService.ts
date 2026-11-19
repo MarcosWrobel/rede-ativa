@@ -10,6 +10,7 @@ import {
   councilGenerateMinuteSchema,
   councilMatrixBatchSaveSchema,
   councilPostActionItemSchema,
+  councilSeatingMapLayoutSchema,
   councilStudentCardUpdateSchema,
   councilSubjectsBatchSchema,
   councilTrimesterUpdateSchema,
@@ -468,6 +469,89 @@ export async function ensureOrUpsertCouncilBoard(params: {
   return getCouncilBoardDetail(schoolId, board.id);
 }
 
+async function validateAndSerializeSeatingMapLayout(params: {
+  schoolId: string;
+  boardId: string;
+  layout: z.infer<typeof councilSeatingMapLayoutSchema> | null;
+}): Promise<string | null> {
+  const { schoolId, boardId, layout } = params;
+  if (layout === null) {
+    return null;
+  }
+
+  const seenMapIds = new Set<string>();
+  const allStudentIds = new Set<string>();
+
+  for (const map of layout.maps) {
+    if (seenMapIds.has(map.id)) {
+      throw new CouncilDomainError("Existem versões de mapa de sala com identificador duplicado.", 400);
+    }
+    seenMapIds.add(map.id);
+
+    const seenCoords = new Set<string>();
+    const seenStudentsInMap = new Set<string>();
+
+    for (const seat of map.seats) {
+      if (seat.col < 0 || seat.col >= map.columns || seat.row < 0 || seat.row >= map.rows) {
+        throw new CouncilDomainError("Coordenada de carteira fora dos limites da planta da sala.", 400);
+      }
+
+      const coordKey = `${seat.col}:${seat.row}`;
+      if (seenCoords.has(coordKey)) {
+        throw new CouncilDomainError("Coordenada de carteira duplicada no mapa de sala.", 400);
+      }
+      seenCoords.add(coordKey);
+
+      if (seat.blocked && seat.studentId) {
+        throw new CouncilDomainError("Carteira bloqueada não pode ter estudante associado.", 400);
+      }
+
+      if (seat.studentId) {
+        if (seenStudentsInMap.has(seat.studentId)) {
+          throw new CouncilDomainError("Um mesmo estudante não pode ocupar duas carteiras no mesmo mapa.", 400);
+        }
+        seenStudentsInMap.add(seat.studentId);
+        allStudentIds.add(seat.studentId);
+      }
+    }
+  }
+
+  if (layout.activeMapId !== null && !seenMapIds.has(layout.activeMapId)) {
+    throw new CouncilDomainError("O mapa de sala vigente selecionado não existe na lista.", 400);
+  }
+
+  if (allStudentIds.size > 0) {
+    const requestedIds = Array.from(allStudentIds);
+    const matched = await prisma.studentCouncilCard.findMany({
+      where: {
+        boardId,
+        schoolId,
+        studentId: { in: requestedIds },
+      },
+      select: { studentId: true },
+    });
+
+    if (matched.length !== requestedIds.length) {
+      throw new CouncilDomainError(
+        "Um ou mais estudantes do mapa de sala não pertencem a esta turma ou instituição.",
+        400
+      );
+    }
+  }
+
+  const normalized = {
+    version: layout.version,
+    activeMapId: layout.activeMapId,
+    maps: layout.maps.map((map) => ({
+      ...map,
+      effectiveDate: map.effectiveDate?.trim() || null,
+      notes: map.notes?.trim() || null,
+    })),
+  };
+
+  return JSON.stringify(normalized);
+}
+
 export async function updateCouncilBoardMetadata(params: {
   schoolId: string;
   boardId: string;
@@ -496,6 +580,15 @@ export async function updateCouncilBoardMetadata(params: {
     payload.teacherLeaderName
   );
 
+  const seatingMapLayoutJson =
+    payload.seatingMapLayout !== undefined
+      ? await validateAndSerializeSeatingMapLayout({
+          schoolId,
+          boardId,
+          layout: payload.seatingMapLayout,
+        })
+      : undefined;
+
   await prisma.classCouncilBoard.update({
     where: { id: boardId },
     data: {
@@ -522,6 +615,7 @@ export async function updateCouncilBoardMetadata(params: {
       ...(payload.seatingMapNotes !== undefined
         ? { seatingMapNotes: payload.seatingMapNotes?.trim() || null }
         : {}),
+      ...(seatingMapLayoutJson !== undefined ? { seatingMapLayoutJson } : {}),
     },
   });
 
