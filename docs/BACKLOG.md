@@ -1,7 +1,7 @@
 # Backlog Geral de Evolução & Roadmap — Rede Ativa SaaS
 
 Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa SaaS**.
-- **Estado Vivo do Repositório:** **21 models Prisma** • **30 páginas (`page.tsx`)** • **53 Route Handlers (`route.ts`)** • **7 módulos em `src/services/`** • **45 bibliotecas em `src/lib/`** • **74 suítes aprovadas (77 arquivos, 3 `skipIf` de banco isolado) / 691 testes Vitest aprovados (12 `skipIf`)** • **Extensão MV3 `v1.6.5`**
+- **Estado Vivo do Repositório:** **26 models Prisma** • **33 páginas (`page.tsx`)** • **60 Route Handlers (`route.ts`)** • **8 módulos em `src/services/`** • **45 bibliotecas em `src/lib/`** • **75 suítes aprovadas (78 arquivos, 3 `skipIf` de banco isolado) / 699 testes Vitest aprovados (12 `skipIf`)** • **Extensão MV3 `v1.6.5`**
 - Status: `[x]` Concluído • `[/]` Em Andamento • `[ ]` Pendente (Roadmap Futuro)
 - Prioridade: `P0` Crítico (Segurança/LGPD/Jurídico) • `P1` Alta (Estabilidade/Performance) • `P2` Média (Valor Pedagógico) • `P3` Expansão Estratégica
 - Esforço: `P` Pequeno (1–2h) • `M` Médio (3–6h) • `G` Grande (1–3 dias)
@@ -242,6 +242,17 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 
 ---
 
+## Épico 18 — Acompanhamento Trimestral de Turmas, Conselho de Classe & Pós-Conselho (Sprint 19 · ref. Épico 14 / Sprint 16 do escopo pedagógico) — ✅ Concluído
+
+- [x] **`PED-06`** `[P1 | Esforço: G]` **Modelagem Multi-Tenant do Conselho de Classe (`ClassCouncilBoard`, `ClassCouncilSubject`, `ClassCouncilTrimester`, `StudentCouncilCard`, `StudentCouncilSubjectEntry`)**  
+  5 novos models em [`prisma/schema.prisma`](../prisma/schema.prisma) com `schoolId` obrigatório e `onDelete: Restrict` em `School`, `ClassGroup` e `Student`, contratos Zod estritos em [`src/lib/schemas.ts`](../src/lib/schemas.ts), 7 ações em [`src/lib/audit.ts`](../src/lib/audit.ts) e exclusão topológica segura em [`/api/schools/[id]/sanitize`](../src/app/api/schools/%5Bid%5D/sanitize/route.ts) e [`DELETE /api/schools/[id]`](../src/app/api/schools/%5Bid%5D/route.ts).
+- [x] **`PED-07`** `[P0 | Esforço: G]` **Camada de Serviço (`classCouncilService.ts`) e 7 APIs REST Blindadas**  
+  Implementação de [`src/services/classCouncilService.ts`](../src/services/classCouncilService.ts) e 7 endpoints sob [`/api/conselho-classe/**`](../src/app/api/conselho-classe/route.ts) com `assertTenantOwnership`, guarda RBAC de escrita (`canMutateSchoolCouncil`), clonagem curricular intra-tenant (`sourceBoardId`), validação anti-FK-traversal na matriz (`1..5`), sigilo LGPD/ECA para `ALUNO_COM_LAUDO`/`AEE`, geração de rascunhos `DRAFT` no Livro de Atas (`POST_COUNCIL` sem auto-vincular toda a turma) e contenção total de erros HTTP 500.
+- [x] **`PED-08`** `[P1 | Esforço: G]` **UI Modular (`src/components/conselho/*`), Impressão A4 & Prontuário 360º**  
+  Construção de 8 subcomponentes sem `any`, páginas `/conselho-classe`, `/conselho-classe/[boardId]` e `/conselho-classe/[boardId]/imprimir` (com `anonymizeOtherMinorsInText` e ocultação de selos clínicos), atalhos `1..5` na grade, modo projeção `"Ocultar laudo e AEE"`, item no [`Sidebar.tsx`](../src/components/Sidebar.tsx) e integração ao Prontuário 360º via [`safePhase3Queries.ts`](../src/lib/safePhase3Queries.ts) e [`ProntuarioClient.tsx`](../src/app/alunos/%5Bid%5D/ProntuarioClient.tsx), validados por 8 testes em [`src/lib/__tests__/classCouncilModule.test.ts`](../src/lib/__tests__/classCouncilModule.test.ts) e relatório [`docs/auditorias/2026-11-18_CONSOLIDACAO_CONSELHO_CLASSE.md`](auditorias/2026-11-18_CONSOLIDACAO_CONSELHO_CLASSE.md).
+
+---
+
 ## Roadmap Estratégico Futuro — Excelência SaaS & Expansão de Larga Escala (Entregas & Próximos Passos)
 
 > **Contexto Estratégico:** Os itens abaixo foram mapeados a partir de auditoria técnica baseada nas melhores práticas de mercado para SaaS B2B/GovTech (Twelve-Factor App, SOC 2, Clean Architecture e APM). Os itens arquiteturais prioritários de código limpo (`SAAS-ARCH-01` e `SAAS-UI-01`) já foram concluídos na **Sprint 18**.
@@ -279,5 +290,6 @@ Este é o **Registro Evolutivo Único e Roadmap** da plataforma **Rede Ativa Saa
 | **Sprint 16** | Fluxo Assistido WhatsApp Web & Selagem Bipartida | Épico 14 | ✅ Concluído |
 | **Sprint 17** | Usabilidade do Livro de Atas, Digitalização Direta & Preservação Arquivística | Épico 15 | ✅ Concluído |
 | **Sprint 18** | Hardening Referencial (`AUD-04`/`06`), Camada `src/services/` & Modularização UI | Épico 16 | ✅ Concluído |
+| **Sprint 19 (ref. Sprint 16)** | Acompanhamento Trimestral de Turmas, Conselho de Classe & Pós-Conselho | Épico 18 (ref. Épico 14) | ✅ Concluído |
 | **Planejado** | Funil Comercial, Secretarias, Implantação & Simuladores ([Plano](landing/PLANO_EVOLUCAO_LANDING.md)) | Épico 17 | ⏳ Onda 1 Pronta / Onda 2 Bloqueada |
 | **Futuro** | Observabilidade APM & Filas Assíncronas | Expansão | ⏳ Planejado sob Demanda |

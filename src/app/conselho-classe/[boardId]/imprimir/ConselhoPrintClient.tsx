@@ -1,0 +1,604 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import Link from "next/link";
+import { ArrowLeft, Printer } from "lucide-react";
+import {
+  COUNCIL_ACTION_RESPONSIBLE_LABELS,
+  COUNCIL_DESCRIPTORS,
+  COUNCIL_ENROLLMENT_STATUS_LABELS,
+  COUNCIL_SEATING_MAP_LABELS,
+  COUNCIL_STUDENT_TAG_OPTIONS,
+  formatSegmentLabel,
+  formatShiftLabel,
+  getCardBelowAvgForTrimester,
+  parsePostActionItemsList,
+  type CouncilBoardDetailRecord,
+  type CouncilEnrollmentStatus,
+  type CouncilSeatingMapMode,
+  type CouncilTrimesterNumber,
+  type SchoolPrintMeta,
+} from "@/components/conselho/types";
+
+export type CouncilPrintMode = "turma" | "pos-conselho" | "aluno";
+
+interface AnonymizedOpinions {
+  t1: string;
+  t2: string;
+  t3: string;
+}
+
+interface ConselhoPrintClientProps {
+  board: CouncilBoardDetailRecord;
+  school: SchoolPrintMeta;
+  initialMode: CouncilPrintMode;
+  initialTrimester: CouncilTrimesterNumber;
+  initialStudentId: string | null;
+  initialHideHealthTags: boolean;
+  anonymizedOpinionsByStudentId: Record<string, AnonymizedOpinions>;
+}
+
+function getSchoolNetworkHeader(school: SchoolPrintMeta) {
+  const network = school.network || "ESTADUAL";
+  if (network === "MUNICIPAL") {
+    return {
+      line1: `Prefeitura Municipal de ${school.city || "Município"} • Secretaria Municipal de Educação`,
+      line2: school.nre
+        ? `Supervisão / Regional: ${school.nre}`
+        : "Secretaria Municipal de Educação",
+    };
+  }
+  if (network === "PRIVADA") {
+    return {
+      line1: "Rede de Ensino Particular / Privada",
+      line2: school.nre ? `Supervisão Regional: ${school.nre}` : "Diretoria de Ensino",
+    };
+  }
+  return {
+    line1: `Governo do Estado ${school.state === "PR" ? "do Paraná" : `de ${school.state || "PR"}`} • Secretaria de Estado da Educação`,
+    line2: `Núcleo Regional de Educação de ${school.nre || school.city || "Regional"}`,
+  };
+}
+
+export default function ConselhoPrintClient({
+  board,
+  school,
+  initialMode,
+  initialTrimester,
+  initialStudentId,
+  initialHideHealthTags,
+  anonymizedOpinionsByStudentId,
+}: ConselhoPrintClientProps) {
+  const [mode, setMode] = useState<CouncilPrintMode>(initialMode);
+  const [trimester, setTrimester] = useState<CouncilTrimesterNumber>(initialTrimester);
+  const [studentId, setStudentId] = useState<string>(
+    initialStudentId || board.studentCards[0]?.studentId || ""
+  );
+  const [hideHealthTags, setHideHealthTags] = useState<boolean>(initialHideHealthTags);
+
+  const networkHeader = getSchoolNetworkHeader(school);
+  const schoolLogo = school.logoUrl || "/logo.svg";
+  const activeSubjects = useMemo(
+    () => board.subjects.filter((s) => s.active),
+    [board.subjects]
+  );
+  const trimesterRecord = useMemo(
+    () => board.trimesters.find((t) => t.trimester === trimester) || null,
+    [board.trimesters, trimester]
+  );
+  const tagMap = useMemo(
+    () => new Map(COUNCIL_STUDENT_TAG_OPTIONS.map((t) => [t.value, t])),
+    []
+  );
+  const selectedStudentCard = useMemo(
+    () => board.studentCards.find((c) => c.studentId === studentId) || null,
+    [board.studentCards, studentId]
+  );
+
+  const postActions = useMemo(
+    () => parsePostActionItemsList(trimesterRecord?.postCouncilActionItemsJson),
+    [trimesterRecord]
+  );
+
+  const selectedAnonymizedOpinion = useMemo(() => {
+    if (!selectedStudentCard) return "";
+    const ops = anonymizedOpinionsByStudentId[selectedStudentCard.studentId];
+    if (!ops) return "";
+    if (trimester === 1) return ops.t1;
+    if (trimester === 2) return ops.t2;
+    return ops.t3;
+  }, [selectedStudentCard, anonymizedOpinionsByStudentId, trimester]);
+
+  const docTitle =
+    mode === "turma"
+      ? `Ficha Trimestral da Turma — ${trimester}º Trimestre / ${board.year}`
+      : mode === "pos-conselho"
+        ? `Ata de Reunião de Pós-Conselho — ${trimester}º Trimestre / ${board.year}`
+        : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* Barra de Controle (Oculta na Impressão) */}
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3 print:hidden">
+        <Link
+          href={`/conselho-classe/${board.id}`}
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-slate-950"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Voltar ao conselho</span>
+        </Link>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Tipo de ficha para impressão"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as CouncilPrintMode)}
+            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100"
+          >
+            <option value="turma">Ficha da Turma</option>
+            <option value="pos-conselho">Reunião de Pós-Conselho</option>
+            <option value="aluno">Ficha Individual do Estudante</option>
+          </select>
+
+          <select
+            aria-label="Trimestre para impressão"
+            value={trimester}
+            onChange={(e) => setTrimester(Number(e.target.value) as CouncilTrimesterNumber)}
+            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100"
+          >
+            <option value={1}>1º Trimestre</option>
+            <option value={2}>2º Trimestre</option>
+            <option value={3}>3º Trimestre</option>
+          </select>
+
+          {mode === "aluno" && (
+            <select
+              aria-label="Selecionar estudante para impressão"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-900 dark:text-slate-100 max-w-[220px]"
+            >
+              {board.studentCards.map((c) => (
+                <option key={c.studentId} value={c.studentId}>
+                  {c.student.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {mode !== "pos-conselho" && (
+            <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hideHealthTags}
+                onChange={(e) => setHideHealthTags(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              <span>Ocultar selos de saúde</span>
+            </label>
+          )}
+
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
+          >
+            <Printer className="w-4 h-4 text-amber-400" />
+            <span>Imprimir A4</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Folha A4 de Impressão */}
+      <div className="bg-white p-6 sm:p-8 rounded-2xl border-2 border-slate-800 text-slate-900 space-y-5 print:p-4 print:rounded-none print:border print:shadow-none">
+        {/* Cabeçalho Institucional Dinâmico */}
+        <header className="border-b-2 border-slate-900 pb-3 flex items-center justify-between gap-4">
+          <div className="w-16 h-16 shrink-0 flex items-center justify-center print:w-14 print:h-14">
+            <img
+              src={schoolLogo}
+              alt={`Brasão de ${school.name}`}
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div className="flex-1 text-center space-y-0.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600">
+              {networkHeader.line1}
+            </p>
+            <p className="text-[10px] font-semibold text-slate-600">{networkHeader.line2}</p>
+            <h1 className="text-base font-black uppercase tracking-tight text-slate-900">
+              {school.name}
+            </h1>
+            <p className="text-[10px] text-slate-500">
+              INEP: {school.inepCode} • {school.city} - {school.state}
+            </p>
+          </div>
+          <div className="w-16 h-16 shrink-0 opacity-0 pointer-events-none print:w-14 print:h-14" />
+        </header>
+
+        {/* Título do Documento */}
+        <div className="text-center space-y-1">
+          <h2 className="text-sm font-black uppercase tracking-wide text-slate-900">
+            {docTitle}
+          </h2>
+          <p className="text-xs font-bold text-slate-700">
+            Turma: {board.classGroup.name} • {formatSegmentLabel(board.classGroup.segment)} •{" "}
+            {formatShiftLabel(board.classGroup.shift)}
+          </p>
+        </div>
+
+        {/* MODO 1: FICHA DA TURMA */}
+        {mode === "turma" && (
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-xl border border-slate-300 bg-slate-50">
+              <div>
+                <span className="font-bold block text-[10px] uppercase text-slate-500">
+                  Líder (Turma)
+                </span>
+                <span>{board.peerLeaderName || "Não informado"}</span>
+              </div>
+              <div>
+                <span className="font-bold block text-[10px] uppercase text-slate-500">
+                  Líder (Docentes)
+                </span>
+                <span>{board.teacherLeaderName || "Não informado"}</span>
+              </div>
+              <div>
+                <span className="font-bold block text-[10px] uppercase text-slate-500">
+                  Mapa de Sala
+                </span>
+                <span>
+                  {COUNCIL_SEATING_MAP_LABELS[
+                    board.seatingMapMode as CouncilSeatingMapMode
+                  ] || board.seatingMapMode}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold block text-[10px] uppercase text-slate-500">
+                  Prova Paraná (%)
+                </span>
+                <span>
+                  1ª: {board.externalEvalEd1Percent ?? "—"}% | 2ª:{" "}
+                  {board.externalEvalEd2Percent ?? "—"}% | 3ª:{" "}
+                  {board.externalEvalEd3Percent ?? "—"}%
+                </span>
+              </div>
+            </div>
+
+            {/* Legenda Compacta */}
+            <div className="text-[10px] border border-slate-300 rounded-lg p-2 bg-slate-50 flex flex-wrap gap-x-4 gap-y-1">
+              {COUNCIL_DESCRIPTORS.map((d) => (
+                <span key={d.code}>
+                  <strong>{d.code}:</strong> {d.fullLabel}
+                </span>
+              ))}
+            </div>
+
+            {/* Tabela de Estudantes x Componentes */}
+            <table className="w-full border-collapse border border-slate-400 text-[10px]">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-400 p-1.5 text-left">Estudante</th>
+                  {activeSubjects.map((s) => (
+                    <th key={s.id} className="border border-slate-400 p-1 text-center">
+                      <div className="font-bold leading-tight">{s.name}</div>
+                      {s.teacherName && (
+                        <div className="font-normal text-[9px] text-slate-600">
+                          {s.teacherName}
+                        </div>
+                      )}
+                    </th>
+                  ))}
+                  <th className="border border-slate-400 p-1.5 text-left">Selos / Observações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {board.studentCards.map((card) => {
+                  const visibleTags = card.tags.filter((val) => {
+                    const meta = tagMap.get(val as never);
+                    if (!meta) return false;
+                    if (hideHealthTags && meta.isSensitiveHealth) return false;
+                    return true;
+                  });
+                  const belowAvg = getCardBelowAvgForTrimester(card, trimester);
+
+                  return (
+                    <tr key={card.id}>
+                      <td className="border border-slate-400 p-1.5 font-semibold">
+                        <div>{card.student.name}</div>
+                        <div className="text-[9px] text-slate-500">
+                          {COUNCIL_ENROLLMENT_STATUS_LABELS[
+                            card.enrollmentStatus as CouncilEnrollmentStatus
+                          ] || card.enrollmentStatus}
+                        </div>
+                      </td>
+                      {activeSubjects.map((s) => {
+                        const entry = card.subjectEntries.find(
+                          (e) => e.subjectId === s.id && e.trimester === trimester
+                        );
+                        return (
+                          <td
+                            key={s.id}
+                            className="border border-slate-400 p-1 text-center font-bold"
+                          >
+                            {entry && entry.descriptorCodes.length > 0
+                              ? entry.descriptorCodes.join(", ")
+                              : "—"}
+                            {entry?.grade !== null && entry?.grade !== undefined
+                              ? ` (${entry.grade})`
+                              : ""}
+                          </td>
+                        );
+                      })}
+                      <td className="border border-slate-400 p-1.5">
+                        {visibleTags.length > 0 && (
+                          <div className="font-semibold">
+                            {visibleTags
+                              .map((t) => tagMap.get(t as never)?.shortLabel || t)
+                              .join(" • ")}
+                          </div>
+                        )}
+                        {belowAvg.length > 0 && (
+                          <div className="text-[9px] text-slate-700">
+                            Abaixo: {belowAvg.map((b) => b.subjectName).join(", ")}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Observações da Turma */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="border border-slate-300 rounded-xl p-2.5">
+                <h3 className="font-bold uppercase text-[10px] text-slate-600 mb-1">
+                  Pontos Positivos
+                </h3>
+                <p className="whitespace-pre-line">{trimesterRecord?.positivePoints || "—"}</p>
+              </div>
+              <div className="border border-slate-300 rounded-xl p-2.5">
+                <h3 className="font-bold uppercase text-[10px] text-slate-600 mb-1">
+                  Pontos de Atenção
+                </h3>
+                <p className="whitespace-pre-line">{trimesterRecord?.attentionPoints || "—"}</p>
+              </div>
+              <div className="border border-slate-300 rounded-xl p-2.5">
+                <h3 className="font-bold uppercase text-[10px] text-slate-600 mb-1">
+                  Ações Planejadas
+                </h3>
+                <p className="whitespace-pre-line">{trimesterRecord?.plannedActions || "—"}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODO 2: ATA DE PÓS-CONSELHO */}
+        {mode === "pos-conselho" && (
+          <div className="space-y-4 text-xs">
+            <div className="text-right text-[11px] font-semibold text-slate-600">
+              Data da reunião:{" "}
+              {trimesterRecord?.postCouncilHeldAt
+                ? new Date(trimesterRecord.postCouncilHeldAt).toLocaleDateString("pt-BR")
+                : "Não informada"}
+            </div>
+
+            <div className="border border-slate-300 rounded-xl p-3 space-y-1.5">
+              <h3 className="font-black uppercase text-[11px] text-slate-800">
+                1. Pontos Positivos
+              </h3>
+              <p>
+                <strong>Avanços:</strong> {trimesterRecord?.postCouncilAdvances || "—"}
+              </p>
+              <p>
+                <strong>O que funcionou bem:</strong> {trimesterRecord?.postCouncilWhatWorked || "—"}
+              </p>
+              <p>
+                <strong>Atitudes reconhecidas:</strong>{" "}
+                {trimesterRecord?.postCouncilRecognizedAttitudes || "—"}
+              </p>
+            </div>
+
+            <div className="border border-slate-300 rounded-xl p-3 space-y-1.5">
+              <h3 className="font-black uppercase text-[11px] text-slate-800">
+                2. Dificuldades Observadas
+              </h3>
+              <p>
+                <strong>Componentes críticos:</strong>{" "}
+                {trimesterRecord?.postCouncilCriticalSubjects || "—"}
+              </p>
+              <p>
+                <strong>Fatores que prejudicam o rendimento:</strong>{" "}
+                {trimesterRecord?.postCouncilPerformanceFactors || "—"}
+              </p>
+              <p>
+                <strong>Comportamento e frequência:</strong>{" "}
+                {trimesterRecord?.postCouncilBehaviorAttendance || "—"}
+              </p>
+            </div>
+
+            <div className="border border-slate-300 rounded-xl p-3 space-y-1.5">
+              <h3 className="font-black uppercase text-[11px] text-slate-800">
+                3. Escuta dos Estudantes
+              </h3>
+              <p>
+                <strong>O que melhorar:</strong>{" "}
+                {trimesterRecord?.postCouncilWhatToImprove || "—"}
+              </p>
+              <p>
+                <strong>Como os docentes podem ajudar:</strong>{" "}
+                {trimesterRecord?.postCouncilHowTeachersCanHelp || "—"}
+              </p>
+              <p>
+                <strong>Compromissos assumidos:</strong>{" "}
+                {trimesterRecord?.postCouncilCommitments || "—"}
+              </p>
+            </div>
+
+            <div className="border border-slate-300 rounded-xl p-3 space-y-2">
+              <h3 className="font-black uppercase text-[11px] text-slate-800">
+                4. Encaminhamentos Numerados
+              </h3>
+              {postActions.length === 0 ? (
+                <p>Nenhum encaminhamento registrado.</p>
+              ) : (
+                <table className="w-full border-collapse border border-slate-300 text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-100 text-left">
+                      <th className="border border-slate-300 p-1.5 w-10">Nº</th>
+                      <th className="border border-slate-300 p-1.5">Encaminhamento</th>
+                      <th className="border border-slate-300 p-1.5">Responsável</th>
+                      <th className="border border-slate-300 p-1.5">Prazo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {postActions.map((a) => (
+                      <tr key={a.number}>
+                        <td className="border border-slate-300 p-1.5 font-bold">{a.number}</td>
+                        <td className="border border-slate-300 p-1.5">{a.description}</td>
+                        <td className="border border-slate-300 p-1.5">
+                          {COUNCIL_ACTION_RESPONSIBLE_LABELS[a.responsible] || a.responsible}
+                        </td>
+                        <td className="border border-slate-300 p-1.5">
+                          {a.dueDate
+                            ? new Date(a.dueDate).toLocaleDateString("pt-BR")
+                            : "Contínuo"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* MODO 3: FICHA INDIVIDUAL DO ESTUDANTE */}
+        {mode === "aluno" && selectedStudentCard && (
+          <div className="space-y-4 text-xs">
+            <div className="border border-slate-300 rounded-xl p-3 bg-slate-50 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <span className="font-bold text-[10px] uppercase text-slate-500 block">
+                  Estudante
+                </span>
+                <span className="font-black text-sm">{selectedStudentCard.student.name}</span>
+                {selectedStudentCard.student.cgm && (
+                  <span className="block text-[11px] text-slate-600">
+                    CGM: {selectedStudentCard.student.cgm}
+                  </span>
+                )}
+              </div>
+              <div>
+                <span className="font-bold text-[10px] uppercase text-slate-500 block">
+                  Situação / Avaliações Externas
+                </span>
+                <span>
+                  {COUNCIL_ENROLLMENT_STATUS_LABELS[
+                    selectedStudentCard.enrollmentStatus as CouncilEnrollmentStatus
+                  ] || selectedStudentCard.enrollmentStatus}
+                </span>
+                <span className="block text-[11px] text-slate-600">
+                  Prova Paraná: 1ª {selectedStudentCard.externalEvalEd1Percent ?? "—"}% | 2ª{" "}
+                  {selectedStudentCard.externalEvalEd2Percent ?? "—"}% | 3ª{" "}
+                  {selectedStudentCard.externalEvalEd3Percent ?? "—"}%
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-[10px] uppercase text-slate-500 block">
+                  Selos de Identificação
+                </span>
+                <span>
+                  {selectedStudentCard.tags
+                    .filter((val) => {
+                      const meta = tagMap.get(val as never);
+                      return meta && (!hideHealthTags || !meta.isSensitiveHealth);
+                    })
+                    .map((val) => tagMap.get(val as never)?.label || val)
+                    .join(" • ") || "Nenhum selo selecionado"}
+                </span>
+              </div>
+            </div>
+
+            <table className="w-full border-collapse border border-slate-400 text-[11px]">
+              <thead>
+                <tr className="bg-slate-100 text-left">
+                  <th className="border border-slate-400 p-1.5">Componente Curricular</th>
+                  <th className="border border-slate-400 p-1.5">Docente</th>
+                  <th className="border border-slate-400 p-1.5 text-center">1º Trim.</th>
+                  <th className="border border-slate-400 p-1.5 text-center">2º Trim.</th>
+                  <th className="border border-slate-400 p-1.5 text-center">3º Trim.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeSubjects.map((s) => (
+                  <tr key={s.id}>
+                    <td className="border border-slate-400 p-1.5 font-semibold">{s.name}</td>
+                    <td className="border border-slate-400 p-1.5 text-slate-600">
+                      {s.teacherName || "—"}
+                    </td>
+                    {([1, 2, 3] as const).map((tri) => {
+                      const entry = selectedStudentCard.subjectEntries.find(
+                        (e) => e.subjectId === s.id && e.trimester === tri
+                      );
+                      return (
+                        <td
+                          key={tri}
+                          className="border border-slate-400 p-1.5 text-center font-bold"
+                        >
+                          {entry && entry.descriptorCodes.length > 0
+                            ? entry.descriptorCodes.join(", ")
+                            : "—"}
+                          {entry?.grade !== null && entry?.grade !== undefined
+                            ? ` (${entry.grade})`
+                            : ""}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="border border-slate-300 rounded-xl p-3 space-y-2">
+              <h3 className="font-black uppercase text-[11px] text-slate-800">
+                Deliberação do {trimester}º Trimestre
+              </h3>
+              <p className="whitespace-pre-line">
+                {selectedAnonymizedOpinion || "Sem parecer qualitativo registrado."}
+              </p>
+
+              {(() => {
+                const below = getCardBelowAvgForTrimester(selectedStudentCard, trimester);
+                if (below.length === 0) return null;
+                return (
+                  <div className="pt-1 text-[11px] font-semibold text-slate-800">
+                    Componentes abaixo da média:{" "}
+                    {below
+                      .map((b) =>
+                        b.grade !== null ? `${b.subjectName} (${b.grade})` : b.subjectName
+                      )
+                      .join(", ")}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* Rodapé de Assinaturas Físicas A4 */}
+        <footer className="pt-8 grid grid-cols-2 gap-8 text-center text-[11px] print:break-inside-avoid">
+          <div>
+            <div className="border-t border-slate-800 pt-1 font-semibold">
+              Equipe Pedagógica / Coordenação
+            </div>
+          </div>
+          <div>
+            <div className="border-t border-slate-800 pt-1 font-semibold">
+              Direção Escolar
+            </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}

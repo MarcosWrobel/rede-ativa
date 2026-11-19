@@ -71,6 +71,11 @@ model School {
   templates       MessageTemplate[]
   auditLogs       AuditLog[]
   pedagogicalMinutes PedagogicalMinute[]
+  classCouncilBoards           ClassCouncilBoard[]
+  classCouncilSubjects         ClassCouncilSubject[]
+  classCouncilTrimesters       ClassCouncilTrimester[]
+  studentCouncilCards          StudentCouncilCard[]
+  studentCouncilSubjectEntries StudentCouncilSubjectEntry[]
 
   @@index([active])
   @@index([networkId])
@@ -130,6 +135,7 @@ model ClassGroup {
   createdAt DateTime  @default(now())
 
   students  Student[]
+  classCouncilBoards ClassCouncilBoard[]
 
   @@unique([schoolId, name])
   @@index([segment, shift])
@@ -161,6 +167,7 @@ model Student {
   inPersonAttendances  InPersonAttendance[]
   pedagogicalMinuteLinks PedagogicalMinuteStudent[]
   attendanceSnapshots  AttendanceSnapshot[]
+  studentCouncilCards  StudentCouncilCard[]
 
   @@index([classGroupId, active])
   @@index([name])
@@ -506,5 +513,173 @@ model RateLimitBucket {
   expiresAt   DateTime
 
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// ACOMPANHAMENTO TRIMESTRAL DE TURMAS, CONSELHO DE CLASSE E PÓS-CONSELHO
+// ---------------------------------------------------------------------------
+
+model ClassCouncilBoard {
+  id                     String   @id @default(cuid())
+  schoolId               String
+  school                 School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  classGroupId           String
+  classGroup             ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  year                   Int      // Ano letivo (ex: 2026)
+
+  // Representação Estudantil
+  peerLeaderStudentId    String?
+  peerLeaderName         String?  // Líder eleito pelos estudantes
+  teacherLeaderStudentId String?
+  teacherLeaderName      String?  // Líder indicado pelos professores
+
+  // Indicadores Macro da Turma em Avaliações Externas (ex: Prova Paraná - % de acerto)
+  externalEvalEd1Percent Float?
+  externalEvalEd2Percent Float?
+  externalEvalEd3Percent Float?
+
+  // Organização do Mapa de Sala
+  seatingMapMode         String   @default("REVEZAMENTO_MENSAL") // SEMANAL | REVEZAMENTO_MENSAL | FIXO | PERSONALIZADO
+  seatingMapNotes        String?
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  subjects               ClassCouncilSubject[]
+  trimesters             ClassCouncilTrimester[]
+  studentCards           StudentCouncilCard[]
+
+  @@unique([schoolId, classGroupId, year])
+  @@index([schoolId, year])
+  @@index([classGroupId, year])
+}
+
+model ClassCouncilSubject {
+  id           String            @id @default(cuid())
+  schoolId     String
+  school       School            @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  boardId      String
+  board        ClassCouncilBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  name         String            // Ex: "Língua Portuguesa", "Matemática", "Projeto de Vida"
+  teacherName  String?           // Nome do(a) docente titular no componente
+  teacherEmail String?           // E-mail institucional opcional
+  displayOrder Int               @default(0)
+  active       Boolean           @default(true)
+
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  entries      StudentCouncilSubjectEntry[]
+
+  @@unique([boardId, name])
+  @@index([schoolId, boardId, displayOrder])
+}
+
+model ClassCouncilTrimester {
+  id                              String            @id @default(cuid())
+  schoolId                        String
+  school                          School            @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  boardId                         String
+  board                           ClassCouncilBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  trimester                       Int               // 1 | 2 | 3
+  status                          String            @default("IN_PROGRESS") // IN_PROGRESS | CONSOLIDATED
+
+  // Observações Gerais da Turma no Trimestre
+  positivePoints                  String?           // Pontos positivos da turma
+  attentionPoints                 String?           // Pontos de atenção / desafios
+  plannedActions                  String?           // Ações planejadas pela equipe
+
+  // Ata de Reunião de Pós-Conselho com Estudantes (Autoavaliação Coletiva)
+  postCouncilHeldAt               DateTime?
+  // Eixo 1: Pontos Positivos
+  postCouncilAdvances             String?           // Avanços percebidos pela turma
+  postCouncilWhatWorked           String?           // O que funcionou bem nas aulas
+  postCouncilRecognizedAttitudes  String?           // Atitudes reconhecidas
+  // Eixo 2: Dificuldades Observadas
+  postCouncilCriticalSubjects     String?           // Componentes críticos apontados
+  postCouncilPerformanceFactors   String?           // Fatores que prejudicam o rendimento
+  postCouncilBehaviorAttendance   String?           // Comportamento e frequência
+  // Eixo 3: Escuta dos Estudantes
+  postCouncilWhatToImprove        String?           // O que a turma precisa melhorar
+  postCouncilHowTeachersCanHelp   String?           // Como os professores podem apoiar
+  postCouncilCommitments          String?           // Compromissos assumidos pelos alunos
+  // Eixo 4: Encaminhamentos Numerados (JSON Array validado via Zod: [{ number, description, responsible, dueDate }])
+  postCouncilActionItemsJson      String?
+
+  // Vínculo opcional com rascunho/ata gerada no Livro Oficial de Atas
+  linkedMinuteId                  String?
+
+  updatedByName                   String?
+  updatedByEmail                  String?
+  createdAt                       DateTime          @default(now())
+  updatedAt                       DateTime          @updatedAt
+
+  @@unique([boardId, trimester])
+  @@index([schoolId, trimester])
+}
+
+model StudentCouncilCard {
+  id                     String            @id @default(cuid())
+  schoolId               String
+  school                 School            @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  boardId                String
+  board                  ClassCouncilBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  studentId              String
+  student                Student           @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  // Situação no ciclo e indicadores externos individuais
+  enrollmentStatus       String            @default("ATIVO") // ATIVO | TRANSFERIDO | REMANEJADO | ABANDONO
+  externalEvalEd1Percent Float?
+  externalEvalEd2Percent Float?
+  externalEvalEd3Percent Float?
+
+  // Selos de Identificação Pedagógica (Array nativo PostgreSQL)
+  // Valores permitidos: ALUNO_COM_LAUDO | AEE | ESTUDANTE_MONITOR | LIDER_DE_TURMA |
+  // DESTAQUE_DA_TURMA | ESTUDANTE_SUPERACAO | DESTAQUE_INTEGRADO_NOTA_INTEGRA
+  tags                   String[]          @default([])
+  hasSensitiveHealthTag  Boolean           @default(false) // Computado automaticamente se tags incluir ALUNO_COM_LAUDO ou AEE
+
+  // Deliberações Qualitativas do Conselho por Trimestre
+  trimester1Opinion      String?
+  trimester2Opinion      String?
+  trimester3Opinion      String?
+
+  // Componentes Abaixo da Média estruturados em JSON validado por Zod: [{ subjectId, subjectName, grade }]
+  trimester1BelowAvgJson String?
+  trimester2BelowAvgJson String?
+  trimester3BelowAvgJson String?
+
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  subjectEntries         StudentCouncilSubjectEntry[]
+
+  @@unique([boardId, studentId])
+  @@index([schoolId, studentId])
+  @@index([boardId, enrollmentStatus])
+}
+
+model StudentCouncilSubjectEntry {
+  id              String              @id @default(cuid())
+  schoolId        String
+  school          School              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  cardId          String
+  card            StudentCouncilCard  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         ClassCouncilSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  trimester       Int                 // 1 | 2 | 3
+
+  // Códigos multivalorados da Matriz de Descritivos (subconjunto ordenado de [1, 2, 3, 4, 5])
+  descriptorCodes Int[]               @default([])
+  // Nota numérica opcional (ex: 4.5) quando o componente estiver abaixo da média no trimestre
+  grade           Float?
+
+  updatedByEmail  String?
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([cardId, subjectId, trimester])
+  @@index([schoolId, subjectId, trimester])
+  @@index([cardId, trimester])
 }
 

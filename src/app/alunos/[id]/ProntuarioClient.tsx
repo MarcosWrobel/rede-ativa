@@ -32,6 +32,9 @@ import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import ModalDialog from "@/components/ModalDialog";
 import WhatsAppReplyCaptureModal from "@/components/whatsapp/WhatsAppReplyCaptureModal";
+import CouncilStudent360Section, {
+  type Student360CouncilCardRecord,
+} from "@/components/conselho/CouncilStudent360Section";
 import {
   KINSHIP_LABELS,
   JUSTIFICATION_TYPE_LABELS,
@@ -54,6 +57,7 @@ interface Props {
   initialAttendances: any[];
   initialSnapshots: any[];
   initialMinutes?: any[];
+  initialCouncilCards?: Student360CouncilCardRecord[];
   initialTab?: TabKey;
   currentSchool?: {
     id?: string;
@@ -76,6 +80,7 @@ export default function ProntuarioClient({
   initialAttendances,
   initialSnapshots,
   initialMinutes = [],
+  initialCouncilCards = [],
   initialTab = "overview",
   currentSchool,
   isAdmin,
@@ -776,6 +781,9 @@ export default function ProntuarioClient({
               )}
             </div>
           )}
+
+          {/* Histórico Trimestral do Conselho de Classe */}
+          <CouncilStudent360Section councilCards={initialCouncilCards} />
         </div>
       )}
 

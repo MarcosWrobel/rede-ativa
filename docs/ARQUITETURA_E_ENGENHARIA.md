@@ -45,14 +45,14 @@ flowchart TD
 
     subgraph NextApp ["Aplicacao Next.js 16 App Router (Vercel Serverless - gru1)"]
         EdgeProxy["src/proxy.ts (Perimetro JWT Edge)"]
-        RSC["30 Server Components (page.tsx + assertTenantOwnership)"]
-        ClientUI["Client Components (*Client.tsx + Editor Modular src/components/ata/editor/*)"]
-        APIRoutes["53 Route Handlers (/api/*)"]
+        RSC["33 Server Components (page.tsx + assertTenantOwnership)"]
+        ClientUI["Client Components (*Client.tsx + Editor Modular src/components/ata/editor/* + Conselho src/components/conselho/*)"]
+        APIRoutes["60 Route Handlers (/api/*)"]
         CronJob["Vercel Cron (/api/cron/weekly-digest)"]
     end
 
     subgraph CoreLibs ["Dominio, Servicos, Seguranca, Criptografia e IA (src/services/* + src/lib/*)"]
-        DomainServices["src/services/ (7 modulos: atas, frequencySync, messageDispatch, messaging/*)"]
+        DomainServices["src/services/ (8 modulos: atas, classCouncil, frequencySync, messageDispatch, messaging/*)"]
         AuthLib["auth.ts + roles.ts + permissions.ts + tenantGuard.ts + platformEditions.ts"]
         CryptoLib["ataCrypto.ts + signingPin.ts + messageCrypto.ts + escolaGoogleVerify.ts"]
         ParserLib["sereParser.ts + studentMatcher.ts + csvSanitizer.ts"]
@@ -64,7 +64,7 @@ flowchart TD
         GoogleOAuth["Google Identity Services (OAuth2 / OIDC)"]
         GeminiAPI["Google Gemini API (@google/genai)"]
         WhatsApp["WhatsApp Web / App Nativo / Gateway HTTP"]
-        NeonDB[("Neon PostgreSQL Serverless - AWS sa-east-1 (21 Models)")]
+        NeonDB[("Neon PostgreSQL Serverless - AWS sa-east-1 (26 Models)")]
     end
 
     SuperAdmin -->|HTTPS| EdgeProxy
@@ -109,18 +109,18 @@ flowchart TD
 
 | Camada | Tecnologia | Versão (`package.json`) | Papel Arquitetural |
 | :--- | :--- | :---: | :--- |
-| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.6` | Renderização híbrida Server/Client (**30 páginas `page.tsx`** + **53 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), **7 módulos de serviço** em [`src/services/`](../src/services), **45 bibliotecas** em [`src/lib/`](../src/lib), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
-| **UI Runtime** | **React & React DOM** | `^19.3.1` | Painéis operacionais densos, modais baseados em `<dialog>` nativo ([`ModalDialog.tsx`](../src/components/ModalDialog.tsx)), subcomponentes tipados em [`src/components/ata/editor/`](../src/components/ata/editor) e captura vetorial/forense de traço em [`SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx). |
+| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.6` | Renderização híbrida Server/Client (**33 páginas `page.tsx`** + **60 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), **8 módulos de serviço** em [`src/services/`](../src/services), **45 bibliotecas** em [`src/lib/`](../src/lib), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
+| **UI Runtime** | **React & React DOM** | `^19.3.1` | Painéis operacionais densos, modais baseados em `<dialog>` nativo ([`ModalDialog.tsx`](../src/components/ModalDialog.tsx)), subcomponentes tipados em [`src/components/ata/editor/`](../src/components/ata/editor) e [`src/components/conselho/`](../src/components/conselho), e captura vetorial/forense de traço em [`SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx). |
 | **Linguagem** | **TypeScript** | `^6.0.3` | `strict: true` em [`tsconfig.json`](../tsconfig.json) e alias `@/* -> ./src/*`, garantindo contratos estáticos ponta a ponta. |
 | **Estilização** | **Tailwind CSS v4** | `^4.3.3` | Utilitários via `@tailwindcss/postcss`, modo escuro sem *flash* (FOUC), ícones `lucide-react` (`^1.63.0`) e diagramação `@media print` A4 pericial com moldura perimétrica padronizada. |
-| **ORM & Persistência** | **Prisma ORM + Neon PostgreSQL** | `^6.4.0` | Schema multi-tenant com **21 models** em [`prisma/schema.prisma`](../prisma/schema.prisma), usando *Connection Pooler* (`DATABASE_URL`) em runtime e conexão direta (`DIRECT_URL`) para DDL, além de `Prisma.sql` parametrizado em *bulk upserts*. |
+| **ORM & Persistência** | **Prisma ORM + Neon PostgreSQL** | `^6.4.0` | Schema multi-tenant com **26 models** em [`prisma/schema.prisma`](../prisma/schema.prisma), usando *Connection Pooler* (`DATABASE_URL`) em runtime e conexão direta (`DIRECT_URL`) para DDL, além de `Prisma.sql` parametrizado em *bulk upserts*. |
 | **Autenticação** | **NextAuth.js (Auth.js v5)** | `^5.0.0-beta.32` | Sessão `jwt` *stateless* dividida entre borda ([`auth.config.ts`](../src/lib/auth.config.ts)) e Node/Prisma ([`auth.ts`](../src/lib/auth.ts)), com revalidação periódica a cada 5 minutos (`SESSION_REVALIDATE_MS`). |
 | **Validação** | **Zod** | `^4.6.7` | Validação estrutural estrita em [`src/lib/schemas.ts`](../src/lib/schemas.ts) e nos endpoints críticos contra *Mass Assignment*. |
 | **IA Generativa** | **Google Gen AI SDK (`@google/genai`)** | `^2.31.0` | Integração com modelos Gemini usando `responseSchema` JSON estrito, fuso `America/Sao_Paulo`, precedida por [`aiPseudonymizer.ts`](../src/lib/aiPseudonymizer.ts) e sucedida por *fallback* determinístico local. |
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `pdf-lib`, `qrcode`** *(+ `jspdf` em `package.json`)* | `^0.18.5` / `^1.9.1` / `^1.17.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão PDF/A-1b de atas via `pdf-lib`, impressão A4 via React `@media print` e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
 | **Extensão Browser** | **Chrome Extension MV3** | `1.6.5` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta com vínculo `targetTabId`, ciclo de vida idempotente (`__REDEATIVA_WA_CLEANUP__` / `__REDEATIVA_BRIDGE_CLEANUP__`), `dispatchObserver` ativo apenas em despachos válidos e confirmação estrita de envio WhatsApp (`evaluateSendConfirmation`), empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-rede-ativa.zip` (`/public/extensao-leopoldina.zip` mantido automaticamente como alias de retrocompatibilidade). |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **77 arquivos (74 aprovados e 3 `skipIf` de banco isolado) / 691 testes aprovados e 12 ignorados (703 testes)** cobrindo vetores adversariais multi-tenant (`adversarialQa.test.ts`), remediações setoriais e sistêmicas (`sectorBRemediation.test.ts`..`sectorERemediation.test.ts`, `systemicIntegrationRemediation.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), confiabilidade, ciclo de vida e desempenho da extensão MV3 (`whatsappExtensionReliability.test.ts`), camada de serviços, polling, reabertura e validade QR de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress, cache Neon e despertar de banco (`egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), simulação 2D / central de orientação / landing (`treinamentoPage.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`), RBAC 4-tier, criptografia SHA-256, PIN, SERE parser e SSR. |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **78 arquivos (75 aprovados e 3 `skipIf` de banco isolado) / 699 testes aprovados e 12 ignorados (711 testes)** cobrindo Conselho de Classe e Pós-Conselho (`classCouncilModule.test.ts`), vetores adversariais multi-tenant (`adversarialQa.test.ts`), remediações setoriais e sistêmicas (`sectorBRemediation.test.ts`..`sectorERemediation.test.ts`, `systemicIntegrationRemediation.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), confiabilidade, ciclo de vida e desempenho da extensão MV3 (`whatsappExtensionReliability.test.ts`), camada de serviços, polling, reabertura e validade QR de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress, cache Neon e despertar de banco (`egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), simulação 2D / central de orientação / landing (`treinamentoPage.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`), RBAC 4-tier, criptografia SHA-256, PIN, SERE parser e SSR. |
 
 ---
 
@@ -210,7 +210,7 @@ stateDiagram-v2
 
 ---
 
-## 4. Modelagem de Dados Multi-Tenant (`prisma/schema.prisma` — 21 Models)
+## 4. Modelagem de Dados Multi-Tenant (`prisma/schema.prisma` — 26 Models)
 
 ### 4.1 Diagrama Entidade-Relacionamento (ERD)
 
@@ -242,6 +242,15 @@ erDiagram
     PedagogicalMinute ||--o{ PedagogicalMinuteAddendum : "adendos_encadeados"
     PedagogicalMinute ||--o{ PedagogicalActionItem : "encaminhamentos"
 
+    School ||--o{ ClassCouncilBoard : "conselhos_classe"
+    ClassGroup ||--o{ ClassCouncilBoard : "acompanhamento_anual"
+    ClassCouncilBoard ||--o{ ClassCouncilSubject : "matriz_curricular"
+    ClassCouncilBoard ||--o{ ClassCouncilTrimester : "trimestres_pos_conselho"
+    ClassCouncilBoard ||--o{ StudentCouncilCard : "fichas_individuais"
+    Student ||--o{ StudentCouncilCard : "historico_conselho"
+    StudentCouncilCard ||--o{ StudentCouncilSubjectEntry : "descritivos_1_a_5"
+    ClassCouncilSubject ||--o{ StudentCouncilSubjectEntry : "avaliacao_componente"
+
     RateLimitBucket {
         string key PK
         int count
@@ -250,7 +259,7 @@ erDiagram
     }
 ```
 
-### 4.2 Síntese das 21 Entidades do Schema
+### 4.2 Síntese das 26 Entidades do Schema
 
 | # | Model Prisma | Chave / Unicidade | Responsabilidade Principal |
 | :-: | :--- | :--- | :--- |
@@ -275,12 +284,17 @@ erDiagram
 | 19 | `PedagogicalMinuteAddendum` | `id` | Termos aditivos *"Em tempo"* encadeados criptograficamente (`previousHash -> addendumHash`). |
 | 20 | `PedagogicalActionItem` | `id` | Combinados e prazos derivados da ata (`responsible`, `dueDate`, `status`, `completedAt`). |
 | 21 | `RateLimitBucket` | `key @id` | Bucket distribuído no PostgreSQL (`key`, `count`, `windowStart`, `expiresAt`) para mitigação de ataques de força bruta e DoS. |
+| 22 | `ClassCouncilBoard` | `@@unique([schoolId, classGroupId, year])` | Painel anual do Conselho de Classe por turma (`peerLeader*`, `teacherLeader*`, médias da *Prova Paraná*, `seatingMapMode`), escopado por `schoolId`. |
+| 23 | `ClassCouncilSubject` | `@@unique([boardId, name])` | Matriz de componentes curriculares/itinerários e professores da turma no conselho (suporta clonagem intra-tenant). |
+| 24 | `ClassCouncilTrimester` | `@@unique([boardId, trimester])` | Registros coletivos por trimestre (`1..3`), observações da turma e Ata de Reunião de Pós-Conselho (4 eixos + `linkedMinuteId`). |
+| 25 | `StudentCouncilCard` | `@@unique([boardId, studentId])` | Ficha individual trimestral do estudante (situação, selos pedagógicos e flag clínica `hasSensitiveHealthTag`, pareceres e abaixo da média). |
+| 26 | `StudentCouncilSubjectEntry` | `@@unique([cardId, subjectId, trimester])` | Célula da matriz `Estudante x Componente x Trimestre` com descritivos multivalorados (`1..5`) e nota numérica opcional. |
 
 ---
 
 ## 5. Catálogo Completo de Rotas e Endpoints
 
-### 5.1 Páginas da Aplicação (`src/app/*` — 30 Páginas)
+### 5.1 Páginas da Aplicação (`src/app/*` — 33 Páginas)
 
 | Rota | Acesso Mínimo | Descrição Funcional |
 | :--- | :---: | :--- |
@@ -304,6 +318,9 @@ erDiagram
 | `/atas` | `PEDAGOGA` | Livro Oficial Digital de Atas: editor widescreen, ditado por voz, IA NRE, PIN de fé pública, QR Code, digitalização direta de via física/Gov.br, download rápido de PDF/A-1b e filtro de pendências. |
 | `/atas/[id]/imprimir` | `PEDAGOGA` | Diagramação oficial A4 em folha única (`1 of 1`) com moldura perimétrica, brasão, nota extemporânea e download PDF/A-1b. |
 | `/atas/livro/[ano]` | `PEDAGOGA` | Livro Anual consolidado com Termo de Abertura, índice sequencial, Termo de Encerramento com extenso feminino (0–999) e datas parametrizáveis. |
+| `/conselho-classe` | `PEDAGOGA` | Diretório anual de acompanhamento trimestral das turmas e status dos conselhos (1º, 2º e 3º Trimestres). |
+| `/conselho-classe/[boardId]` | `PEDAGOGA` | Workspace trimestral da turma: matriz de descritivos (`1..5`), clonagem de componentes, fichas individuais e Reunião de Pós-Conselho. |
+| `/conselho-classe/[boardId]/imprimir` | `PEDAGOGA` | Impressão A4 limpa da ficha da turma, Ata de Pós-Conselho e ficha individual com anonimização ECA e ocultação opcional de selos clínicos. |
 | `/encaminhamentos` | `PEDAGOGA` | Central de alertas temáticos e baixa de combinados/prazos firmados em atas. |
 | `/boletim` | `PEDAGOGA` | Boletim semanal executivo de infrequência e fila prioritária sem contato > 7 dias. |
 | `/relatorios` | `PEDAGOGA` | Indicadores analíticos agregados por motivo, segmento, trimestre, autora e status de entrega. |
@@ -320,7 +337,7 @@ erDiagram
 - **Central de Orientação Operacional ([`/treinamento`](../src/app/treinamento/page.tsx) + [`TreinamentoClient.tsx`](../src/app/treinamento/TreinamentoClient.tsx)):** Rota autenticada exposta no menu lateral ([`Sidebar.tsx`](../src/components/Sidebar.tsx) — *"Orientação e Guias"*) que resolve a escola e edição ativas no servidor (`auth()` + `getCurrentSchool()`), integrando o [`PedagogicalFlowSimulator`](../src/components/PedagogicalFlowSimulator.tsx) (`mode="internal"`) a guias passo a passo com atalhos diretos e FAQ operacional.
 - **Vitrine Pública e Ocultação Não-Destrutiva ([`LandingPageClient.tsx`](../src/components/landing/LandingPageClient.tsx)):** Unifica a apresentação pública em `/` e `/impacto` com os guardrails do Item 10 do [`GEMINI.md`](../GEMINI.md) e seleção de visão por perfil (`Equipe Pedagógica`, `Direção Escolar`, `Secretaria de Educação`). Na seção `#workflow-demo`, os dois painéis animados anteriores (`MasterWorkflowAnimation` e `WorkflowAnimation`, identificados por `"Fluxo completo"` e `"Contatos com famílias"`) permanecem preservados e controlados pela constante exportada `ENABLE_LEGACY_WORKFLOW_PANELS = false`, exibindo exclusivamente `<PedagogicalFlowSimulator mode="public" />` até eventual reativação.
 
-### 5.2 Route Handlers REST (`src/app/api/*` — 53 Route Handlers)
+### 5.2 Route Handlers REST (`src/app/api/*` — 60 Route Handlers)
 
 | Domínio | Endpoint | Métodos Exatos | Finalidade e Guarda |
 | :--- | :--- | :---: | :--- |
@@ -376,8 +393,15 @@ erDiagram
 | **IA, Relatórios & Cron** | `/api/ai/test-key` | `GET, POST` | Diagnóstico sanitizado de conectividade com a API Google Gemini. |
 | **IA, Relatórios & Cron** | `/api/reports` | `GET` | Agregações SQL paralelas (`count` + `groupBy`) para o painel `/relatorios`. |
 | **IA, Relatórios & Cron** | `/api/cron/weekly-digest` | `GET, POST` | Job semanal (`CRON_SECRET` / sessão) alimentando o diagnóstico executivo `/boletim`. |
+| **Conselho de Classe** | `/api/conselho-classe` | `GET, POST` | Listagem anual de turmas/conselhos e criação/sincronização transacional de `ClassCouncilBoard` na escola ativa. |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]` | `GET, PATCH` | Consulta completa e atualização de líderes, médias externas (*Prova Paraná*) e mapa de sala (`assertTenantOwnership`). |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]/subjects` | `PUT` | Edição em lote ou clonagem intra-tenant (`sourceBoardId`) de componentes curriculares e docentes. |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]/trimesters` | `PATCH` | Atualização de observações gerais do trimestre e dos 4 eixos da Reunião de Pós-Conselho. |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]/matrix` | `PUT` | Lançamento em lote da matriz `Estudante x Componente` (`1..5`) com validação de FKs e recálculo de componentes abaixo da média. |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]/students/[studentId]` | `PATCH` | Atualização da ficha individual trimestral, selos (com controle LGPD `hasSensitiveHealthTag`), parecer e disciplinas abaixo da média. |
+| **Conselho de Classe** | `/api/conselho-classe/[boardId]/generate-minute` | `POST` | Geração de rascunho `DRAFT` de Ata Oficial a partir do Pós-Conselho (sem auto-vincular toda a turma) ou de deliberação individual (sigilo automático se Laudo/AEE). |
 
-*(Nota: O catálogo completo em `src/app/api/` soma exatamente **53 arquivos `route.ts`**).*
+*(Nota: O catálogo completo em `src/app/api/` soma exatamente **60 arquivos `route.ts`**).*
 
 ---
 
@@ -402,13 +426,13 @@ A integridade arquitetural é validada via **Vitest (`npm test`)**, checagem est
   - **Episódio anterior de expiração antecipada e acompanhamento:** a expiração antecipada relatada anteriormente não voltou a ocorrer nessa rodada; **a causa do episódio anterior permanece desconhecida**. Manter acompanhamento contínuo dos logs estruturados (`[POST /api/atas/[id]/sign-token]`, `[GET /api/atas/sign-token]` e `[POST /api/atas/sign-token]`) nas primeiras utilizações reais.
 - **Validação de Desempenho, Ciclo de Vida e Confiabilidade da Extensão MV3 (`v1.6.0` em `13/11/2026`):**
   - **Suíte de regressão dedicada:** `npx vitest run src/lib/__tests__/whatsappExtensionReliability.test.ts` → **1 arquivo, 13 testes aprovados** (injeção idempotente 10x, cleanup de listeners/timers/observers, `selectionchange` sem auto-mutação, `dispatchObserver` desconectado fora de despacho ativo, rejeição de falso positivo em timeout de 45s, rejeição de histórico antigo ao rolar, rejeição após troca de conversa, isolamento de corrida A ➔ B, bloqueio `UNAUTHORIZED_WHATSAPP_TAB`, preservação de outras abas abertas e ausência de resize forçado de popup, unmount de `WhatsAppDispatchToggle` e `BuscaAtivaClient`, e integridade SHA-256 dos 14 arquivos nos ZIPs distribuídos).
-  - **Estado atual verificado da suíte (`npm test`):** **74 arquivos aprovados e 3 `skipIf` de banco isolado (`ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx` = 77 arquivos)**; **691 testes aprovados e 12 ignorados (703 testes)** *(incluindo as suítes `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)*; `npx tsc --noEmit` e `npm run build` com **0 erros**.
+  - **Estado atual verificado da suíte (`npm test`):** **75 arquivos aprovados e 3 `skipIf` de banco isolado (`ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx` = 78 arquivos)**; **699 testes aprovados e 12 ignorados (711 testes)** *(incluindo `classCouncilModule.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)*; `npx tsc --noEmit` e `npm run build` com **0 erros**.
   - *(Snapshot histórico de `14/11/2026`: `68/71` arquivos e `652` testes aprovados na consolidação `v1.6.0`.)*
 - **Pilares de Cobertura da Suíte:**
   - **Segurança Adversarial Multi-Tenant, V3 & Domínio:** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `messageReplySecurity.test.ts`, `schoolSyncToken.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`, `authGoogleCredentialsAndDomain.test.ts`, `storageKeysAndNeutralDomain.test.ts`, `platformEditions.test.ts`.
   - **Conformidade Jurídica, PIN, Serviços de Atas, Polling QR & Perícia Forense:** `securityAndLegalAuditV2.test.ts`, `complianceAndForensics.test.ts`, `signingPin.test.ts`, `ataCrypto.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `teacherAtas.test.ts`, `escolaSign.test.ts`, `messageCrypto.test.ts`, `actionAlertsAndPhysicalScan.test.ts`, `atasDynamicLayout.test.ts`, `atasArchiveUsability.test.ts`, `qrCodeGeneration.test.ts`, `ataPdfArchive.test.ts`, `objectStorageMultiDriver.test.ts`.
   - **Privacidade LGPD/ECA & IA:** `aiPseudonymizer.test.ts`, `nreAtaFormalize.test.ts`, `predictiveAnalytics.test.ts`.
-  - **Operação Pedagógica, Performance Neon, SERE, Extensão, Roteamento, Simulação 2D & SSR:** `sereParser.test.ts`, `studentMatcher.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `whatsappExtensionReliability.test.ts`, `clientDispatcher.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `phase5Features.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `buscaAtivaSsr.test.tsx`, `faltasPageReal.test.tsx`, `faltasSsr.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`, `rootPageRouting.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`, `treinamentoPage.test.tsx`.
+  - **Operação Pedagógica, Conselho de Classe, Performance Neon, SERE, Extensão, Roteamento, Simulação 2D & SSR:** `classCouncilModule.test.ts`, `sereParser.test.ts`, `studentMatcher.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`, `classGroupManagement.test.ts`, `pedagogicalClassifier.test.ts`, `whatsappPhase4.test.ts`, `whatsappAutoConfirmation.test.ts`, `whatsappExtensionReliability.test.ts`, `clientDispatcher.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappPhase3Integration.test.tsx`, `messageFormatter.test.ts`, `saasOnboardingAndPredictive.test.ts`, `secretariaExecutive.test.ts`, `phase5Features.test.ts`, `adminEscolasSsr.test.tsx`, `escolaSettingsSsr.test.tsx`, `buscaAtivaPageReal.test.tsx`, `buscaAtivaSsr.test.tsx`, `faltasPageReal.test.tsx`, `faltasSsr.test.tsx`, `alunosSsr.test.tsx`, `ssrComponents.test.tsx`, `rootPageRouting.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`, `treinamentoPage.test.tsx`.
 
 ---
 

@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui arquitetura probatória sob a Lei nº 14.063/2020 (documentação interna) com confirmação de autoria por PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, traço vetorial, governança extemporânea (> 5 dias úteis), complementos encadeados ("Em tempo") e biometria móvel WebAuthn. Em toda interface visível (UI, `aria-label` e landing pages), cumpra a Seção 10 de GEMINI.md (sem "fé pública", "imutável", siglas como SHA-256 ou selos legais).
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 77 arquivos: 74 aprovados e 3 `skipIf` de banco isolado pré-existentes; 691 testes aprovados e 12 ignorados (703 testes), incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `treinamentoPage.test.tsx`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`) e que o build de produção compile sem erros (`npm run build`).
+6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 78 arquivos: 75 aprovados e 3 `skipIf` de banco isolado pré-existentes; 699 testes aprovados e 12 ignorados (711 testes), incluindo `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `treinamentoPage.test.tsx`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`) e que o build de produção compile sem erros (`npm run build`).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -160,7 +160,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — todos os testes ativos da suíte Vitest devem passar sem falhas (estado vigente: **74 arquivos aprovados | 3 ignorados por `skipIf` sem banco isolado local (77 arquivos)** e **691 testes aprovados | 12 ignorados (703 testes)**, incluindo `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`; `ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx` e `faltasPageReal.test.tsx` usam `describe.skipIf(!hasIsolatedDb)` e `rateLimitDistributed.test.ts` possui 4 casos opcionais condicionados a PostgreSQL/Redis).
+  1. Execute `npm test` — todos os testes ativos da suíte Vitest devem passar sem falhas (estado vigente: **75 arquivos aprovados | 3 ignorados por `skipIf` sem banco isolado local (78 arquivos)** e **699 testes aprovados | 12 ignorados (711 testes)**, incluindo `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`; `ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx` e `faltasPageReal.test.tsx` usam `describe.skipIf(!hasIsolatedDb)` e `rateLimitDistributed.test.ts` possui 4 casos opcionais condicionados a PostgreSQL/Redis).
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -203,7 +203,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ```text
 ├── src/
-│   ├── app/                        # 30 Páginas SSR + 53 Route Handlers (Next.js 16 App Router)
+│   ├── app/                        # 33 Páginas SSR + 60 Route Handlers (Next.js 16 App Router)
 │   │   ├── login/                  # Login institucional Google OAuth e login dev condicional
 │   │   ├── impacto/                # Redirecionamento permanente para landing pública na raiz (/)
 │   │   ├── preview-landing/        # Pré-visualização da landing pública com PedagogicalFlowSimulator
@@ -215,6 +215,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── onboarding/             # Wizard de adesão em 4 etapas para novas escolas/redes
 │   │   ├── busca-ativa/            # Fila inteligente de disparos WhatsApp
 │   │   ├── atas/                   # Livro Oficial Digital de Atas, Impressão A4 e Livro Anual
+│   │   ├── conselho-classe/        # Acompanhamento Trimestral de Turmas, Conselho de Classe e Pós-Conselho
 │   │   ├── encaminhamentos/        # Gestão de prazos e alertas de combinados das atas
 │   │   ├── alunos/                 # Base cadastral, Importação SERE, Prontuário 360º e Dossiê
 │   │   ├── faltas/                 # Monitoramento de infrequência, SERP e queda abrupta
@@ -228,10 +229,11 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── auditoria/              # Trilha de auditoria imutável escopada por escola
 │   │   ├── validar/ata/[code]/     # Portal público LGPD de validação cega de atas
 │   │   ├── assinar/ata/[token]/    # Portal móvel de assinatura com biometria e traço vetorial
-│   │   └── api/                    # 53 Route Handlers REST serverless
-│   ├── services/                   # Camada de serviços de domínio, sync e mensageria (7 módulos)
+│   │   └── api/                    # 60 Route Handlers REST serverless
+│   ├── services/                   # Camada de serviços de domínio, sync e mensageria (8 módulos)
 │   │   ├── ataParticipantService.ts# Sanitização de rascunhos e pareamento anti-forja de signatários
 │   │   ├── ataFinalizationService.ts# Cálculo de dias úteis BRT, hash SHA-256 e lavratura atômica
+│   │   ├── classCouncilService.ts  # Orquestração trimestral, matriz de descritivos, clonagem curricular e Pós-Conselho
 │   │   ├── frequencySyncService.ts # Orquestração de importação e sincronização de frequência
 │   │   ├── messageDispatchService.ts# Despacho auditado de mensagens e hash bipartido
 │   │   └── messaging/              # Contratos e capacidade isolados (piloto Evolution MSG-*)
@@ -239,6 +241,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── PedagogicalFlowSimulator.tsx # Simulador 2D interativo em App Shell (âncoras DOM data-sim-target, cadência 3 tempos e Item 10)
 │   │   ├── landing/                # LandingPageClient (flag ENABLE_LEGACY_WORKFLOW_PANELS = false) e painéis legados preservados
 │   │   ├── ata/                    # Editor widescreen (editor/* tipado, qrPollController, hook, banner QR, signatureState, signLinkValidity), PIN modal, scan físico, canvas
+│   │   ├── conselho/               # Subcomponentes modulares do Conselho de Classe, Matriz 1..5, Pós-Conselho e Prontuário 360º
 │   │   └── whatsapp/               # Modal de retorno assistido e alternador de Janela Dedicada Compacta
 │   ├── lib/                        # Regras de negócio, segurança, criptografia e integrações
 │   │   ├── auth.ts / auth.config.ts# Configuração NextAuth v5 (Edge + Prisma)
@@ -261,7 +264,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   └── __tests__/              # Suítes unitárias, SSR e regressão multi-tenant (Vitest)
 │   └── proxy.ts                    # Middleware de borda (Next.js 16 Proxy)
 ├── prisma/
-│   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (21 models)
+│   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (26 models)
 ├── extension/                      # Extensão Chrome MV3 (v1.6.5) — Power BI, SERP e WhatsApp
 ├── scripts/                        # Scripts ativos (package_extension.cjs, vercel_db_push.cjs, seed.cjs, validate_qr_poll_browser.mjs, validate_ata_editor_reopen_browser.mjs, validate_ata_reopen_expiry_e2e.mjs)
 │   └── legacy/                     # Utilitários históricos arquivados
@@ -280,7 +283,7 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 77 arquivos: 74 aprovados e 3 skipIf banco isolado; 691 testes aprovados e 12 ignorados)
+# Executar suíte completa de testes (Vitest — 78 arquivos: 75 aprovados e 3 skipIf banco isolado; 699 testes aprovados e 12 ignorados)
 npm test
 
 # Executar compilação completa de produção (Extensão + Schema Check + Turbopack)

@@ -347,6 +347,21 @@ export async function DELETE(
       prisma.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } }),
       prisma.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } }),
       prisma.pedagogicalMinute.deleteMany({ where: { schoolId: id } }),
+      ...(typeof prisma.studentCouncilSubjectEntry?.deleteMany === "function"
+        ? [prisma.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: id } })]
+        : []),
+      ...(typeof prisma.studentCouncilCard?.deleteMany === "function"
+        ? [prisma.studentCouncilCard.deleteMany({ where: { schoolId: id } })]
+        : []),
+      ...(typeof prisma.classCouncilTrimester?.deleteMany === "function"
+        ? [prisma.classCouncilTrimester.deleteMany({ where: { schoolId: id } })]
+        : []),
+      ...(typeof prisma.classCouncilSubject?.deleteMany === "function"
+        ? [prisma.classCouncilSubject.deleteMany({ where: { schoolId: id } })]
+        : []),
+      ...(typeof prisma.classCouncilBoard?.deleteMany === "function"
+        ? [prisma.classCouncilBoard.deleteMany({ where: { schoolId: id } })]
+        : []),
       prisma.student.deleteMany({ where: { schoolId: id } }),
       prisma.classGroup.deleteMany({ where: { schoolId: id } }),
       prisma.messageTemplate.deleteMany({ where: { schoolId: id } }),

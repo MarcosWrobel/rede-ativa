@@ -330,3 +330,155 @@ export const inPersonAttendanceCreateSchema = z.object({
   summary: z.string().trim().min(5, "Descreva o resumo/relato do atendimento presencial"),
   agreements: z.string().trim().optional().nullable(),
 });
+
+// ---------------------------------------------------------------------------
+// ACOMPANHAMENTO TRIMESTRAL DE TURMAS, CONSELHO DE CLASSE E PÓS-CONSELHO
+// ---------------------------------------------------------------------------
+
+export const councilTrimesterEnum = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+
+export const councilEnrollmentStatusEnum = z.enum([
+  "ATIVO",
+  "TRANSFERIDO",
+  "REMANEJADO",
+  "ABANDONO",
+]);
+
+export const councilSeatingMapModeEnum = z.enum([
+  "SEMANAL",
+  "REVEZAMENTO_MENSAL",
+  "FIXO",
+  "PERSONALIZADO",
+]);
+
+export const councilStudentTagEnum = z.enum([
+  "ALUNO_COM_LAUDO",
+  "AEE",
+  "ESTUDANTE_MONITOR",
+  "LIDER_DE_TURMA",
+  "DESTAQUE_DA_TURMA",
+  "ESTUDANTE_SUPERACAO",
+  "DESTAQUE_INTEGRADO_NOTA_INTEGRA",
+]);
+
+export const councilDescriptorCodeSchema = z.number().int().min(1).max(5);
+
+export const councilBoardUpsertSchema = z.object({
+  classGroupId: z.string().trim().min(1, "Turma é obrigatória").max(100),
+  year: z.number().int().min(2024).max(2100),
+  peerLeaderStudentId: z.string().trim().max(100).optional().nullable(),
+  peerLeaderName: z.string().trim().max(200).optional().nullable(),
+  teacherLeaderStudentId: z.string().trim().max(100).optional().nullable(),
+  teacherLeaderName: z.string().trim().max(200).optional().nullable(),
+  externalEvalEd1Percent: z.number().min(0).max(100).optional().nullable(),
+  externalEvalEd2Percent: z.number().min(0).max(100).optional().nullable(),
+  externalEvalEd3Percent: z.number().min(0).max(100).optional().nullable(),
+  seatingMapMode: councilSeatingMapModeEnum.optional().default("REVEZAMENTO_MENSAL"),
+  seatingMapNotes: z.string().trim().max(2000).optional().nullable(),
+});
+
+export const councilBoardMetadataUpdateSchema = councilBoardUpsertSchema.partial().omit({
+  classGroupId: true,
+  year: true,
+});
+
+export const councilSubjectItemSchema = z.object({
+  id: z.string().trim().max(100).optional(),
+  name: z.string().trim().min(2, "Nome do componente é obrigatório").max(120),
+  teacherName: z.string().trim().max(200).optional().nullable(),
+  teacherEmail: z
+    .string()
+    .trim()
+    .email("E-mail docente inválido")
+    .max(200)
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  displayOrder: z.number().int().min(0).max(100).default(0),
+  active: z.boolean().default(true),
+});
+
+export const councilSubjectsBatchSchema = z
+  .object({
+    sourceBoardId: z.string().trim().min(1).max(100).optional().nullable(),
+    subjects: z
+      .array(councilSubjectItemSchema)
+      .max(40, "Limite máximo de 40 componentes por turma.")
+      .optional(),
+  })
+  .refine(
+    (d) => Boolean(d.sourceBoardId) || (Array.isArray(d.subjects) && d.subjects.length >= 1),
+    {
+      message:
+        "Informe ao menos um componente curricular ou selecione uma turma de origem para importar.",
+    }
+  );
+
+export const councilPostActionItemSchema = z.object({
+  number: z.number().int().min(1).max(50),
+  description: z.string().trim().min(2, "Descrição do encaminhamento é obrigatória").max(1000),
+  responsible: z.enum(["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO"]).default("ESCOLA"),
+  dueDate: z.string().optional().nullable(),
+});
+
+export const councilTrimesterUpdateSchema = z.object({
+  trimester: councilTrimesterEnum,
+  status: z.enum(["IN_PROGRESS", "CONSOLIDATED"]).optional(),
+  positivePoints: z.string().trim().max(5000).optional().nullable(),
+  attentionPoints: z.string().trim().max(5000).optional().nullable(),
+  plannedActions: z.string().trim().max(5000).optional().nullable(),
+  postCouncilHeldAt: z.string().optional().nullable(),
+  postCouncilAdvances: z.string().trim().max(4000).optional().nullable(),
+  postCouncilWhatWorked: z.string().trim().max(4000).optional().nullable(),
+  postCouncilRecognizedAttitudes: z.string().trim().max(4000).optional().nullable(),
+  postCouncilCriticalSubjects: z.string().trim().max(4000).optional().nullable(),
+  postCouncilPerformanceFactors: z.string().trim().max(4000).optional().nullable(),
+  postCouncilBehaviorAttendance: z.string().trim().max(4000).optional().nullable(),
+  postCouncilWhatToImprove: z.string().trim().max(4000).optional().nullable(),
+  postCouncilHowTeachersCanHelp: z.string().trim().max(4000).optional().nullable(),
+  postCouncilCommitments: z.string().trim().max(4000).optional().nullable(),
+  postCouncilActionItems: z.array(councilPostActionItemSchema).max(30).optional(),
+});
+
+export const councilBelowAvgItemSchema = z.object({
+  subjectId: z.string().trim().max(100).optional().nullable(),
+  subjectName: z.string().trim().min(1).max(120),
+  grade: z.number().min(0).max(100).nullable(),
+});
+
+export const councilStudentCardUpdateSchema = z.object({
+  studentId: z.string().trim().min(1).max(100),
+  enrollmentStatus: councilEnrollmentStatusEnum.optional(),
+  externalEvalEd1Percent: z.number().min(0).max(100).optional().nullable(),
+  externalEvalEd2Percent: z.number().min(0).max(100).optional().nullable(),
+  externalEvalEd3Percent: z.number().min(0).max(100).optional().nullable(),
+  tags: z.array(councilStudentTagEnum).max(7).optional(),
+  trimester: councilTrimesterEnum.optional(),
+  qualitativeOpinion: z.string().trim().max(4000).optional().nullable(),
+  belowAverageSubjects: z.array(councilBelowAvgItemSchema).max(30).optional(),
+});
+
+export const councilMatrixBatchSaveSchema = z.object({
+  trimester: councilTrimesterEnum,
+  entries: z
+    .array(
+      z.object({
+        studentId: z.string().trim().min(1).max(100),
+        subjectId: z.string().trim().min(1).max(100),
+        descriptorCodes: z
+          .array(councilDescriptorCodeSchema)
+          .max(5)
+          .transform((arr) => Array.from(new Set(arr)).sort((a, b) => a - b)),
+        grade: z.number().min(0).max(100).optional().nullable(),
+      })
+    )
+    .min(1, "Informe ao menos um lançamento na matriz.")
+    .max(1500, "Limite máximo de 1.500 células por lote excedido."),
+});
+
+export const councilGenerateMinuteSchema = z.object({
+  source: z.enum(["POST_COUNCIL", "STUDENT_DELIBERATION"]),
+  trimester: councilTrimesterEnum,
+  studentIds: z.array(z.string().trim().min(1).max(100)).max(100).optional().default([]),
+  isConfidential: z.boolean().optional(),
+});

@@ -26,7 +26,8 @@ import {
   Stethoscope,
   ListTodo,
   Building2,
-  Landmark
+  Landmark,
+  ClipboardList
 } from "lucide-react";
 
 interface SidebarProps {
@@ -136,6 +137,12 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
           label: "Estudantes e Turmas",
           icon: Users,
           description: "Prontuário e histórico de acompanhamento",
+        },
+        {
+          href: "/conselho-classe",
+          label: "Conselho de Classe",
+          icon: ClipboardList,
+          description: "Fichas trimestrais e pós-conselho",
         },
         {
           href: "/atestados",

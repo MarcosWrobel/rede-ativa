@@ -17,7 +17,8 @@ export async function safeQueryList<T>(fn: () => Promise<T[]>): Promise<T[]> {
 }
 
 export async function loadStudent360Bundle(studentId: string) {
-  const [student, contacts, justifications, attendances, snapshots, minutes] = await Promise.all([
+  const [student, contacts, justifications, attendances, snapshots, minutes, councilCards] =
+    await Promise.all([
     prisma.student.findUnique({
       where: { id: studentId },
       include: {
@@ -133,6 +134,41 @@ export async function loadStudent360Bundle(studentId: string) {
         orderBy: [{ ataNumber: "desc" }, { attendedAt: "desc" }],
       })
     ),
+    safeQueryList(() =>
+      typeof prisma.studentCouncilCard?.findMany === "function"
+        ? prisma.studentCouncilCard.findMany({
+            where: { studentId },
+            include: {
+              board: {
+                select: {
+                  id: true,
+                  year: true,
+                  schoolId: true,
+                  classGroup: {
+                    select: { id: true, name: true, segment: true, shift: true },
+                  },
+                  subjects: {
+                    where: { active: true },
+                    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+                    select: { id: true, name: true, teacherName: true, displayOrder: true },
+                  },
+                },
+              },
+              subjectEntries: {
+                orderBy: [{ trimester: "asc" }],
+                select: {
+                  id: true,
+                  subjectId: true,
+                  trimester: true,
+                  descriptorCodes: true,
+                  grade: true,
+                },
+              },
+            },
+            orderBy: { board: { year: "desc" } },
+          })
+        : Promise.resolve([])
+    ),
   ]);
 
   if (!student) return null;
@@ -156,6 +192,13 @@ export async function loadStudent360Bundle(studentId: string) {
       physicalSignedScanData: null,
     }));
 
+  const scopedCouncilCards = councilCards.filter(
+    (c: any) =>
+      !student.schoolId ||
+      ((!c.schoolId || c.schoolId === student.schoolId) &&
+        (!c.board?.schoolId || c.board.schoolId === student.schoolId))
+  );
+
   return {
     student,
     contacts,
@@ -163,5 +206,6 @@ export async function loadStudent360Bundle(studentId: string) {
     attendances,
     snapshots,
     minutes: scopedMinutes,
+    councilCards: scopedCouncilCards,
   };
 }

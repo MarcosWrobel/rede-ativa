@@ -129,6 +129,7 @@ export default async function ProntuarioPage({
       initialAttendances={bundle.attendances}
       initialSnapshots={bundle.snapshots}
       initialMinutes={sanitizedMinutes}
+      initialCouncilCards={bundle.councilCards || []}
       currentSchool={studentSchool}
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
