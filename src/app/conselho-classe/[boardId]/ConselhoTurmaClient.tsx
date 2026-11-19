@@ -8,12 +8,14 @@ import {
   FileText,
   Grid3X3,
   MessageSquareText,
+  Presentation,
   Printer,
   Users,
 } from "lucide-react";
 import CouncilHeaderMetadataCard from "@/components/conselho/CouncilHeaderMetadataCard";
 import CouncilSubjectsManagerModal from "@/components/conselho/CouncilSubjectsManagerModal";
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
+import CouncilAnalysisPanel from "@/components/conselho/CouncilAnalysisPanel";
 import CouncilMatrixGrid from "@/components/conselho/CouncilMatrixGrid";
 import CouncilTrimesterOverviewTab from "@/components/conselho/CouncilTrimesterOverviewTab";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
@@ -33,7 +35,7 @@ import {
   type CouncilTrimesterRecord,
 } from "@/components/conselho/types";
 
-type ActiveTabKey = "matrix" | "students" | "overview" | "post-council";
+type ActiveTabKey = "analysis" | "matrix" | "students" | "overview" | "post-council";
 
 interface ConselhoTurmaClientProps {
   initialBoard: CouncilBoardDetailRecord;
@@ -48,7 +50,7 @@ export default function ConselhoTurmaClient({
 }: ConselhoTurmaClientProps) {
   const [board, setBoard] = useState<CouncilBoardDetailRecord>(initialBoard);
   const [activeTrimester, setActiveTrimester] = useState<CouncilTrimesterNumber>(1);
-  const [activeTab, setActiveTab] = useState<ActiveTabKey>("matrix");
+  const [activeTab, setActiveTab] = useState<ActiveTabKey>("analysis");
   const [hideSensitiveTags, setHideSensitiveTags] = useState(false);
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
@@ -127,6 +129,7 @@ export default function ConselhoTurmaClient({
   );
 
   const tabItems: Array<{ key: ActiveTabKey; label: string; icon: typeof Grid3X3 }> = [
+    { key: "analysis", label: "Painel de Análise", icon: Presentation },
     { key: "matrix", label: "Matriz por Componente", icon: Grid3X3 },
     { key: "students", label: "Fichas dos Estudantes", icon: Users },
     { key: "overview", label: "Observações da Turma", icon: FileText },
@@ -242,6 +245,22 @@ export default function ConselhoTurmaClient({
         aria-labelledby={`council-tab-${activeTab}`}
         className="mt-0"
       >
+        {activeTab === "analysis" && (
+          <CouncilAnalysisPanel
+            board={board}
+            activeTrimester={activeTrimester}
+            onChangeTrimester={setActiveTrimester}
+            hideSensitiveTags={hideSensitiveTags}
+            onToggleHideSensitiveTags={() => setHideSensitiveTags((prev) => !prev)}
+            onOpenStudentModal={(card) => setEditingCardId(card.studentId)}
+            onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
+            onCardUpdated={handleCardUpdated}
+            onMatrixSaved={refreshBoard}
+            onNotify={notify}
+            readOnly={!canEdit}
+          />
+        )}
+
         {activeTab === "matrix" && (
           <CouncilMatrixGrid
             board={board}
