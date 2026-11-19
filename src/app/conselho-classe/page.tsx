@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import { canUseGovernmentScrapers, isPilotIntegrated } from "@/lib/platformEditions";
 import { getCurrentBrasiliaYear } from "@/services/ataFinalizationService";
 import {
   canMutateSchoolCouncil,
@@ -36,6 +37,8 @@ export default async function ConselhoClassePage({
 
   const data = await listSchoolCouncilBoards(currentSchool.id, year);
   const canEdit = canMutateSchoolCouncil(session, currentSchool.id);
+  const canUseBiScraper =
+    isPilotIntegrated(currentSchool.edition) || canUseGovernmentScrapers(currentSchool);
 
   return (
     <ConselhoIndexClient
@@ -44,6 +47,7 @@ export default async function ConselhoClassePage({
       initialBoards={data.boards}
       schoolName={currentSchool.name}
       canEdit={canEdit}
+      canUseBiScraper={canUseBiScraper}
     />
   );
 }

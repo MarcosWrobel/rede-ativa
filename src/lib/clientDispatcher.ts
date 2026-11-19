@@ -4,7 +4,7 @@ import { getStoredPreference } from "./storageKeys";
 
 export const WHATSAPP_DISPATCH_STORAGE_KEY = "redeativa_whatsapp_dispatch_mode";
 export const LEGACY_WHATSAPP_DISPATCH_STORAGE_KEY = "leopoldina_whatsapp_dispatch_mode";
-export const EXPECTED_EXTENSION_VERSION = "1.6.5";
+export const EXPECTED_EXTENSION_VERSION = "1.7.0";
 export type WhatsAppDispatchMode = "extension" | "native";
 
 declare global {

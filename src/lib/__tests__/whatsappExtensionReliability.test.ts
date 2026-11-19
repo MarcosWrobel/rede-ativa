@@ -699,7 +699,7 @@ function createWhatsAppContentHarness(options?: {
   };
 }
 
-describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.6.5)", () => {
+describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.7.0)", () => {
   it("1. Reinjeção 1x, 5x e 10x de whatsapp-content.js não acumula listeners, timers, observers nem barras duplicadas", () => {
     const h = createWhatsAppContentHarness();
 
@@ -717,7 +717,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     const pingResponses = h.sendRuntimeToContent({ type: "LEOPOLDINA_PING" });
     expect(pingResponses).toHaveLength(1);
-    expect(pingResponses[0]).toEqual({ pong: true, version: "1.6.5" });
+    expect(pingResponses[0]).toEqual({ pong: true, version: "1.7.0" });
   });
 
   it("2. __REDEATIVA_WA_CLEANUP__ remove todos os listeners, cancela timers pendentes e impede confirmação posterior", () => {
@@ -1211,7 +1211,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     expect(winListeners).toHaveLength(1);
     expect(runtimeListeners).toHaveLength(1);
-    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.6.5");
+    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.7.0");
   });
 
   it("12. WhatsAppDispatchToggle e BuscaAtivaClient removem todos os listeners e timers no cleanup de useEffect", () => {
@@ -1230,9 +1230,9 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(buscaAtivaSource).toContain("if (toastTimer) clearTimeout(toastTimer)");
   });
 
-  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.6.5 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
+  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.7.0 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
-    expect(manifest.version).toBe("1.6.5");
+    expect(manifest.version).toBe("1.7.0");
     expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version);
 
     expect(fs.existsSync(ZIP_REDE_ATIVA_PATH)).toBe(true);
@@ -2395,7 +2395,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     });
 
     expect(rootDataset.redeativaExtension).toBe("true");
-    expect(rootDataset.redeativaExtensionVersion).toBe("1.6.5");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.0");
 
     // Simula hidratação do Next/React removendo atributos data-* do <html>
     delete rootDataset.redeativaExtension;
@@ -2404,7 +2404,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     mutationObservers[0].cb();
 
     expect(rootDataset.redeativaExtension).toBe("true");
-    expect(rootDataset.redeativaExtensionVersion).toBe("1.6.5");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.0");
     expect(
       postedMessages.filter((m) => m.type === "REDEATIVA_EXTENSION_READY").length
     ).toBeGreaterThan(readyCountBefore);
@@ -2416,7 +2416,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
       { id: "ext-rede-ativa-test" },
       (res: any) => pingReplies.push(res)
     );
-    expect(pingReplies[0]).toEqual({ alive: true, version: "1.6.5" });
+    expect(pingReplies[0]).toEqual({ alive: true, version: "1.7.0" });
 
     // Modal aberto sem enviar studentName no payload -> bridge infere "NATIELE PACHECO" do <dialog open>
     for (const fn of winListeners.get("message") || []) {

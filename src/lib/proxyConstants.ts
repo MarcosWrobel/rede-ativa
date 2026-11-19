@@ -11,6 +11,7 @@ export const SELF_AUTH_API_PREFIXES = [
   "/api/auth/",
   "/api/frequencia/sync",
   "/api/serp/sync",
+  "/api/conselho-classe/sync",
   "/api/messages/pending",
   "/api/atas/public/",
   "/api/atas/sign-token/",

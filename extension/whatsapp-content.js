@@ -1,5 +1,5 @@
 // whatsapp-content.js - Captura Assistida de Retornos e Confirmação Verificada de Envio (WhatsApp Web)
-// Versão 1.6.5 — Correlação @lid + nome do estudante + filtro de timestamp + transição SPA verificada
+// Versão 1.7.0 — BI Aprendizagem (Conselho de Classe), @lid + nome do estudante + filtro de timestamp + transição SPA verificada
 
 if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
   try {
@@ -8,7 +8,7 @@ if (typeof window.__REDEATIVA_WA_CLEANUP__ === "function") {
 }
 
 (function () {
-  const EXTENSION_VERSION = "1.6.5";
+  const EXTENSION_VERSION = "1.7.0";
 
   let isInstanceDisposed = false;
   let dispatchGeneration = 0;

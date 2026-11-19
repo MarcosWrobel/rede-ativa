@@ -26,7 +26,7 @@ const hoisted = vi.hoisted(() => {
       state: "PR",
       nre: "Ponta Grossa",
       network: "ESTADUAL",
-      edition: "INSTITUCIONAL_ESSENCIAL" as const,
+      edition: "INSTITUCIONAL_ESSENCIAL" as "INSTITUCIONAL_ESSENCIAL" | "PILOTO_INTEGRADA",
     },
     db,
     auditCalls: [] as any[],
@@ -137,8 +137,19 @@ vi.mock("@/lib/prisma", () => {
           if (where?.classGroupId !== undefined && st.classGroupId !== where.classGroupId) {
             return false;
           }
+          if (where?.active !== undefined && (st.active ?? true) !== where.active) {
+            return false;
+          }
+          if (where?.cgm?.in && !where.cgm.in.includes(st.cgm)) {
+            return false;
+          }
           return true;
         });
+      }),
+      update: vi.fn(async ({ where, data }: any) => {
+        const st = hoisted.db.students.find((s) => s.id === where?.id);
+        if (st) Object.assign(st, data);
+        return st;
       }),
       findUnique: vi.fn(async ({ where }: any) => {
         const st = hoisted.db.students.find((s) => s.id === where?.id);
@@ -196,7 +207,19 @@ vi.mock("@/lib/prisma", () => {
       }),
       findUnique: vi.fn(async ({ where, include }: any) => {
         if (hoisted.forceDbError) throw new Error("FATAL_DB_SECRET_CONNECTION_LEAK");
-        const found = hoisted.db.boards.find((b) => b.id === where?.id);
+        let found: any = null;
+        if (where?.id) {
+          found = hoisted.db.boards.find((b) => b.id === where.id) || null;
+        } else if (where?.schoolId_classGroupId_year) {
+          const k = where.schoolId_classGroupId_year;
+          found =
+            hoisted.db.boards.find(
+              (b) =>
+                b.schoolId === k.schoolId &&
+                b.classGroupId === k.classGroupId &&
+                b.year === k.year
+            ) || null;
+        }
         if (!found) return null;
         if (!include) return found;
         return hydrateBoard(found);
@@ -427,9 +450,19 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import {
+  classCouncilBiSyncSchema,
   councilMatrixBatchSaveSchema,
   councilSubjectsBatchSchema,
+  parsePtBrDecimal,
 } from "@/lib/schemas";
+import {
+  isRegularTrimestralBiTurma,
+  mergeBiDescriptorCodes,
+  mergeBiStudentTags,
+  normalizeBiDisciplineName,
+  parseCgmAndAgeFromBiRow,
+} from "@/services/classCouncilBiSyncService";
+import { POST as postCouncilBiSyncRoute } from "@/app/api/conselho-classe/sync/route";
 import { GET as getBoardsRoute, POST as postBoardRoute } from "@/app/api/conselho-classe/route";
 import {
   GET as getBoardDetailRoute,
@@ -960,6 +993,320 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       for (const pat of forbidden) {
         expect(content, `${rel} violou padrão ${pat}`).not.toMatch(pat);
       }
+    }
+  });
+
+  it("normaliza dados do BI Aprendizagem (cgmkey, decimais PT-BR, filtro TRIMESTRAL, nomes de disciplinas e mesclagem não-destrutiva)", () => {
+    expect(parsePtBrDecimal("5,8")).toBe(5.8);
+    expect(parsePtBrDecimal("10,0")).toBe(10);
+    expect(parsePtBrDecimal("-")).toBeNull();
+
+    expect(
+      classCouncilBiSyncSchema.safeParse({
+        notasMapa: [
+          {
+            cgm: "1008044100",
+            disciplinaRaw: "MATEMATICA - 1203",
+            nota1Tri: "5,8",
+            nota2Tri: "8,4",
+          },
+        ],
+      }).success
+    ).toBe(true);
+
+    expect(
+      classCouncilBiSyncSchema.safeParse({
+        notasMapa: [
+          {
+            cgm: "1008044100",
+            disciplinaRaw: "MATEMATICA - 1203",
+            nota1Tri: "12,5",
+          },
+        ],
+      }).success
+    ).toBe(false);
+
+    expect(
+      parseCgmAndAgeFromBiRow({
+        cgmkey: "1008044100-18",
+        nome: "CLÓVIS AUGUSTO DO ROSÁRIO WALTE... - 1008044100",
+      })
+    ).toEqual({
+      cgm: "1008044100",
+      age: 18,
+      cleanName: "CLÓVIS AUGUSTO DO ROSÁRIO WALTE...",
+    });
+
+    expect(
+      isRegularTrimestralBiTurma({
+        turmaRaw: "6º Série 1 Manhã - 2636446",
+        periodoAvaliacao: "TRIMESTRAL",
+        equivalenciaSeriacao: "Fundamental - 6º Ano",
+        curso: "ENS FUND 6/9 ANO-SERIE - 4060",
+      })
+    ).toBe(true);
+    expect(
+      isRegularTrimestralBiTurma({
+        turmaRaw: "Sem Seriação 2 Noite - 2691458",
+        periodoAvaliacao: "TRIMESTRAL",
+        equivalenciaSeriacao: "Médio - Sem Equivalencia",
+        curso: "AULAS ESP. TREIN. ESPORTIVO - 3009",
+      })
+    ).toBe(false);
+    expect(
+      isRegularTrimestralBiTurma({
+        turmaRaw: "1º Período 2 Tarde - 2749415",
+        periodoAvaliacao: "",
+        equivalenciaSeriacao: "Médio - Sem Equivalencia",
+        curso: "PROG ALUNO MONITOR - 3042",
+      })
+    ).toBe(false);
+    expect(
+      isRegularTrimestralBiTurma({
+        turmaRaw: "3º Período 1 Manhã - 2793482",
+        periodoAvaliacao: "",
+        equivalenciaSeriacao: "Fundamental - 7º Ano",
+        curso: "ROBOTICA PARANA EF - 3025",
+      })
+    ).toBe(false);
+
+    expect(normalizeBiDisciplineName("ADM.FINANC.E ORCAMENTARIA - 4191").canonicalName).toBe(
+      "Adm. Financeira e Orçamentária"
+    );
+    expect(normalizeBiDisciplineName("ED DIG COMP PROG E IA - 6507").canonicalName).toBe(
+      "Ed. Digital, Programação e IA"
+    );
+    expect(normalizeBiDisciplineName("EDUCACAO FISICA - 601").canonicalName).toBe(
+      "Educação Física"
+    );
+
+    expect(mergeBiDescriptorCodes([3, 4], 5.2)).toEqual([2, 3, 4]);
+    expect(mergeBiDescriptorCodes([2, 3], 7.8)).toEqual([1, 3]);
+    expect(mergeBiDescriptorCodes([2, 5], 6.4)).toEqual([5]);
+
+    const tags = mergeBiStudentTags({
+      existingTags: ["ALUNO_COM_LAUDO", "AEE"],
+      media1Tri: 5.4,
+      media2Tri: 7.5,
+      abaixoBasicoCount: 1,
+    });
+    expect(tags).toEqual(["ALUNO_COM_LAUDO", "AEE", "ESTUDANTE_SUPERACAO"]);
+
+    const topTags = mergeBiStudentTags({
+      existingTags: ["LIDER_DE_TURMA"],
+      media1Tri: 9.2,
+      media2Tri: 9.4,
+      abaixoBasicoCount: 0,
+    });
+    expect(topTags).toEqual(["LIDER_DE_TURMA", "DESTAQUE_DA_TURMA"]);
+  });
+
+  it("bloqueia POST /api/conselho-classe/sync com 403 Forbidden na edição INSTITUCIONAL_ESSENCIAL e valida papel operacional na PILOTO_INTEGRADA", async () => {
+    hoisted.currentSchool.edition = "INSTITUCIONAL_ESSENCIAL";
+    const blockedRes = await postCouncilBiSyncRoute(
+      new Request("http://localhost/api/conselho-classe/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notasMapa: [{ cgm: "1001112223", disciplinaRaw: "ARTE - 704", nota1Tri: "8,0" }],
+        }),
+      })
+    );
+    expect(blockedRes.status).toBe(403);
+
+    hoisted.currentSchool.edition = "PILOTO_INTEGRADA";
+    hoisted.session = {
+      user: {
+        id: "usr-sec",
+        name: "Secretária Municipal",
+        email: "sec@tibagi.pr.gov.br",
+        role: "GESTAO_SECRETARIA",
+        active: true,
+        networks: [{ networkId: "net-1" }],
+      },
+    };
+    const secBlocked = await postCouncilBiSyncRoute(
+      new Request("http://localhost/api/conselho-classe/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notasMapa: [{ cgm: "1001112223", disciplinaRaw: "ARTE - 704", nota1Tri: "8,0" }],
+        }),
+      })
+    );
+    expect(secBlocked.status).toBe(403);
+  });
+
+  it("sincroniza abas ESCOLA, TURMA e MAPA em POST /api/conselho-classe/sync preservando docentes, pareceres, textos e selos sensíveis", async () => {
+    hoisted.currentSchool.edition = "PILOTO_INTEGRADA";
+    hoisted.db.students[0].cgm = "1001112223";
+    hoisted.db.students[1].cgm = "1002223334";
+    hoisted.db.students[2].cgm = "2003334445"; // outra escola (school-b)
+    hoisted.db.cards[0].tags = ["AEE", "ESTUDANTE_MONITOR"];
+    hoisted.db.entries.push({
+      id: "entry-manual-mat",
+      schoolId: "school-a",
+      cardId: "card-a1",
+      subjectId: "subj-a2",
+      trimester: 1,
+      descriptorCodes: [3, 4],
+      grade: null,
+    });
+
+    const res = await postCouncilBiSyncRoute(
+      new Request("http://localhost/api/conselho-classe/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year: 2026,
+          turmas: [
+            {
+              turmaRaw: "6º Série 1 Manhã - 2636446",
+              codturma: "2636446",
+              periodoAvaliacao: "TRIMESTRAL",
+              equivalenciaSeriacao: "Fundamental - 6º Ano",
+              curso: "ENS FUND 6/9 ANO-SERIE - 4060",
+              alunosMatriculados: 24,
+              alunosAvaliados: 24,
+            },
+            {
+              turmaRaw: "Sem Seriação 1 Tarde - 2691389",
+              periodoAvaliacao: "",
+              equivalenciaSeriacao: "Médio - Sem Equivalencia",
+              curso: "AULAS ESP. TREIN. ESPORTIVO - 3009",
+            },
+          ],
+          alunosTurma: [
+            {
+              cgmkey: "1001112223-15",
+              nome: "ANA CLARA SOUZA - 1001112223",
+              codturma: "2636446",
+              media1Tri: "5,5",
+              media2Tri: "7,8",
+              abaixoBasicoCount: 1,
+            },
+          ],
+          notasMapa: [
+            {
+              cgm: "1001112223",
+              nome: "ANA CLARA SOUZA - 1001112223",
+              codturma: "2636446",
+              disciplinaRaw: "MATEMATICA - 1203",
+              disciplinaCode: "1203",
+              nota1Tri: "4,8",
+              nota2Tri: "7,5",
+            },
+            {
+              cgm: "1001112223",
+              nome: "ANA CLARA SOUZA - 1001112223",
+              codturma: "2636446",
+              disciplinaRaw: "CIENCIAS - 301",
+              disciplinaCode: "301",
+              nota1Tri: "8,5",
+            },
+            {
+              // Aluno pertencente a school-b: não pode ser pareado nem modificado por school-a
+              cgm: "2003334445",
+              nome: "CARLOS MENDES - 2003334445",
+              disciplinaRaw: "CIENCIAS - 301",
+              nota1Tri: "3,0",
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.sucesso).toBe(true);
+    expect(json.turmasRegularesRecebidas).toBe(1);
+    expect(json.turmasIgnoradasNaoRegulares).toBe(1);
+    expect(json.alunosPareados).toBe(1);
+    expect(json.disciplinasCriadas).toBe(1);
+    expect(json.notasGravadas).toBe(3);
+    expect(json.naoEncontradosTotal).toBe(1);
+
+    // Idade atualizada via cgmkey e aluno de school-b intocado
+    expect(hoisted.db.students[0].age).toBe(15);
+    expect(hoisted.db.students[2].age).toBeUndefined();
+
+    // Docente titular de Matemática preservado e apenas Ciências adicionada
+    const matSub = hoisted.db.subjects.find((s) => s.id === "subj-a2");
+    expect(matSub?.teacherName).toBe("Prof. Marcos");
+    expect(hoisted.db.subjects.some((s) => s.name === "Ciências" && s.boardId === "board-a1")).toBe(
+      true
+    );
+
+    // Descritivos manuais preservados [3, 4] + código 2 no 1º Tri (< 6.0) e código 1 no 2º Tri (>= 7.0)
+    const matTri1 = hoisted.db.entries.find(
+      (e) => e.cardId === "card-a1" && e.subjectId === "subj-a2" && e.trimester === 1
+    );
+    expect(matTri1?.grade).toBe(4.8);
+    expect(matTri1?.descriptorCodes).toEqual([2, 3, 4]);
+
+    const matTri2 = hoisted.db.entries.find(
+      (e) => e.cardId === "card-a1" && e.subjectId === "subj-a2" && e.trimester === 2
+    );
+    expect(matTri2?.grade).toBe(7.5);
+    expect(matTri2?.descriptorCodes).toEqual([1]);
+
+    // Card preservou parecer e manual below-avg sem subjectId, incluiu Matemática < 6.0 e selo de superação mantendo AEE
+    const cardA1 = hoisted.db.cards[0];
+    expect(cardA1.trimester1Opinion).toBe("Acompanhamento com apoio.");
+    expect(cardA1.tags).toEqual(["AEE", "ESTUDANTE_MONITOR", "ESTUDANTE_SUPERACAO"]);
+    const below1 = JSON.parse(cardA1.trimester1BelowAvgJson);
+    expect(below1).toEqual([
+      { subjectId: "subj-a2", subjectName: "Matemática", grade: 4.8 },
+      { subjectId: null, subjectName: "Projeto Integrador (manual)", grade: 5 },
+    ]);
+
+    // Trimester.positivePoints NÃO foi sobrescrito pelo BI
+    expect(hoisted.db.trimesters[0].positivePoints).toBe("Turma participativa");
+    expect(hoisted.db.trimesters[0].attentionPoints).toBeNull();
+
+    // Auditoria com schoolId na raiz e sem PII/notas
+    expect(hoisted.auditCalls).toHaveLength(1);
+    expect(hoisted.auditCalls[0].action).toBe("SYNC_CLASS_COUNCIL_BI");
+    expect(hoisted.auditCalls[0].schoolId).toBe("school-a");
+    const serializedAudit = JSON.stringify(hoisted.auditCalls[0].details);
+    expect(serializedAudit).not.toContain("Ana Clara");
+    expect(serializedAudit).not.toContain("1001112223");
+    expect(serializedAudit).not.toContain("4.8");
+  });
+
+  it("extension/content.js implementa Viewport Guard 2D e Map indexado por cgm|subjectCode|trimester e rota /sync sanitiza HTTP 500", async () => {
+    const contentJs = fs.readFileSync(
+      path.resolve(process.cwd(), "extension/content.js"),
+      "utf8"
+    );
+    expect(contentJs).toContain(
+      "${matchedRow.cgm}|${matchedSub.subjectCode}|${matchedSub.trimester}"
+    );
+    expect(contentJs).toContain("bounds.dataLeft");
+    expect(contentJs).toContain("bounds.dataRight");
+    expect(contentJs).toContain("bounds.dataTop");
+    expect(contentJs).toContain("bounds.dataBottom");
+    expect(contentJs).toContain("/api/conselho-classe/sync");
+    expect(contentJs).toContain("isTrustedSyncServerUrl");
+
+    hoisted.currentSchool.edition = "PILOTO_INTEGRADA";
+    hoisted.forceDbError = true;
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const errRes = await postCouncilBiSyncRoute(
+        new Request("http://localhost/api/conselho-classe/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            notasMapa: [{ cgm: "1001112223", disciplinaRaw: "ARTE - 704", nota1Tri: "7,0" }],
+          }),
+        })
+      );
+      expect(errRes.status).toBe(500);
+      const errBody = await errRes.json();
+      expect(JSON.stringify(errBody)).not.toContain("FATAL_DB_SECRET_CONNECTION_LEAK");
+    } finally {
+      errSpy.mockRestore();
     }
   });
 });

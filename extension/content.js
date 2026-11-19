@@ -1,12 +1,19 @@
-// content.js - Roda no contexto da página e gerencia a interface e coleta da tabela
+// content.js - Extrator Power BI Multi-Relatório (Frequência & BI Aprendizagem v1.7.0)
 (function() {
   if (window.__leopoldina_content_injected) return;
   window.__leopoldina_content_injected = true;
 
-  console.log('[Leopoldina] Content script v1.1 carregado com sucesso.');
+  console.log('[Rede Ativa] Content script v1.7.0 carregado com sucesso.');
 
-  // Armazena alunos únicos mapeados por CGM
+  // Armazena alunos únicos mapeados por CGM (Modo Presente na Escola / Frequência)
   const alunosCapturados = new Map();
+
+  // Acumuladores do BI Aprendizagem Estadual (Abas ESCOLA, TURMA e MAPA)
+  const councilTurmasMap = new Map();       // chave: codturma || turmaRaw
+  const councilEscolaByRowIdx = new Map();  // merge horizontal por aria-rowindex na aba ESCOLA
+  const councilAlunosTurmaMap = new Map();  // chave: cgm
+  const councilMapaCellsMap = new Map();    // chave: `${cgm}|${subjectCode}|${trimester}`
+
   let isScrolling = false;
 
   const OFFICIAL_SYNC_HTTPS_HOSTS = new Set([
@@ -29,6 +36,100 @@
       if (url.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1')) return true;
     } catch {}
     return false;
+  }
+
+  function normText(val) {
+    return String(val || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function normKeyAscii(val) {
+    return normText(val)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+  }
+
+  function getElementFullText(el) {
+    if (!el) return '';
+    const title = normText(el.getAttribute && el.getAttribute('title'));
+    const inner = normText(el.innerText || el.textContent);
+    if (title && title.length >= inner.length) return title;
+    return inner || title;
+  }
+
+  // Detecta automaticamente o relatório / aba ativa do Power BI
+  function detectarModoPowerBi() {
+    const headerNodes = Array.from(
+      document.querySelectorAll(
+        '[role="columnheader"], .columnHeaders *, .pivotTableHeaderWrap, .pivotTableHeaderWrap *, .pivotTableHeader, th, .headerCell, .tablix-column-header'
+      )
+    );
+
+    const headerTexts = [];
+    for (let i = 0; i < headerNodes.length; i++) {
+      const txt = getElementFullText(headerNodes[i]);
+      if (txt) headerTexts.push(txt);
+    }
+
+    const joinedAscii = headerTexts.map(normKeyAscii).join(' | ');
+    const hasSubTri = headerTexts.some((t) => /^[123]\s*[º°o]?\s*tri$/i.test(normText(t)));
+    const hasDisciplinaHeader = headerTexts.some((t) =>
+      /^[A-ZÀ-Ÿ0-9.\s/]{2,}\s*-\s*\d{2,6}$/i.test(normText(t)) &&
+      !/TURMA|SERIE|PERIODO|SEM SERIACAO/i.test(normKeyAscii(t))
+    );
+
+    if ((hasSubTri && hasDisciplinaHeader) || (hasSubTri && joinedAscii.includes('ALUNO - CGM'))) {
+      return 'APRENDIZAGEM_MAPA';
+    }
+
+    if (
+      joinedAscii.includes('CGMKEY') ||
+      (joinedAscii.includes('CODTURMA') && joinedAscii.includes('NOTA MEDIA'))
+    ) {
+      return 'APRENDIZAGEM_TURMA';
+    }
+
+    if (
+      joinedAscii.includes('TURMA') &&
+      (joinedAscii.includes('ABAIXO DO BASICO') ||
+        joinedAscii.includes('NIVEIS PREOCUPANTES') ||
+        joinedAscii.includes('EQUIVALENCIA SERIACAO')) &&
+      !joinedAscii.includes('CGMKEY')
+    ) {
+      return 'APRENDIZAGEM_ESCOLA';
+    }
+
+    return 'FREQUENCIA_PRESENTE';
+  }
+
+  function isAprendizagemMode(mode) {
+    return (
+      mode === 'APRENDIZAGEM_MAPA' ||
+      mode === 'APRENDIZAGEM_TURMA' ||
+      mode === 'APRENDIZAGEM_ESCOLA'
+    );
+  }
+
+  function hasAnyAprendizagemData() {
+    return (
+      councilMapaCellsMap.size > 0 ||
+      councilAlunosTurmaMap.size > 0 ||
+      councilTurmasMap.size > 0
+    );
+  }
+
+  function getEffectiveSyncTarget() {
+    const mode = detectarModoPowerBi();
+    if (isAprendizagemMode(mode)) return 'CONSELHO_BI';
+    if (alunosCapturados.size === 0 && hasAnyAprendizagemData()) return 'CONSELHO_BI';
+    return 'FREQUENCIA_BI';
+  }
+
+  function getModeBadgeLabel(mode) {
+    if (mode === 'APRENDIZAGEM_MAPA') return 'BI Aprendizagem • Aba MAPA';
+    if (mode === 'APRENDIZAGEM_TURMA') return 'BI Aprendizagem • Aba TURMA';
+    if (mode === 'APRENDIZAGEM_ESCOLA') return 'BI Aprendizagem • Aba ESCOLA';
+    return 'Presente na Escola • Frequência';
   }
 
   // Cria ou atualiza a interface flutuante
@@ -62,7 +163,7 @@
         transition: all 0.2s ease;
       ">
         <span style="font-size: 18px;">🎓</span>
-        <span>Busca Ativa • Rede Ativa</span>
+        <span>Sincronizador • Rede Ativa</span>
         <span id="leo-count-badge" style="
           background: #10b981;
           color: #042f2e;
@@ -78,7 +179,7 @@
         position: absolute;
         bottom: 55px;
         right: 0;
-        width: 390px;
+        width: 400px;
         background: #ffffff;
         color: #1e293b;
         border-radius: 16px;
@@ -89,15 +190,15 @@
         <div style="background: #0f172a; color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center;">
           <div>
             <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px;">
-              <span>🎓</span> Busca Ativa & Frequência
+              <span>🎓</span> Rede Ativa • Power BI
             </div>
-            <div style="font-size: 11px; color: #94a3b8;">Rede Ativa SaaS</div>
+            <div id="leo-mode-label" style="font-size: 11px; color: #38bdf8; font-weight: 600;">Detectando relatório...</div>
           </div>
           <button id="leo-close-btn" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer; padding: 4px;">&times;</button>
         </div>
 
         <div style="padding: 16px;">
-          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+          <div id="leo-stats-freq" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
               <span style="font-size: 12px; color: #64748b; font-weight: 500;">Alunos Capturados:</span>
               <span id="leo-panel-count" style="font-size: 16px; font-weight: 800; color: #0f172a;">0</span>
@@ -116,6 +217,21 @@
             </div>
           </div>
 
+          <div id="leo-stats-council" style="display: none; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 12px; color: #0369a1; font-weight: 600;">Notas Matriz (MAPA):</span>
+              <span id="leo-bi-mapa-count" style="font-size: 14px; font-weight: 800; color: #0f172a;">0 células</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 12px; color: #0369a1; font-weight: 600;">Médias / Idades (TURMA):</span>
+              <span id="leo-bi-turma-count" style="font-size: 13px; font-weight: 700; color: #0284c7;">0 alunos</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12px; color: #0369a1; font-weight: 600;">Turmas (ESCOLA):</span>
+              <span id="leo-bi-escola-count" style="font-size: 13px; font-weight: 700; color: #0284c7;">0 turmas</span>
+            </div>
+          </div>
+
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <button id="leo-btn-autoscroll" style="
               background: #0284c7;
@@ -131,7 +247,7 @@
               justify-content: center;
               gap: 8px;
             ">
-              <span>⚡</span> Rastrear Todos os Alunos (Auto-Scroll)
+              <span>⚡</span> Rastrear Aba Ativa (Auto-Scroll)
             </button>
 
             <button id="leo-btn-download-csv" style="
@@ -165,7 +281,7 @@
               justify-content: center;
               gap: 8px;
             ">
-              <span>📋</span> Copiar JSON dos Alunos
+              <span>📋</span> Copiar JSON
             </button>
 
             <button id="leo-btn-sync-api" style="
@@ -182,12 +298,12 @@
               justify-content: center;
               gap: 8px;
             ">
-              <span>🚀</span> Sincronizar com Sistema (Vercel)
+              <span>🚀</span> Sincronizar com Rede Ativa
             </button>
           </div>
 
           <details id="leo-settings-box" style="margin-top: 10px; font-size: 11px; color: #475569; background: #f8fafc; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <summary style="cursor: pointer; font-weight: 600; color: #334155;">⚙️ Configuração de Envio (Vercel / Nuvem)</summary>
+            <summary style="cursor: pointer; font-weight: 600; color: #334155;">⚙️ Configuração de Envio (Nuvem / Local)</summary>
             <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">URL do Servidor:</label>
@@ -195,10 +311,10 @@
               </div>
               <div>
                 <label style="display: block; font-weight: 600; margin-bottom: 2px;">Chave de Sincronização:</label>
-                <input id="leo-cfg-token" type="password" placeholder="Token secreto cadastrado na Vercel" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                <input id="leo-cfg-token" type="password" placeholder="Token secreto da escola" style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;" />
               </div>
               <div style="display: flex; gap: 4px; margin-top: 2px;">
-                <button id="leo-cfg-btn-vercel" type="button" style="flex: 1; padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-weight: 600;">Usar Vercel</button>
+                <button id="leo-cfg-btn-vercel" type="button" style="flex: 1; padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-weight: 600;">Usar Produção</button>
                 <button id="leo-cfg-btn-local" type="button" style="flex: 1; padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-weight: 600;">Usar Localhost:3001</button>
               </div>
             </div>
@@ -218,12 +334,12 @@
 
     document.body.appendChild(container);
 
-    // Eventos da interface
     const pill = document.getElementById('leo-pill');
     const panel = document.getElementById('leo-panel');
     const closeBtn = document.getElementById('leo-close-btn');
 
     pill.addEventListener('click', () => {
+      atualizarContadores();
       panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
     });
 
@@ -232,7 +348,6 @@
       panel.style.display = 'none';
     });
 
-    // Carrega configurações salvas no storage
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
 
@@ -247,7 +362,7 @@
             inputToken.value = res.leopoldina_sync_token || '';
           }
         } catch (err) {
-          console.warn('[Leopoldina] Falha ao ler storage:', err);
+          console.warn('[Rede Ativa] Falha ao ler storage:', err);
         }
       } else {
         if (inputUrl) inputUrl.value = 'https://www.redeativa.app.br';
@@ -289,6 +404,8 @@
     document.getElementById('leo-btn-download-csv').addEventListener('click', baixarCSV);
     document.getElementById('leo-btn-copy-json').addEventListener('click', copiarJSON);
     document.getElementById('leo-btn-sync-api').addEventListener('click', sincronizarComSistema);
+
+    atualizarContadores();
   }
 
   function setStatus(msg, cor = '#64748b') {
@@ -300,6 +417,52 @@
   }
 
   function atualizarContadores() {
+    const mode = detectarModoPowerBi();
+    const target = getEffectiveSyncTarget();
+
+    const modeEl = document.getElementById('leo-mode-label');
+    if (modeEl) {
+      modeEl.textContent = getModeBadgeLabel(mode);
+    }
+
+    const statsFreq = document.getElementById('leo-stats-freq');
+    const statsCouncil = document.getElementById('leo-stats-council');
+    const btnSync = document.getElementById('leo-btn-sync-api');
+    const badge = document.getElementById('leo-count-badge');
+
+    if (target === 'CONSELHO_BI') {
+      if (statsFreq) statsFreq.style.display = 'none';
+      if (statsCouncil) statsCouncil.style.display = 'block';
+      if (btnSync) {
+        btnSync.textContent = '🚀 Sincronizar Conselho de Classe';
+      }
+
+      const mapaEl = document.getElementById('leo-bi-mapa-count');
+      const turmaEl = document.getElementById('leo-bi-turma-count');
+      const escolaEl = document.getElementById('leo-bi-escola-count');
+
+      if (mapaEl) mapaEl.textContent = `${councilMapaCellsMap.size} células`;
+      if (turmaEl) turmaEl.textContent = `${councilAlunosTurmaMap.size} alunos`;
+      if (escolaEl) escolaEl.textContent = `${councilTurmasMap.size} turmas`;
+
+      if (badge) {
+        if (councilMapaCellsMap.size > 0) {
+          badge.textContent = `${councilMapaCellsMap.size} notas`;
+        } else if (councilAlunosTurmaMap.size > 0) {
+          badge.textContent = `${councilAlunosTurmaMap.size} alunos`;
+        } else {
+          badge.textContent = `${councilTurmasMap.size} turmas`;
+        }
+      }
+      return;
+    }
+
+    if (statsFreq) statsFreq.style.display = 'block';
+    if (statsCouncil) statsCouncil.style.display = 'none';
+    if (btnSync) {
+      btnSync.textContent = '🚀 Sincronizar Frequência com Rede Ativa';
+    }
+
     const total = alunosCapturados.size;
     let risco = 0;
     let amparos = 0;
@@ -307,22 +470,15 @@
 
     alunosCapturados.forEach(a => {
       const freqNum = parseFloat((a.mediaGeral || '').replace('%', '').replace(',', '.'));
-      if (!isNaN(freqNum) && freqNum < 75) {
-        risco++;
-      }
-      if (a.amparoLegalVigencia && !a.ganhandoMundo) {
-        amparos++;
-      }
-      if (a.ganhandoMundo) {
-        ganhando++;
-      }
+      if (!isNaN(freqNum) && freqNum < 75) risco++;
+      if (a.amparoLegalVigencia && !a.ganhandoMundo) amparos++;
+      if (a.ganhandoMundo) ganhando++;
     });
 
-    const badge = document.getElementById('leo-count-badge');
     if (badge) badge.textContent = `${total} alunos`;
 
     const pCount = document.getElementById('leo-panel-count');
-    if (pCount) pCount.textContent = total;
+    if (pCount) pCount.textContent = String(total);
 
     const pRisco = document.getElementById('leo-panel-risco');
     if (pRisco) pRisco.textContent = `${risco} alunos`;
@@ -340,7 +496,10 @@
     }
   }
 
-  // Palavras de interface e metadados a ignorar
+  // =========================================================================
+  // MODO 1: PRESENTE NA ESCOLA (FREQUÊNCIA — COMPORTAMENTO ORIGINAL PRESERVADO)
+  // =========================================================================
+
   const IGNORAR_NOMES = [
     'selecionar linha', 'rolar para cima', 'rolar para baixo', 'varias selecoes',
     'todos', 'outros', 'memoria', 'amparo legal', 'deficiencia', 'ganhando mundo',
@@ -349,9 +508,7 @@
     'formatacao condicional', 'formatação condicional adicional', 'formatacao condicional adicional'
   ];
 
-  // Identifica a posição das colunas no cabeçalho do Power BI (aria-colindex e coordenadas X)
   function detectarIndicesColunas() {
-    // Busca ampla em todos os seletores possíveis de cabeçalho de matriz e tabela Power BI
     const allHeaderNodes = Array.from(
       document.querySelectorAll(
         '[role="columnheader"], [role="columnheader"] *, .columnHeaders *, .pivotTableHeaderWrap, .pivotTableHeaderWrap *, .pivotTableHeader, th, th *, .headerCell, .tablix-column-header, .tablix-column-header *'
@@ -414,8 +571,6 @@
       }
     });
 
-    // Fallback Geométrico Relativo:
-    // Ganhando Mundo vem logo após Deficiência e antes de SERP/Idade
     if (map.deficiencia.left > 0 && map.ganhando.left === -1) {
       const colWidth = (map.deficiencia.right - map.deficiencia.left) || 80;
       map.ganhando.left = map.deficiencia.right;
@@ -431,8 +586,7 @@
     return map;
   }
 
-  // Extrai linhas visíveis da tabela
-  function extrairLinhasVisiveis() {
+  function extrairLinhasFrequenciaVisiveis() {
     const cgmRegex = /\b10\d{8}\b/;
     const percentRegex = /\d{1,3}[,\.]\d{1,2}%/g;
     const dateRegex = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/;
@@ -442,7 +596,6 @@
     let novos = 0;
 
     rows.forEach(r => {
-      // Coleta textos visíveis e atributos title (que contêm o nome completo sem reticências!)
       const cellTitles = Array.from(r.querySelectorAll('[title]')).map(el => el.getAttribute('title') || '');
       const rawText = (r.innerText || '').replace(/\u00A0/g, ' ');
       const fullText = cellTitles.join('\n') + '\n' + rawText;
@@ -456,11 +609,9 @@
         const partes = fullText.split('\n').map(p => p.trim()).filter(Boolean);
         const percentuais = fullText.match(percentRegex) || [];
 
-        // Células individuais da linha (desduplica nós aninhados)
         const allCells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell, td'));
         const distinctCells = allCells.filter(c => !allCells.some(other => other !== c && other.contains(c)));
 
-        // Helper para testar se uma célula pertence a uma coluna específica
         const isCellForCol = (c, colKey) => {
           const target = colMap[colKey];
           if (!target) return false;
@@ -475,19 +626,14 @@
             const rect = c.getBoundingClientRect();
             if (rect.width > 0) {
               const center = (rect.left + rect.right) / 2;
-              if (center >= target.left - 10 && center <= target.right + 10) {
-                return true;
-              }
+              if (center >= target.left - 10 && center <= target.right + 10) return true;
               const overlap = Math.max(0, Math.min(rect.right, target.right) - Math.max(rect.left, target.left));
-              if (overlap > 15) {
-                return true;
-              }
+              if (overlap > 15) return true;
             }
           }
           return false;
         };
 
-        // 1. Nome do Aluno
         let alunoParte = partes.find(p => /^[A-Za-zÀ-ÿ\s\.\']+\s*-\s*10\d*/.test(p.trim()));
         if (!alunoParte) {
           alunoParte = partes.find(p => {
@@ -506,14 +652,12 @@
           ? alunoParte.replace(/\s*-\s*\d+.*$/, '').replace(/…/g, '').trim()
           : (existente && existente.nome !== 'Aluno' ? existente.nome : 'Aluno');
 
-        // 2. Turma
-        const turma = partes.find(p => 
-          p.includes('Série') || p.includes('Serie') || 
-          p.includes('Período') || p.includes('Periodo') || 
+        const turma = partes.find(p =>
+          p.includes('Série') || p.includes('Serie') ||
+          p.includes('Período') || p.includes('Periodo') ||
           p.includes('Manhã') || p.includes('Tarde') || p.includes('Noite') || p.includes('Sem Seriação')
         ) || (existente ? existente.turma : '');
 
-        // 3. Amparo Legal Vigência Máx (Data DD/MM/AAAA)
         let amparoLegalVigencia = null;
         const amparoCell = distinctCells.find(c => isCellForCol(c, 'amparo'));
         if (amparoCell) {
@@ -526,12 +670,10 @@
           if (m) amparoLegalVigencia = m[1];
         }
 
-        // 4. Deficiência, Ganhando Mundo e SERP
         let deficienciaAltasHabilidades = false;
         let ganhandoMundo = false;
         let serpAtivo = false;
 
-        // Limiares geométricos horizontais
         const midDef = (colMap.deficiencia.left > 0 && colMap.deficiencia.right > 0)
           ? (colMap.deficiencia.left + colMap.deficiencia.right) / 2
           : null;
@@ -545,14 +687,9 @@
         let divisaDefGanhando = (midDef && midGanhando) ? (midDef + midGanhando) / 2 : null;
         let divisaGanhandoSerp = (midGanhando && midSerp) ? (midGanhando + midSerp) / 2 : null;
 
-        if (!divisaGanhandoSerp && midSerp) {
-          divisaGanhandoSerp = midSerp - 30;
-        }
-        if (!divisaDefGanhando && midDef) {
-          divisaDefGanhando = midDef + 30;
-        }
+        if (!divisaGanhandoSerp && midSerp) divisaGanhandoSerp = midSerp - 30;
+        if (!divisaDefGanhando && midDef) divisaDefGanhando = midDef + 30;
 
-        // Teste direto nas células mapeadas de cada coluna
         const ganhandoCell = distinctCells.find(c => isCellForCol(c, 'ganhando'));
         if (ganhandoCell) {
           const txt = (ganhandoCell.innerText || ganhandoCell.getAttribute('title') || '').trim();
@@ -583,7 +720,6 @@
           }
         }
 
-        // Varredura de segurança em todas as células da linha
         distinctCells.forEach(c => {
           const txt = (c.innerText || c.getAttribute('title') || '').trim();
           const title = (c.getAttribute('title') || '').toLowerCase();
@@ -592,7 +728,6 @@
           const hasCheck = hasIcon || /[✓✔√☑]/.test(txt);
           const hasPositiveNum = (txt === '1' || txt.toLowerCase() === 'sim' || txt.toLowerCase() === 'true');
 
-          // 1. Textos explícitos em labels/titles
           if (title.includes('ganhando') || ariaLabel.includes('ganhando')) {
             if (hasCheck || hasPositiveNum) ganhandoMundo = true;
           }
@@ -603,14 +738,11 @@
             if (hasPositiveNum) deficienciaAltasHabilidades = true;
           }
 
-          // 2. Se a célula contiver ícone ou marca de checkmark (Ganhando Mundo e SERP usam ícone checkmark verde)
           if (hasCheck) {
             const rect = c.getBoundingClientRect();
             if (rect.width > 0) {
               const cMid = (rect.left + rect.right) / 2;
-
               if (divisaGanhandoSerp !== null && cMid < divisaGanhandoSerp) {
-                // Fica à esquerda da coluna SERP -> Pertence a Ganhando Mundo
                 if (divisaDefGanhando !== null && cMid >= divisaDefGanhando) {
                   ganhandoMundo = true;
                 } else if (colMap.deficiencia.right > 0 && cMid > (colMap.deficiencia.right - 5)) {
@@ -619,7 +751,6 @@
                   ganhandoMundo = true;
                 }
               } else if (divisaGanhandoSerp !== null && cMid >= divisaGanhandoSerp) {
-                // Fica na coluna SERP ou à direita
                 serpAtivo = true;
               } else if (isCellForCol(c, 'ganhando')) {
                 ganhandoMundo = true;
@@ -629,7 +760,6 @@
             }
           }
 
-          // 3. Se contiver o número 1 (Deficiência / Altas Habilidades)
           if (hasPositiveNum && !hasIcon) {
             const rect = c.getBoundingClientRect();
             if (rect.width > 0) {
@@ -647,12 +777,6 @@
           }
         });
 
-        if (ganhandoMundo) {
-          console.warn('✈️ [Leopoldina] Aluno Ganhando Mundo capturado:', nome, cgm, turma);
-          setStatus(`✈️ Aluno Ganhando Mundo capturado: ${nome}`, '#0284c7');
-        }
-
-        // 7. IDADE (Inteiro entre 5 e 99)
         let idade = null;
         const idadeCell = distinctCells.find(c => isCellForCol(c, 'idade'));
         if (idadeCell) {
@@ -676,7 +800,6 @@
         }
 
         const isGanhando = Boolean(ganhandoMundo || existente?.ganhandoMundo);
-        // Regra de Negócio: Se for Ganhando Mundo, a vigência é do intercâmbio e NÃO deve constar como atestado/amparo legal
         const vigenciaAtestado = isGanhando ? null : (amparoLegalVigencia || existente?.amparoLegalVigencia || null);
 
         const aluno = {
@@ -719,20 +842,850 @@
             prev.amparoLegalVigencia = null;
             mudou = true;
           }
-          if (mudou) {
-            alunosCapturados.set(cgm, prev);
-          }
+          if (mudou) alunosCapturados.set(cgm, prev);
         }
       }
     });
 
-    if (novos > 0) {
-      atualizarContadores();
-    }
+    if (novos > 0) atualizarContadores();
     return novos;
   }
 
-  // Rastreamento automático por rolagem suave (Auto-Scroll)
+  // =========================================================================
+  // MODO 2: BI APRENDIZAGEM ESTADUAL 2026 (ABAS ESCOLA, TURMA E MAPA)
+  // =========================================================================
+
+  function parsePtBrGradeClient(raw) {
+    const cleaned = normText(raw);
+    if (!cleaned || cleaned === '-' || cleaned === '--') return null;
+    if (!/^\d{1,2}(?:[,.]\d{1,2})?$/.test(cleaned)) return null;
+    const num = parseFloat(cleaned.replace(',', '.'));
+    if (!Number.isFinite(num) || num < 0 || num > 10) return null;
+    return Math.round(num * 100) / 100;
+  }
+
+  function parsePtBrIntClient(raw) {
+    const cleaned = normText(raw).replace(/\./g, '');
+    if (!cleaned || !/^\d{1,6}$/.test(cleaned)) return null;
+    const num = parseInt(cleaned, 10);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function detectarCabecalhosTabela(container) {
+    const root = container || document;
+    const nodes = Array.from(
+      root.querySelectorAll('[role="columnheader"], .columnHeaders *, th, .headerCell, .tablix-column-header')
+    );
+    const cols = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      const text = getElementFullText(el);
+      if (!text) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const ariaColAttr = el.getAttribute('aria-colindex') || el.closest('[aria-colindex]')?.getAttribute('aria-colindex');
+      cols.push({
+        el,
+        text,
+        key: normKeyAscii(text),
+        rect,
+        ariaCol: ariaColAttr ? parseInt(ariaColAttr, 10) : null,
+      });
+    }
+    return cols;
+  }
+
+  function encontrarCelulaDaColuna(cells, colHeader) {
+    if (!colHeader) return null;
+    if (colHeader.ariaCol) {
+      const byAria = cells.find((c) => {
+        const attr = c.getAttribute('aria-colindex') || c.closest('[aria-colindex]')?.getAttribute('aria-colindex');
+        return attr && parseInt(attr, 10) === colHeader.ariaCol;
+      });
+      if (byAria) return byAria;
+    }
+    const colLeft = colHeader.rect.left;
+    const colRight = colHeader.rect.right;
+    return cells.find((c) => {
+      const r = c.getBoundingClientRect();
+      if (r.width <= 0) return false;
+      const cx = (r.left + r.right) / 2;
+      return cx >= colLeft - 4 && cx <= colRight + 4;
+    }) || null;
+  }
+
+  // ABA ESCOLA (Imagens 1 e 2)
+  function extrairAbaEscolaVisivel() {
+    const cols = detectarCabecalhosTabela(document);
+    const pickCol = (predicate) => {
+      const matches = cols.filter(predicate);
+      if (matches.length === 0) return null;
+      return matches.sort((a, b) => a.rect.width - b.rect.width)[0];
+    };
+
+    const colTurma = pickCol((c) => c.key === 'TURMA');
+    const colPeriodo = pickCol((c) => c.key.includes('PERIODO AVALIACAO'));
+    const colMatriculados = pickCol((c) => c.key.includes('ALUNOS MATRICULADOS'));
+    const colAvaliados = pickCol((c) => c.key.includes('ALUNOS AVALIADOS') && !c.key.includes('%'));
+    const colEquivalencia = pickCol((c) => c.key.includes('EQUIVALENCIA SERIACAO'));
+    const colCurso = pickCol((c) => c.key === 'CURSO');
+
+    const rows = Array.from(document.querySelectorAll('[role="row"], .row, .tr'));
+    let novidades = 0;
+
+    rows.forEach((r, domIdx) => {
+      const allCells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell, td'));
+      const cells = allCells.filter((c) => !allCells.some((o) => o !== c && o.contains(c)));
+      if (cells.length === 0) return;
+
+      const ariaRowAttr = r.getAttribute('aria-rowindex') || r.getAttribute('row-index');
+      const rowIndexKey = ariaRowAttr ? `aria:${ariaRowAttr}` : null;
+
+      const turmaCell = colTurma ? encontrarCelulaDaColuna(cells, colTurma) : null;
+      const periodoCell = colPeriodo ? encontrarCelulaDaColuna(cells, colPeriodo) : null;
+      const matricCell = colMatriculados ? encontrarCelulaDaColuna(cells, colMatriculados) : null;
+      const avalCell = colAvaliados ? encontrarCelulaDaColuna(cells, colAvaliados) : null;
+      const equivCell = colEquivalencia ? encontrarCelulaDaColuna(cells, colEquivalencia) : null;
+      const cursoCell = colCurso ? encontrarCelulaDaColuna(cells, colCurso) : null;
+
+      let turmaRaw = turmaCell ? getElementFullText(turmaCell) : '';
+      if (turmaRaw && /^total$/i.test(turmaRaw)) return;
+
+      let registro = null;
+      if (turmaRaw) {
+        const codMatch = turmaRaw.match(/-\s*(\d{5,10})\s*$/);
+        const codturma = codMatch ? codMatch[1] : null;
+        const mapKey = codturma || turmaRaw;
+        registro = councilTurmasMap.get(mapKey) || {
+          turmaRaw,
+          codturma,
+          periodoAvaliacao: null,
+          equivalenciaSeriacao: null,
+          curso: null,
+          alunosMatriculados: null,
+          alunosAvaliados: null,
+        };
+        if (rowIndexKey) {
+          councilEscolaByRowIdx.set(rowIndexKey, mapKey);
+        }
+        if (!councilTurmasMap.has(mapKey)) novidades++;
+        councilTurmasMap.set(mapKey, registro);
+      } else if (rowIndexKey && councilEscolaByRowIdx.has(rowIndexKey)) {
+        const mapKey = councilEscolaByRowIdx.get(rowIndexKey);
+        registro = councilTurmasMap.get(mapKey) || null;
+      }
+
+      if (!registro) return;
+
+      if (periodoCell) {
+        const pv = getElementFullText(periodoCell);
+        if (pv !== undefined) registro.periodoAvaliacao = pv;
+      }
+      if (matricCell) {
+        const m = parsePtBrIntClient(getElementFullText(matricCell));
+        if (m !== null) registro.alunosMatriculados = m;
+      }
+      if (avalCell) {
+        const a = parsePtBrIntClient(getElementFullText(avalCell));
+        if (a !== null) registro.alunosAvaliados = a;
+      }
+      if (equivCell) {
+        const eq = getElementFullText(equivCell);
+        if (eq) registro.equivalenciaSeriacao = eq;
+      }
+      if (cursoCell) {
+        const cs = getElementFullText(cursoCell);
+        if (cs) registro.curso = cs;
+      }
+    });
+
+    if (novidades > 0) atualizarContadores();
+    return novidades;
+  }
+
+  // ABA TURMA (Imagens 3 e 4)
+  function extrairAbaTurmaVisivel() {
+    const cols = detectarCabecalhosTabela(document);
+    const pickCol = (predicate) => {
+      const matches = cols.filter(predicate);
+      if (matches.length === 0) return null;
+      return matches.sort((a, b) => a.rect.width - b.rect.width)[0];
+    };
+
+    const colAluno = pickCol((c) => c.key.includes('ALUNO') && c.key.includes('CGM'));
+    const colCgmKey = pickCol((c) => c.key === 'CGMKEY');
+    const colCodTurma = pickCol((c) => c.key === 'CODTURMA');
+    const colPeriodo = pickCol((c) => c.key === 'PERIODOAVA');
+    const colMed1 = pickCol((c) => c.key.includes('NOTA MEDIA 1'));
+    const colMed2 = pickCol((c) => c.key.includes('NOTA MEDIA 2'));
+    const colMed3 = pickCol((c) => c.key.includes('NOTA MEDIA 3'));
+    const colAb = pickCol((c) => c.key.includes('ABAIXO DO BASICO'));
+    const colBa = pickCol((c) => c.key.startsWith('BASICO'));
+    const colAd = pickCol((c) => c.key.startsWith('ADEQUADO'));
+    const colAv = pickCol((c) => c.key.startsWith('AVANCADO'));
+    const colQtde = pickCol((c) => c.key.includes('QTDE DE NOTAS'));
+
+    const rows = Array.from(document.querySelectorAll('[role="row"], .row, .tr'));
+    let novos = 0;
+
+    rows.forEach((r) => {
+      const allCells = Array.from(r.querySelectorAll('[role="gridcell"], .pivotTableCellWrap, .bodyCells, .cell, td'));
+      const cells = allCells.filter((c) => !allCells.some((o) => o !== c && o.contains(c)));
+      if (cells.length === 0) return;
+
+      const cgmKeyCell = colCgmKey ? encontrarCelulaDaColuna(cells, colCgmKey) : null;
+      const cgmKeyText = cgmKeyCell ? getElementFullText(cgmKeyCell) : '';
+      const keyMatch = cgmKeyText.match(/^(\d{7,12})(?:-(\d{1,2}))?$/);
+
+      const alunoCell = colAluno ? encontrarCelulaDaColuna(cells, colAluno) : null;
+      const alunoText = alunoCell ? getElementFullText(alunoCell) : '';
+      const alunoCgmMatch = alunoText.match(/-\s*(\d{8,11})\s*$/);
+
+      const cgm = (keyMatch && keyMatch[1]) || (alunoCgmMatch && alunoCgmMatch[1]) || '';
+      if (!cgm) return;
+
+      const prev = councilAlunosTurmaMap.get(cgm) || {
+        cgm,
+        cgmkey: cgmKeyText || null,
+        nome: alunoText || null,
+        codturma: null,
+        periodoava: null,
+        media1Tri: null,
+        media2Tri: null,
+        media3Tri: null,
+        abaixoBasicoCount: null,
+        basicoCount: null,
+        adequadoCount: null,
+        avancadoCount: null,
+        qtdeNotasDadas: null,
+      };
+
+      if (!councilAlunosTurmaMap.has(cgm)) novos++;
+
+      if (cgmKeyText) prev.cgmkey = cgmKeyText;
+      if (alunoText && (!prev.nome || prev.nome.includes('...') || alunoText.length > prev.nome.length)) {
+        prev.nome = alunoText;
+      }
+
+      const codCell = colCodTurma ? encontrarCelulaDaColuna(cells, colCodTurma) : null;
+      if (codCell) {
+        const ct = getElementFullText(codCell);
+        if (/^\d{4,10}$/.test(ct)) prev.codturma = ct;
+      }
+
+      const perCell = colPeriodo ? encontrarCelulaDaColuna(cells, colPeriodo) : null;
+      if (perCell) {
+        const pv = getElementFullText(perCell);
+        if (pv) prev.periodoava = pv;
+      }
+
+      const m1Cell = colMed1 ? encontrarCelulaDaColuna(cells, colMed1) : null;
+      if (m1Cell) {
+        const g = parsePtBrGradeClient(getElementFullText(m1Cell));
+        if (g !== null) prev.media1Tri = g;
+      }
+
+      const m2Cell = colMed2 ? encontrarCelulaDaColuna(cells, colMed2) : null;
+      if (m2Cell) {
+        const g = parsePtBrGradeClient(getElementFullText(m2Cell));
+        if (g !== null) prev.media2Tri = g;
+      }
+
+      const m3Cell = colMed3 ? encontrarCelulaDaColuna(cells, colMed3) : null;
+      if (m3Cell) {
+        const g = parsePtBrGradeClient(getElementFullText(m3Cell));
+        if (g !== null) prev.media3Tri = g;
+      }
+
+      const abCell = colAb ? encontrarCelulaDaColuna(cells, colAb) : null;
+      if (abCell) {
+        const n = parsePtBrIntClient(getElementFullText(abCell));
+        if (n !== null) prev.abaixoBasicoCount = n;
+      }
+
+      const baCell = colBa ? encontrarCelulaDaColuna(cells, colBa) : null;
+      if (baCell) {
+        const n = parsePtBrIntClient(getElementFullText(baCell));
+        if (n !== null) prev.basicoCount = n;
+      }
+
+      const adCell = colAd ? encontrarCelulaDaColuna(cells, colAd) : null;
+      if (adCell) {
+        const n = parsePtBrIntClient(getElementFullText(adCell));
+        if (n !== null) prev.adequadoCount = n;
+      }
+
+      const avCell = colAv ? encontrarCelulaDaColuna(cells, colAv) : null;
+      if (avCell) {
+        const n = parsePtBrIntClient(getElementFullText(avCell));
+        if (n !== null) prev.avancadoCount = n;
+      }
+
+      const qtCell = colQtde ? encontrarCelulaDaColuna(cells, colQtde) : null;
+      if (qtCell) {
+        const n = parsePtBrIntClient(getElementFullText(qtCell));
+        if (n !== null) prev.qtdeNotasDadas = n;
+      }
+
+      councilAlunosTurmaMap.set(cgm, prev);
+    });
+
+    if (novos > 0) atualizarContadores();
+    return novos;
+  }
+
+  // ABA MAPA (Imagens 5 a 10) — Extração 2D com Viewport Guard Estrito
+  function localizarContainerMatrizNotas() {
+    const grids = Array.from(document.querySelectorAll('[role="grid"], .pivotTable'));
+    let bestGrid = null;
+    let bestScore = -1;
+
+    for (let i = 0; i < grids.length; i++) {
+      const grid = grids[i];
+      const rect = grid.getBoundingClientRect();
+      if (rect.width < 250 || rect.height < 140) continue;
+
+      const textSample = normKeyAscii((grid.innerText || '').slice(0, 3500));
+      let score = 0;
+      if (textSample.includes('ALUNO - CGM')) score += 100;
+      if (/1\s*[º°O]?\s*TRI/.test(textSample)) score += 40;
+      if (/\b10\d{7,9}\b/.test(textSample)) score += 60;
+      if (textSample.includes('PONTOS AVALIADOS')) score -= 200;
+      if (grid.querySelector('[role="grid"], .pivotTable')) score -= 30;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestGrid = grid;
+      }
+    }
+
+    if (bestScore <= 0) return null;
+    return bestGrid;
+  }
+
+  function calcularLimitesVisiveisMatriz(grid) {
+    const gridRect = grid.getBoundingClientRect();
+    const midViewport = grid.querySelector('.mid-viewport');
+    const colHeaderWrap =
+      grid.querySelector('.columnHeaders') ||
+      grid.querySelector('[role="rowgroup"]');
+    const rowHeaderWrap = grid.querySelector('.rowHeaders');
+    const bodyWrap = grid.querySelector('.bodyCells') || midViewport;
+    const cornerEl =
+      grid.querySelector('.corner') ||
+      grid.querySelector('.pivotTableCorner');
+
+    const midRect = midViewport ? midViewport.getBoundingClientRect() : gridRect;
+    const colRect = colHeaderWrap ? colHeaderWrap.getBoundingClientRect() : gridRect;
+    const rowHeaderRect = rowHeaderWrap ? rowHeaderWrap.getBoundingClientRect() : null;
+    const bodyRect = bodyWrap ? bodyWrap.getBoundingClientRect() : gridRect;
+    const cornerRect = cornerEl ? cornerEl.getBoundingClientRect() : null;
+
+    const dataLeft = Math.max(
+      gridRect.left,
+      cornerRect ? cornerRect.right : 0,
+      rowHeaderRect ? rowHeaderRect.right : 0,
+      colRect.left
+    );
+    const dataRight = Math.min(gridRect.right - 12, midRect.right - 4, colRect.right, bodyRect.right);
+    const dataTop = Math.max(gridRect.top, colRect.bottom, bodyRect.top);
+    const dataBottom = Math.min(gridRect.bottom - 12, midRect.bottom - 4, bodyRect.bottom);
+
+    return {
+      gridRect,
+      dataLeft,
+      dataRight,
+      dataTop,
+      dataBottom,
+      rowHeaderLeft: rowHeaderRect ? rowHeaderRect.left : gridRect.left,
+      rowHeaderRight: rowHeaderRect ? rowHeaderRect.right : dataLeft,
+      colHeaderTop: colRect.top,
+      colHeaderBottom: colRect.bottom,
+    };
+  }
+
+  function getVisibleMapaColumnSignature(grid) {
+    if (!grid) return '';
+    const bounds = calcularLimitesVisiveisMatriz(grid);
+    const nodes = Array.from(
+      grid.querySelectorAll('.columnHeaders .pivotTableCellWrap, .columnHeaders [role="columnheader"], [role="columnheader"]')
+    );
+    const visibleNames = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const txt = getElementFullText(nodes[i]);
+      if (!txt || /^[123]\s*[º°o]?\s*tri$/i.test(txt)) continue;
+      const r = nodes[i].getBoundingClientRect();
+      if (r.right >= bounds.dataLeft && r.left <= bounds.dataRight && /\s-\s*\d{2,6}$/.test(txt)) {
+        visibleNames.push(txt);
+      }
+    }
+    return visibleNames.join('|');
+  }
+
+  function extrairMapaNotasVisiveis() {
+    const grid = localizarContainerMatrizNotas();
+    if (!grid) return { novos: 0, bounds: null };
+
+    const bounds = calcularLimitesVisiveisMatriz(grid);
+    if (bounds.dataRight <= bounds.dataLeft + 40 || bounds.dataBottom <= bounds.dataTop + 30) {
+      return { novos: 0, bounds };
+    }
+
+    const TOL = 2;
+
+    // 1. Coleta cabeçalhos de disciplina (<NOME> - <CÓDIGO>) com Viewport Guard horizontal estrito
+    const rawHeaderNodes = Array.from(
+      grid.querySelectorAll('.columnHeaders .pivotTableCellWrap, .columnHeaders [role="columnheader"], [role="columnheader"]')
+    );
+    const leafHeaderNodes = rawHeaderNodes.filter(
+      (el) => !rawHeaderNodes.some((other) => other !== el && other.contains(el))
+    );
+
+    const visibleDisciplines = [];
+    const subColCandidates = [];
+
+    for (let i = 0; i < leafHeaderNodes.length; i++) {
+      const el = leafHeaderNodes[i];
+      const text = getElementFullText(el);
+      if (!text) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
+      const triMatch = text.match(/^([123])\s*[º°o]?\s*tri$/i);
+      if (triMatch) {
+        subColCandidates.push({
+          trimester: parseInt(triMatch[1], 10),
+          rect,
+        });
+        continue;
+      }
+
+      const discMatch = text.match(/^([A-ZÀ-ÿ0-9.\s/]+?)\s*-\s*(\d{2,6})$/i);
+      if (discMatch) {
+        const upperCheck = normKeyAscii(discMatch[1]);
+        if (upperCheck === 'ALUNO' || upperCheck.includes('SERIE') || upperCheck.includes('PERIODO')) {
+          continue;
+        }
+        // Viewport Guard Horizontal: cabeçalho da disciplina deve estar 100% dentro [dataLeft, dataRight]
+        if (rect.left >= bounds.dataLeft - TOL && rect.right <= bounds.dataRight + TOL && rect.width >= 60) {
+          visibleDisciplines.push({
+            disciplinaRaw: text,
+            subjectCode: discMatch[2],
+            left: rect.left,
+            right: rect.right,
+            bottom: rect.bottom,
+          });
+        }
+      }
+    }
+
+    if (visibleDisciplines.length === 0 || subColCandidates.length === 0) {
+      return { novos: 0, bounds };
+    }
+
+    // Estima largura mediana das subcolunas para descartar eventuais subcolunas parcialmente cortadas na borda
+    const widths = subColCandidates.map((s) => s.rect.width).sort((a, b) => a - b);
+    const medianSubWidth = widths[Math.floor(widths.length / 2)] || 32;
+    const minSubWidth = Math.max(16, medianSubWidth * 0.65);
+
+    const visibleSubColumns = [];
+    for (let i = 0; i < subColCandidates.length; i++) {
+      const sub = subColCandidates[i];
+      const r = sub.rect;
+      if (
+        r.width < minSubWidth ||
+        r.left < bounds.dataLeft - TOL ||
+        r.right > bounds.dataRight + TOL
+      ) {
+        continue;
+      }
+      const centerX = (r.left + r.right) / 2;
+      const parentDisc = visibleDisciplines.find(
+        (d) =>
+          centerX >= d.left - 2 &&
+          centerX <= d.right + 2 &&
+          r.left >= d.left - 3 &&
+          r.right <= d.right + 3
+      );
+      if (!parentDisc) continue;
+
+      visibleSubColumns.push({
+        trimester: sub.trimester,
+        subjectCode: parentDisc.subjectCode,
+        disciplinaRaw: parentDisc.disciplinaRaw,
+        left: r.left,
+        right: r.right,
+        centerX,
+      });
+    }
+
+    if (visibleSubColumns.length === 0) {
+      return { novos: 0, bounds };
+    }
+
+    // 2. Coleta rowHeaders (<NOME> - <CGM>) com Viewport Guard vertical estrito
+    const rowHeaderRoot = grid.querySelector('.rowHeaders') || grid;
+    const rawRowHeaderNodes = Array.from(
+      rowHeaderRoot.querySelectorAll('.pivotTableCellWrap, [role="rowheader"]')
+    );
+    const leafRowNodes = rawRowHeaderNodes.filter(
+      (el) => !rawRowHeaderNodes.some((other) => other !== el && other.contains(el))
+    );
+
+    const visibleRows = [];
+    for (let i = 0; i < leafRowNodes.length; i++) {
+      const el = leafRowNodes[i];
+      const text = getElementFullText(el);
+      if (!text) continue;
+      const m = text.match(/^(.*?)\s*-\s*(\d{8,11})\s*$/);
+      if (!m) continue;
+
+      const cleanNome = normText(m[1]);
+      if (/S[EÉ]RIE|PER[IÍ]ODO|SEM SERIA[CÇ][AÃ]O/i.test(cleanNome)) continue;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.height < 12 || rect.top < bounds.dataTop - TOL || rect.bottom > bounds.dataBottom + TOL) {
+        continue;
+      }
+
+      visibleRows.push({
+        cgm: m[2],
+        nome: `${cleanNome} - ${m[2]}`,
+        top: rect.top,
+        bottom: rect.bottom,
+        centerY: (rect.top + rect.bottom) / 2,
+        height: rect.height,
+      });
+    }
+
+    if (visibleRows.length === 0) {
+      return { novos: 0, bounds };
+    }
+
+    // 3. Coleta células de nota dentro da área de dados (.bodyCells)
+    const bodyRoot = grid.querySelector('.bodyCells') || grid;
+    const rawBodyCells = Array.from(
+      bodyRoot.querySelectorAll('.pivotTableCellWrap, [role="gridcell"]')
+    );
+    const leafBodyCells = rawBodyCells.filter((el) => {
+      if (el.closest('.rowHeaders') || el.closest('.columnHeaders')) return false;
+      return !rawBodyCells.some((other) => other !== el && other.contains(el));
+    });
+
+    let novos = 0;
+    for (let i = 0; i < leafBodyCells.length; i++) {
+      const cell = leafBodyCells[i];
+      const gradeNum = parseMapaGradeCellText(getElementFullText(cell));
+      if (gradeNum === null) continue;
+
+      const rect = cell.getBoundingClientRect();
+      if (
+        rect.width <= 0 ||
+        rect.height <= 0 ||
+        rect.left < bounds.dataLeft - TOL ||
+        rect.right > bounds.dataRight + TOL ||
+        rect.top < bounds.dataTop - TOL ||
+        rect.bottom > bounds.dataBottom + TOL
+      ) {
+        continue;
+      }
+
+      const cx = (rect.left + rect.right) / 2;
+      const cy = (rect.top + rect.bottom) / 2;
+
+      // Pareia subcoluna (eixo X) e estudante (eixo Y)
+      const matchedSub = visibleSubColumns.find(
+        (sub) => cx >= sub.left - 2 && cx <= sub.right + 2
+      );
+      if (!matchedSub) continue;
+
+      const matchedRow = visibleRows.find(
+        (row) => cy >= row.top - 2 && cy <= row.bottom + 2
+      );
+      if (!matchedRow) continue;
+
+      const cellKey = `${matchedRow.cgm}|${matchedSub.subjectCode}|${matchedSub.trimester}`;
+      const existing = councilMapaCellsMap.get(cellKey);
+      if (!existing) {
+        novos++;
+      }
+      councilMapaCellsMap.set(cellKey, {
+        cgm: matchedRow.cgm,
+        nome: matchedRow.nome,
+        disciplinaRaw: matchedSub.disciplinaRaw,
+        disciplinaCode: matchedSub.subjectCode,
+        trimester: matchedSub.trimester,
+        gradeNum,
+      });
+    }
+
+    if (novos > 0) atualizarContadores();
+    return { novos, bounds };
+  }
+
+  function parseMapaGradeCellText(raw) {
+    return parsePtBrGradeClient(raw);
+  }
+
+  function extrairTabelaAtiva() {
+    const mode = detectarModoPowerBi();
+    if (mode === 'APRENDIZAGEM_MAPA') return extrairMapaNotasVisiveis().novos;
+    if (mode === 'APRENDIZAGEM_TURMA') return extrairAbaTurmaVisivel();
+    if (mode === 'APRENDIZAGEM_ESCOLA') return extrairAbaEscolaVisivel();
+    return extrairLinhasFrequenciaVisiveis();
+  }
+
+  // =========================================================================
+  // AUTO-SCROLL (VERTICAL PARA FREQUÊNCIA/TURMA E 2D EM SERPENTINA PARA MAPA/ESCOLA)
+  // =========================================================================
+
+  function findScrollContainers(root) {
+    const candidates = Array.from(
+      (root || document).querySelectorAll('.mid-viewport, .innerContainer, [role="grid"], .tableEx, .pivotTable, .scroll-wrapper')
+    );
+    const vTarget = candidates.find((el) => el.scrollHeight > el.clientHeight + 8) || null;
+    const hTarget = candidates.find((el) => el.scrollWidth > el.clientWidth + 8) || null;
+    return { vTarget, hTarget };
+  }
+
+  function dispatchWheel(el, deltaX, deltaY) {
+    if (!el) return;
+    try {
+      el.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaX,
+          deltaY,
+          deltaMode: 0,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    } catch {}
+  }
+
+  function dragHorizontalScrollbarStep(grid, deltaPx) {
+    const bars = Array.from((grid || document).querySelectorAll('.scroll-bar-part-bar'));
+    const horizBar = bars.find((bar) => {
+      const track = bar.parentElement;
+      if (!track) return false;
+      const tr = track.getBoundingClientRect();
+      const br = bar.getBoundingClientRect();
+      return tr.width > tr.height * 2 && tr.width > br.width + 6;
+    });
+    if (!horizBar) return false;
+
+    const br = horizBar.getBoundingClientRect();
+    const startX = br.left + br.width / 2;
+    const startY = br.top + br.height / 2;
+    const endX = startX + deltaPx;
+
+    try {
+      horizBar.dispatchEvent(new MouseEvent('mousedown', { clientX: startX, clientY: startY, bubbles: true }));
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: endX, clientY: startY, bubbles: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: endX, clientY: startY, bubbles: true }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function scanVerticalPass(vTarget, direction, extractFn, statusPrefix) {
+    if (!vTarget) {
+      extractFn();
+      return;
+    }
+
+    const stepSize = Math.max(120, Math.floor((vTarget.clientHeight || 400) * 0.55));
+    let idleTicks = 0;
+
+    while (isScrolling) {
+      extractFn();
+      setStatus(statusPrefix(), '#0284c7');
+
+      const prevTop = vTarget.scrollTop;
+      const maxTop = Math.max(0, vTarget.scrollHeight - vTarget.clientHeight);
+      const atEdge =
+        direction > 0 ? prevTop >= maxTop - 4 : prevTop <= 4;
+
+      if (atEdge) {
+        await new Promise((r) => setTimeout(r, 450));
+        extractFn();
+        break;
+      }
+
+      vTarget.scrollTop = Math.max(0, Math.min(maxTop, prevTop + direction * stepSize));
+      if (Math.abs(vTarget.scrollTop - prevTop) < 2) {
+        dispatchWheel(vTarget, 0, direction * stepSize);
+        idleTicks++;
+      } else {
+        idleTicks = 0;
+      }
+
+      await new Promise((r) => setTimeout(r, 250));
+      if (idleTicks >= 6) break;
+    }
+  }
+
+  async function iniciarAutoScroll2DMapa() {
+    const grid = localizarContainerMatrizNotas();
+    const { vTarget, hTarget } = findScrollContainers(grid || document);
+    const wheelArea = (grid && (grid.querySelector('.bodyCells, .mid-viewport') || grid)) || hTarget || vTarget;
+
+    if (!vTarget && !hTarget && !grid) {
+      extrairMapaNotasVisiveis();
+      setStatus(`Matriz lida! Total: ${councilMapaCellsMap.size} células capturadas.`, '#10b981');
+      return;
+    }
+
+    isScrolling = true;
+    const btn = document.getElementById('leo-btn-autoscroll');
+    if (btn) btn.innerHTML = '<span>⏸️</span> Pausar Rastreamento';
+
+    // Retorna para o início horizontal/vertical antes de iniciar a serpentina
+    if (hTarget) hTarget.scrollLeft = 0;
+    if (vTarget) vTarget.scrollTop = 0;
+    await new Promise((r) => setTimeout(r, 300));
+
+    let sliceIdx = 0;
+    let direction = 1; // 1 = desce (slices pares), -1 = sobe (slices ímpares)
+    let stuckHorizontal = 0;
+
+    while (isScrolling && sliceIdx < 60) {
+      const snap = extrairMapaNotasVisiveis();
+      const visibleDataWidth =
+        snap.bounds && snap.bounds.dataRight > snap.bounds.dataLeft
+          ? snap.bounds.dataRight - snap.bounds.dataLeft
+          : 420;
+      const horizStep = Math.max(120, Math.floor(visibleDataWidth * 0.45));
+
+      await scanVerticalPass(
+        vTarget,
+        direction,
+        () => extrairMapaNotasVisiveis(),
+        () => `Serpentina 2D (fatia ${sliceIdx + 1})... ${councilMapaCellsMap.size} notas capturadas.`
+      );
+
+      if (!isScrolling) break;
+
+      // Avança horizontalmente para a próxima fatia de disciplinas
+      if (hTarget && hTarget.scrollWidth > hTarget.clientWidth + 8) {
+        const prevLeft = hTarget.scrollLeft;
+        const maxLeft = Math.max(0, hTarget.scrollWidth - hTarget.clientWidth);
+        if (prevLeft >= maxLeft - 4) break;
+        hTarget.scrollLeft = Math.min(maxLeft, prevLeft + horizStep);
+        await new Promise((r) => setTimeout(r, 320));
+        if (Math.abs(hTarget.scrollLeft - prevLeft) < 2) {
+          stuckHorizontal++;
+          if (stuckHorizontal >= 3) break;
+        } else {
+          stuckHorizontal = 0;
+        }
+      } else {
+        const beforeSig = getVisibleMapaColumnSignature(grid);
+        const moved = dragHorizontalScrollbarStep(grid, 70);
+        if (!moved) {
+          dispatchWheel(wheelArea, horizStep, 0);
+        }
+        await new Promise((r) => setTimeout(r, 360));
+        extrairMapaNotasVisiveis();
+        const afterSig = getVisibleMapaColumnSignature(grid);
+        if (afterSig === beforeSig) {
+          stuckHorizontal++;
+          if (stuckHorizontal >= 3) break;
+        } else {
+          stuckHorizontal = 0;
+        }
+      }
+
+      direction = direction * -1;
+      sliceIdx++;
+    }
+
+    isScrolling = false;
+    if (btn) btn.innerHTML = '<span>⚡</span> Rastrear Novamente';
+    atualizarContadores();
+    salvarBiAprendizagemNoStorage();
+    setStatus(`✅ Concluído (MAPA)! ${councilMapaCellsMap.size} notas trimestrais capturadas.`, '#10b981');
+  }
+
+  async function iniciarAutoScrollEscolaOuTurma(mode) {
+    const { vTarget, hTarget } = findScrollContainers(document);
+    const extractFn =
+      mode === 'APRENDIZAGEM_TURMA' ? extrairAbaTurmaVisivel : extrairAbaEscolaVisivel;
+
+    if (!vTarget) {
+      extractFn();
+      if (hTarget) {
+        const prevLeft = hTarget.scrollLeft;
+        hTarget.scrollLeft = Math.max(0, hTarget.scrollWidth - hTarget.clientWidth);
+        await new Promise((r) => setTimeout(r, 300));
+        extractFn();
+        hTarget.scrollLeft = prevLeft;
+      }
+      atualizarContadores();
+      salvarBiAprendizagemNoStorage();
+      setStatus(
+        mode === 'APRENDIZAGEM_TURMA'
+          ? `✅ Concluído (TURMA)! ${councilAlunosTurmaMap.size} alunos capturados.`
+          : `✅ Concluído (ESCOLA)! ${councilTurmasMap.size} turmas capturadas.`,
+        '#10b981'
+      );
+      return;
+    }
+
+    isScrolling = true;
+    const btn = document.getElementById('leo-btn-autoscroll');
+    if (btn) btn.innerHTML = '<span>⏸️</span> Pausar Rastreamento';
+
+    vTarget.scrollTop = 0;
+    if (hTarget) hTarget.scrollLeft = 0;
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Passagem vertical capturando colunas da esquerda
+    await scanVerticalPass(
+      vTarget,
+      1,
+      extractFn,
+      () =>
+        mode === 'APRENDIZAGEM_TURMA'
+          ? `Rastreando TURMA... ${councilAlunosTurmaMap.size} alunos capturados.`
+          : `Rastreando ESCOLA... ${councilTurmasMap.size} turmas capturadas.`
+    );
+
+    // Se houver scroll horizontal (ex: Equivalência Seriação / CURSO na aba ESCOLA ou Qtde Notas na aba TURMA)
+    if (isScrolling && hTarget && hTarget.scrollWidth > hTarget.clientWidth + 10) {
+      const horizStep = Math.max(200, Math.floor(hTarget.clientWidth * 0.7));
+      const maxLeft = hTarget.scrollWidth - hTarget.clientWidth;
+      let nextLeft = horizStep;
+      let dir = -1;
+      while (isScrolling) {
+        hTarget.scrollLeft = Math.min(maxLeft, nextLeft);
+        await new Promise((r) => setTimeout(r, 280));
+        await scanVerticalPass(
+          vTarget,
+          dir,
+          extractFn,
+          () => `Lendo colunas complementares...`
+        );
+        if (hTarget.scrollLeft >= maxLeft - 4) break;
+        nextLeft += horizStep;
+        dir = dir * -1;
+      }
+      hTarget.scrollLeft = 0;
+    }
+
+    isScrolling = false;
+    if (btn) btn.innerHTML = '<span>⚡</span> Rastrear Novamente';
+    atualizarContadores();
+    salvarBiAprendizagemNoStorage();
+    setStatus(
+      mode === 'APRENDIZAGEM_TURMA'
+        ? `✅ Concluído (TURMA)! ${councilAlunosTurmaMap.size} alunos capturados.`
+        : `✅ Concluído (ESCOLA)! ${councilTurmasMap.size} turmas capturadas.`,
+      '#10b981'
+    );
+  }
+
   async function iniciarAutoScroll() {
     if (isScrolling) {
       isScrolling = false;
@@ -742,11 +1695,22 @@
       return;
     }
 
+    const mode = detectarModoPowerBi();
+    if (mode === 'APRENDIZAGEM_MAPA') {
+      await iniciarAutoScroll2DMapa();
+      return;
+    }
+    if (mode === 'APRENDIZAGEM_TURMA' || mode === 'APRENDIZAGEM_ESCOLA') {
+      await iniciarAutoScrollEscolaOuTurma(mode);
+      return;
+    }
+
+    // Modo Frequência (Presente na Escola)
     const containers = Array.from(document.querySelectorAll('.innerContainer, [role="grid"], .mid-viewport, .tableEx, .bodyCells'));
     const scrollable = containers.find(el => el.scrollHeight > el.clientHeight);
 
     if (!scrollable) {
-      extrairLinhasVisiveis();
+      extrairLinhasFrequenciaVisiveis();
       setStatus(`Tabela lida! Total: ${alunosCapturados.size} alunos.`);
       return;
     }
@@ -761,7 +1725,7 @@
     let semMudancas = 0;
 
     while (isScrolling) {
-      extrairLinhasVisiveis();
+      extrairLinhasFrequenciaVisiveis();
       setStatus(`Rastreando... ${alunosCapturados.size} alunos capturados.`, '#0284c7');
 
       if (alunosCapturados.size === ultimosAlunos) {
@@ -771,13 +1735,11 @@
         ultimosAlunos = alunosCapturados.size;
       }
 
-      if (semMudancas >= 30) {
-        break;
-      }
+      if (semMudancas >= 30) break;
 
       if (scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 5) {
         await new Promise(r => setTimeout(r, 600));
-        extrairLinhasVisiveis();
+        extrairLinhasFrequenciaVisiveis();
         if (scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 5) {
           break;
         }
@@ -793,7 +1755,6 @@
     salvarNoStorage();
   }
 
-  // Salva no Chrome Storage Local
   function salvarNoStorage() {
     const lista = Array.from(alunosCapturados.values());
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -801,12 +1762,100 @@
     }
   }
 
-  // Baixa CSV formatado para Excel
+  function buildConselhoBiPayload() {
+    const groupedNotas = new Map();
+
+    councilMapaCellsMap.forEach((cell) => {
+      const key = `${cell.cgm}|${cell.disciplinaCode || cell.disciplinaRaw}`;
+      let rec = groupedNotas.get(key);
+      if (!rec) {
+        const turmaInfo = councilAlunosTurmaMap.get(cell.cgm);
+        rec = {
+          cgm: cell.cgm,
+          nome: cell.nome,
+          codturma: turmaInfo?.codturma || undefined,
+          disciplinaRaw: cell.disciplinaRaw,
+          disciplinaCode: cell.disciplinaCode || undefined,
+          nota1Tri: null,
+          nota2Tri: null,
+          nota3Tri: null,
+        };
+        groupedNotas.set(key, rec);
+      }
+      if (cell.trimester === 1) rec.nota1Tri = cell.gradeNum;
+      if (cell.trimester === 2) rec.nota2Tri = cell.gradeNum;
+      if (cell.trimester === 3) rec.nota3Tri = cell.gradeNum;
+    });
+
+    return {
+      year: 2026,
+      turmas: Array.from(councilTurmasMap.values()),
+      alunosTurma: Array.from(councilAlunosTurmaMap.values()),
+      notasMapa: Array.from(groupedNotas.values()),
+    };
+  }
+
+  function salvarBiAprendizagemNoStorage() {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({
+        redeativa_bi_aprendizagem_cache: buildConselhoBiPayload(),
+      });
+    }
+  }
+
   function baixarCSV() {
+    if (getEffectiveSyncTarget() === 'CONSELHO_BI') {
+      if (!hasAnyAprendizagemData()) {
+        extrairTabelaAtiva();
+        if (!hasAnyAprendizagemData()) {
+          alert('Nenhum dado do BI Aprendizagem capturado ainda. Clique em "Rastrear Aba Ativa" primeiro!');
+          return;
+        }
+      }
+
+      const payload = buildConselhoBiPayload();
+      const headers = [
+        'CGM',
+        'Nome',
+        'CodTurma',
+        'Disciplina_Codigo',
+        'Disciplina',
+        'Nota_1Tri',
+        'Nota_2Tri',
+        'Nota_3Tri',
+      ];
+      const rows = [headers.join(';')];
+
+      payload.notasMapa.forEach((n) => {
+        rows.push([
+          `"${n.cgm || ''}"`,
+          `"${String(n.nome || '').replace(/"/g, '""')}"`,
+          `"${n.codturma || ''}"`,
+          `"${n.disciplinaCode || ''}"`,
+          `"${String(n.disciplinaRaw || '').replace(/"/g, '""')}"`,
+          `"${n.nota1Tri !== null && n.nota1Tri !== undefined ? String(n.nota1Tri).replace('.', ',') : ''}"`,
+          `"${n.nota2Tri !== null && n.nota2Tri !== undefined ? String(n.nota2Tri).replace('.', ',') : ''}"`,
+          `"${n.nota3Tri !== null && n.nota3Tri !== undefined ? String(n.nota3Tri).replace('.', ',') : ''}"`,
+        ].join(';'));
+      });
+
+      const csvContent = '\uFEFF' + rows.join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `BI_Aprendizagem_Conselho_RedeAtiva_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setStatus('Planilha CSV do Conselho de Classe gerada!', '#10b981');
+      return;
+    }
+
     if (alunosCapturados.size === 0) {
-      extrairLinhasVisiveis();
+      extrairLinhasFrequenciaVisiveis();
       if (alunosCapturados.size === 0) {
-        alert('Nenhum dado capturado ainda. Clique em "Rastrear Tabela" primeiro!');
+        alert('Nenhum dado capturado ainda. Clique em "Rastrear Aba Ativa" primeiro!');
         return;
       }
     }
@@ -854,10 +1903,23 @@
     setStatus('Planilha CSV gerada e baixada!', '#10b981');
   }
 
-  // Copia JSON para clipboard
   async function copiarJSON() {
+    if (getEffectiveSyncTarget() === 'CONSELHO_BI') {
+      if (!hasAnyAprendizagemData()) {
+        extrairTabelaAtiva();
+      }
+      const payload = buildConselhoBiPayload();
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        setStatus(`JSON copiado (${payload.notasMapa.length} registros de notas)!`, '#10b981');
+      } catch {
+        setStatus('Erro ao copiar para clipboard.', '#ef4444');
+      }
+      return;
+    }
+
     if (alunosCapturados.size === 0) {
-      extrairLinhasVisiveis();
+      extrairLinhasFrequenciaVisiveis();
     }
     const lista = Array.from(alunosCapturados.values());
     try {
@@ -868,16 +1930,74 @@
     }
   }
 
-  // Sincroniza diretamente com a Vercel (ou Localhost)
-  async function sincronizarComSistema() {
-    if (alunosCapturados.size === 0) {
-      extrairLinhasVisiveis();
-      if (alunosCapturados.size === 0) {
-        alert('Nenhum aluno capturado ainda. Use o botão "Rastrear Tabela" primeiro.');
+  async function sincronizarConselhoComSistema(baseUrl, token) {
+    if (!hasAnyAprendizagemData()) {
+      extrairTabelaAtiva();
+      if (!hasAnyAprendizagemData()) {
+        alert('Nenhum dado do BI Aprendizagem capturado ainda. Use "Rastrear Aba Ativa" primeiro.');
         return;
       }
     }
 
+    const payload = buildConselhoBiPayload();
+    const CHUNK_SIZE = 3000;
+    const totalNotas = payload.notasMapa.length;
+    const numChunks = Math.max(1, Math.ceil(totalNotas / CHUNK_SIZE));
+
+    let totalNotasGravadas = 0;
+    let totalDisciplinasCriadas = 0;
+    let totalAbaixoMedia = 0;
+    let ultimoTurmasAfetadas = 0;
+    let ultimoAlunosPareados = 0;
+
+    setStatus(`Enviando BI Aprendizagem para ${baseUrl} (${numChunks} lote${numChunks > 1 ? 's' : ''})...`, '#6366f1');
+
+    try {
+      for (let i = 0; i < numChunks; i++) {
+        const chunkPayload = {
+          year: payload.year,
+          turmas: i === 0 ? payload.turmas : [],
+          alunosTurma: i === 0 ? payload.alunosTurma : [],
+          notasMapa: payload.notasMapa.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE),
+        };
+
+        const resp = await fetch(`${baseUrl}/api/conselho-classe/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(chunkPayload),
+        });
+
+        if (!resp.ok) {
+          if (resp.status === 401) {
+            setStatus('❌ Erro 401: Chave de Sincronização inválida no servidor.', '#ef4444');
+            return;
+          }
+          const errJson = await resp.json().catch(() => ({}));
+          setStatus(`Erro no servidor: ${errJson.error || ('HTTP ' + resp.status)}`, '#ef4444');
+          return;
+        }
+
+        const resJson = await resp.json();
+        totalNotasGravadas += resJson.notasGravadas ?? 0;
+        totalDisciplinasCriadas += resJson.disciplinasCriadas ?? 0;
+        totalAbaixoMedia = Math.max(totalAbaixoMedia, resJson.abaixoDaMediaDetectados ?? 0);
+        ultimoTurmasAfetadas = Math.max(ultimoTurmasAfetadas, resJson.turmasAfetadas ?? 0);
+        ultimoAlunosPareados = Math.max(ultimoAlunosPareados, resJson.alunosPareados ?? 0);
+      }
+
+      setStatus(
+        `🚀 Conselho sincronizado! ${ultimoTurmasAfetadas} turmas, ${ultimoAlunosPareados} alunos, ${totalNotasGravadas} notas (${totalDisciplinasCriadas} novas disciplinas).`,
+        '#10b981'
+      );
+    } catch {
+      setStatus(`Não foi possível conectar em ${baseUrl}. Verifique a URL.`, '#ef4444');
+    }
+  }
+
+  async function sincronizarComSistema() {
     const inputUrl = document.getElementById('leo-cfg-url');
     const inputToken = document.getElementById('leo-cfg-token');
     const rawBaseUrl = (inputUrl?.value?.trim() || 'https://www.redeativa.app.br').replace(/\/+$/, '');
@@ -893,8 +2013,21 @@
       const settingsBox = document.getElementById('leo-settings-box');
       if (settingsBox) settingsBox.open = true;
       if (inputToken) inputToken.focus();
-      setStatus('⚠️ Cole a Chave de Sincronização (botão "Chave da Extensão" em /faltas).', '#f59e0b');
+      setStatus('⚠️ Cole a Chave de Sincronização (disponível em /faltas ou /gestao).', '#f59e0b');
       return;
+    }
+
+    if (getEffectiveSyncTarget() === 'CONSELHO_BI') {
+      await sincronizarConselhoComSistema(baseUrl, token);
+      return;
+    }
+
+    if (alunosCapturados.size === 0) {
+      extrairLinhasFrequenciaVisiveis();
+      if (alunosCapturados.size === 0) {
+        alert('Nenhum aluno capturado ainda. Use o botão "Rastrear Aba Ativa" primeiro.');
+        return;
+      }
     }
 
     const lista = Array.from(alunosCapturados.values());
@@ -916,7 +2049,7 @@
         const emRisco = resJson.emRiscoCount ?? 0;
         const amparos = resJson.amparosCriados ?? 0;
         const enriquecidos = resJson.estudantesEnriquecidos ?? 0;
-        let extras = [];
+        const extras = [];
         if (amparos > 0) extras.push(`${amparos} atestados criados`);
         if (enriquecidos > 0) extras.push(`${enriquecidos} enriquecidos`);
         const extraText = extras.length > 0 ? ` (${extras.join(', ')})` : '';
@@ -927,13 +2060,11 @@
         const errJson = await resp.json().catch(() => ({}));
         setStatus(`Erro no servidor: ${errJson.error || ('HTTP ' + resp.status)}`, '#ef4444');
       }
-    } catch (e) {
+    } catch {
       setStatus(`Não foi possível conectar em ${baseUrl}. Verifique a URL.`, '#ef4444');
-      console.log('Dados prontos para exportação:', lista);
     }
   }
 
-  // Inicializa quando a página estiver pronta
   window.addEventListener('load', () => {
     setTimeout(criarInterfaceFlutuante, 2000);
   });
@@ -944,6 +2075,9 @@
   let timeoutScroll = null;
   window.addEventListener('scroll', () => {
     if (timeoutScroll) clearTimeout(timeoutScroll);
-    timeoutScroll = setTimeout(extrairLinhasVisiveis, 400);
+    timeoutScroll = setTimeout(() => {
+      extrairTabelaAtiva();
+      atualizarContadores();
+    }, 400);
   }, true);
 })();

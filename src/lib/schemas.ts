@@ -482,3 +482,107 @@ export const councilGenerateMinuteSchema = z.object({
   studentIds: z.array(z.string().trim().min(1).max(100)).max(100).optional().default([]),
   isConfidential: z.boolean().optional(),
 });
+
+// ---------------------------------------------------------------------------
+// SINCRONIZAÇÃO DO BI APRENDIZAGEM ESTADUAL (EXTENSÃO POWER BI -> CONSELHO)
+// ---------------------------------------------------------------------------
+
+/**
+ * Converte string numérica PT-BR ("5,8", "10,0", "1.234,5") ou number em float arredondado a 2 casas.
+ * Retorna `null` para valores ausentes/hífens e `NaN` para strings inválidas.
+ */
+export function parsePtBrDecimal(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? Math.round(val * 100) / 100 : NaN;
+  }
+  if (typeof val !== "string") return NaN;
+
+  const trimmed = val.replace(/\u0000/g, "").replace(/%/g, "").trim();
+  if (!trimmed || trimmed === "-" || trimmed === "--") return null;
+
+  let normalized = trimmed.replace(/\s+/g, "");
+  if (normalized.includes(",") && normalized.includes(".")) {
+    if (normalized.lastIndexOf(",") > normalized.lastIndexOf(".")) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (normalized.includes(",")) {
+    normalized = normalized.replace(",", ".");
+  }
+
+  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) {
+    return NaN;
+  }
+
+  const num = Number(normalized);
+  return Number.isFinite(num) ? Math.round(num * 100) / 100 : NaN;
+}
+
+export const councilBiGrade0To10Schema = z
+  .union([z.number(), z.string(), z.null()])
+  .transform((val, ctx) => {
+    const parsed = parsePtBrDecimal(val);
+    if (parsed === null) return null;
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 10) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Nota do BI deve estar na escala decimal entre 0 e 10.",
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+export const councilBiTurmaItemSchema = z.object({
+  turmaRaw: z.string().trim().min(1).max(160),
+  codturma: z.string().trim().max(40).optional().nullable(),
+  periodoAvaliacao: z.string().trim().max(40).optional().nullable(),
+  equivalenciaSeriacao: z.string().trim().max(120).optional().nullable(),
+  curso: z.string().trim().max(160).optional().nullable(),
+  alunosMatriculados: z.number().int().min(0).max(5000).optional().nullable(),
+  alunosAvaliados: z.number().int().min(0).max(5000).optional().nullable(),
+});
+
+export const councilBiAlunoTurmaItemSchema = z.object({
+  cgm: z.string().trim().max(30).optional().nullable(),
+  cgmkey: z.string().trim().max(40).optional().nullable(),
+  nome: z.string().trim().max(200).optional().nullable(),
+  codturma: z.string().trim().max(40).optional().nullable(),
+  periodoava: z.string().trim().max(40).optional().nullable(),
+  media1Tri: councilBiGrade0To10Schema.optional(),
+  media2Tri: councilBiGrade0To10Schema.optional(),
+  media3Tri: councilBiGrade0To10Schema.optional(),
+  abaixoBasicoCount: z.number().int().min(0).max(500).optional().nullable(),
+  basicoCount: z.number().int().min(0).max(500).optional().nullable(),
+  adequadoCount: z.number().int().min(0).max(500).optional().nullable(),
+  avancadoCount: z.number().int().min(0).max(500).optional().nullable(),
+  qtdeNotasDadas: z.number().int().min(0).max(1000).optional().nullable(),
+});
+
+export const councilBiMapaNotaItemSchema = z.object({
+  cgm: z.string().trim().max(30).optional().nullable(),
+  cgmkey: z.string().trim().max(40).optional().nullable(),
+  nome: z.string().trim().max(200).optional().nullable(),
+  codturma: z.string().trim().max(40).optional().nullable(),
+  disciplinaRaw: z.string().trim().min(1).max(160),
+  disciplinaCode: z.string().trim().max(30).optional().nullable(),
+  nota1Tri: councilBiGrade0To10Schema.optional(),
+  nota2Tri: councilBiGrade0To10Schema.optional(),
+  nota3Tri: councilBiGrade0To10Schema.optional(),
+});
+
+export const classCouncilBiSyncSchema = z
+  .object({
+    year: z.coerce.number().int().min(2020).max(2100).optional().default(2026),
+    turmas: z.array(councilBiTurmaItemSchema).max(300).optional().default([]),
+    alunosTurma: z.array(councilBiAlunoTurmaItemSchema).max(5000).optional().default([]),
+    notasMapa: z.array(councilBiMapaNotaItemSchema).max(50000).optional().default([]),
+  })
+  .refine(
+    (d) => d.turmas.length > 0 || d.alunosTurma.length > 0 || d.notasMapa.length > 0,
+    {
+      message: "Nenhum dado do BI Aprendizagem foi enviado para sincronização.",
+    }
+  );

@@ -25,7 +25,7 @@
       "busca-ativa-leopoldina.vercel.app",
     ]);
 
-    const EXTENSION_VERSION = "1.6.5";
+    const EXTENSION_VERSION = "1.7.0";
     const REQUEST_TTL_MS = 20000;
     const CAPTURE_CONTEXT_TTL_MS = 15 * 60 * 1000;
     const pendingRequests = new Map();

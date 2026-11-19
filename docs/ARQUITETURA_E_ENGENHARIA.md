@@ -15,7 +15,7 @@ Originalmente idealizada e homologada em produção no **Colégio Estadual Leopo
 
 1. **Governança Multi-Tenant em 4 Camadas & Isolamento Adversarial:** Particionamento lógico estrito (`EducationNetwork`, `UserNetwork`, `School`, `UserSchool`) com verificação anti-spoofing de sessão/cookie (`getCurrentSchool`), guarda atômica `assertTenantOwnership` em Route Handlers e Server Components dinâmicos, e blindagem inviolável da Escola Piloto (`41042730`).
 2. **Ingestão Cadastral Poliglota (SERE):** Importação em memória de relatórios oficiais exportados em `.xls` (BIFF8), `.xlsx`, `.pdf` e `.csv` (`UTF-8` / `Windows-1252`), com desduplicação automática de dupla matrícula técnica (Ensino Médio Regular + Itinerário Profissional NEM/EPT) e higienização de telefones familiares.
-3. **Telemetria de Frequência, Rede de Proteção & Retorno Assistido (Extensão MV3 v1.6.5):** Agente universal de navegador com ciclo de vida idempotente (`__REDEATIVA_WA_CLEANUP__` / `__REDEATIVA_BRIDGE_CLEANUP__`) que extrai indicadores semanais do painel oficial *Presente na Escola* (`app.powerbi.com`), fichas do portal *SERP / Rede de Proteção* (`redeprotecao.seed.pr.gov.br`), gerencia a **Janela Dedicada Compacta (`480x760px`)** vinculada à aba autorizada (`targetTabId`) com confirmação estrita de envio (`evaluateSendConfirmation` exigindo conversa verificada, nova bolha de saída na base de `#main` e compatibilidade textual), executa a **captura assistida *Read-Only* de retornos do WhatsApp Web** ([`WhatsAppReplyCaptureModal.tsx`](../src/components/whatsapp/WhatsAppReplyCaptureModal.tsx) + [`extractWhatsAppReplyViaExtension`](../src/lib/clientDispatcher.ts)) e assegura integridade probatória com a **Regra Bipartida** do `computeMessageContentHash` em [`src/lib/messageCrypto.ts`](../src/lib/messageCrypto.ts). *(Nota: na UI visível e rótulos de acessibilidade, seguir estritamente a Seção 10 de [`GEMINI.md`](../GEMINI.md).)*
+3. **Telemetria de Frequência, BI Aprendizagem, Rede de Proteção & Retorno Assistido (Extensão MV3 v1.7.0):** Agente universal de navegador com ciclo de vida idempotente (`__REDEATIVA_WA_CLEANUP__` / `__REDEATIVA_BRIDGE_CLEANUP__`) que extrai indicadores semanais do painel oficial *Presente na Escola* (`app.powerbi.com`), notas trimestrais do *BI Aprendizagem Estadual* (`ESCOLA`, `TURMA`, varredura 2D na aba `MAPA`), fichas do portal *SERP / Rede de Proteção* (`redeprotecao.seed.pr.gov.br`), gerencia a **Janela Dedicada Compacta (`480x760px`)** vinculada à aba autorizada (`targetTabId`) com confirmação estrita de envio (`evaluateSendConfirmation` exigindo conversa verificada, nova bolha de saída na base de `#main` e compatibilidade textual), executa a **captura assistida *Read-Only* de retornos do WhatsApp Web** ([`WhatsAppReplyCaptureModal.tsx`](../src/components/whatsapp/WhatsAppReplyCaptureModal.tsx) + [`extractWhatsAppReplyViaExtension`](../src/lib/clientDispatcher.ts)) e assegura integridade probatória com a **Regra Bipartida** do `computeMessageContentHash` em [`src/lib/messageCrypto.ts`](../src/lib/messageCrypto.ts). *(Nota: na UI visível e rótulos de acessibilidade, seguir estritamente a Seção 10 de [`GEMINI.md`](../GEMINI.md).)*
 4. **Inteligência Artificial Pedagógica & Preditiva (LGPD/ECA-Safe):** Formalização gramatical de atas conforme diretrizes NRE/SEED-PR, classificação estruturada de retornos familiares via Google Gemini precedida obrigatoriamente por pseudonimização ([`aiPseudonymizer.ts`](../src/lib/aiPseudonymizer.ts)), além de motor preditivo de risco de evasão para Secretarias Municipais ([`predictiveAnalytics.ts`](../src/lib/predictiveAnalytics.ts)).
 5. **Livro Oficial Digital de Atas & Arcabouço Probatório (Lei nº 14.063/2020):** Lavratura eletrônica com **PIN de Fé Pública do servidor (`PBKDF2-SHA512`)**, numeração anual sequencial atômica por escola, captura forense vetorial do traço (`x, y, t, p` + `User-Agent`), autenticação biométrica móvel **WebAuthn/FIDO2** via QR Code, governança de lavratura extemporânea (> 5 dias úteis), averbação **Gov.br / ITI**, selo canônico `SHA-256`, adendos encadeados (*"Em tempo"*), certidão cega pública e Dossiê Pericial A4 unificado.
 
@@ -37,8 +37,8 @@ flowchart TD
         GovBr["Assinador Digital Gov.br / ITI"]
     end
 
-    subgraph Extension ["Extensao Chrome Sincronizador v1.6.5 (MV3)"]
-        PBIContent["content.js (Auto-Scroll e Extracao DOM Power BI)"]
+    subgraph Extension ["Extensao Chrome Sincronizador v1.7.0 (MV3)"]
+        PBIContent["content.js (Auto-Scroll 1D/2D e Extracao DOM Power BI)"]
         SERPBridge["serp-content.js + serp-bridge.js (Auto-Paginacao SERP)"]
         WABridge["registro-bridge.js + background.js + whatsapp-content.js (Janela Compacta, Ciclo Idempotente e Confirmacao Estrita)"]
     end
@@ -47,12 +47,12 @@ flowchart TD
         EdgeProxy["src/proxy.ts (Perimetro JWT Edge)"]
         RSC["33 Server Components (page.tsx + assertTenantOwnership)"]
         ClientUI["Client Components (*Client.tsx + Editor Modular src/components/ata/editor/* + Conselho src/components/conselho/*)"]
-        APIRoutes["60 Route Handlers (/api/*)"]
+        APIRoutes["61 Route Handlers (/api/*)"]
         CronJob["Vercel Cron (/api/cron/weekly-digest)"]
     end
 
     subgraph CoreLibs ["Dominio, Servicos, Seguranca, Criptografia e IA (src/services/* + src/lib/*)"]
-        DomainServices["src/services/ (8 modulos: atas, classCouncil, frequencySync, messageDispatch, messaging/*)"]
+        DomainServices["src/services/ (9 modulos: atas, classCouncil, classCouncilBiSync, frequencySync, messageDispatch, messaging/*)"]
         AuthLib["auth.ts + roles.ts + permissions.ts + tenantGuard.ts + platformEditions.ts"]
         CryptoLib["ataCrypto.ts + signingPin.ts + messageCrypto.ts + escolaGoogleVerify.ts"]
         ParserLib["sereParser.ts + studentMatcher.ts + csvSanitizer.ts"]
@@ -76,7 +76,7 @@ flowchart TD
     GovBr -->|Protocolo Verificado| ClientUI
     PBI -.->|Scraping Assistido| PBIContent
     SERP -.->|Paginacao Nativa| SERPBridge
-    PBIContent -->|POST /api/frequencia/sync| APIRoutes
+    PBIContent -->|POST /api/frequencia/sync e /api/conselho-classe/sync| APIRoutes
     SERPBridge -->|POST /api/serp/sync| APIRoutes
     ClientUI <-->|window.postMessage| WABridge
     WABridge -->|Popup 480x760 + Recibo| WhatsApp
@@ -109,7 +109,7 @@ flowchart TD
 
 | Camada | Tecnologia | Versão (`package.json`) | Papel Arquitetural |
 | :--- | :--- | :---: | :--- |
-| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.6` | Renderização híbrida Server/Client (**33 páginas `page.tsx`** + **60 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), **8 módulos de serviço** em [`src/services/`](../src/services), **45 bibliotecas** em [`src/lib/`](../src/lib), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
+| **Framework Full-Stack** | **Next.js (App Router + Turbopack)** | `^16.4.6` | Renderização híbrida Server/Client (**33 páginas `page.tsx`** + **61 Route Handlers** serverless em [`src/app/api/`](../src/app/api)), **9 módulos de serviço** em [`src/services/`](../src/services), **45 bibliotecas** em [`src/lib/`](../src/lib), proxy de borda em [`src/proxy.ts`](../src/proxy.ts) e deploy regionalizado em São Paulo (`gru1` em [`vercel.json`](../vercel.json)). |
 | **UI Runtime** | **React & React DOM** | `^19.3.1` | Painéis operacionais densos, modais baseados em `<dialog>` nativo ([`ModalDialog.tsx`](../src/components/ModalDialog.tsx)), subcomponentes tipados em [`src/components/ata/editor/`](../src/components/ata/editor) e [`src/components/conselho/`](../src/components/conselho), e captura vetorial/forense de traço em [`SignatureCanvas.tsx`](../src/components/ata/SignatureCanvas.tsx). |
 | **Linguagem** | **TypeScript** | `^6.0.3` | `strict: true` em [`tsconfig.json`](../tsconfig.json) e alias `@/* -> ./src/*`, garantindo contratos estáticos ponta a ponta. |
 | **Estilização** | **Tailwind CSS v4** | `^4.3.3` | Utilitários via `@tailwindcss/postcss`, modo escuro sem *flash* (FOUC), ícones `lucide-react` (`^1.63.0`) e diagramação `@media print` A4 pericial com moldura perimétrica padronizada. |
@@ -119,8 +119,8 @@ flowchart TD
 | **IA Generativa** | **Google Gen AI SDK (`@google/genai`)** | `^2.31.0` | Integração com modelos Gemini usando `responseSchema` JSON estrito, fuso `America/Sao_Paulo`, precedida por [`aiPseudonymizer.ts`](../src/lib/aiPseudonymizer.ts) e sucedida por *fallback* determinístico local. |
 | **Parsers & QR/PDF** | **`xlsx`, `unpdf`, `pdf-lib`, `qrcode`** *(+ `jspdf` em `package.json`)* | `^0.18.5` / `^1.9.1` / `^1.17.1` / `^1.5.4` | Parsing em memória de planilhas BIFF8/OpenXML e PDFs posicionais do SERE; emissão PDF/A-1b de atas via `pdf-lib`, impressão A4 via React `@media print` e geração offline de QR Codes institucionais ([`qrCode.ts`](../src/lib/qrCode.ts)). |
 | **PWA & Mobile** | **Service Worker Nativo** | `v1.1.0` | Manifesto instalável (`/manifest.json`), [`PwaRegister.tsx`](../src/components/PwaRegister.tsx) e cache seletivo *network-first* em [`public/sw.js`](../public/sw.js) (ignorando `/api/*`). |
-| **Extensão Browser** | **Chrome Extension MV3** | `1.6.5` | Coleta assistida no Power BI e SERP, Janela Dedicada Compacta com vínculo `targetTabId`, ciclo de vida idempotente (`__REDEATIVA_WA_CLEANUP__` / `__REDEATIVA_BRIDGE_CLEANUP__`), `dispatchObserver` ativo apenas em despachos válidos e confirmação estrita de envio WhatsApp (`evaluateSendConfirmation`), empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-rede-ativa.zip` (`/public/extensao-leopoldina.zip` mantido automaticamente como alias de retrocompatibilidade). |
-| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **78 arquivos (75 aprovados e 3 `skipIf` de banco isolado) / 699 testes aprovados e 12 ignorados (711 testes)** cobrindo Conselho de Classe e Pós-Conselho (`classCouncilModule.test.ts`), vetores adversariais multi-tenant (`adversarialQa.test.ts`), remediações setoriais e sistêmicas (`sectorBRemediation.test.ts`..`sectorERemediation.test.ts`, `systemicIntegrationRemediation.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), confiabilidade, ciclo de vida e desempenho da extensão MV3 (`whatsappExtensionReliability.test.ts`), camada de serviços, polling, reabertura e validade QR de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress, cache Neon e despertar de banco (`egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), simulação 2D / central de orientação / landing (`treinamentoPage.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`), RBAC 4-tier, criptografia SHA-256, PIN, SERE parser e SSR. |
+| **Extensão Browser** | **Chrome Extension MV3** | `1.7.0` | Coleta assistida no Power BI (*Presente na Escola* e *BI Aprendizagem 2026* 2D) e SERP, Janela Dedicada Compacta com vínculo `targetTabId`, ciclo de vida idempotente (`__REDEATIVA_WA_CLEANUP__` / `__REDEATIVA_BRIDGE_CLEANUP__`), `dispatchObserver` ativo apenas em despachos válidos e confirmação estrita de envio WhatsApp (`evaluateSendConfirmation`), empacotada no build por [`scripts/package_extension.cjs`](../scripts/package_extension.cjs) em `/public/extensao-rede-ativa.zip` (`/public/extensao-leopoldina.zip` mantido automaticamente como alias de retrocompatibilidade). |
+| **Qualidade & Testes** | **Vitest** | `^5.0.5` | **78 arquivos (75 aprovados e 3 `skipIf` de banco isolado) / 703 testes aprovados e 12 ignorados (715 testes)** cobrindo Conselho de Classe, Pós-Conselho e Sync BI Aprendizagem (`classCouncilModule.test.ts`), vetores adversariais multi-tenant (`adversarialQa.test.ts`), remediações setoriais e sistêmicas (`sectorBRemediation.test.ts`..`sectorERemediation.test.ts`, `systemicIntegrationRemediation.test.ts`), segurança de retornos assistidos (`messageReplySecurity.test.ts`), modal de captura WhatsApp (`whatsappReplyCaptureModal.test.tsx`), confiabilidade, ciclo de vida e desempenho da extensão MV3 (`whatsappExtensionReliability.test.ts`), camada de serviços, polling, reabertura e validade QR de atas (`ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`), sincronização de frequência Power BI / CSV / JSON (`frequenciaSync.test.ts`), otimização de egress, cache Neon e despertar de banco (`egressAndCacheOptimization.test.ts`, `dbWakeAndPollOptimization.test.ts`), tokens da extensão (`schoolSyncToken.test.ts`), duas edições no Paraná (`platformEditions.test.ts`), atas de orientação docente (`teacherAtas.test.ts`), usabilidade do livro de atas (`atasArchiveUsability.test.ts`), auditoria V3 (`securityAndStabilityAuditV3.test.ts`), simulação 2D / central de orientação / landing (`treinamentoPage.test.tsx`, `impactoPage.test.tsx`, `previewLanding.test.tsx`), RBAC 4-tier, criptografia SHA-256, PIN, SERE parser e SSR. |
 
 ---
 
@@ -308,7 +308,7 @@ erDiagram
 | `/visao-geral` | `GESTOR_ESCOLAR` | Panorama operacional resumido da unidade escolar ativa. |
 | `/equipe` | `GESTOR_ESCOLAR` | Gestão da allowlist de servidores da unidade ativa e atribuição de papéis dentro do teto hierárquico. |
 | `/configuracoes/escola` | `GESTOR_ESCOLAR` | Identidade institucional, INEP, contatos, brasão oficial A4 e token de sincronização da extensão. |
-| `/busca-ativa` | `PEDAGOGA` | Disparo individual e Fila Assistida por Turma via WhatsApp (wa.me / Janela Compacta v1.6.5). |
+| `/busca-ativa` | `PEDAGOGA` | Disparo individual e Fila Assistida por Turma via WhatsApp (wa.me / Janela Compacta v1.7.0). |
 | `/faltas` | `PEDAGOGA` | Painel de infrequência crítica (<75%), queda abrupta, protocolos SERP e exportação CSV blindada. |
 | `/historico` | `PEDAGOGA` | Linha do tempo paginada no servidor com recibos de entrega, selo SHA-256 e classificação com IA. |
 | `/alunos` | `PEDAGOGA` | Catálogo cadastral, gestão de turmas e Importador Poliglota SERE (`.xls`, `.xlsx`, `.pdf`, `.csv`). |
@@ -337,7 +337,7 @@ erDiagram
 - **Central de Orientação Operacional ([`/treinamento`](../src/app/treinamento/page.tsx) + [`TreinamentoClient.tsx`](../src/app/treinamento/TreinamentoClient.tsx)):** Rota autenticada exposta no menu lateral ([`Sidebar.tsx`](../src/components/Sidebar.tsx) — *"Orientação e Guias"*) que resolve a escola e edição ativas no servidor (`auth()` + `getCurrentSchool()`), integrando o [`PedagogicalFlowSimulator`](../src/components/PedagogicalFlowSimulator.tsx) (`mode="internal"`) a guias passo a passo com atalhos diretos e FAQ operacional.
 - **Vitrine Pública e Ocultação Não-Destrutiva ([`LandingPageClient.tsx`](../src/components/landing/LandingPageClient.tsx)):** Unifica a apresentação pública em `/` e `/impacto` com os guardrails do Item 10 do [`GEMINI.md`](../GEMINI.md) e seleção de visão por perfil (`Equipe Pedagógica`, `Direção Escolar`, `Secretaria de Educação`). Na seção `#workflow-demo`, os dois painéis animados anteriores (`MasterWorkflowAnimation` e `WorkflowAnimation`, identificados por `"Fluxo completo"` e `"Contatos com famílias"`) permanecem preservados e controlados pela constante exportada `ENABLE_LEGACY_WORKFLOW_PANELS = false`, exibindo exclusivamente `<PedagogicalFlowSimulator mode="public" />` até eventual reativação.
 
-### 5.2 Route Handlers REST (`src/app/api/*` — 60 Route Handlers)
+### 5.2 Route Handlers REST (`src/app/api/*` — 61 Route Handlers)
 
 | Domínio | Endpoint | Métodos Exatos | Finalidade e Guarda |
 | :--- | :--- | :---: | :--- |
@@ -400,8 +400,9 @@ erDiagram
 | **Conselho de Classe** | `/api/conselho-classe/[boardId]/matrix` | `PUT` | Lançamento em lote da matriz `Estudante x Componente` (`1..5`) com validação de FKs e recálculo de componentes abaixo da média. |
 | **Conselho de Classe** | `/api/conselho-classe/[boardId]/students/[studentId]` | `PATCH` | Atualização da ficha individual trimestral, selos (com controle LGPD `hasSensitiveHealthTag`), parecer e disciplinas abaixo da média. |
 | **Conselho de Classe** | `/api/conselho-classe/[boardId]/generate-minute` | `POST` | Geração de rascunho `DRAFT` de Ata Oficial a partir do Pós-Conselho (sem auto-vincular toda a turma) ou de deliberação individual (sigilo automático se Laudo/AEE). |
+| **Conselho de Classe** | `/api/conselho-classe/sync` | `OPTIONS, POST` | Ingestão via Extensão MV3 (`v1.7.0`) do BI Aprendizagem (`ESCOLA`, `TURMA`, `MAPA`) com bloqueio `403` em `INSTITUCIONAL_ESSENCIAL` e mesclagem não-destrutiva. |
 
-*(Nota: O catálogo completo em `src/app/api/` soma exatamente **60 arquivos `route.ts`**).*
+*(Nota: O catálogo completo em `src/app/api/` soma exatamente **61 arquivos `route.ts`**).*
 
 ---
 
@@ -426,7 +427,7 @@ A integridade arquitetural é validada via **Vitest (`npm test`)**, checagem est
   - **Episódio anterior de expiração antecipada e acompanhamento:** a expiração antecipada relatada anteriormente não voltou a ocorrer nessa rodada; **a causa do episódio anterior permanece desconhecida**. Manter acompanhamento contínuo dos logs estruturados (`[POST /api/atas/[id]/sign-token]`, `[GET /api/atas/sign-token]` e `[POST /api/atas/sign-token]`) nas primeiras utilizações reais.
 - **Validação de Desempenho, Ciclo de Vida e Confiabilidade da Extensão MV3 (`v1.6.0` em `13/11/2026`):**
   - **Suíte de regressão dedicada:** `npx vitest run src/lib/__tests__/whatsappExtensionReliability.test.ts` → **1 arquivo, 13 testes aprovados** (injeção idempotente 10x, cleanup de listeners/timers/observers, `selectionchange` sem auto-mutação, `dispatchObserver` desconectado fora de despacho ativo, rejeição de falso positivo em timeout de 45s, rejeição de histórico antigo ao rolar, rejeição após troca de conversa, isolamento de corrida A ➔ B, bloqueio `UNAUTHORIZED_WHATSAPP_TAB`, preservação de outras abas abertas e ausência de resize forçado de popup, unmount de `WhatsAppDispatchToggle` e `BuscaAtivaClient`, e integridade SHA-256 dos 14 arquivos nos ZIPs distribuídos).
-  - **Estado atual verificado da suíte (`npm test`):** **75 arquivos aprovados e 3 `skipIf` de banco isolado (`ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx` = 78 arquivos)**; **699 testes aprovados e 12 ignorados (711 testes)** *(incluindo `classCouncilModule.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)*; `npx tsc --noEmit` e `npm run build` com **0 erros**.
+  - **Estado atual verificado da suíte (`npm test`):** **75 arquivos aprovados e 3 `skipIf` de banco isolado (`ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx` = 78 arquivos)**; **703 testes aprovados e 12 ignorados (715 testes)** *(incluindo `classCouncilModule.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)*; `npx tsc --noEmit` e `npm run build` com **0 erros**.
   - *(Snapshot histórico de `14/11/2026`: `68/71` arquivos e `652` testes aprovados na consolidação `v1.6.0`.)*
 - **Pilares de Cobertura da Suíte:**
   - **Segurança Adversarial Multi-Tenant, V3 & Domínio:** `adversarialQa.test.ts`, `securityAndStabilityAuditV3.test.ts`, `multiTenantSecurityAudit.test.ts`, `messageReplySecurity.test.ts`, `schoolSyncToken.test.ts`, `m1MultiTenantFixes.test.ts`, `m2DataIntegrityFixes.test.ts`, `securityAndRbac.test.ts`, `multiTenancy.test.ts`, `rateLimitDistributed.test.ts`, `authGoogleCredentialsAndDomain.test.ts`, `storageKeysAndNeutralDomain.test.ts`, `platformEditions.test.ts`.

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sincronizador Rede Ativa (Power BI & SERP)",
-  "version": "1.6.5",
-  "description": "Extrai dados de frequência do Power BI, fichas SERP e gerencia a confirmação automática de envio do WhatsApp Web para a Busca Ativa.",
+  "version": "1.7.0",
+  "description": "Extrai dados de frequência e notas trimestrais do Power BI (Conselho de Classe), fichas SERP e gerencia a confirmação assistida de envio do WhatsApp Web.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
