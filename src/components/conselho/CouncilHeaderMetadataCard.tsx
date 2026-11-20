@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   BookOpen,
-  ClipboardList,
   Eye,
   EyeOff,
   FileUp,
+  Maximize2,
+  Presentation,
   Printer,
   Save,
+  Settings,
   ChevronDown,
-  ChevronUp,
   Users,
   Award,
   LayoutGrid,
@@ -31,10 +32,11 @@ interface CouncilHeaderMetadataCardProps {
   hideSensitiveTags: boolean;
   onToggleHideSensitiveTags: () => void;
   onOpenSubjectsModal: () => void;
-  onOpenPreCouncilModal?: () => void;
-  preCouncilProgress?: { completed: number; total: number } | null;
   onOpenPdfImportModal?: () => void;
   onOpenSeatingMap?: () => void;
+  onStartPresentation?: () => void;
+  onEnterProjectorMode?: () => void;
+  presentationDisabled?: boolean;
   onBoardUpdated: (updated: CouncilBoardDetailRecord) => void;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
@@ -54,16 +56,39 @@ export default function CouncilHeaderMetadataCard({
   hideSensitiveTags,
   onToggleHideSensitiveTags,
   onOpenSubjectsModal,
-  onOpenPreCouncilModal,
-  preCouncilProgress,
   onOpenPdfImportModal,
   onOpenSeatingMap,
+  onStartPresentation,
+  onEnterProjectorMode,
+  presentationDisabled = false,
   onBoardUpdated,
   onNotify,
   readOnly = false,
 }: CouncilHeaderMetadataCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [configMenuOpen, setConfigMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const configMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!configMenuOpen) return;
+    function handleOutside(event: MouseEvent) {
+      if (configMenuRef.current && !configMenuRef.current.contains(event.target as Node)) {
+        setConfigMenuOpen(false);
+      }
+    }
+    function handleEsc(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setConfigMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [configMenuOpen]);
 
   const [peerLeaderStudentId, setPeerLeaderStudentId] = useState(board.peerLeaderStudentId || "");
   const [peerLeaderName, setPeerLeaderName] = useState(board.peerLeaderName || "");
@@ -212,80 +237,118 @@ export default function CouncilHeaderMetadataCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenSubjectsModal}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 transition cursor-pointer"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-sky-600" />
-            <span>Componentes</span>
-          </button>
-
-          {onOpenPreCouncilModal && (
+          <div ref={configMenuRef} className="relative">
             <button
               type="button"
-              onClick={onOpenPreCouncilModal}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-bold text-indigo-900 dark:text-indigo-200 transition cursor-pointer"
+              aria-expanded={configMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setConfigMenuOpen((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 transition cursor-pointer"
             >
-              <ClipboardList className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Pré-Conselho</span>
-              {preCouncilProgress && preCouncilProgress.total > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-extrabold leading-none">
-                  {preCouncilProgress.completed}/{preCouncilProgress.total}
-                </span>
-              )}
+              <Settings className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+              <span>Configurar</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
             </button>
-          )}
 
-          {!readOnly && onOpenPdfImportModal && (
-            <button
-              type="button"
-              onClick={onOpenPdfImportModal}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-xs font-bold text-sky-900 dark:text-sky-200 transition cursor-pointer"
-            >
-              <FileUp className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-              <span>Importar PDF SERE</span>
-            </button>
-          )}
+            {configMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Configurações da turma"
+                className="absolute right-0 mt-2 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-30"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setConfigMenuOpen(false);
+                    onOpenSubjectsModal();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Componentes curriculares</span>
+                </button>
 
-          <button
-            type="button"
-            onClick={onToggleHideSensitiveTags}
-            aria-pressed={hideSensitiveTags}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
-              hideSensitiveTags
-                ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200"
-                : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700"
-            }`}
-            title="Redução da exposição de dados sensíveis na tela durante reuniões"
-          >
-            {hideSensitiveTags ? (
-              <EyeOff className="w-3.5 h-3.5" />
-            ) : (
-              <Eye className="w-3.5 h-3.5" />
+                {!readOnly && onOpenPdfImportModal && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setConfigMenuOpen(false);
+                      onOpenPdfImportModal();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <FileUp className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Importar PDF SERE</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setConfigMenuOpen(false);
+                    onToggleHideSensitiveTags();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  {hideSensitiveTags ? (
+                    <EyeOff className="w-3.5 h-3.5 text-amber-600" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 text-slate-600" />
+                  )}
+                  <span>{hideSensitiveTags ? "Exibir laudo e AEE" : "Ocultar laudo e AEE"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setConfigMenuOpen(false);
+                    setExpanded((prev) => !prev);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <Award className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>{expanded ? "Ocultar metadados e líderes" : "Metadados e líderes"}</span>
+                </button>
+              </div>
             )}
-            <span>{hideSensitiveTags ? "Exibir laudo e AEE" : "Ocultar laudo e AEE"}</span>
-          </button>
+          </div>
+
+          {onStartPresentation && (
+            <button
+              type="button"
+              disabled={presentationDisabled}
+              onClick={onStartPresentation}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+            >
+              <Presentation className="w-3.5 h-3.5" />
+              <span>Apresentar</span>
+            </button>
+          )}
+
+          {onEnterProjectorMode && (
+            <button
+              type="button"
+              onClick={onEnterProjectorMode}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold transition cursor-pointer"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Modo Telão</span>
+            </button>
+          )}
 
           <Link
             href={`/conselho-classe/${board.id}/imprimir?mode=turma&trimester=${activeTrimester}${
               hideSensitiveTags ? "&hideHealthTags=1" : ""
             }`}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-bold transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold transition"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>Imprimir ficha</span>
+            <span>Imprimir</span>
           </Link>
-
-          <button
-            type="button"
-            onClick={() => setExpanded((prev) => !prev)}
-            aria-expanded={expanded}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
-          >
-            <span>Metadados e líderes</span>
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
         </div>
       </div>
 

@@ -10,6 +10,7 @@ import {
   sortStudentCellsByCriticality,
 } from "@/components/conselho/councilAnalytics";
 import CouncilAnalysisPanel from "@/components/conselho/CouncilAnalysisPanel";
+import CouncilHeaderMetadataCard from "@/components/conselho/CouncilHeaderMetadataCard";
 import CouncilStudentFocusModal from "@/components/conselho/CouncilStudentFocusModal";
 import type { CouncilBoardDetailRecord } from "@/components/conselho/types";
 
@@ -450,6 +451,34 @@ describe("Painel de Análise e Modo Telão do Conselho de Classe", () => {
     );
     expect(htmlVisible).toContain("Com Laudo");
     expect(htmlVisible).toContain(">AEE<");
+    expect(htmlVisible).toContain("Abrir ficha completa de Bruno Crítico");
+    expect(htmlVisible).toContain(">Focar<");
+    expect(htmlVisible).not.toContain(">Ficha<");
+    expect(htmlVisible.replace(/<!-- -->/g, "")).toContain("1 de 4");
+  });
+
+  it("renderiza CouncilHeaderMetadataCard enxuto com menu Configurar, Apresentar, Modo Telão e Imprimir sem Pré-Conselho duplicado", () => {
+    const board = createSyntheticBoard();
+    const html = renderToString(
+      React.createElement(CouncilHeaderMetadataCard, {
+        board,
+        activeTrimester: 2,
+        hideSensitiveTags: false,
+        onToggleHideSensitiveTags: vi.fn(),
+        onOpenSubjectsModal: vi.fn(),
+        onOpenPdfImportModal: vi.fn(),
+        onStartPresentation: vi.fn(),
+        onEnterProjectorMode: vi.fn(),
+        onBoardUpdated: vi.fn(),
+        onNotify: vi.fn(),
+      })
+    );
+
+    expect(html).toContain("Configurar");
+    expect(html).toContain("Apresentar");
+    expect(html).toContain("Modo Telão");
+    expect(html).toContain("Imprimir");
+    expect(html).not.toContain("Pré-Conselho");
   });
 
   it("renderiza CouncilStudentFocusModal com privacidade de tags sensíveis e bloqueio em readOnly", () => {

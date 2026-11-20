@@ -54,6 +54,9 @@ interface CouncilAnalysisPanelProps {
   onMatrixSaved: () => Promise<void>;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
+  hideTopActionBar?: boolean;
+  presentationRequestNonce?: number;
+  projectorRequestNonce?: number;
 }
 
 const PRIORITY_STYLES: Record<
@@ -92,6 +95,9 @@ export default function CouncilAnalysisPanel({
   onMatrixSaved,
   onNotify,
   readOnly = false,
+  hideTopActionBar = false,
+  presentationRequestNonce = 0,
+  projectorRequestNonce = 0,
 }: CouncilAnalysisPanelProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [quickFilter, setQuickFilter] = useState<AnalysisQuickFilter>("ALL");
@@ -103,9 +109,12 @@ export default function CouncilAnalysisPanel({
   const [showAllSubjectsRanking, setShowAllSubjectsRanking] = useState(false);
   const [focusModalOpen, setFocusModalOpen] = useState(false);
   const [focusStudentId, setFocusStudentId] = useState<string | null>(null);
+  const [expandedStudentIds, setExpandedStudentIds] = useState<Record<string, boolean>>({});
 
   const projectorContainerRef = useRef<HTMLDivElement | null>(null);
   const heatmapCaptionId = useId();
+  const lastPresentationNonceRef = useRef(presentationRequestNonce);
+  const lastProjectorNonceRef = useRef(projectorRequestNonce);
 
   const analytics = useMemo(
     () => buildClassCouncilAnalytics(board, activeTrimester),
@@ -189,6 +198,30 @@ export default function CouncilAnalysisPanel({
     setQuickFilter("ALL");
     setSubjectIdFilter("");
   }
+
+  function toggleStudentExpanded(studentId: string) {
+    setExpandedStudentIds((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
+  }
+
+  useEffect(() => {
+    if (presentationRequestNonce !== lastPresentationNonceRef.current) {
+      lastPresentationNonceRef.current = presentationRequestNonce;
+      if (visibleStudents.length > 0) {
+        setFocusStudentId(visibleStudents[0].studentId);
+        setFocusModalOpen(true);
+      }
+    }
+  }, [presentationRequestNonce, visibleStudents]);
+
+  useEffect(() => {
+    if (projectorRequestNonce !== lastProjectorNonceRef.current) {
+      lastProjectorNonceRef.current = projectorRequestNonce;
+      enterProjectorMode();
+    }
+  }, [projectorRequestNonce]);
 
   const hasActiveFilters =
     searchTerm.trim().length > 0 || quickFilter !== "ALL" || subjectIdFilter !== "";
@@ -306,8 +339,8 @@ export default function CouncilAnalysisPanel({
         </header>
       )}
 
-      {/* Barra de ações rápidas (modo normal) */}
-      {!isProjectorMode && (
+      {/* Barra de ações rápidas (modo normal quando standalone) */}
+      {!isProjectorMode && !hideTopActionBar && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 shadow-xs">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
             <span className="font-extrabold text-slate-900 dark:text-white">
@@ -351,14 +384,27 @@ export default function CouncilAnalysisPanel({
         </div>
       )}
 
-      {/* BLOCO 1: Panorama da Turma, Cruzamentos e Componentes Críticos */}
+      {!isProjectorMode && hideTopActionBar && activeSubjects.length === 0 && !readOnly && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+          <span>Nenhum componente curricular cadastrado nesta turma.</span>
+          <button
+            type="button"
+            onClick={onOpenSubjectsModal}
+            className="font-bold underline cursor-pointer shrink-0"
+          >
+            Cadastrar componentes
+          </button>
+        </div>
+      )}
+
+      {/* BLOCO 1: Panorama da Turma em faixa única + Grade horizontal de Componentes */}
       {showOverview && (
         <section
           aria-label="Panorama consolidado da turma"
-          className="grid grid-cols-1 xl:grid-cols-12 gap-4"
+          className="space-y-3"
         >
-          {/* KPIs + Cruzamentos */}
-          <div className="xl:col-span-7 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-4 shadow-xs">
+          {/* KPIs + Cruzamentos em faixa compacta */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {[
                 {
@@ -409,86 +455,80 @@ export default function CouncilAnalysisPanel({
                     type="button"
                     aria-pressed={isSelected}
                     onClick={() => toggleQuickFilter(kpi.key)}
-                    className={`rounded-xl border p-3 text-left transition cursor-pointer ${
+                    className={`rounded-xl border px-3.5 py-2.5 text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                       isSelected ? kpi.activeClass : kpi.idleClass
                     }`}
                   >
-                    <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                       {kpi.label}
-                    </div>
-                    <div className={`mt-1 font-black ${isProjectorMode ? "text-3xl" : "text-2xl"} ${kpi.numberClass}`}>
+                    </span>
+                    <span className={`font-black ${isProjectorMode ? "text-2xl" : "text-xl"} ${kpi.numberClass}`}>
                       {kpi.count}
-                    </div>
+                    </span>
                   </button>
                 );
               })}
             </div>
 
-            {/* Cruzamentos pedagógicos */}
-            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
-                Cruzamentos da turma
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  {
-                    key: "CORR_INFREQ_BELOW" as const,
-                    label: "Infrequência + Abaixo da média",
-                    count: analytics.correlations.lowAttendanceAndBelowAvg,
-                    tone: "rose",
-                  },
-                  {
-                    key: "CORR_CONDUCT_BELOW" as const,
-                    label: "Conduta + Abaixo da média",
-                    count: analytics.correlations.conductAndBelowAvg,
-                    tone: "amber",
-                  },
-                  {
-                    key: "CORR_DIFFICULTY_REGULAR_ATT" as const,
-                    label: "Dificuldade com frequência regular",
-                    count: analytics.correlations.difficultyWithRegularAttendance,
-                    tone: "sky",
-                  },
-                  {
-                    key: "HIGHLIGHTS" as const,
-                    label: "Destaques e assiduidade",
-                    count: analytics.correlations.highlights,
-                    tone: "emerald",
-                  },
-                ].map((corr) => {
-                  const selected = quickFilter === corr.key;
-                  return (
-                    <button
-                      key={corr.key}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => toggleQuickFilter(corr.key)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+            {/* Cruzamentos pedagógicos em linha */}
+            <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500 mr-1">
+                Cruzamentos:
+              </span>
+              {[
+                {
+                  key: "CORR_INFREQ_BELOW" as const,
+                  label: "Infrequência + Abaixo da média",
+                  count: analytics.correlations.lowAttendanceAndBelowAvg,
+                },
+                {
+                  key: "CORR_CONDUCT_BELOW" as const,
+                  label: "Conduta + Abaixo da média",
+                  count: analytics.correlations.conductAndBelowAvg,
+                },
+                {
+                  key: "CORR_DIFFICULTY_REGULAR_ATT" as const,
+                  label: "Dificuldade com frequência regular",
+                  count: analytics.correlations.difficultyWithRegularAttendance,
+                },
+                {
+                  key: "HIGHLIGHTS" as const,
+                  label: "Destaques e assiduidade",
+                  count: analytics.correlations.highlights,
+                },
+              ].map((corr) => {
+                const selected = quickFilter === corr.key;
+                return (
+                  <button
+                    key={corr.key}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => toggleQuickFilter(corr.key)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                      selected
+                        ? "bg-sky-600 border-sky-600 text-white"
+                        : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {corr.key === "HIGHLIGHTS" && <Sparkles className="w-3 h-3" />}
+                    <span>{corr.label}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[11px] font-black ${
                         selected
-                          ? "bg-sky-600 border-sky-600 text-white"
-                          : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          ? "bg-white/20 text-white"
+                          : "bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                       }`}
                     >
-                      {corr.key === "HIGHLIGHTS" && <Sparkles className="w-3.5 h-3.5" />}
-                      <span>{corr.label}</span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded-md text-[11px] font-black ${
-                          selected
-                            ? "bg-white/20 text-white"
-                            : "bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                        }`}
-                      >
-                        {corr.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                      {corr.count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Ranking de Componentes Críticos */}
-          <div className="xl:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
+          {/* Ranking de Componentes Críticos em grade horizontal */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <div className="inline-flex items-center gap-1.5">
                 <BarChart3 className="w-4 h-4 text-sky-600" />
@@ -508,11 +548,11 @@ export default function CouncilAnalysisPanel({
             </div>
 
             {rankedSubjects.length === 0 ? (
-              <p className="text-xs text-slate-500 py-4 text-center">
+              <p className="text-xs text-slate-500 py-2 text-center">
                 Nenhum componente curricular cadastrado.
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
                 {rankedSubjects.map((subj) => {
                   const selected = subjectIdFilter === subj.subjectId;
                   const barWidth = Math.min(100, Math.max(subj.belowAvgPercent, subj.belowAvgCount > 0 ? 8 : 0));
@@ -537,23 +577,9 @@ export default function CouncilAnalysisPanel({
                         <span className="font-extrabold text-slate-900 dark:text-white truncate">
                           {subj.subjectName}
                         </span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {subj.belowAvgCount > 0 && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-200 text-[10px] font-bold">
-                              {subj.belowAvgCount} abaixo ({subj.belowAvgPercent}%)
-                            </span>
-                          )}
-                          {subj.difficultyCount > 0 && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 text-[10px] font-bold">
-                              {subj.difficultyCount} dif.
-                            </span>
-                          )}
-                          {subj.conductCount > 0 && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-200 text-[10px] font-bold">
-                              {subj.conductCount} cond.
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-[11px] font-black text-rose-700 dark:text-rose-300 shrink-0">
+                          {subj.belowAvgCount} ({subj.belowAvgPercent}%)
+                        </span>
                       </div>
                       <div className="mt-1.5 h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                         <div
@@ -561,6 +587,12 @@ export default function CouncilAnalysisPanel({
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
+                      {(subj.difficultyCount > 0 || subj.conductCount > 0) && (
+                        <div className="mt-1.5 flex items-center gap-2 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+                          {subj.difficultyCount > 0 && <span>{subj.difficultyCount} dif.</span>}
+                          {subj.conductCount > 0 && <span>{subj.conductCount} cond.</span>}
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -724,188 +756,217 @@ export default function CouncilAnalysisPanel({
             </button>
           </div>
         ) : displayMode === "consolidated" ? (
-          <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {visibleStudents.map((item) => {
-              const pStyle = PRIORITY_STYLES[item.priority];
-              const visibleTags = item.card.tags.filter((tagValue) => {
-                const meta = tagOptionMap.get(tagValue as never);
-                if (!meta) return false;
-                if (hideSensitiveTags && meta.isSensitiveHealth) return false;
-                return true;
-              });
-              const comp = item.comparison;
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <th className="py-2.5 px-4">Estudante</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Frequência</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Abaixo da média</th>
+                  <th className="py-2.5 px-3">Ocorrências</th>
+                  <th className="py-2.5 px-4 text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {visibleStudents.map((item) => {
+                  const pStyle = PRIORITY_STYLES[item.priority];
+                  const visibleTags = item.card.tags.filter((tagValue) => {
+                    const meta = tagOptionMap.get(tagValue as never);
+                    if (!meta) return false;
+                    if (hideSensitiveTags && meta.isSensitiveHealth) return false;
+                    return true;
+                  });
+                  const comp = item.comparison;
+                  const isExpanded = Boolean(expandedStudentIds[item.studentId]);
+                  const occurrenceParts: string[] = [];
+                  if (item.descriptorCounts[2] > 0) {
+                    occurrenceParts.push(`${item.descriptorCounts[2]} Dificuldade`);
+                  }
+                  if (item.descriptorCounts[3] > 0) {
+                    occurrenceParts.push(`${item.descriptorCounts[3]} Conduta`);
+                  }
+                  if (item.descriptorCounts[4] > 0) {
+                    occurrenceParts.push(`${item.descriptorCounts[4]} Infrequência`);
+                  }
 
-              return (
-                <article
-                  key={item.card.id}
-                  className={`p-4 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition ${pStyle.stripeClass}`}
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                    {/* Identificação + Status + Evolução */}
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div
-                        aria-hidden="true"
-                        className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-200 font-extrabold text-xs flex items-center justify-center shrink-0 mt-0.5"
-                      >
-                        {getStudentInitials(item.studentName)}
-                      </div>
+                  return (
+                    <tr
+                      key={item.card.id}
+                      className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition align-top ${pStyle.stripeClass}`}
+                    >
+                      <td className="py-3 px-4">
+                        <div className="flex items-start gap-2.5 min-w-[200px]">
+                          <div
+                            aria-hidden="true"
+                            className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-200 font-extrabold text-[11px] flex items-center justify-center shrink-0 mt-0.5"
+                          >
+                            {getStudentInitials(item.studentName)}
+                          </div>
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => onOpenStudentModal(item.card)}
+                                aria-label={`Abrir ficha completa de ${item.studentName}`}
+                                title="Abrir ficha do estudante"
+                                className={`font-black text-slate-900 dark:text-white hover:text-sky-700 dark:hover:text-sky-400 hover:underline text-left leading-tight cursor-pointer ${
+                                  isProjectorMode ? "text-base" : "text-sm"
+                                }`}
+                              >
+                                {item.studentName}
+                              </button>
+                              <span
+                                className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${pStyle.badgeClass}`}
+                              >
+                                {pStyle.label}
+                              </span>
+                              {!item.isActiveEnrollment && (
+                                <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
+                                  {COUNCIL_ENROLLMENT_STATUS_LABELS[
+                                    item.card.enrollmentStatus as CouncilEnrollmentStatus
+                                  ] || item.card.enrollmentStatus}
+                                </span>
+                              )}
+                              {visibleTags.map((tagVal) => {
+                                const meta = tagOptionMap.get(tagVal as never);
+                                if (!meta) return null;
+                                return (
+                                  <span
+                                    key={tagVal}
+                                    className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${meta.badgeClass}`}
+                                  >
+                                    {meta.shortLabel}
+                                  </span>
+                                );
+                              })}
+                            </div>
 
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4
-                            className={`font-black text-slate-900 dark:text-white leading-tight ${
-                              isProjectorMode ? "text-base" : "text-sm"
+                            {item.opinion && (
+                              <p className="text-[11px] text-slate-600 dark:text-slate-400 line-clamp-1">
+                                <strong className="font-bold text-slate-700 dark:text-slate-300">
+                                  Parecer:
+                                </strong>{" "}
+                                {item.opinion}
+                              </p>
+                            )}
+
+                            {isExpanded && item.belowAvgItems.length > 0 && (
+                              <div className="pt-1.5 flex flex-wrap gap-1.5">
+                                {item.belowAvgItems.map((b) => (
+                                  <span
+                                    key={`${item.studentId}-${b.subjectName}`}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 text-[11px] font-bold"
+                                  >
+                                    <span>{b.subjectName}</span>
+                                    {b.grade !== null && (
+                                      <span className="font-black">
+                                        {formatCouncilGradePtBr(b.grade)}
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        {item.attendancePercent !== null ? (
+                          <span
+                            className={`font-bold ${
+                              item.hasLowAttendance
+                                ? "text-rose-700 dark:text-rose-300"
+                                : "text-slate-700 dark:text-slate-300"
                             }`}
                           >
-                            {item.studentName}
-                          </h4>
-
-                          <span
-                            className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${pStyle.badgeClass}`}
-                          >
-                            {pStyle.label}
+                            {item.attendancePercent.toFixed(1)}%
                           </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
 
-                          {!item.isActiveEnrollment && (
-                            <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold">
-                              {COUNCIL_ENROLLMENT_STATUS_LABELS[
-                                item.card.enrollmentStatus as CouncilEnrollmentStatus
-                              ] || item.card.enrollmentStatus}
-                            </span>
-                          )}
-
-                          {item.attendancePercent !== null && (
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                                item.hasLowAttendance
-                                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-200"
-                                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                              }`}
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1">
+                          {item.belowAvgCount > 0 ? (
+                            <button
+                              type="button"
+                              aria-expanded={isExpanded}
+                              onClick={() => toggleStudentExpanded(item.studentId)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-800 dark:text-rose-200 font-bold cursor-pointer transition"
                             >
-                              Freq. {item.attendancePercent.toFixed(1)}%
+                              <span>
+                                {item.belowAvgCount} de {activeSubjects.length || item.belowAvgCount}
+                              </span>
+                              {isExpanded ? (
+                                <ChevronUp className="w-3 h-3" />
+                              ) : (
+                                <ChevronDown className="w-3 h-3" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                              Nenhuma
                             </span>
                           )}
 
                           {comp?.hasPrevData && comp.trend !== "NONE" && (
                             <span
-                              className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                              className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${
                                 comp.trend === "IMPROVED"
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+                                  ? "text-emerald-700 dark:text-emerald-300"
                                   : comp.trend === "WORSENED"
-                                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300"
-                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                  ? "text-rose-700 dark:text-rose-300"
+                                  : "text-slate-500 dark:text-slate-400"
                               }`}
                             >
                               {comp.trend === "IMPROVED" && <ArrowDownRight className="w-3 h-3" />}
                               {comp.trend === "WORSENED" && <ArrowUpRight className="w-3 h-3" />}
                               <span>
                                 {comp.belowAvgDelta < 0
-                                  ? `${Math.abs(comp.belowAvgDelta)} a menos abaixo da média vs ${comp.prevTrimester}ºT`
+                                  ? `${Math.abs(comp.belowAvgDelta)} a menos vs ${comp.prevTrimester}ºT`
                                   : comp.belowAvgDelta > 0
-                                  ? `+${comp.belowAvgDelta} abaixo da média vs ${comp.prevTrimester}ºT`
-                                  : comp.trend === "IMPROVED"
-                                  ? `Melhora na média vs ${comp.prevTrimester}ºT`
-                                  : comp.trend === "WORSENED"
-                                  ? `Queda na média vs ${comp.prevTrimester}ºT`
+                                  ? `+${comp.belowAvgDelta} vs ${comp.prevTrimester}ºT`
                                   : `Estável vs ${comp.prevTrimester}ºT`}
                               </span>
                             </span>
                           )}
+                        </div>
+                      </td>
 
-                          {visibleTags.map((tagVal) => {
-                            const meta = tagOptionMap.get(tagVal as never);
-                            if (!meta) return null;
-                            return (
+                      <td className="py-3 px-3">
+                        {occurrenceParts.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {occurrenceParts.map((part) => (
                               <span
-                                key={tagVal}
-                                className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${meta.badgeClass}`}
+                                key={part}
+                                className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[11px] font-semibold whitespace-nowrap"
                               >
-                                {meta.shortLabel}
+                                {part}
                               </span>
-                            );
-                          })}
-                        </div>
-
-                        {/* Resumo de notas abaixo da média e descritivos */}
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {item.belowAvgItems.slice(0, 6).map((b) => (
-                            <span
-                              key={`${item.studentId}-${b.subjectName}`}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 text-[11px] font-bold"
-                              title={b.subjectName}
-                            >
-                              <span>{b.shortName}</span>
-                              {b.grade !== null && (
-                                <span className="font-black">
-                                  {formatCouncilGradePtBr(b.grade)}
-                                </span>
-                              )}
-                            </span>
-                          ))}
-                          {item.belowAvgItems.length > 6 && (
-                            <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-200 text-[11px] font-bold">
-                              +{item.belowAvgItems.length - 6} componentes
-                            </span>
-                          )}
-
-                          {item.descriptorCounts[2] > 0 && (
-                            <span className="px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 text-[11px] font-bold">
-                              {item.descriptorCounts[2]} Dificuldade
-                            </span>
-                          )}
-                          {item.descriptorCounts[3] > 0 && (
-                            <span className="px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 text-[11px] font-bold">
-                              {item.descriptorCounts[3]} Conduta
-                            </span>
-                          )}
-                          {item.descriptorCounts[4] > 0 && (
-                            <span className="px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 text-orange-800 dark:text-orange-200 text-[11px] font-bold">
-                              {item.descriptorCounts[4]} Infrequência
-                            </span>
-                          )}
-                          {item.belowAvgCount === 0 && item.alertDescriptorTotal === 0 && (
-                            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                              Sem notas abaixo da média ou alertas registrados
-                            </span>
-                          )}
-                        </div>
-
-                        {item.opinion && (
-                          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
-                            <strong className="font-bold text-slate-700 dark:text-slate-300">
-                              Parecer:
-                            </strong>{" "}
-                            {item.opinion}
-                          </p>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">—</span>
                         )}
-                      </div>
-                    </div>
+                      </td>
 
-                    {/* Ações da linha */}
-                    <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
-                      <button
-                        type="button"
-                        onClick={() => openFocusForStudent(item.studentId)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition cursor-pointer"
-                      >
-                        <Presentation className="w-3.5 h-3.5" />
-                        <span>Focar</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => onOpenStudentModal(item.card)}
-                        aria-label={`Abrir ficha completa de ${item.studentName}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
-                      >
-                        <UserRound className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Ficha</span>
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => openFocusForStudent(item.studentId)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition cursor-pointer"
+                        >
+                          <Presentation className="w-3.5 h-3.5" />
+                          <span>Focar</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           /* MAPA DE CALOR COMPACTO */

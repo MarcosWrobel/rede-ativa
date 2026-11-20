@@ -62,6 +62,8 @@ export default function ConselhoTurmaClient({
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [presentationRequestNonce, setPresentationRequestNonce] = useState(0);
+  const [projectorRequestNonce, setProjectorRequestNonce] = useState(0);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -245,10 +247,17 @@ export default function ConselhoTurmaClient({
         hideSensitiveTags={hideSensitiveTags}
         onToggleHideSensitiveTags={() => setHideSensitiveTags((prev) => !prev)}
         onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
-        onOpenPreCouncilModal={() => setActiveTab("pre-council")}
-        preCouncilProgress={preCouncilProgress}
         onOpenPdfImportModal={() => setIsPdfImportModalOpen(true)}
         onOpenSeatingMap={() => setActiveTab("seating-map")}
+        onStartPresentation={() => {
+          setActiveTab("analysis");
+          setPresentationRequestNonce((n) => n + 1);
+        }}
+        onEnterProjectorMode={() => {
+          setActiveTab("analysis");
+          setProjectorRequestNonce((n) => n + 1);
+        }}
+        presentationDisabled={board.studentCards.length === 0}
         onBoardUpdated={setBoard}
         onNotify={notify}
         readOnly={!canEdit}
@@ -279,6 +288,11 @@ export default function ConselhoTurmaClient({
             >
               <Icon className="w-4 h-4" />
               <span>{tab.label}</span>
+              {tab.key === "pre-council" && preCouncilProgress && preCouncilProgress.total > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-200 text-[10px] font-extrabold leading-none">
+                  {preCouncilProgress.completed}/{preCouncilProgress.total}
+                </span>
+              )}
             </button>
           );
         })}
@@ -303,6 +317,9 @@ export default function ConselhoTurmaClient({
             onMatrixSaved={refreshBoard}
             onNotify={notify}
             readOnly={!canEdit}
+            hideTopActionBar={true}
+            presentationRequestNonce={presentationRequestNonce}
+            projectorRequestNonce={projectorRequestNonce}
           />
         )}
 
