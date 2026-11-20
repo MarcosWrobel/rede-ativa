@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ArrowRight,
   ClipboardCheck,
   FileText,
   LayoutGrid,
@@ -24,12 +25,14 @@ import CouncilStudentFichaModal from "@/components/conselho/CouncilStudentFichaM
 import { getPreCouncilProgress, parsePreCouncilData } from "@/components/conselho/preCouncilUtils";
 import {
   COUNCIL_ENROLLMENT_STATUS_LABELS,
+  COUNCIL_SEATING_MAP_LABELS,
   COUNCIL_STUDENT_TAG_OPTIONS,
   getCardBelowAvgForTrimester,
   getCardOpinionForTrimester,
   getStudentInitials,
   type CouncilBoardDetailRecord,
   type CouncilEnrollmentStatus,
+  type CouncilSeatingMapMode,
   type CouncilSourceBoardOption,
   type CouncilStudentCardRecord,
   type CouncilSubjectRecord,
@@ -37,7 +40,7 @@ import {
   type CouncilTrimesterRecord,
 } from "@/components/conselho/types";
 
-type ActiveTabKey = "analysis" | "pre-council" | "seating-map" | "students" | "overview" | "post-council";
+type ActiveTabKey = "hub" | "analysis" | "pre-council" | "seating-map" | "students" | "overview" | "post-council";
 
 interface ConselhoTurmaClientProps {
   initialBoard: CouncilBoardDetailRecord;
@@ -57,7 +60,7 @@ export default function ConselhoTurmaClient({
   const entryTrimester: CouncilTrimesterNumber = initialTrimester;
   const [board, setBoard] = useState<CouncilBoardDetailRecord>(initialBoard);
   const [activeTrimester, setActiveTrimester] = useState<CouncilTrimesterNumber>(entryTrimester);
-  const [activeTab, setActiveTab] = useState<ActiveTabKey>("analysis");
+  const [activeTab, setActiveTab] = useState<ActiveTabKey>("hub");
   const [hideSensitiveTags, setHideSensitiveTags] = useState(false);
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
   const [isPdfImportModalOpen, setIsPdfImportModalOpen] = useState(false);
@@ -144,25 +147,86 @@ export default function ConselhoTurmaClient({
     []
   );
 
-  const tabItems: Array<{ key: ActiveTabKey; label: string; icon: typeof ClipboardCheck }> = [
-    { key: "analysis", label: "Painel de Análise", icon: Presentation },
-    { key: "pre-council", label: "Pré-Conselho", icon: ClipboardCheck },
-    { key: "seating-map", label: "Mapa de Sala", icon: LayoutGrid },
-    { key: "students", label: "Fichas dos Estudantes", icon: Users },
-    { key: "overview", label: "Observações da Turma", icon: FileText },
-    { key: "post-council", label: "Reunião de Pós-Conselho", icon: MessageSquareText },
+  const hubCards: Array<{
+    key: Exclude<ActiveTabKey, "hub">;
+    title: string;
+    metric: string;
+    icon: typeof ClipboardCheck;
+    accentClass: string;
+  }> = [
+    {
+      key: "analysis",
+      title: "Painel de Análise",
+      metric: `${board.studentCards.filter((c) => c.enrollmentStatus === "ATIVO").length} estudantes ativos`,
+      icon: Presentation,
+      accentClass: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+    },
+    {
+      key: "pre-council",
+      title: "Pré-Conselho",
+      metric:
+        preCouncilProgress && preCouncilProgress.total > 0
+          ? `${preCouncilProgress.completed}/${preCouncilProgress.total} conversas`
+          : `${board.subjects.filter((s) => s.active).length} componentes`,
+      icon: ClipboardCheck,
+      accentClass: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300",
+    },
+    {
+      key: "seating-map",
+      title: "Mapa de Sala",
+      metric:
+        COUNCIL_SEATING_MAP_LABELS[board.seatingMapMode as CouncilSeatingMapMode] ||
+        "A configurar",
+      icon: LayoutGrid,
+      accentClass: "bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
+    },
+    {
+      key: "students",
+      title: "Fichas dos Estudantes",
+      metric: `${board.studentCards.length} fichas`,
+      icon: Users,
+      accentClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+    },
+    {
+      key: "overview",
+      title: "Observações da Turma",
+      metric:
+        activeTrimesterRecord?.positivePoints || activeTrimesterRecord?.attentionPoints
+          ? "Preenchido"
+          : "Em aberto",
+      icon: FileText,
+      accentClass: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+    },
+    {
+      key: "post-council",
+      title: "Reunião de Pós-Conselho",
+      metric: activeTrimesterRecord?.status === "CONSOLIDATED" ? "Consolidado" : "Em aberto",
+      icon: MessageSquareText,
+      accentClass: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
+    },
   ];
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          href="/conselho-classe"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Todas as turmas</span>
-        </Link>
+        {activeTab === "hub" ? (
+          <Link
+            href="/conselho-classe"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Todas as turmas</span>
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setActiveTab("hub")}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-400 hover:text-sky-900 dark:hover:text-sky-200 transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Painel da turma</span>
+          </button>
+        )}
 
         {/* Seletor de Trimestre */}
         <div className="flex flex-wrap items-center gap-2">
@@ -249,61 +313,62 @@ export default function ConselhoTurmaClient({
         onOpenSubjectsModal={() => setIsSubjectsModalOpen(true)}
         onOpenPdfImportModal={() => setIsPdfImportModalOpen(true)}
         onOpenSeatingMap={() => setActiveTab("seating-map")}
-        onStartPresentation={() => {
-          setActiveTab("analysis");
-          setPresentationRequestNonce((n) => n + 1);
-        }}
-        onEnterProjectorMode={() => {
-          setActiveTab("analysis");
-          setProjectorRequestNonce((n) => n + 1);
-        }}
+        showConfigMenu={activeTab === "hub"}
+        showPrintButton={activeTab === "hub"}
+        showSensitiveToggleButton={activeTab === "analysis"}
+        onStartPresentation={
+          activeTab === "analysis"
+            ? () => setPresentationRequestNonce((n) => n + 1)
+            : undefined
+        }
+        onEnterProjectorMode={
+          activeTab === "analysis"
+            ? () => setProjectorRequestNonce((n) => n + 1)
+            : undefined
+        }
         presentationDisabled={board.studentCards.length === 0}
         onBoardUpdated={setBoard}
         onNotify={notify}
         readOnly={!canEdit}
       />
 
-      {/* Navegação por Abas */}
-      <div
-        role="tablist"
-        aria-label="Seções do conselho de classe"
-        className="flex overflow-x-auto border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-2xl px-3 pt-2 gap-1"
-      >
-        {tabItems.map((tab) => {
-          const Icon = tab.icon;
-          const isSelected = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              id={`council-tab-${tab.key}`}
-              type="button"
-              role="tab"
-              aria-selected={isSelected}
-              onClick={() => setActiveTab(tab.key)}
-              className={`relative flex-none inline-flex items-center gap-2 px-4 py-3 text-xs font-bold transition cursor-pointer ${
-                isSelected
-                  ? "text-sky-700 dark:text-sky-400 after:content-[''] after:absolute after:inset-x-2 after:bottom-0 after:border-b-[3px] after:border-sky-600 dark:after:border-sky-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              {tab.key === "pre-council" && preCouncilProgress && preCouncilProgress.total > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-200 text-[10px] font-extrabold leading-none">
-                  {preCouncilProgress.completed}/{preCouncilProgress.total}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Painel Ativo */}
-      <div
-        role="tabpanel"
-        aria-labelledby={`council-tab-${activeTab}`}
-        className="mt-0"
-      >
+      {/* HUB Inicial ou Seção Ativa */}
+      {activeTab === "hub" ? (
+        <section
+          aria-label="Seções do conselho de classe"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+        >
+          {hubCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <button
+                key={card.key}
+                type="button"
+                onClick={() => setActiveTab(card.key)}
+                className="group text-left bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-sky-400 dark:hover:border-sky-600 p-4 shadow-xs transition cursor-pointer flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${card.accentClass}`}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                      {card.title}
+                    </h2>
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">
+                      {card.metric}
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-sky-600 transition shrink-0" />
+              </button>
+            );
+          })}
+        </section>
+      ) : (
+      <div className="mt-0">
         {activeTab === "analysis" && (
           <CouncilAnalysisPanel
             board={board}
@@ -472,6 +537,7 @@ export default function ConselhoTurmaClient({
           />
         )}
       </div>
+      )}
 
       <CouncilSubjectsManagerModal
         open={isSubjectsModalOpen}

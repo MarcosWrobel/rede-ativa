@@ -12,6 +12,7 @@ import {
   Clock,
   FileText,
   LogOut,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
@@ -288,6 +289,7 @@ export default function ProfessorConselhoClient({
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [checkingAckRelease, setCheckingAckRelease] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -890,6 +892,99 @@ export default function ProfessorConselhoClient({
       setSubmitting(false);
     }
   }
+
+  const refreshAckReleaseStatus = useCallback(
+    async (manual = false) => {
+      if (!googleIdToken || !council) return;
+      if (manual) {
+        setCheckingAckRelease(true);
+        setSubmitFeedback(null);
+      }
+
+      try {
+        const res = await fetch(`${portalApiBase}/${encodeURIComponent(token)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken }),
+        });
+        const data: {
+          success?: boolean;
+          error?: string;
+          council?: TeacherPortalCouncilContext;
+        } = await res.json();
+
+        if (!res.ok || !data.council) {
+          if (manual) {
+            setSubmitFeedback({
+              type: "error",
+              message:
+                res.status === 401
+                  ? "Sessão expirada. Entre novamente para atualizar."
+                  : data.error || "Não foi possível verificar a liberação agora.",
+            });
+          }
+          return;
+        }
+
+        setCouncil(data.council);
+        if (manual) {
+          const updatedConv = data.council.preCouncil?.conversationsBySubjectId?.[selectedSubjectId];
+          if (updatedConv?.canConfirmAck) {
+            setSubmitFeedback({
+              type: "success",
+              message: "Assinatura liberada pela equipe pedagógica.",
+            });
+          } else {
+            setSubmitFeedback({
+              type: "error",
+              message: "Ainda aguardando o registro da conversa ou combinados pela equipe pedagógica.",
+            });
+          }
+        }
+      } catch {
+        if (manual) {
+          setSubmitFeedback({
+            type: "error",
+            message: "Falha de conexão ao verificar liberação.",
+          });
+        }
+      } finally {
+        if (manual) {
+          setCheckingAckRelease(false);
+        }
+      }
+    },
+    [googleIdToken, council, portalApiBase, token, selectedSubjectId]
+  );
+
+  // Atualiza automaticamente a Etapa 3 enquanto aguarda liberação da equipe pedagógica
+  useEffect(() => {
+    if (
+      activeStep !== "ack" ||
+      !googleIdToken ||
+      !council ||
+      isClaimedByOtherTeacher ||
+      selectedConv?.digitalAckEmail ||
+      selectedConv?.canConfirmAck
+    ) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshAckReleaseStatus(false);
+    }, 8000);
+
+    return () => clearInterval(timer);
+  }, [
+    activeStep,
+    googleIdToken,
+    council,
+    isClaimedByOtherTeacher,
+    selectedConv?.digitalAckEmail,
+    selectedConv?.canConfirmAck,
+    refreshAckReleaseStatus,
+  ]);
 
   function handleLogoutTeacher() {
     checkedDraftKeysRef.current.clear();
@@ -1725,8 +1820,19 @@ export default function ProfessorConselhoClient({
                   </button>
                 </div>
               ) : (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-950">
-                  Você já pode clicar em <strong>Enviar matriz e observações</strong> no rodapé. A confirmação de ciência será liberada neste mesmo link assim que a equipe pedagógica registrar a conversa ou os combinados do componente.
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950">
+                  <span>
+                    Você já pode clicar em <strong>Enviar matriz e observações</strong> no rodapé. A confirmação de ciência será liberada automaticamente assim que a equipe pedagógica registrar a conversa ou os combinados do componente.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={checkingAckRelease}
+                    onClick={() => void refreshAckReleaseStatus(true)}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 text-xs font-bold transition cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${checkingAckRelease ? "animate-spin" : ""}`} />
+                    <span>{checkingAckRelease ? "Verificando..." : "Verificar liberação"}</span>
+                  </button>
                 </div>
               )}
             </section>

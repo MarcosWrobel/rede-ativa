@@ -6,9 +6,11 @@ import {
   CheckCircle2,
   ClipboardCheck,
   LogOut,
+  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import {
+  canConversationConfirmDigitalAck,
   DEFAULT_PRE_COUNCIL_ACK_STATEMENT,
   formatPreCouncilDatePtBr,
   formatPreCouncilDateTimePtBr,
@@ -101,6 +103,7 @@ export default function ProfessorPreConselhoClient({
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [checkingRelease, setCheckingRelease] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -315,6 +318,96 @@ export default function ProfessorPreConselhoClient({
       setConfirming(false);
     }
   }
+
+  const canConfirmSelectedLegacy = useMemo(() => {
+    if (!selectedConversation) return false;
+    return canConversationConfirmDigitalAck({
+      conversationStatus: selectedConversation.conversationStatus,
+      agreements: selectedConversation.agreements,
+    });
+  }, [selectedConversation]);
+
+  const refreshLegacyReleaseStatus = useCallback(
+    async (manual = false) => {
+      if (!googleIdToken || !preCouncil || council) return;
+      if (manual) {
+        setCheckingRelease(true);
+        setSubmitFeedback(null);
+      }
+
+      try {
+        const res = await fetch(
+          `/api/conselho-classe/pre-council-portal/${encodeURIComponent(token)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ googleIdToken }),
+          }
+        );
+        const data: {
+          success?: boolean;
+          error?: string;
+          preCouncil?: PreCouncilPortalContext;
+        } = await res.json();
+
+        if (!res.ok || !data.preCouncil) {
+          if (manual) {
+            setSubmitFeedback({
+              type: "error",
+              message: data.error || "Não foi possível verificar a liberação.",
+            });
+          }
+          return;
+        }
+
+        setPreCouncil(data.preCouncil);
+      } catch {
+        if (manual) {
+          setSubmitFeedback({
+            type: "error",
+            message: "Falha de conexão ao verificar liberação.",
+          });
+        }
+      } finally {
+        if (manual) {
+          setCheckingRelease(false);
+        }
+      }
+    },
+    [googleIdToken, preCouncil, council, token]
+  );
+
+  useEffect(() => {
+    if (
+      !googleIdToken ||
+      !preCouncil ||
+      council ||
+      !selectedConversation ||
+      isClaimedByOtherTeacher ||
+      isAckByOtherTeacher ||
+      isAckByCurrentTeacher ||
+      canConfirmSelectedLegacy
+    ) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshLegacyReleaseStatus(false);
+    }, 8000);
+
+    return () => clearInterval(timer);
+  }, [
+    googleIdToken,
+    preCouncil,
+    council,
+    selectedConversation,
+    isClaimedByOtherTeacher,
+    isAckByOtherTeacher,
+    isAckByCurrentTeacher,
+    canConfirmSelectedLegacy,
+    refreshLegacyReleaseStatus,
+  ]);
 
   function handleLogoutTeacher() {
     setGoogleIdToken(null);
@@ -667,7 +760,7 @@ export default function ProfessorPreConselhoClient({
           </h2>
           <p className="text-slate-600 leading-relaxed">{DEFAULT_PRE_COUNCIL_ACK_STATEMENT}</p>
 
-          {isAckByCurrentTeacher && selectedConversation && (
+          {isAckByCurrentTeacher && selectedConversation ? (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 flex items-start gap-2 text-emerald-900 font-semibold">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <div>
@@ -680,6 +773,26 @@ export default function ProfessorPreConselhoClient({
                 </div>
               </div>
             </div>
+          ) : (
+            !canConfirmSelectedLegacy &&
+            selectedConversation &&
+            !isClaimedByOtherTeacher &&
+            !isAckByOtherTeacher && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-950">
+                <span>
+                  Aguardando a equipe pedagógica registrar a conversa ou os combinados para liberar a assinatura.
+                </span>
+                <button
+                  type="button"
+                  disabled={checkingRelease}
+                  onClick={() => void refreshLegacyReleaseStatus(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 font-bold transition cursor-pointer shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkingRelease ? "animate-spin" : ""}`} />
+                  <span>{checkingRelease ? "Verificando..." : "Verificar liberação"}</span>
+                </button>
+              </div>
+            )
           )}
         </section>
       </main>

@@ -292,106 +292,6 @@ export default function CouncilPreCouncilConversationsView({
 
   return (
     <div className="space-y-4">
-      {/* Configuração do Período e Objetivo */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
-          <div className="flex-1 max-w-sm space-y-1">
-            <label
-              htmlFor="pre-council-period-label"
-              className="block text-xs font-bold text-slate-700 dark:text-slate-300"
-            >
-              Período no documento
-            </label>
-            <input
-              id="pre-council-period-label"
-              type="text"
-              disabled={readOnly}
-              value={draft.periodLabel}
-              onChange={(e) =>
-                onUpdateDraft((prev) => ({ ...prev, periodLabel: e.target.value }))
-              }
-              placeholder="Ex.: 2º Semestre ou 1º Trimestre"
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs text-slate-900 dark:text-slate-100"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowObjectiveEditor((prev) => !prev)}
-              aria-expanded={showObjectiveEditor}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
-            >
-              <span>Objetivo do documento</span>
-              {showObjectiveEditor ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
-
-            {!readOnly && (
-              <>
-                <button
-                  type="button"
-                  onClick={onSyncSubjects}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-xs font-bold text-sky-900 dark:text-sky-200 transition cursor-pointer"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Sincronizar componentes</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onAddCustomRow}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 transition cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Adicionar linha</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {showObjectiveEditor && (
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="pre-council-objective-text"
-                className="text-xs font-bold text-slate-700 dark:text-slate-300"
-              >
-                Texto do Objetivo (impresso na 1ª página)
-              </label>
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateDraft((prev) => ({
-                      ...prev,
-                      objectiveText: DEFAULT_PRE_COUNCIL_OBJECTIVE,
-                    }))
-                  }
-                  className="text-[11px] font-bold text-sky-700 dark:text-sky-400 hover:underline cursor-pointer"
-                >
-                  Restaurar padrão
-                </button>
-              )}
-            </div>
-            <textarea
-              id="pre-council-objective-text"
-              rows={3}
-              disabled={readOnly}
-              value={draft.objectiveText}
-              onChange={(e) =>
-                onUpdateDraft((prev) => ({ ...prev, objectiveText: e.target.value }))
-              }
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-2.5 text-xs text-slate-900 dark:text-slate-100 leading-relaxed"
-            />
-          </div>
-        )}
-      </div>
-
       {/* Lista lateral + Editor focado */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* Coluna Esquerda: Lista de Componentes/Docentes */}
@@ -408,27 +308,52 @@ export default function CouncilPreCouncilConversationsView({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-bold">
-            {(
-              [
-                { key: "ALL", label: "Todos" },
-                { key: "PENDING", label: "Pendentes" },
-                { key: "COMPLETED", label: "Realizadas" },
-              ] as const
-            ).map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setConvFilter(item.key)}
-                className={`py-1.5 rounded-lg transition cursor-pointer ${
-                  convFilter === item.key
-                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-300"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-bold flex-1">
+              {(
+                [
+                  { key: "ALL", label: "Todos" },
+                  { key: "PENDING", label: "Pendentes" },
+                  { key: "COMPLETED", label: "Realizadas" },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setConvFilter(item.key)}
+                  className={`py-1.5 rounded-lg transition cursor-pointer ${
+                    convFilter === item.key
+                      ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            {!readOnly && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={onSyncSubjects}
+                  aria-label="Sincronizar componentes da turma"
+                  title="Sincronizar componentes da turma"
+                  className="p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onAddCustomRow}
+                  aria-label="Adicionar componente manual"
+                  title="Adicionar componente manual"
+                  className="p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
           {filteredConversations.length === 0 ? (

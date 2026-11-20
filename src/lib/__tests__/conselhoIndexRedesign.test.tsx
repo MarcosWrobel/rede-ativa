@@ -65,6 +65,7 @@ vi.mock("@/components/conselho/CouncilStudentFichaModal", () => ({
 import { PATCH as patchClassShift } from "@/app/api/classes/[id]/route";
 import ConselhoIndexClient from "@/app/conselho-classe/ConselhoIndexClient";
 import ConselhoTurmaClient from "@/app/conselho-classe/[boardId]/ConselhoTurmaClient";
+import CouncilPreCouncilConversationsView from "@/components/conselho/CouncilPreCouncilConversationsView";
 import type { CouncilBoardDetailRecord } from "@/components/conselho/types";
 
 describe("Redesenho do Conselho de Classe (Etapa 1)", () => {
@@ -284,6 +285,75 @@ describe("Redesenho do Conselho de Classe (Etapa 1)", () => {
       expect(html).toContain("2º Trimestre");
       expect(html).toContain("Acesso");
       expect(html).toContain('aria-pressed="true"');
+      expect(html).toContain("Painel de Análise");
+      expect(html).toContain("Pré-Conselho");
+      expect(html).toContain("Mapa de Sala");
+      expect(html).toContain("Fichas dos Estudantes");
+      expect(html).toContain("Observações da Turma");
+      expect(html).toContain("Reunião de Pós-Conselho");
+      expect(html).not.toContain('data-testid="analysis-panel"');
+    });
+  });
+
+  describe("CouncilPreCouncilConversationsView", () => {
+    it("remove faixa de período/objetivo e coloca ícones de sincronizar/adicionar na linha de filtros", () => {
+      const html = renderToString(
+        React.createElement(CouncilPreCouncilConversationsView, {
+          board: {
+            id: "board-1",
+            schoolId: "school-a",
+            classGroupId: "cg-1",
+            year: 2026,
+            peerLeaderStudentId: null,
+            peerLeaderName: null,
+            teacherLeaderStudentId: null,
+            teacherLeaderName: null,
+            externalEvalEd1Percent: null,
+            externalEvalEd2Percent: null,
+            externalEvalEd3Percent: null,
+            seatingMapMode: "REVEZAMENTO_MENSAL",
+            seatingMapNotes: null,
+            classGroup: { id: "cg-1", name: "1º 2", segment: "MEDIO", shift: "TARDE" },
+            subjects: [],
+            trimesters: [],
+            studentCards: [],
+          },
+          activeTrimester: 3,
+          draft: {
+            version: 1,
+            periodLabel: "3º Trimestre",
+            objectiveText: "",
+            responsiblePedagogueName: "",
+            responsiblePedagogueRole: "",
+            conversations: [],
+            synthesis: {
+              mainDifficulties: "",
+              priorityStudents: "",
+              attendanceIssues: "",
+              behaviorIssues: "",
+              pedagogicalActions: "",
+            },
+          },
+          selectedConvId: "",
+          onSelectConvId: vi.fn(),
+          onUpdateDraft: vi.fn(),
+          onSyncSubjects: vi.fn(),
+          onAddCustomRow: vi.fn(),
+          onRemoveConversation: vi.fn(),
+          onOpenUnifiedTeacherLink: vi.fn(),
+          onMatrixSaved: vi.fn(async () => {}),
+          onNotify: vi.fn(),
+          alertsBundle: { bySubjectId: {}, lowAttendanceStudents: [] },
+          matrixStatsBySubjectId: {},
+          hideSensitiveTags: false,
+          readOnly: false,
+        })
+      ).replace(/<!-- -->/g, "");
+
+      expect(html).not.toContain("Período no documento");
+      expect(html).not.toContain("Objetivo do documento");
+      expect(html).toContain('aria-label="Sincronizar componentes da turma"');
+      expect(html).toContain('aria-label="Adicionar componente manual"');
     });
   });
 });

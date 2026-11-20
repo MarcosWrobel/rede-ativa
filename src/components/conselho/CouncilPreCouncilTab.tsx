@@ -88,7 +88,7 @@ export default function CouncilPreCouncilTab({
   onNotify,
   readOnly = false,
 }: CouncilPreCouncilTabProps) {
-  const [subView, setSubView] = useState<PreCouncilSubView>("matrix");
+  const [subView, setSubView] = useState<PreCouncilSubView>("conversations");
   const [draft, setDraft] = useState<PreCouncilData>(() =>
     resolveInitialPreCouncilData({
       board,
@@ -158,15 +158,28 @@ export default function CouncilPreCouncilTab({
       return;
     }
 
-    // Mescla somente ciências digitais e envios docentes verificados pelo servidor
+    // Mescla envios docentes verificados pelo servidor (incluindo observações e estudantes em acompanhamento)
     const serverById = new Map(parsed.conversations.map((c) => [c.id, c]));
     setDraft((prev) => ({
       ...prev,
       conversations: prev.conversations.map((c) => {
         const srv = serverById.get(c.id);
         if (!srv) return c;
+        const serverSubmittedNewer =
+          Boolean(srv.teacherSubmittedAt) &&
+          srv.teacherSubmittedAt !== c.teacherSubmittedAt;
         return {
           ...c,
+          teacherName: c.teacherName.trim() ? c.teacherName : srv.teacherName,
+          teacherEmail: c.teacherEmail || srv.teacherEmail,
+          monitoredStudentIds:
+            serverSubmittedNewer || c.monitoredStudentIds.length === 0
+              ? srv.monitoredStudentIds
+              : c.monitoredStudentIds,
+          monitoredStudentsNotes:
+            serverSubmittedNewer || !c.monitoredStudentsNotes.trim()
+              ? srv.monitoredStudentsNotes
+              : c.monitoredStudentsNotes,
           teacherSubmittedAt: srv.teacherSubmittedAt ?? c.teacherSubmittedAt ?? null,
           digitalAckEmail: srv.digitalAckEmail ?? c.digitalAckEmail,
           digitalAckName: srv.digitalAckName ?? c.digitalAckName,
@@ -376,17 +389,17 @@ export default function CouncilPreCouncilTab({
     label: string;
     icon: typeof Grid3X3;
   }> = [
-    { key: "matrix", label: "Matriz Geral", icon: Grid3X3 },
     {
       key: "conversations",
-      label: `Conversas por Componente (${progress.completed}/${progress.total})`,
+      label: `Conversas (${progress.completed}/${progress.total})`,
       icon: MessageSquareText,
     },
     {
       key: "synthesis",
-      label: `Síntese e Ciência (${progress.acknowledged}/${progress.total})`,
+      label: `Síntese (${progress.acknowledged}/${progress.total})`,
       icon: FileText,
     },
+    { key: "matrix", label: "Matriz", icon: Grid3X3 },
   ];
 
   return (
@@ -457,18 +470,6 @@ export default function CouncilPreCouncilTab({
               <Printer className="w-3.5 h-3.5" />
               <span>Imprimir A4</span>
             </Link>
-
-            {!readOnly && subView !== "matrix" && (
-              <button
-                type="button"
-                disabled={savingPreCouncil}
-                onClick={() => void handleSavePreCouncil()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white text-xs font-bold transition cursor-pointer"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{savingPreCouncil ? "Salvando..." : "Salvar pré-conselho"}</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -552,6 +553,25 @@ export default function CouncilPreCouncilTab({
           onOpenUnifiedTeacherLink={handleOpenUnifiedLink}
           readOnly={readOnly}
         />
+      )}
+
+      {!readOnly && subView !== "matrix" && (
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {isDirty && (
+            <span className="text-xs font-bold text-amber-700 dark:text-amber-300">
+              Há alterações não salvas
+            </span>
+          )}
+          <button
+            type="button"
+            disabled={savingPreCouncil}
+            onClick={() => void handleSavePreCouncil()}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>{savingPreCouncil ? "Salvando..." : "Salvar pré-conselho"}</span>
+          </button>
+        </div>
       )}
 
       {!readOnly && (

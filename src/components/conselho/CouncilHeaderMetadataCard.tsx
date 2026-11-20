@@ -37,6 +37,9 @@ interface CouncilHeaderMetadataCardProps {
   onStartPresentation?: () => void;
   onEnterProjectorMode?: () => void;
   presentationDisabled?: boolean;
+  showConfigMenu?: boolean;
+  showPrintButton?: boolean;
+  showSensitiveToggleButton?: boolean;
   onBoardUpdated: (updated: CouncilBoardDetailRecord) => void;
   onNotify: (message: string, kind?: "success" | "error") => void;
   readOnly?: boolean;
@@ -61,6 +64,9 @@ export default function CouncilHeaderMetadataCard({
   onStartPresentation,
   onEnterProjectorMode,
   presentationDisabled = false,
+  showConfigMenu = true,
+  showPrintButton = true,
+  showSensitiveToggleButton = false,
   onBoardUpdated,
   onNotify,
   readOnly = false,
@@ -236,7 +242,9 @@ export default function CouncilHeaderMetadataCard({
           </div>
         </div>
 
+        {(showConfigMenu || showSensitiveToggleButton || onStartPresentation || onEnterProjectorMode || showPrintButton) && (
         <div className="flex flex-wrap items-center gap-2">
+          {showConfigMenu && (
           <div ref={configMenuRef} className="relative">
             <button
               type="button"
@@ -316,6 +324,24 @@ export default function CouncilHeaderMetadataCard({
               </div>
             )}
           </div>
+          )}
+
+          {showSensitiveToggleButton && (
+            <button
+              type="button"
+              onClick={onToggleHideSensitiveTags}
+              aria-pressed={hideSensitiveTags}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                hideSensitiveTags
+                  ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200"
+                  : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700"
+              }`}
+              title="Redução da exposição de dados sensíveis na tela durante reuniões"
+            >
+              {hideSensitiveTags ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              <span>{hideSensitiveTags ? "Exibir laudo e AEE" : "Ocultar laudo e AEE"}</span>
+            </button>
+          )}
 
           {onStartPresentation && (
             <button
@@ -340,6 +366,7 @@ export default function CouncilHeaderMetadataCard({
             </button>
           )}
 
+          {showPrintButton && (
           <Link
             href={`/conselho-classe/${board.id}/imprimir?mode=turma&trimester=${activeTrimester}${
               hideSensitiveTags ? "&hideHealthTags=1" : ""
@@ -349,7 +376,9 @@ export default function CouncilHeaderMetadataCard({
             <Printer className="w-3.5 h-3.5" />
             <span>Imprimir</span>
           </Link>
+          )}
         </div>
+        )}
       </div>
 
       {expanded && (

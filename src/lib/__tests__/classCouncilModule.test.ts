@@ -2889,9 +2889,9 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
           onNotify: () => {},
         })
       );
-      expect(preCouncilTabHtml).toContain("Matriz Geral");
-      expect(preCouncilTabHtml).toContain("Conversas por Componente");
-      expect(preCouncilTabHtml).toContain("Síntese e Ciência");
+      expect(preCouncilTabHtml).toContain("Conversas (");
+      expect(preCouncilTabHtml).toContain("Síntese (");
+      expect(preCouncilTabHtml).toContain(">Matriz<");
       expect(preCouncilTabHtml).toContain("Link do Pré-Conselho");
       expect(preCouncilTabHtml).toContain("Imprimir A4");
     } finally {
