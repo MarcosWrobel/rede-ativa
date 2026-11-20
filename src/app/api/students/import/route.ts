@@ -8,6 +8,10 @@ import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone } from "@/lib/sereParser";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
+import {
+  normalizeClassGroupDisplayName,
+  normalizeClassGroupKey,
+} from "@/lib/classGroupName";
 
 export const maxDuration = 60;
 
@@ -64,7 +68,7 @@ export async function POST(req: Request) {
       where: schoolFilter,
     });
     const existingByName = new Map(
-      existingClassGroups.map((cg) => [cg.name.trim().toUpperCase(), cg])
+      existingClassGroups.map((cg) => [normalizeClassGroupKey(cg.name), cg])
     );
 
     const tempIdToClassId = new Map<string, string>();
@@ -72,8 +76,8 @@ export async function POST(req: Request) {
     let turmasUpdated = 0;
 
     for (const t of turmas) {
-      const cleanName = t.name.replace(/\s+/g, " ").trim();
-      const upperKey = cleanName.toUpperCase();
+      const cleanName = normalizeClassGroupDisplayName(t.name);
+      const upperKey = normalizeClassGroupKey(cleanName);
       const found = existingByName.get(upperKey);
 
       if (found) {

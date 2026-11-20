@@ -4,6 +4,10 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, classGroupCreateSchema } from "@/lib/schemas";
 import { getCurrentSchool } from "@/lib/currentSchool";
+import {
+  normalizeClassGroupDisplayName,
+  normalizeClassGroupKey,
+} from "@/lib/classGroupName";
 
 export async function GET(req: Request) {
   try {
@@ -47,15 +51,26 @@ export async function POST(req: Request) {
     }
 
     const { segment, shift } = parsed.data;
-    const cleanName = parsed.data.name.replace(/\s+/g, " ").trim();
+    const cleanName = normalizeClassGroupDisplayName(parsed.data.name);
+    const canonicalKey = normalizeClassGroupKey(cleanName);
 
-    // Verificação de unicidade dentro da mesma escola (multi-tenant)
-    const existing = await prisma.classGroup.findFirst({
-      where: {
-        schoolId: currentSchool.id,
-        name: { equals: cleanName, mode: "insensitive" },
-      },
-    });
+    // Verificação de unicidade canônica dentro da mesma escola (multi-tenant)
+    // Evita duplicidades por variação de °/º, acentos ou espaços
+    const schoolClasses =
+      typeof prisma.classGroup.findMany === "function"
+        ? await prisma.classGroup.findMany({
+            where: { schoolId: currentSchool.id },
+            select: { id: true, name: true },
+          })
+        : [];
+    const existing =
+      schoolClasses.find((c) => normalizeClassGroupKey(c.name) === canonicalKey) ||
+      (await prisma.classGroup.findFirst({
+        where: {
+          schoolId: currentSchool.id,
+          name: { equals: cleanName, mode: "insensitive" },
+        },
+      }));
 
     if (existing) {
       return NextResponse.json(

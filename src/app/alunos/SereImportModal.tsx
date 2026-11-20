@@ -26,6 +26,7 @@ import {
   type SereParseResult,
   type TurmaSelectionConfig,
 } from "@/lib/sereParser";
+import { normalizeClassGroupKey } from "@/lib/classGroupName";
 
 interface ImportSummary {
   turmasCreated: number;
@@ -91,13 +92,13 @@ export default function SereImportModal({
   } | null>(null);
 
   const existingTurmaNamesUpper = useMemo(() => {
-    return new Set(existingClassGroups.map((cg) => cg.name.trim().toUpperCase()));
+    return new Set(existingClassGroups.map((cg) => normalizeClassGroupKey(cg.name)));
   }, [existingClassGroups]);
 
   const existingTurmaByUpper = useMemo(() => {
     const map = new Map<string, { name: string; segment: string; shift?: string }>();
     for (const cg of existingClassGroups) {
-      map.set(cg.name.trim().toUpperCase(), cg);
+      map.set(normalizeClassGroupKey(cg.name), cg);
     }
     return map;
   }, [existingClassGroups]);
@@ -204,7 +205,9 @@ export default function SereImportModal({
 
       const nextConfigs: Record<string, TurmaSelectionConfig> = {};
       for (const t of parsed.turmas) {
-        const matchedExisting = existingTurmaByUpper.get(t.suggestedName.toUpperCase());
+        const matchedExisting = existingTurmaByUpper.get(
+          normalizeClassGroupKey(t.suggestedName)
+        );
         nextConfigs[t.tempId] = {
           tempId: t.tempId,
           selected: t.selectedByDefault,
@@ -784,7 +787,7 @@ export default function SereImportModal({
                           ).length;
 
                           const existsInDb = existingTurmaNamesUpper.has(
-                            cfg.customName.trim().toUpperCase()
+                            normalizeClassGroupKey(cfg.customName)
                           );
 
                           return (

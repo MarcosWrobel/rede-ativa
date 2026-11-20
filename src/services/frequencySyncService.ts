@@ -281,23 +281,35 @@ export async function executePowerBiFrequencySync(options: {
     if (studentId) {
       const studentRecord = studentByIdMap.get(studentId);
 
+      const hasExplicitExchange =
+        item.ganhandoMundo !== undefined &&
+        item.ganhandoMundo !== null &&
+        String(item.ganhandoMundo).trim() !== "";
+      const hasExplicitSpecial =
+        item.deficienciaAltasHabilidades !== undefined &&
+        item.deficienciaAltasHabilidades !== null &&
+        String(item.deficienciaAltasHabilidades).trim() !== "";
+
       const isExchangeStudent = parseBooleanFlag(item.ganhandoMundo);
       const isSpecialNeeds = parseBooleanFlag(item.deficienciaAltasHabilidades);
       const age = parseAge(item.idade);
 
-      const needsExchange = isExchangeStudent && !studentRecord?.isExchangeStudent;
-      const needsSpecial = isSpecialNeeds && !studentRecord?.isSpecialNeeds;
+      const currentExchange = Boolean(studentRecord?.isExchangeStudent);
+      const currentSpecial = Boolean(studentRecord?.isSpecialNeeds);
+
+      const needsExchange = hasExplicitExchange && isExchangeStudent !== currentExchange;
+      const needsSpecial = hasExplicitSpecial && isSpecialNeeds !== currentSpecial;
       const needsAge = age !== null && studentRecord?.age !== age;
 
       if (needsExchange || needsSpecial || needsAge) {
         const current = pendingStudentUpdates.get(studentId) || {};
-        if (needsExchange) current.isExchangeStudent = true;
-        if (needsSpecial) current.isSpecialNeeds = true;
+        if (needsExchange) current.isExchangeStudent = isExchangeStudent;
+        if (needsSpecial) current.isSpecialNeeds = isSpecialNeeds;
         if (needsAge) current.age = age;
         pendingStudentUpdates.set(studentId, current);
       }
 
-      const isGanhandoMundo = isExchangeStudent || Boolean(studentRecord?.isExchangeStudent);
+      const isGanhandoMundo = hasExplicitExchange ? isExchangeStudent : currentExchange;
 
       const cleanAmparo = item.amparoLegalVigencia
         ? String(item.amparoLegalVigencia).replace(/\u0000/g, "").trim()
@@ -418,13 +430,13 @@ export async function executePowerBiFrequencySync(options: {
       const slice = studentUpdateEntries.slice(i, i + BATCH_SIZE);
       const values = slice.map(
         ([id, data]) =>
-          Prisma.sql`(${id}, CAST(${Boolean(data.isExchangeStudent)} AS BOOLEAN), CAST(${Boolean(data.isSpecialNeeds)} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
+          Prisma.sql`(${id}, CAST(${data.isExchangeStudent ?? null} AS BOOLEAN), CAST(${data.isSpecialNeeds ?? null} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
       );
       await prisma.$executeRaw`
         UPDATE "Student" AS s
         SET
-          "isExchangeStudent" = CASE WHEN v."setExchange" THEN true ELSE s."isExchangeStudent" END,
-          "isSpecialNeeds" = CASE WHEN v."setSpecial" THEN true ELSE s."isSpecialNeeds" END,
+          "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
+          "isSpecialNeeds" = COALESCE(v."setSpecial", s."isSpecialNeeds"),
           "age" = COALESCE(v."ageVal", s."age"),
           "updatedAt" = NOW()
         FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
@@ -439,12 +451,16 @@ export async function executePowerBiFrequencySync(options: {
   let amparosAtualizados = 0;
 
   const exchangeStudentIds = Array.from(
-    new Set([
-      ...allStudents.filter((s) => s.isExchangeStudent).map((s) => s.id),
-      ...Array.from(pendingStudentUpdates.entries())
-        .filter(([, u]) => u.isExchangeStudent)
-        .map(([id]) => id),
-    ])
+    new Set(
+      allStudents
+        .filter((s) => {
+          const pending = pendingStudentUpdates.get(s.id);
+          return pending?.isExchangeStudent !== undefined
+            ? pending.isExchangeStudent
+            : s.isExchangeStudent;
+        })
+        .map((s) => s.id)
+    )
   );
 
   if (exchangeStudentIds.length > 0) {

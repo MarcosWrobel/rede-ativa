@@ -11,6 +11,7 @@
 
 import * as XLSX from "xlsx";
 import { normalizeStudentName } from "./studentMatcher";
+import { normalizeClassGroupDisplayName } from "./classGroupName";
 
 export const MAX_SERE_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB por arquivo
 export const MAX_SERE_BATCH_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB por lote
@@ -1259,7 +1260,7 @@ function parseTabularCsvFallback(
           seriacao: turma,
           turno,
           turma: "",
-          explicitName: turma.replace(/\s+/g, " ").trim(),
+          explicitName: normalizeClassGroupDisplayName(turma),
         },
         studentsMap: new Map(),
       };

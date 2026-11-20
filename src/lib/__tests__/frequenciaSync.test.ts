@@ -84,6 +84,10 @@ vi.mock("@/lib/prisma", () => ({
 
 import { parseFrequencyImportInput } from "@/lib/frequencyImportParser";
 import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
+import {
+  normalizeClassGroupDisplayName,
+  normalizeClassGroupKey,
+} from "@/lib/classGroupName";
 import { POST as frequenciaSyncPost } from "@/app/api/frequencia/sync/route";
 import { POST as serpSyncPost } from "@/app/api/serp/sync/route";
 
@@ -329,6 +333,71 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       expect(data.estudantesEnriquecidos).toBe(1);
       // LowAttendanceRecord + AttendanceSnapshot + bulk UPDATE Student
       expect(hoisted.executeRaw).toHaveBeenCalledTimes(3);
+    });
+
+    it("permite reverter badges isExchangeStudent/isSpecialNeeds quando payload envia false explícito e preserva quando omitido", async () => {
+      hoisted.studentFindMany.mockResolvedValueOnce([
+        {
+          id: "st-reset-1",
+          cgm: "1010870581",
+          name: "ALUNO CORRIGIDO",
+          isExchangeStudent: true,
+          isSpecialNeeds: true,
+          age: 16,
+        },
+        {
+          id: "st-keep-2",
+          cgm: "1010870582",
+          name: "ALUNO PRESERVADO",
+          isExchangeStudent: true,
+          isSpecialNeeds: true,
+          age: 16,
+        },
+      ]);
+
+      const req = new Request("http://localhost:3000/api/frequencia/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alunos: [
+            {
+              cgm: "1010870581",
+              nome: "ALUNO CORRIGIDO",
+              mediaGeral: "95,00%",
+              ganhandoMundo: false,
+              deficienciaAltasHabilidades: false,
+              idade: 16,
+            },
+            {
+              cgm: "1010870582",
+              nome: "ALUNO PRESERVADO",
+              mediaGeral: "95,00%",
+              idade: 16,
+            },
+          ],
+        }),
+      });
+
+      const res = await frequenciaSyncPost(req);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.estudantesEnriquecidos).toBe(1);
+      // st-reset-1 teve flags revertidas para false, então não entra em deleteMany de amparos
+      expect(hoisted.absenceJustificationDeleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            studentId: { in: ["st-keep-2"] },
+          }),
+        })
+      );
+    });
+
+    it("normaliza nomes e chaves de turmas para evitar duplicidades (° vs º, acentos e espaços)", () => {
+      expect(normalizeClassGroupDisplayName("1°   2 ")).toBe("1º 2");
+      expect(normalizeClassGroupKey("1° 2")).toBe(normalizeClassGroupKey("1º 2"));
+      expect(normalizeClassGroupKey("1º Serie")).toBe(normalizeClassGroupKey("1º Série"));
+      expect(normalizeClassGroupKey("1ª Série")).toBe(normalizeClassGroupKey("1º Série"));
+      expect(normalizeClassGroupKey("1º ADM")).not.toBe(normalizeClassGroupKey("1º 2"));
     });
 
     it("retorna 400 (não 500) para JSON malformado", async () => {
