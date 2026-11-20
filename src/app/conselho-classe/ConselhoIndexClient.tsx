@@ -1,22 +1,25 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowRight,
   BookOpen,
   Calendar,
   ClipboardList,
   FileUp,
+  Loader2,
   Search,
   Users,
 } from "lucide-react";
+import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
 import {
   formatSegmentLabel,
   formatShiftLabel,
+  type CouncilBoardDetailRecord,
   type CouncilIndexBoardItem,
   type CouncilIndexClassGroupItem,
+  type CouncilTrimesterNumber,
 } from "@/components/conselho/types";
 
 interface ConselhoIndexClientProps {
@@ -27,6 +30,13 @@ interface ConselhoIndexClientProps {
   canEdit: boolean;
   canUseBiScraper?: boolean;
 }
+
+const SHIFT_OPTIONS = [
+  { value: "MANHA", label: "Manhã" },
+  { value: "TARDE", label: "Tarde" },
+  { value: "NOITE", label: "Noite" },
+  { value: "INTEGRAL", label: "Integral" },
+] as const;
 
 export default function ConselhoIndexClient({
   initialYear,
@@ -44,8 +54,37 @@ export default function ConselhoIndexClient({
   const [searchTerm, setSearchTerm] = useState("");
   const [shiftFilter, setShiftFilter] = useState("ALL");
   const [loadingYear, setLoadingYear] = useState(false);
-  const [openingClassId, setOpeningClassId] = useState<string | null>(null);
+  const [openingTarget, setOpeningTarget] = useState<{
+    classGroupId: string;
+    trimester?: CouncilTrimesterNumber;
+    action: "open" | "sere";
+  } | null>(null);
+  const [savingShiftClassId, setSavingShiftClassId] = useState<string | null>(null);
+  const [sereModalTarget, setSereModalTarget] = useState<{
+    boardId: string;
+    classNameLabel: string;
+  } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  function notify(message: string, kind: "success" | "error" = "success") {
+    setToast({ message, kind });
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  }
 
   const boardByClassId = useMemo(() => {
     return new Map(boards.map((b) => [b.classGroupId, b]));
@@ -64,66 +103,141 @@ export default function ConselhoIndexClient({
     });
   }, [classGroups, searchTerm, shiftFilter]);
 
+  async function refreshYearData(targetYear: number) {
+    const res = await fetch(`/api/conselho-classe?year=${targetYear}`);
+    const data: {
+      success?: boolean;
+      classGroups?: CouncilIndexClassGroupItem[];
+      boards?: CouncilIndexBoardItem[];
+      error?: string;
+    } = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Não foi possível carregar as turmas do ano letivo.");
+    }
+    setClassGroups(data.classGroups || []);
+    setBoards(data.boards || []);
+  }
+
   async function handleYearChange(nextYear: number) {
     setYear(nextYear);
     setLoadingYear(true);
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/conselho-classe?year=${nextYear}`);
-      const data: {
-        success?: boolean;
-        classGroups?: CouncilIndexClassGroupItem[];
-        boards?: CouncilIndexBoardItem[];
-        error?: string;
-      } = await res.json();
-      if (!res.ok) {
-        setErrorMsg(data.error || "Não foi possível carregar as turmas do ano letivo.");
-        return;
-      }
-      setClassGroups(data.classGroups || []);
-      setBoards(data.boards || []);
-    } catch {
-      setErrorMsg("Falha de conexão ao consultar o ano letivo.");
+      await refreshYearData(nextYear);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Falha de conexão ao consultar o ano letivo."
+      );
     } finally {
       setLoadingYear(false);
     }
   }
 
-  async function handleOpenBoard(classGroupId: string) {
+  async function ensureBoard(classGroupId: string): Promise<string | null> {
     const existing = boardByClassId.get(classGroupId);
     if (existing) {
-      router.push(`/conselho-classe/${existing.id}`);
-      return;
+      return existing.id;
     }
     if (!canEdit) {
       setErrorMsg("Conselho de classe ainda não iniciado para esta turma.");
-      return;
+      return null;
     }
 
-    setOpeningClassId(classGroupId);
+    const res = await fetch("/api/conselho-classe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classGroupId, year }),
+    });
+    const data: {
+      success?: boolean;
+      board?: { id: string };
+      error?: string;
+    } = await res.json();
+
+    if (!res.ok || !data.board) {
+      setErrorMsg(data.error || "Não foi possível inicializar o conselho desta turma.");
+      return null;
+    }
+
+    return data.board.id;
+  }
+
+  async function handleOpenTrimester(classGroupId: string, trimester: CouncilTrimesterNumber) {
+    setOpeningTarget({ classGroupId, trimester, action: "open" });
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/conselho-classe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classGroupId, year }),
-      });
-      const data: {
-        success?: boolean;
-        board?: { id: string };
-        error?: string;
-      } = await res.json();
+      const boardId = await ensureBoard(classGroupId);
+      if (boardId) {
+        router.push(`/conselho-classe/${boardId}?trimestre=${trimester}`);
+      }
+    } catch {
+      setErrorMsg("Falha de conexão ao abrir o conselho da turma.");
+    } finally {
+      setOpeningTarget(null);
+    }
+  }
 
-      if (!res.ok || !data.board) {
-        setErrorMsg(data.error || "Não foi possível abrir o conselho desta turma.");
+  async function handleOpenSereImport(cg: CouncilIndexClassGroupItem) {
+    if (!canEdit) return;
+    setOpeningTarget({ classGroupId: cg.id, action: "sere" });
+    setErrorMsg(null);
+    try {
+      const hadBoard = boardByClassId.has(cg.id);
+      const boardId = await ensureBoard(cg.id);
+      if (!boardId) return;
+      if (!hadBoard) {
+        await refreshYearData(year).catch(() => {});
+      }
+      setSereModalTarget({ boardId, classNameLabel: cg.name });
+    } catch {
+      setErrorMsg("Falha de conexão ao preparar a importação da turma.");
+    } finally {
+      setOpeningTarget(null);
+    }
+  }
+
+  async function handleBoardUpdatedFromSere(updatedBoard: CouncilBoardDetailRecord) {
+    setClassGroups((prev) =>
+      prev.map((cg) =>
+        cg.id === updatedBoard.classGroupId
+          ? { ...cg, shift: updatedBoard.classGroup.shift }
+          : cg
+      )
+    );
+    await refreshYearData(year).catch(() => {});
+  }
+
+  async function handleShiftChange(cg: CouncilIndexClassGroupItem, nextShift: string) {
+    if (!canEdit || cg.shift === nextShift) return;
+    const previousShift = cg.shift;
+    setSavingShiftClassId(cg.id);
+    setErrorMsg(null);
+    setClassGroups((prev) =>
+      prev.map((item) => (item.id === cg.id ? { ...item, shift: nextShift } : item))
+    );
+
+    try {
+      const res = await fetch(`/api/classes/${cg.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shift: nextShift }),
+      });
+      const data: { success?: boolean; error?: string } = await res.json();
+      if (!res.ok) {
+        setClassGroups((prev) =>
+          prev.map((item) => (item.id === cg.id ? { ...item, shift: previousShift } : item))
+        );
+        notify(data.error || "Não foi possível alterar o turno.", "error");
         return;
       }
-
-      router.push(`/conselho-classe/${data.board.id}`);
+      notify(`Turno de ${cg.name} atualizado para ${formatShiftLabel(nextShift)}.`);
     } catch {
-      setErrorMsg("Falha de conexão ao inicializar o conselho da turma.");
+      setClassGroups((prev) =>
+        prev.map((item) => (item.id === cg.id ? { ...item, shift: previousShift } : item))
+      );
+      notify("Falha de conexão ao atualizar o turno.", "error");
     } finally {
-      setOpeningClassId(null);
+      setSavingShiftClassId(null);
     }
   }
 
@@ -132,23 +246,31 @@ export default function ConselhoIndexClient({
   ).sort((a, b) => b - a);
 
   return (
-    <div className="space-y-6">
-      <header className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center shrink-0">
-            <ClipboardList className="w-6 h-6" />
+    <div className="space-y-4">
+      <header className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 px-5 py-4 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center shrink-0">
+            <ClipboardList className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+            <h1 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
               Conselho de Classe e Pós-Conselho
             </h1>
             <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-              {schoolName} • Acompanhamento trimestral por turma e estudante
+              {schoolName}
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {canUseBiScraper && (
+            <Link
+              href="/gestao"
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            >
+              Gestão Escolar
+            </Link>
+          )}
           <div className="inline-flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2">
             <Calendar className="w-3.5 h-3.5 text-sky-600" />
             <label htmlFor="council-year-select" className="sr-only">
@@ -180,34 +302,22 @@ export default function ConselhoIndexClient({
         </div>
       )}
 
-      {canEdit && (
-        <div className="rounded-2xl border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/40 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-start gap-2.5">
-            <FileUp className="w-4 h-4 text-sky-700 dark:text-sky-300 mt-0.5 shrink-0" />
-            <div className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
-              <strong className="font-bold text-slate-900 dark:text-white">
-                Importação de notas via PDF do SERE:
-              </strong>{" "}
-              abra uma turma abaixo e clique em <span className="font-semibold">Importar PDF SERE</span>{" "}
-              para enviar o Relatório de Acompanhamento Trimestral (incluindo os dois arquivos de
-              matriz da 3ª série) e preencher notas, componentes curriculares e lista abaixo de 6,0.
-            </div>
-          </div>
-          {canUseBiScraper && (
-            <div className="flex items-center gap-2 shrink-0 text-xs font-bold">
-              <Link
-                href="/gestao"
-                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              >
-                Gestão Escolar
-              </Link>
-            </div>
-          )}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl border shadow-lg text-xs font-bold ${
+            toast.kind === "error"
+              ? "bg-rose-600 border-rose-700 text-white"
+              : "bg-slate-900 border-slate-800 text-white dark:bg-emerald-600 dark:border-emerald-700"
+          }`}
+        >
+          {toast.message}
         </div>
       )}
 
       {/* Barra de Filtros */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row gap-3">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-3 flex flex-col sm:flex-row gap-2.5">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
@@ -233,101 +343,173 @@ export default function ConselhoIndexClient({
         </select>
       </div>
 
-      {/* Grade de Turmas */}
+      {/* Lista Compacta de Turmas */}
       {filteredClassGroups.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 text-center text-xs text-slate-500">
           Nenhuma turma encontrada para o filtro selecionado.
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredClassGroups.map((cg) => {
-            const board = boardByClassId.get(cg.id);
-            const isOpening = openingClassId === cg.id;
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+          <div className="hidden lg:grid lg:grid-cols-[minmax(180px,1.2fr)_130px_145px_minmax(280px,1.5fr)_auto] items-center gap-3 px-4 py-2.5 bg-slate-50 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <span>Turma</span>
+            <span>Turno</span>
+            <span>Composição</span>
+            <span>Acessar trimestre</span>
+            {canEdit && <span className="text-right">Notas SERE</span>}
+          </div>
 
-            return (
-              <article
-                key={cg.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col justify-between gap-4 hover:border-sky-300 dark:hover:border-sky-700 transition"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h2 className="text-base font-black text-slate-900 dark:text-white">
-                        {cg.name}
-                      </h2>
-                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        {formatSegmentLabel(cg.segment)} • {formatShiftLabel(cg.shift)}
+          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+            {filteredClassGroups.map((cg) => {
+              const board = boardByClassId.get(cg.id);
+              const isRowBusy = openingTarget?.classGroupId === cg.id;
+              const isOpeningSere = isRowBusy && openingTarget?.action === "sere";
+              const isSavingShift = savingShiftClassId === cg.id;
+
+              return (
+                <li
+                  key={cg.id}
+                  className="px-4 py-3 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition grid grid-cols-1 lg:grid-cols-[minmax(180px,1.2fr)_130px_145px_minmax(280px,1.5fr)_auto] items-center gap-3"
+                >
+                  {/* Turma e Segmento */}
+                  <div className="flex items-center justify-between lg:justify-start gap-2.5 min-w-0">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                          {cg.name}
+                        </h2>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                            board
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800"
+                              : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                          }`}
+                        >
+                          {board ? "Iniciado" : "Pendente"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                        {formatSegmentLabel(cg.segment)}
                       </p>
                     </div>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        board
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800"
-                          : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-                      }`}
-                    >
-                      {board ? "Iniciado" : "Não iniciado"}
+                  </div>
+
+                  {/* Turno (Editável inline para canEdit) */}
+                  <div className="flex items-center gap-1.5">
+                    {canEdit ? (
+                      <select
+                        aria-label={`Turno da turma ${cg.name}`}
+                        disabled={isSavingShift}
+                        value={cg.shift.toUpperCase()}
+                        onChange={(e) => handleShiftChange(cg, e.target.value)}
+                        className="w-full lg:w-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-slate-100 disabled:opacity-60 cursor-pointer"
+                      >
+                        {SHIFT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {formatShiftLabel(cg.shift)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Composição */}
+                  <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
+                    <span className="inline-flex items-center gap-1" title="Estudantes ativos">
+                      <Users className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                      <span className="font-semibold">{cg._count.students}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1" title="Componentes curriculares">
+                      <BookOpen className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span className="font-semibold">
+                        {board ? board._count.subjects : 0} comp.
+                      </span>
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
-                    <span className="inline-flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-sky-600" />
-                      {cg._count.students} estudantes ativos
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                      {board ? `${board._count.subjects} componentes` : "0 componentes"}
-                    </span>
-                  </div>
-
-                  {/* Status dos 3 Trimestres */}
-                  <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  {/* Botões de Acesso Direto por Trimestre */}
+                  <div
+                    role="group"
+                    aria-label={`Trimestres de ${cg.name}`}
+                    className="grid grid-cols-3 gap-1.5"
+                  >
                     {([1, 2, 3] as const).map((tri) => {
                       const triRec = board?.trimesters.find((t) => t.trimester === tri);
                       const consolidated = triRec?.status === "CONSOLIDATED";
+                      const isOpeningThisTri =
+                        isRowBusy &&
+                        openingTarget?.action === "open" &&
+                        openingTarget?.trimester === tri;
+                      const statusText = isOpeningThisTri
+                        ? "Abrindo..."
+                        : consolidated
+                          ? "Consolidado"
+                          : board
+                            ? "Em aberto"
+                            : "Iniciar";
+
                       return (
-                        <div
+                        <button
                           key={tri}
-                          className={`rounded-xl border px-2 py-1.5 text-center ${
+                          type="button"
+                          disabled={isRowBusy}
+                          onClick={() => handleOpenTrimester(cg.id, tri)}
+                          className={`rounded-lg border px-2 py-1.5 text-center transition cursor-pointer disabled:opacity-60 ${
                             consolidated
-                              ? "bg-emerald-50/70 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200"
+                              ? "bg-emerald-50/80 hover:bg-emerald-100 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:border-emerald-800 dark:text-emerald-200"
                               : board
-                                ? "bg-sky-50/50 border-sky-200 text-sky-900 dark:bg-sky-950/30 dark:border-sky-800 dark:text-sky-200"
-                                : "bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-950 dark:border-slate-800"
+                                ? "bg-sky-50/60 hover:bg-sky-100 border-sky-200 text-sky-900 dark:bg-sky-950/30 dark:hover:bg-sky-900/50 dark:border-sky-800 dark:text-sky-200"
+                                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
                           }`}
                         >
-                          <div className="text-[10px] font-extrabold">{tri}º Trim.</div>
-                          <div className="text-[10px]">
-                            {consolidated ? "Consolidado" : board ? "Em aberto" : "Pendente"}
+                          <div className="text-[11px] font-extrabold leading-tight">
+                            {tri}º Trim.
                           </div>
-                        </div>
+                          <div className="text-[10px] leading-tight opacity-85">
+                            {statusText}
+                          </div>
+                        </button>
                       );
                     })}
                   </div>
-                </div>
 
-                <button
-                  type="button"
-                  disabled={isOpening}
-                  onClick={() => handleOpenBoard(cg.id)}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 disabled:opacity-60 text-white text-xs font-bold transition cursor-pointer"
-                >
-                  <span>
-                    {isOpening
-                      ? "Abrindo..."
-                      : board
-                        ? "Abrir conselho"
-                        : canEdit
-                          ? "Iniciar conselho"
-                          : "Visualizar"}
-                  </span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </article>
-            );
-          })}
+                  {/* Ação direta Importar SERE */}
+                  {canEdit && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={isRowBusy}
+                        onClick={() => handleOpenSereImport(cg)}
+                        className="w-full lg:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-sky-300 dark:border-sky-700 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 dark:hover:bg-sky-900/60 text-sky-900 dark:text-sky-200 text-xs font-bold transition cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                      >
+                        {isOpeningSere ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <FileUp className="w-3.5 h-3.5" />
+                        )}
+                        <span>Importar SERE</span>
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
+      )}
+
+      {sereModalTarget && (
+        <CouncilSerePdfImportModal
+          open={Boolean(sereModalTarget)}
+          onClose={() => setSereModalTarget(null)}
+          boardId={sereModalTarget.boardId}
+          classNameLabel={sereModalTarget.classNameLabel}
+          onBoardUpdated={handleBoardUpdatedFromSere}
+          onNotify={notify}
+        />
       )}
     </div>
   );

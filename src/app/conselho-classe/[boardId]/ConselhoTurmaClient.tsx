@@ -44,6 +44,7 @@ interface ConselhoTurmaClientProps {
   availableSourceBoards: CouncilSourceBoardOption[];
   canEdit: boolean;
   currentUserName?: string;
+  initialTrimester?: CouncilTrimesterNumber;
 }
 
 export default function ConselhoTurmaClient({
@@ -51,9 +52,11 @@ export default function ConselhoTurmaClient({
   availableSourceBoards,
   canEdit,
   currentUserName = "",
+  initialTrimester = 1,
 }: ConselhoTurmaClientProps) {
+  const entryTrimester: CouncilTrimesterNumber = initialTrimester;
   const [board, setBoard] = useState<CouncilBoardDetailRecord>(initialBoard);
-  const [activeTrimester, setActiveTrimester] = useState<CouncilTrimesterNumber>(1);
+  const [activeTrimester, setActiveTrimester] = useState<CouncilTrimesterNumber>(entryTrimester);
   const [activeTab, setActiveTab] = useState<ActiveTabKey>("analysis");
   const [hideSensitiveTags, setHideSensitiveTags] = useState(false);
   const [isSubjectsModalOpen, setIsSubjectsModalOpen] = useState(false);
@@ -160,32 +163,59 @@ export default function ConselhoTurmaClient({
         </Link>
 
         {/* Seletor de Trimestre */}
-        <div
-          role="group"
-          aria-label="Selecionar trimestre"
-          className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800"
-        >
-          {([1, 2, 3] as const).map((tri) => {
-            const triRec = board.trimesters.find((t) => t.trimester === tri);
-            const selected = activeTrimester === tri;
-            const consolidated = triRec?.status === "CONSOLIDATED";
-            return (
+        <div className="flex flex-wrap items-center gap-2">
+          {activeTrimester !== entryTrimester && (
+            <div
+              role="status"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[11px] font-bold text-amber-900 dark:text-amber-200"
+            >
+              <span>Acessado pelo {entryTrimester}º Trim.</span>
               <button
-                key={tri}
                 type="button"
-                aria-pressed={selected}
-                onClick={() => setActiveTrimester(tri)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  selected
-                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
-                }`}
+                onClick={() => setActiveTrimester(entryTrimester)}
+                className="underline hover:no-underline text-amber-800 dark:text-amber-100 cursor-pointer"
               >
-                <span>{tri}º Trimestre</span>
-                {consolidated && <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600" />}
+                Voltar ao {entryTrimester}º
               </button>
-            );
-          })}
+            </div>
+          )}
+
+          <div
+            role="group"
+            aria-label="Selecionar trimestre"
+            className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800"
+          >
+            {([1, 2, 3] as const).map((tri) => {
+              const triRec = board.trimesters.find((t) => t.trimester === tri);
+              const selected = activeTrimester === tri;
+              const isEntry = entryTrimester === tri;
+              const consolidated = triRec?.status === "CONSOLIDATED";
+              return (
+                <button
+                  key={tri}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setActiveTrimester(tri)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    selected
+                      ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <span>{tri}º Trimestre</span>
+                  {isEntry && (
+                    <span
+                      title="Trimestre de acesso"
+                      className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200 text-[9px] font-extrabold"
+                    >
+                      Acesso
+                    </span>
+                  )}
+                  {consolidated && <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600" />}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

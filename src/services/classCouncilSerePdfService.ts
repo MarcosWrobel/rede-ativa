@@ -85,6 +85,22 @@ function normalizeShiftToken(raw?: string | null): string | null {
   return null;
 }
 
+function formatShiftPtBr(shift: string): string {
+  const norm = normalizeShiftToken(shift);
+  if (norm === "MANHA") return "Manhã";
+  if (norm === "TARDE") return "Tarde";
+  if (norm === "NOITE") return "Noite";
+  if (norm === "INTEGRAL") return "Integral";
+  return shift;
+}
+
+function resolveConsistentPdfShift(files: ParsedSereCouncilMetadata[]): string | null {
+  const detected = Array.from(
+    new Set(files.map((f) => normalizeShiftToken(f.shift)).filter((s): s is string => Boolean(s)))
+  );
+  return detected.length === 1 ? detected[0] : null;
+}
+
 function extractLeadingGradeNumber(raw?: string | null): string | null {
   if (!raw) return null;
   const m = raw.match(/\b(\d{1,2})\s*[ªº°]?\s*(?:ANO|SERIE|SÉRIE)\b/i);
@@ -95,23 +111,26 @@ function buildClassMetadataWarnings(
   files: ParsedSereCouncilMetadata[],
   classGroupName: string,
   classGroupShift: string,
-  boardYear: number
+  boardYear: number,
+  includeShiftUpdateNotice = false
 ): string[] {
   const warnings: string[] = [];
   const boardShift = normalizeShiftToken(classGroupShift);
   const boardGradeNum = extractLeadingGradeNumber(classGroupName);
 
+  if (includeShiftUpdateNotice) {
+    const resolvedPdfShift = resolveConsistentPdfShift(files);
+    if (resolvedPdfShift && boardShift !== resolvedPdfShift) {
+      warnings.push(
+        `Turno da turma será atualizado de ${formatShiftPtBr(classGroupShift)} para ${formatShiftPtBr(resolvedPdfShift)} conforme o PDF.`
+      );
+    }
+  }
+
   for (const file of files) {
     if (file.year && file.year !== boardYear) {
       warnings.push(
         `${file.fileName}: ano letivo do PDF (${file.year}) difere do painel atual (${boardYear}).`
-      );
-    }
-
-    const pdfShift = normalizeShiftToken(file.shift);
-    if (boardShift && pdfShift && boardShift !== pdfShift) {
-      warnings.push(
-        `${file.fileName}: turno informado no PDF (${file.shift}) difere da turma atual (${classGroupShift}).`
       );
     }
 
@@ -272,7 +291,8 @@ export async function previewCouncilSerePdfImport(params: {
       batch.files,
       board.classGroup.name,
       board.classGroup.shift,
-      board.year
+      board.year,
+      true
     ),
   ];
 
@@ -615,14 +635,30 @@ export async function applyCouncilSerePdfImport(params: {
     );
   }
 
+  const resolvedPdfShift = resolveConsistentPdfShift(batch.files);
+  const currentBoardShift = normalizeShiftToken(board.classGroup.shift);
+  let shiftUpdatedTo: string | null = null;
+  if (
+    resolvedPdfShift &&
+    resolvedPdfShift !== currentBoardShift &&
+    typeof prisma.classGroup?.update === "function"
+  ) {
+    await prisma.classGroup.update({
+      where: { id: board.classGroup.id },
+      data: { shift: resolvedPdfShift },
+    });
+    shiftUpdatedTo = resolvedPdfShift;
+  }
+
   const trimestersTouched = Array.from(trimestersSet).sort((a, b) => a - b) as SereCouncilTrimesterKey[];
   const warnings = [
     ...batch.warnings,
     ...buildClassMetadataWarnings(
       batch.files,
       board.classGroup.name,
-      board.classGroup.shift,
-      board.year
+      shiftUpdatedTo ?? board.classGroup.shift,
+      board.year,
+      false
     ),
   ];
 
@@ -645,6 +681,7 @@ export async function applyCouncilSerePdfImport(params: {
       cardsUpdated: cardUpdates.length,
       belowAverageGrades,
       trimestersTouched,
+      ...(shiftUpdatedTo ? { shiftUpdatedTo } : {}),
     },
   });
 

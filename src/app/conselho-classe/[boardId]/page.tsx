@@ -8,6 +8,7 @@ import {
   getCouncilBoardDetail,
   listSchoolCouncilBoards,
 } from "@/services/classCouncilService";
+import type { CouncilTrimesterNumber } from "@/components/conselho/types";
 import ConselhoTurmaClient from "./ConselhoTurmaClient";
 
 export const dynamic = "force-dynamic";
@@ -16,17 +17,29 @@ export const metadata = {
   title: "Conselho da Turma | Rede Ativa SaaS",
 };
 
+function parseTrimesterParam(raw?: string): CouncilTrimesterNumber {
+  if (raw === "2") return 2;
+  if (raw === "3") return 3;
+  return 1;
+}
+
 export default async function ConselhoTurmaPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ boardId: string }>;
+  searchParams?: Promise<{ trimestre?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
   }
 
-  const { boardId } = await params;
+  const [{ boardId }, sp] = await Promise.all([
+    params,
+    searchParams ? searchParams : Promise.resolve<{ trimestre?: string }>({}),
+  ]);
+  const initialTrimester = parseTrimesterParam(sp?.trimestre);
   const ownership = await findCouncilBoardOwnershipRecord(boardId);
   if (!ownership) {
     notFound();
@@ -65,6 +78,7 @@ export default async function ConselhoTurmaPage({
       availableSourceBoards={availableSourceBoards}
       canEdit={canEdit}
       currentUserName={session.user.name || ""}
+      initialTrimester={initialTrimester}
     />
   );
 }

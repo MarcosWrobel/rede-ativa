@@ -307,6 +307,7 @@ const {
   mockSubjectCreate,
   mockEvalUpsert,
   mockCardUpdate,
+  mockClassGroupUpdate,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockRequireAuth: vi.fn(),
@@ -319,6 +320,7 @@ const {
   mockSubjectCreate: vi.fn(),
   mockEvalUpsert: vi.fn(),
   mockCardUpdate: vi.fn(),
+  mockClassGroupUpdate: vi.fn(),
   mockTransaction: vi.fn(),
 }));
 
@@ -353,6 +355,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     studentCouncilCard: {
       update: mockCardUpdate,
+    },
+    classGroup: {
+      update: mockClassGroupUpdate,
     },
     $transaction: mockTransaction,
   },
@@ -609,6 +614,37 @@ describe("POST /api/conselho-classe/[boardId]/import-pdf — segurança, RBAC e 
     expect(auditPayload.action).toBe("IMPORT_COUNCIL_SERE_PDF");
     expect(auditPayload.schoolId).toBe("school-a");
     expect(JSON.stringify(auditPayload.details)).not.toContain("ESTUDANTE SINTETICO ALPHA");
+  });
+
+  it("atualiza automaticamente o turno da turma quando o PDF informa turno diferente", async () => {
+    const pdf = buildSyntheticSereCouncilPdf({
+      course: "ENSINO MEDIO FGB",
+      grade: "3ª Série",
+      shift: "Tarde",
+      classCode: "2",
+      subjects: ["MATEMATICA"],
+      rows: [{ nro: 1, nameLines: ["ESTUDANTE SINTETICO ALPHA"], grades: [["7.0", "7.0", "7.0"]] }],
+    });
+
+    const previewRes = await importPdfPost(
+      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "preview"),
+      { params: Promise.resolve({ boardId: "board-1" }) }
+    );
+    expect(previewRes.status).toBe(200);
+    const previewBody = await previewRes.json();
+    expect(previewBody.preview.warnings).toContain(
+      "Turno da turma será atualizado de Noite para Tarde conforme o PDF."
+    );
+
+    const applyRes = await importPdfPost(
+      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "apply"),
+      { params: Promise.resolve({ boardId: "board-1" }) }
+    );
+    expect(applyRes.status).toBe(200);
+    expect(mockClassGroupUpdate).toHaveBeenCalledWith({
+      where: { id: "cg-1" },
+      data: { shift: "TARDE" },
+    });
   });
 
   it("sanitiza erro interno HTTP 500 sem vazar detalhes de infraestrutura", async () => {
