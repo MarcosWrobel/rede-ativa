@@ -27,6 +27,7 @@ import {
   COUNCIL_ENROLLMENT_STATUS_LABELS,
   COUNCIL_SEATING_MAP_LABELS,
   COUNCIL_STUDENT_TAG_OPTIONS,
+  formatCouncilGradePtBr,
   getCardBelowAvgForTrimester,
   getCardOpinionForTrimester,
   getStudentInitials,
@@ -315,7 +316,12 @@ export default function ConselhoTurmaClient({
         onOpenSeatingMap={() => setActiveTab("seating-map")}
         showConfigMenu={activeTab === "hub"}
         showPrintButton={activeTab === "hub"}
-        showSensitiveToggleButton={activeTab === "analysis"}
+        showSensitiveToggleButton={
+          activeTab === "analysis" ||
+          activeTab === "students" ||
+          activeTab === "seating-map" ||
+          activeTab === "pre-council"
+        }
         onStartPresentation={
           activeTab === "analysis"
             ? () => setPresentationRequestNonce((n) => n + 1)
@@ -477,7 +483,9 @@ export default function ConselhoTurmaClient({
                         Abaixo da média ({activeTrimester}º Trim.):{" "}
                         {belowAvg
                           .map((b) =>
-                            b.grade !== null ? `${b.subjectName} (${b.grade})` : b.subjectName
+                            b.grade !== null
+                              ? `${b.subjectName} (${formatCouncilGradePtBr(b.grade)})`
+                              : b.subjectName
                           )
                           .join(", ")}
                       </div>

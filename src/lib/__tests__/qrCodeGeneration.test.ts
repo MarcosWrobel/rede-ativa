@@ -52,6 +52,44 @@ describe("QR Code Generation & Autonomy Unit Tests", () => {
     expect(origin).toBe("https://portal.colegioleopoldina.com.br");
   });
 
+  it("[M-01] getTrustedAppOrigin bloqueia Host Header Injection e prioriza base confiável", async () => {
+    const { getTrustedAppOrigin } = await import("@/lib/qrCode");
+    const env = process.env as Record<string, string | undefined>;
+    const prevAppUrl = env.APP_URL;
+    const prevPublicAppUrl = env.NEXT_PUBLIC_APP_URL;
+    const prevVercelEnv = env.VERCEL_ENV;
+
+    try {
+      delete env.APP_URL;
+      delete env.NEXT_PUBLIC_APP_URL;
+      env.VERCEL_ENV = "production";
+
+      const evilHeaders = new Map<string, string>([
+        ["x-forwarded-host", "evil.attacker.test"],
+        ["host", "evil.attacker.test"],
+        ["x-forwarded-proto", "http"],
+      ]);
+      const safeOrigin = getTrustedAppOrigin({
+        get: (k) => evilHeaders.get(k.toLowerCase()) || null,
+      });
+      expect(safeOrigin).not.toContain("evil.attacker.test");
+      expect(safeOrigin.startsWith("https://")).toBe(true);
+
+      env.NEXT_PUBLIC_APP_URL = "https://painel.redeativa.com.br";
+      const envOrigin = getTrustedAppOrigin({
+        get: (k) => evilHeaders.get(k.toLowerCase()) || null,
+      });
+      expect(envOrigin).toBe("https://painel.redeativa.com.br");
+    } finally {
+      if (prevAppUrl === undefined) delete env.APP_URL;
+      else env.APP_URL = prevAppUrl;
+      if (prevPublicAppUrl === undefined) delete env.NEXT_PUBLIC_APP_URL;
+      else env.NEXT_PUBLIC_APP_URL = prevPublicAppUrl;
+      if (prevVercelEnv === undefined) delete env.VERCEL_ENV;
+      else env.VERCEL_ENV = prevVercelEnv;
+    }
+  });
+
   it("should serve SVG via internal /api/atas/qr endpoint with immutable cache headers", async () => {
     const req = new Request(
       `https://localhost/api/atas/qr?data=${encodeURIComponent(expectedUrl)}&format=svg&size=200`

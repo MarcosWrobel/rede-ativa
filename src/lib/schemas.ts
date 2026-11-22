@@ -451,14 +451,20 @@ export const councilSubjectsBatchSchema = z
     }
   );
 
+const councilPreCouncilDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
 export const councilPostActionItemSchema = z.object({
   number: z.number().int().min(1).max(50),
   description: z.string().trim().min(2, "Descrição do encaminhamento é obrigatória").max(1000),
   responsible: z.enum(["FAMILIA", "ESTUDANTE", "ESCOLA", "REDE_PROTECAO"]).default("ESCOLA"),
-  dueDate: z.string().optional().nullable(),
+  dueDate: z
+    .string()
+    .trim()
+    .regex(councilPreCouncilDateRegex, "Prazo inválido (use AAAA-MM-DD)")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
 });
-
-const councilPreCouncilDateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
 export const councilPreCouncilConversationSchema = z.object({
   id: z.string().trim().min(1).max(100),
@@ -489,6 +495,7 @@ export const councilPreCouncilConversationSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
+  teacherSubmittedAt: z.string().trim().max(64).optional().nullable(),
 });
 
 export const councilPreCouncilSynthesisSchema = z.object({

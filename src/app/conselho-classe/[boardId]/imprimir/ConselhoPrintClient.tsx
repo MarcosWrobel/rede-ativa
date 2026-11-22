@@ -25,6 +25,8 @@ import {
   COUNCIL_ENROLLMENT_STATUS_LABELS,
   COUNCIL_SEATING_MAP_LABELS,
   COUNCIL_STUDENT_TAG_OPTIONS,
+  formatCouncilCalendarDatePtBr,
+  formatCouncilGradePtBr,
   formatSegmentLabel,
   formatShiftLabel,
   getCardBelowAvgForTrimester,
@@ -175,9 +177,11 @@ export default function ConselhoPrintClient({
             ? `Mapa de Sala — ${selectedSeatingMap ? `${selectedSeatingMap.name} • ` : ""}${board.year}`
             : `Ficha Individual do Estudante — ${trimester}º Trimestre / ${board.year}`;
 
+  const isLandscapePrint = mode === "mapa-sala" || mode === "turma";
+
   return (
-    <div className={`${mode === "mapa-sala" ? "max-w-7xl" : "max-w-5xl"} mx-auto space-y-5`}>
-      {mode === "mapa-sala" && (
+    <div className={`${isLandscapePrint ? "max-w-7xl" : "max-w-5xl"} mx-auto space-y-5`}>
+      {isLandscapePrint && (
         <style>{"@media print { @page { size: A4 landscape; margin: 8mm; } }"}</style>
       )}
 
@@ -444,7 +448,7 @@ export default function ConselhoPrintClient({
                               ? entry.descriptorCodes.join(", ")
                               : "—"}
                             {entry?.grade !== null && entry?.grade !== undefined
-                              ? ` (${entry.grade})`
+                              ? ` (${formatCouncilGradePtBr(entry.grade)})`
                               : ""}
                           </td>
                         );
@@ -689,9 +693,7 @@ export default function ConselhoPrintClient({
           <div className="space-y-4 text-xs">
             <div className="text-right text-[11px] font-semibold text-slate-600">
               Data da reunião:{" "}
-              {trimesterRecord?.postCouncilHeldAt
-                ? new Date(trimesterRecord.postCouncilHeldAt).toLocaleDateString("pt-BR")
-                : "Não informada"}
+              {formatCouncilCalendarDatePtBr(trimesterRecord?.postCouncilHeldAt) || "Não informada"}
             </div>
 
             <div className="border border-slate-300 rounded-xl p-3 space-y-1.5">
@@ -771,9 +773,7 @@ export default function ConselhoPrintClient({
                           {COUNCIL_ACTION_RESPONSIBLE_LABELS[a.responsible] || a.responsible}
                         </td>
                         <td className="border border-slate-300 p-1.5">
-                          {a.dueDate
-                            ? new Date(a.dueDate).toLocaleDateString("pt-BR")
-                            : "Contínuo"}
+                          {formatCouncilCalendarDatePtBr(a.dueDate) || "Contínuo"}
                         </td>
                       </tr>
                     ))}
@@ -860,7 +860,7 @@ export default function ConselhoPrintClient({
                             ? entry.descriptorCodes.join(", ")
                             : "—"}
                           {entry?.grade !== null && entry?.grade !== undefined
-                            ? ` (${entry.grade})`
+                            ? ` (${formatCouncilGradePtBr(entry.grade)})`
                             : ""}
                         </td>
                       );
@@ -886,7 +886,9 @@ export default function ConselhoPrintClient({
                     Componentes abaixo da média:{" "}
                     {below
                       .map((b) =>
-                        b.grade !== null ? `${b.subjectName} (${b.grade})` : b.subjectName
+                        b.grade !== null
+                          ? `${b.subjectName} (${formatCouncilGradePtBr(b.grade)})`
+                          : b.subjectName
                       )
                       .join(", ")}
                   </div>
@@ -989,7 +991,7 @@ export default function ConselhoPrintClient({
                 {selectedSeatingMap.effectiveDate && (
                   <span>
                     <strong>Vigência:</strong>{" "}
-                    {selectedSeatingMap.effectiveDate.split("-").reverse().join("/")}
+                    {formatCouncilCalendarDatePtBr(selectedSeatingMap.effectiveDate)}
                   </span>
                 )}
                 <span>

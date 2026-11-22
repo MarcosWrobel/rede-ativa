@@ -10,7 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
-import type { CouncilBoardDetailRecord } from "@/components/conselho/types";
+import { formatShiftLabel, type CouncilBoardDetailRecord } from "@/components/conselho/types";
 import type {
   CouncilSerePdfApplySummary,
   CouncilSerePdfPreviewResult,
@@ -42,6 +42,7 @@ export default function CouncilSerePdfImportModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<CouncilSerePdfPreviewResult | null>(null);
+  const [confirmShiftUpdate, setConfirmShiftUpdate] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export default function CouncilSerePdfImportModal({
   function resetState() {
     setFiles([]);
     setPreview(null);
+    setConfirmShiftUpdate(false);
     setErrorMsg(null);
     setLoadingPreview(false);
     setApplying(false);
@@ -67,6 +69,7 @@ export default function CouncilSerePdfImportModal({
     if (!selectedList || selectedList.length === 0) return;
     setErrorMsg(null);
     setPreview(null);
+    setConfirmShiftUpdate(false);
 
     const incoming = Array.from(selectedList);
     setFiles((prev) => {
@@ -90,12 +93,16 @@ export default function CouncilSerePdfImportModal({
   function handleRemoveFile(index: number) {
     setFiles((prev) => prev.filter((_, idx) => idx !== index));
     setPreview(null);
+    setConfirmShiftUpdate(false);
     setErrorMsg(null);
   }
 
   function buildFormData(mode: "preview" | "apply"): FormData {
     const fd = new FormData();
     fd.append("mode", mode);
+    if (mode === "apply" && confirmShiftUpdate) {
+      fd.append("updateClassShift", "true");
+    }
     for (const file of files) {
       fd.append("files", file);
     }
@@ -425,6 +432,21 @@ export default function CouncilSerePdfImportModal({
               </div>
             )}
 
+            {preview.detectedShift && (
+              <label className="flex items-start gap-2.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 px-3.5 py-2.5 text-xs text-amber-950 dark:text-amber-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={confirmShiftUpdate}
+                  onChange={(e) => setConfirmShiftUpdate(e.target.checked)}
+                  className="mt-0.5 rounded border-amber-400"
+                />
+                <span>
+                  Atualizar turno da turma de <strong>{formatShiftLabel(preview.classGroupShift)}</strong>{" "}
+                  para <strong>{formatShiftLabel(preview.detectedShift)}</strong> conforme o relatório.
+                </span>
+              </label>
+            )}
+
             <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-3.5 py-2.5 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
               <span>
@@ -438,6 +460,7 @@ export default function CouncilSerePdfImportModal({
                 type="button"
                 onClick={() => {
                   setPreview(null);
+                  setConfirmShiftUpdate(false);
                   setErrorMsg(null);
                 }}
                 disabled={applying}

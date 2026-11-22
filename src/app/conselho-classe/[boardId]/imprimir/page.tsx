@@ -1,13 +1,13 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import {
   findCouncilBoardOwnershipRecord,
   getCouncilBoardDetail,
+  resolveAuthorizedSchoolForCouncil,
 } from "@/services/classCouncilService";
 import type {
   CouncilTrimesterNumber,
@@ -36,7 +36,7 @@ export default async function ConselhoPrintPage({
   }>;
 }) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user || session.user.active === false) {
     redirect("/login");
   }
 
@@ -47,9 +47,9 @@ export default async function ConselhoPrintPage({
   }
 
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
-  const currentSchool = await getCurrentSchool(sessionSchoolId);
+  const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
+  if (!currentSchool || !assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
     notFound();
   }
 

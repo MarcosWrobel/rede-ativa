@@ -487,6 +487,56 @@ export function formatCouncilGradePtBr(grade: number | null | undefined): string
   return rounded.toFixed(2).replace(".", ",");
 }
 
+/**
+ * Normaliza data civil (Date, ISO UTC 00:00 legado ou YYYY-MM-DD) para YYYY-MM-DD
+ * em America/Sao_Paulo sem deslocamento de -1 dia.
+ */
+export function formatCouncilCalendarDateYmd(val: string | Date | null | undefined): string {
+  if (!val) return "";
+  if (typeof val === "string") {
+    const clean = val.trim();
+    if (!clean) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+    if (/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/i.test(clean)) {
+      return clean.slice(0, 10);
+    }
+    const dt = new Date(clean);
+    if (Number.isNaN(dt.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(dt);
+  }
+
+  if (Number.isNaN(val.getTime())) return "";
+  if (
+    val.getUTCHours() === 0 &&
+    val.getUTCMinutes() === 0 &&
+    val.getUTCSeconds() === 0 &&
+    val.getUTCMilliseconds() === 0
+  ) {
+    return val.toISOString().slice(0, 10);
+  }
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(val);
+}
+
+/**
+ * Formata data civil como DD/MM/AAAA em America/Sao_Paulo sem deslocamento de fuso.
+ */
+export function formatCouncilCalendarDatePtBr(val: string | Date | null | undefined): string {
+  const ymd = formatCouncilCalendarDateYmd(val);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "";
+  const [y, m, d] = ymd.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 export function getStudentInitials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";

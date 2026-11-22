@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   isValidPdfBuffer,
@@ -14,6 +13,7 @@ import {
   canMutateSchoolCouncil,
   CouncilDomainError,
   findCouncilBoardOwnershipRecord,
+  resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
 } from "@/services/classCouncilService";
 import {
@@ -40,8 +40,8 @@ export async function POST(
       );
     }
 
-    const school = await getCurrentSchool(authCheck.schoolId);
-    if (!assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -155,6 +155,11 @@ export async function POST(
       });
     }
 
+    const confirmShiftUpdate =
+      String(formData.get("updateClassShift") || "")
+        .trim()
+        .toLowerCase() === "true";
+
     const actor = {
       id: authCheck.session.user?.id || undefined,
       name: authCheck.session.user?.name || "Equipe pedagógica",
@@ -167,6 +172,7 @@ export async function POST(
       batch,
       actor,
       req,
+      confirmShiftUpdate,
     });
 
     return NextResponse.json({

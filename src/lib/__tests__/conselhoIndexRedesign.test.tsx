@@ -173,6 +173,49 @@ describe("Redesenho do Conselho de Classe (Etapa 1)", () => {
         })
       );
     });
+
+    it("[B-01 & C-01] retorna 400 para JSON malformado e 403 para PEDAGOGA sem escola vinculada", async () => {
+      mockClassGroupFindUnique.mockResolvedValueOnce({
+        id: "cg-a",
+        schoolId: "school-a",
+        name: "9º Ano A",
+        shift: "MANHA",
+      });
+      const malformedRes = await patchClassShift(
+        new Request("http://localhost/api/classes/cg-a", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: "{ invalid-json",
+        }),
+        { params: Promise.resolve({ id: "cg-a" }) }
+      );
+      expect(malformedRes.status).toBe(400);
+
+      mockRequireAuth.mockResolvedValueOnce({
+        ok: true,
+        schoolId: null,
+        user: { id: "u-orphan", email: "orphan@escola.pr.gov.br", role: "PEDAGOGA" },
+        session: {
+          user: {
+            id: "u-orphan",
+            email: "orphan@escola.pr.gov.br",
+            role: "PEDAGOGA",
+            schoolId: null,
+            schools: [],
+          },
+        },
+      });
+      const orphanRes = await patchClassShift(
+        new Request("http://localhost/api/classes/cg-a", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shift: "NOITE" }),
+        }),
+        { params: Promise.resolve({ id: "cg-a" }) }
+      );
+      expect(orphanRes.status).toBe(403);
+      expect(mockClassGroupUpdate).not.toHaveBeenCalled();
+    });
   });
 
   describe("ConselhoIndexClient", () => {
@@ -292,6 +335,41 @@ describe("Redesenho do Conselho de Classe (Etapa 1)", () => {
       expect(html).toContain("Observações da Turma");
       expect(html).toContain("Reunião de Pós-Conselho");
       expect(html).not.toContain('data-testid="analysis-panel"');
+    });
+
+    it("habilita controle de ocultar selos de saúde também nas abas students, seating-map e pre-council", async () => {
+      const fsMod = await import("node:fs");
+      const pathMod = await import("node:path");
+      const { default: CouncilHeaderMetadataCard } = await vi.importActual<
+        typeof import("@/components/conselho/CouncilHeaderMetadataCard")
+      >("@/components/conselho/CouncilHeaderMetadataCard");
+
+      const turmaSource = fsMod.readFileSync(
+        pathMod.resolve(
+          process.cwd(),
+          "src/app/conselho-classe/[boardId]/ConselhoTurmaClient.tsx"
+        ),
+        "utf8"
+      );
+      expect(turmaSource).toContain('activeTab === "students"');
+      expect(turmaSource).toContain('activeTab === "seating-map"');
+      expect(turmaSource).toContain('activeTab === "pre-council"');
+
+      const headerHtml = renderToString(
+        React.createElement(CouncilHeaderMetadataCard, {
+          board: sampleBoard,
+          activeTrimester: 1,
+          hideSensitiveTags: false,
+          onToggleHideSensitiveTags: vi.fn(),
+          onOpenSubjectsModal: vi.fn(),
+          showConfigMenu: false,
+          showPrintButton: false,
+          showSensitiveToggleButton: true,
+          onBoardUpdated: vi.fn(),
+          onNotify: vi.fn(),
+        })
+      );
+      expect(headerHtml).toContain("Ocultar laudo e AEE");
     });
   });
 

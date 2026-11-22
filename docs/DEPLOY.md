@@ -46,9 +46,10 @@ A plataforma utiliza o Neon PostgreSQL Serverless em São Paulo (`sa-east-1`) pa
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Opcional | Credenciais Upstash Redis REST para rate limit distribuído em borda (fallback em PostgreSQL se ausente). |
 
 4. Ao acionar **Deploy**, o script `npm run build` executará automaticamente:
-   - Compactação da extensão universal `v1.6.5` (`scripts/package_extension.cjs` -> `public/extensao-rede-ativa.zip`, mantendo `public/extensao-leopoldina.zip` automaticamente no build como alias de retrocompatibilidade);
-   - Sincronização segura do schema Prisma com trava `--accept-data-loss=false` (`scripts/vercel_db_push.cjs`);
-   - Compilação otimizada Next.js 16 com Turbopack.
+   - Compactação da extensão universal `v1.7.0` (`scripts/package_extension.cjs` -> `public/extensao-rede-ativa.zip`, mantendo `public/extensao-leopoldina.zip` automaticamente no build como alias de retrocompatibilidade);
+   - Compilação otimizada Next.js 16 com Turbopack (conforme [`package.json`](../package.json), o build não executa `db push` automático).
+5. A evolução de banco de dados ocorre separadamente por migrations declarativas em `prisma/migrations/` utilizando `DIRECT_URL`:
+   - Valide o schema com `npx prisma validate`, inspecione o estado com `npx prisma migrate status` e aplique explicitamente com `npm run db:migrate:deploy`.
 
 ---
 
@@ -83,7 +84,7 @@ Com o `SUPERADMIN` autenticado, a adesão de novas redes municipais (SEMEC) e es
    - Configure o brasão oficial com pré-visualização A4 em tempo real, importe a carga inicial SERE e gere o token exclusivo da extensão (`syncTokenHash`).
 2. **Credenciamento de Gestores e Equipe (`/admin` ou `/equipe`)**:
    - Cadastre os e-mails institucionais dos secretários municipais (`GESTAO_SECRETARIA`), diretores (`GESTOR_ESCOLAR`) e equipe pedagógica (`PEDAGOGA`).
-3. **Instalação do Agente Universal de Sincronização (`v1.6.5` — Edição `PILOTO_INTEGRADA`)**:
+3. **Instalação do Agente Universal de Sincronização (`v1.7.0` — Edição `PILOTO_INTEGRADA`)**:
    - Os operadores baixam `/extensao-rede-ativa.zip` (sendo `/extensao-leopoldina.zip` mantido automaticamente no build como alias de retrocompatibilidade), configuram a chave individual da sua escola obtida em `/configuracoes/escola` e conectam seus navegadores ao Power BI, SERP e Janela Compacta do WhatsApp.
 
 ---

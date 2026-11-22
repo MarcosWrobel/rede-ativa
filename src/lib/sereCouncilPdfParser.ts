@@ -38,6 +38,7 @@ export interface ParsedSereCouncilStudentRow {
   normalizedName: string;
   grades: ParsedSereCouncilGradeEntry[];
   hasAnyGrade: boolean;
+  isAmbiguousInPdf?: boolean;
 }
 
 export interface ParsedSereCouncilPdfReport {
@@ -148,6 +149,15 @@ function toSmartPtBrTitleCase(raw: string): string {
     .join(" ");
 }
 
+function extractTrailingRomanNumeral(key: string): string | null {
+  const match = key.match(/\s+(I|II|III|IV|V)$/);
+  return match ? match[1] : null;
+}
+
+const SORTED_SERE_DISCIPLINE_ENTRIES = Object.entries(SERE_TRUNCATED_DISCIPLINE_MAP).sort(
+  (a, b) => b[0].length - a[0].length
+);
+
 /**
  * Converte cabeçalhos truncados do SERE (ex.: "EDUCACAO FIS", "LINGUA PORTU", "PROJETO DE V")
  * em nomes padronizados em português e gera `matchKey` estável para deduplicação.
@@ -167,10 +177,43 @@ export function normalizeSereTruncatedDisciplineName(raw: string): {
     return { name: direct, matchKey: toCouncilSubjectMatchKey(direct) };
   }
 
-  // Fallback por prefixo exato >= 10 chars quando SERE truncar com 11–13 caracteres
+  const asciiRoman = extractTrailingRomanNumeral(asciiKey);
+  if (asciiRoman) {
+    const baseAscii = asciiKey.slice(0, -(asciiRoman.length + 1)).trim();
+    const baseDirect = SERE_TRUNCATED_DISCIPLINE_MAP[baseAscii];
+    if (baseDirect) {
+      const displayName = `${baseDirect} ${asciiRoman}`;
+      return { name: displayName, matchKey: toCouncilSubjectMatchKey(displayName) };
+    }
+    if (baseAscii.length >= 10) {
+      for (const [dictKey, displayName] of SORTED_SERE_DISCIPLINE_ENTRIES) {
+        if (extractTrailingRomanNumeral(dictKey)) continue;
+        if (
+          dictKey.length >= 10 &&
+          ((baseAscii.startsWith(dictKey) && baseAscii[dictKey.length] !== " ") ||
+            (dictKey.startsWith(baseAscii) && dictKey[baseAscii.length] !== " "))
+        ) {
+          const withRoman = `${displayName} ${asciiRoman}`;
+          return { name: withRoman, matchKey: toCouncilSubjectMatchKey(withRoman) };
+        }
+      }
+    }
+  }
+
+  // Fallback por prefixo seguro >= 10 chars (sem colisão entre palavras/numerais romanos distintos)
   if (asciiKey.length >= 10) {
-    for (const [dictKey, displayName] of Object.entries(SERE_TRUNCATED_DISCIPLINE_MAP)) {
-      if (dictKey.length >= 10 && (asciiKey.startsWith(dictKey) || dictKey.startsWith(asciiKey))) {
+    for (const [dictKey, displayName] of SORTED_SERE_DISCIPLINE_ENTRIES) {
+      if (extractTrailingRomanNumeral(dictKey) !== asciiRoman) continue;
+      if (dictKey.length < 10) continue;
+      const matchesPrefix =
+        asciiKey.startsWith(dictKey) &&
+        asciiKey.length > dictKey.length &&
+        asciiKey[dictKey.length] !== " ";
+      const matchesTruncated =
+        dictKey.startsWith(asciiKey) &&
+        dictKey.length > asciiKey.length &&
+        dictKey[asciiKey.length] !== " ";
+      if (matchesPrefix || matchesTruncated) {
         return { name: displayName, matchKey: toCouncilSubjectMatchKey(displayName) };
       }
     }
@@ -630,6 +673,7 @@ export async function parseSereCouncilPdfBuffer(
 
   const subjectMap = new Map<string, ParsedSereCouncilSubject>();
   const studentMap = new Map<string, ParsedSereCouncilStudentRow>();
+  const ambiguousNames = new Set<string>();
   const warnings: string[] = [];
   let sawReportTitle = false;
 
@@ -648,17 +692,35 @@ export async function parseSereCouncilPdfBuffer(
       }
     }
 
+    const seenOnPage = new Set<string>();
     for (const stu of pageResult.students) {
+      if (seenOnPage.has(stu.normalizedName)) {
+        ambiguousNames.add(stu.normalizedName);
+      }
+      seenOnPage.add(stu.normalizedName);
+
       const existing = studentMap.get(stu.normalizedName);
       if (!existing) {
         studentMap.set(stu.normalizedName, {
           rowNumber: stu.rowNumber,
           rawName: stu.rawName,
           normalizedName: stu.normalizedName,
-          grades: [...stu.grades],
-          hasAnyGrade: stu.grades.length > 0,
+          grades: ambiguousNames.has(stu.normalizedName) ? [] : [...stu.grades],
+          hasAnyGrade: ambiguousNames.has(stu.normalizedName) ? false : stu.grades.length > 0,
         });
       } else {
+        // Números de chamada distintos com o mesmo nome dentro do mesmo PDF indicam homônimos
+        if (
+          existing.rowNumber !== null &&
+          stu.rowNumber !== null &&
+          existing.rowNumber !== stu.rowNumber
+        ) {
+          ambiguousNames.add(stu.normalizedName);
+          continue;
+        }
+        if (ambiguousNames.has(stu.normalizedName)) {
+          continue;
+        }
         // Mescla notas caso o estudante apareça em múltiplas páginas (ex.: quebra horizontal de disciplinas)
         const existingKeys = new Set(
           existing.grades.map((g) => `${g.subjectMatchKey}|${g.trimester}`)
@@ -675,6 +737,18 @@ export async function parseSereCouncilPdfBuffer(
     }
   }
 
+  for (const normName of ambiguousNames) {
+    const row = studentMap.get(normName);
+    if (row) {
+      row.isAmbiguousInPdf = true;
+      row.grades = [];
+      row.hasAnyGrade = false;
+      warnings.push(
+        `${fileName}: nome duplicado no PDF ("${row.rawName}") tratado como homônimo e ignorado para evitar mistura de notas.`
+      );
+    }
+  }
+
   if (subjectMap.size === 0 || studentMap.size === 0) {
     throw new Error(
       sawReportTitle
@@ -683,7 +757,9 @@ export async function parseSereCouncilPdfBuffer(
     );
   }
 
-  const studentsWithoutGrades = Array.from(studentMap.values()).filter((s) => !s.hasAnyGrade).length;
+  const studentsWithoutGrades = Array.from(studentMap.values()).filter(
+    (s) => !s.hasAnyGrade && !s.isAmbiguousInPdf
+  ).length;
   if (studentsWithoutGrades > 0) {
     warnings.push(
       `${fileName}: ${studentsWithoutGrades} estudante(s) sem notas lançadas (apenas "--", possivelmente transferidos).`
@@ -757,8 +833,9 @@ export function parseSereCouncilPdfText(
     });
   }
 
-  const students: ParsedSereCouncilStudentRow[] = [];
+  const rawStudents: ParsedSereCouncilStudentRow[] = [];
   const tokenRegex = /(?:\d{1,2}[.,]\d{1,2}|--)/g;
+  const occurrencesByNorm = new Map<string, number>();
 
   for (let i = tLineIdx + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -776,6 +853,8 @@ export function parseSereCouncilPdfText(
     const tokens = tokensStr.match(tokenRegex) || [];
     const normalizedName = normalizeStudentName(rawName);
     if (!normalizedName) continue;
+
+    occurrencesByNorm.set(normalizedName, (occurrencesByNorm.get(normalizedName) ?? 0) + 1);
 
     const grades: ParsedSereCouncilGradeEntry[] = [];
     const stride = tokens.length >= subjects.length * 4 ? 4 : 3;
@@ -796,13 +875,35 @@ export function parseSereCouncilPdfText(
       }
     }
 
-    students.push({
+    rawStudents.push({
       rowNumber,
       rawName,
       normalizedName,
       grades,
       hasAnyGrade: grades.length > 0,
     });
+  }
+
+  const warnings: string[] = [];
+  const students: ParsedSereCouncilStudentRow[] = [];
+  const seenAmbiguous = new Set<string>();
+  for (const stu of rawStudents) {
+    if ((occurrencesByNorm.get(stu.normalizedName) ?? 0) > 1) {
+      if (!seenAmbiguous.has(stu.normalizedName)) {
+        seenAmbiguous.add(stu.normalizedName);
+        students.push({
+          ...stu,
+          grades: [],
+          hasAnyGrade: false,
+          isAmbiguousInPdf: true,
+        });
+        warnings.push(
+          `${fileName}: nome duplicado no PDF ("${stu.rawName}") tratado como homônimo e ignorado para evitar mistura de notas.`
+        );
+      }
+    } else {
+      students.push(stu);
+    }
   }
 
   if (subjects.length === 0 || students.length === 0) {
@@ -813,7 +914,7 @@ export function parseSereCouncilPdfText(
     metadata,
     subjects,
     students,
-    warnings: [],
+    warnings,
   };
 }
 
@@ -827,12 +928,14 @@ export function mergeParsedSereCouncilReports(
   const warnings: string[] = [];
   const files: ParsedSereCouncilMetadata[] = [];
   const subjectMap = new Map<string, ParsedSereCouncilSubject>();
+  const ambiguousNames = new Set<string>();
   const studentMap = new Map<
     string,
     {
       rowNumber: number | null;
       rawName: string;
       normalizedName: string;
+      isAmbiguousInPdf: boolean;
       gradeByCell: Map<string, ParsedSereCouncilGradeEntry>;
     }
   >();
@@ -843,6 +946,19 @@ export function mergeParsedSereCouncilReports(
   for (const report of reports) {
     files.push(report.metadata);
     warnings.push(...report.warnings);
+
+    const reportCounts = new Map<string, number>();
+    for (const stu of report.students) {
+      reportCounts.set(stu.normalizedName, (reportCounts.get(stu.normalizedName) ?? 0) + 1);
+      if (stu.isAmbiguousInPdf) {
+        ambiguousNames.add(stu.normalizedName);
+      }
+    }
+    for (const [norm, count] of reportCounts.entries()) {
+      if (count > 1) {
+        ambiguousNames.add(norm);
+      }
+    }
 
     const sigParts = [
       report.metadata.grade?.toUpperCase().trim() || "",
@@ -874,9 +990,16 @@ export function mergeParsedSereCouncilReports(
           rowNumber: stu.rowNumber,
           rawName: stu.rawName,
           normalizedName: stu.normalizedName,
+          isAmbiguousInPdf: ambiguousNames.has(stu.normalizedName),
           gradeByCell: new Map(),
         };
         studentMap.set(stu.normalizedName, target);
+      }
+
+      if (ambiguousNames.has(stu.normalizedName)) {
+        target.isAmbiguousInPdf = true;
+        target.gradeByCell.clear();
+        continue;
       }
 
       for (const g of stu.grades) {
@@ -897,7 +1020,8 @@ export function mergeParsedSereCouncilReports(
   const students: ParsedSereCouncilStudentRow[] = [];
 
   for (const stu of studentMap.values()) {
-    const grades = Array.from(stu.gradeByCell.values());
+    const isAmbiguous = stu.isAmbiguousInPdf || ambiguousNames.has(stu.normalizedName);
+    const grades = isAmbiguous ? [] : Array.from(stu.gradeByCell.values());
     totalGrades += grades.length;
     belowAverageGrades += grades.filter((g) => g.grade < 6.0).length;
     students.push({
@@ -906,6 +1030,7 @@ export function mergeParsedSereCouncilReports(
       normalizedName: stu.normalizedName,
       grades,
       hasAnyGrade: grades.length > 0,
+      ...(isAmbiguous ? { isAmbiguousInPdf: true } : {}),
     });
   }
 

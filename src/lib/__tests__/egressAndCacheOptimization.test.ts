@@ -455,5 +455,83 @@ describe("Otimizações de Egress, Cache & Operações no Neon PostgreSQL", () =
       expect(hoisted.findSchoolBySyncToken).not.toHaveBeenCalled();
       expect(hoisted.checkRateLimit).not.toHaveBeenCalled();
     });
+
+    it("[C-01] exige schoolId explícito e ativo ao autenticar com SYNC_API_TOKEN global", async () => {
+      const prevSyncToken = process.env.SYNC_API_TOKEN;
+      process.env.SYNC_API_TOKEN = "global-sync-secret-123";
+      try {
+        hoisted.getRateLimitStatus.mockResolvedValue({
+          count: 0,
+          isBlocked: false,
+          retryAfterSeconds: 0,
+        });
+
+        const missingSchoolReq = new Request("http://localhost/api/frequencia/sync", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer global-sync-secret-123",
+            "x-forwarded-for": "127.0.0.10",
+          },
+        });
+        const missingRes = await authenticateExtensionSyncToken({
+          req: missingSchoolReq,
+          corsHeaders: {},
+          label: "Extensão Power BI",
+        });
+        expect(missingRes.ok).toBe(false);
+        if (!missingRes.ok) {
+          expect(missingRes.response.status).toBe(400);
+        }
+
+        hoisted.schoolFindUnique.mockResolvedValueOnce(null);
+        const unknownSchoolReq = new Request(
+          "http://localhost/api/frequencia/sync?schoolId=school-inexistente",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer global-sync-secret-123",
+              "x-forwarded-for": "127.0.0.11",
+            },
+          }
+        );
+        const unknownRes = await authenticateExtensionSyncToken({
+          req: unknownSchoolReq,
+          corsHeaders: {},
+          label: "Extensão Power BI",
+        });
+        expect(unknownRes.ok).toBe(false);
+        if (!unknownRes.ok) {
+          expect(unknownRes.response.status).toBe(404);
+        }
+
+        hoisted.schoolFindUnique.mockResolvedValueOnce({
+          id: "school-opt-1",
+          active: true,
+        });
+        const validGlobalReq = new Request("http://localhost/api/frequencia/sync", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer global-sync-secret-123",
+            "x-school-id": "school-opt-1",
+            "x-forwarded-for": "127.0.0.12",
+          },
+        });
+        const validRes = await authenticateExtensionSyncToken({
+          req: validGlobalReq,
+          corsHeaders: {},
+          label: "Extensão Power BI",
+        });
+        expect(validRes.ok).toBe(true);
+        if (validRes.ok) {
+          expect(validRes.targetSchoolId).toBe("school-opt-1");
+        }
+      } finally {
+        if (prevSyncToken === undefined) {
+          delete process.env.SYNC_API_TOKEN;
+        } else {
+          process.env.SYNC_API_TOKEN = prevSyncToken;
+        }
+      }
+    });
   });
 });

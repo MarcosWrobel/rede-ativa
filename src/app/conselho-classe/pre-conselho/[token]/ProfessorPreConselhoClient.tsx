@@ -11,17 +11,16 @@ import {
 } from "lucide-react";
 import {
   canConversationConfirmDigitalAck,
+  computePortalPollBackoffMs,
   DEFAULT_PRE_COUNCIL_ACK_STATEMENT,
   formatPreCouncilDatePtBr,
   formatPreCouncilDateTimePtBr,
+  TEACHER_PORTAL_POLL_BASE_MS,
 } from "@/components/conselho/preCouncilUtils";
 import type {
   CouncilTrimesterNumber,
   PreCouncilSynthesis,
 } from "@/components/conselho/types";
-import ProfessorConselhoClient, {
-  type TeacherPortalCouncilContext,
-} from "@/app/conselho-classe/professor/[token]/ProfessorConselhoClient";
 
 interface PreCouncilPortalConversation {
   id: string;
@@ -97,25 +96,29 @@ export default function ProfessorPreConselhoClient({
   const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [preCouncil, setPreCouncil] = useState<PreCouncilPortalContext | null>(null);
-  const [council, setCouncil] = useState<TeacherPortalCouncilContext | null>(null);
-  const [suggestedSubjectId, setSuggestedSubjectId] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string>("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [checkingRelease, setCheckingRelease] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(null);
   const [devEmail, setDevEmail] = useState("docente.teste@escola.pr.gov.br");
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
+  const pollInFlightRef = useRef(false);
+  const pollAbortRef = useRef<AbortController | null>(null);
+  const pollDelayMsRef = useRef<number>(TEACHER_PORTAL_POLL_BASE_MS);
 
   const authenticateWithCredential = useCallback(
     async (credential: string) => {
       setAuthError(null);
       setAuthLoading(true);
+      setSessionExpired(false);
       setSubmitFeedback(null);
+      pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
 
       try {
         const res = await fetch(
@@ -132,9 +135,7 @@ export default function ProfessorPreConselhoClient({
           verifiedEmail?: string;
           verifiedName?: string;
           suggestedConversationId?: string | null;
-          suggestedSubjectId?: string | null;
           preCouncil?: PreCouncilPortalContext;
-          council?: TeacherPortalCouncilContext | null;
         } = await res.json();
 
         if (!res.ok || !data.preCouncil || !data.verifiedEmail) {
@@ -147,8 +148,6 @@ export default function ProfessorPreConselhoClient({
         setVerifiedEmail(data.verifiedEmail);
         setVerifiedName(data.verifiedName || data.verifiedEmail);
         setPreCouncil(data.preCouncil);
-        setCouncil(data.council ?? null);
-        setSuggestedSubjectId(data.suggestedSubjectId ?? null);
         setSelectedConversationId(
           data.suggestedConversationId || data.preCouncil.conversations[0]?.id || ""
         );
@@ -158,8 +157,6 @@ export default function ProfessorPreConselhoClient({
         setVerifiedEmail(null);
         setVerifiedName(null);
         setPreCouncil(null);
-        setCouncil(null);
-        setSuggestedSubjectId(null);
       } finally {
         setAuthLoading(false);
       }
@@ -328,8 +325,15 @@ export default function ProfessorPreConselhoClient({
   }, [selectedConversation]);
 
   const refreshLegacyReleaseStatus = useCallback(
-    async (manual = false) => {
-      if (!googleIdToken || !preCouncil || council) return;
+    async (manual = false): Promise<"ok" | "expired" | "rate_limited" | "error" | "skipped"> => {
+      if (!googleIdToken || !preCouncil || sessionExpired) return "skipped";
+      if (!manual && pollInFlightRef.current) return "skipped";
+
+      pollAbortRef.current?.abort();
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+      pollInFlightRef.current = true;
+
       if (manual) {
         setCheckingRelease(true);
         setSubmitFeedback(null);
@@ -342,13 +346,41 @@ export default function ProfessorPreConselhoClient({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ googleIdToken }),
+            signal: controller.signal,
           }
         );
         const data: {
           success?: boolean;
           error?: string;
+          retryAfter?: number;
           preCouncil?: PreCouncilPortalContext;
-        } = await res.json();
+        } = await res.json().catch(() => ({}));
+
+        if (controller.signal.aborted) return "skipped";
+
+        if (res.status === 401) {
+          setSessionExpired(true);
+          setSubmitFeedback({
+            type: "error",
+            message: "Sessão Google expirada. Entre novamente com sua conta @escola.pr.gov.br.",
+          });
+          return "expired";
+        }
+
+        if (res.status === 429) {
+          pollDelayMsRef.current = computePortalPollBackoffMs({
+            retryAfterHeader: res.headers.get("retry-after"),
+            retryAfterBody: data.retryAfter,
+            currentDelayMs: pollDelayMsRef.current,
+          });
+          if (manual) {
+            setSubmitFeedback({
+              type: "error",
+              message: data.error || "Muitas consultas em sequência. Aguarde alguns instantes.",
+            });
+          }
+          return "rate_limited";
+        }
 
         if (!res.ok || !data.preCouncil) {
           if (manual) {
@@ -357,50 +389,80 @@ export default function ProfessorPreConselhoClient({
               message: data.error || "Não foi possível verificar a liberação.",
             });
           }
-          return;
+          return "error";
         }
 
+        pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
         setPreCouncil(data.preCouncil);
-      } catch {
+        return "ok";
+      } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") {
+          return "skipped";
+        }
         if (manual) {
           setSubmitFeedback({
             type: "error",
             message: "Falha de conexão ao verificar liberação.",
           });
         }
+        return "error";
       } finally {
+        pollInFlightRef.current = false;
+        if (pollAbortRef.current === controller) {
+          pollAbortRef.current = null;
+        }
         if (manual) {
           setCheckingRelease(false);
         }
       }
     },
-    [googleIdToken, preCouncil, council, token]
+    [googleIdToken, preCouncil, token, sessionExpired]
   );
 
   useEffect(() => {
     if (
       !googleIdToken ||
       !preCouncil ||
-      council ||
+      sessionExpired ||
       !selectedConversation ||
       isClaimedByOtherTeacher ||
       isAckByOtherTeacher ||
       isAckByCurrentTeacher ||
       canConfirmSelectedLegacy
     ) {
+      pollAbortRef.current?.abort();
       return;
     }
 
-    const timer = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      void refreshLegacyReleaseStatus(false);
-    }, 8000);
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearInterval(timer);
+    const scheduleNext = () => {
+      if (cancelled) return;
+      timerId = setTimeout(async () => {
+        if (cancelled) return;
+        if (typeof document !== "undefined" && document.hidden) {
+          scheduleNext();
+          return;
+        }
+        const outcome = await refreshLegacyReleaseStatus(false);
+        if (!cancelled && outcome !== "expired") {
+          scheduleNext();
+        }
+      }, pollDelayMsRef.current);
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+      pollAbortRef.current?.abort();
+    };
   }, [
     googleIdToken,
     preCouncil,
-    council,
+    sessionExpired,
     selectedConversation,
     isClaimedByOtherTeacher,
     isAckByOtherTeacher,
@@ -410,12 +472,14 @@ export default function ProfessorPreConselhoClient({
   ]);
 
   function handleLogoutTeacher() {
+    pollAbortRef.current?.abort();
+    pollInFlightRef.current = false;
+    pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+    setSessionExpired(false);
     setGoogleIdToken(null);
     setVerifiedEmail(null);
     setVerifiedName(null);
     setPreCouncil(null);
-    setCouncil(null);
-    setSuggestedSubjectId(null);
     setSelectedConversationId("");
     setSubmitFeedback(null);
     setAuthError(null);
@@ -512,32 +576,6 @@ export default function ProfessorPreConselhoClient({
           </div>
         </div>
       </div>
-    );
-  }
-
-  if (council && googleIdToken && verifiedEmail) {
-    return (
-      <ProfessorConselhoClient
-        token={token}
-        schoolName={schoolName}
-        classNameLabel={classNameLabel}
-        segmentLabel={segmentLabel}
-        shiftLabel={shiftLabel}
-        year={year}
-        trimester={trimester}
-        lockedSubjectName={lockedSubjectName}
-        googleClientId={googleClientId}
-        enableDevAuth={enableDevAuth}
-        portalApiBase="/api/conselho-classe/pre-council-portal"
-        preloadedSession={{
-          googleIdToken,
-          verifiedEmail,
-          verifiedName: verifiedName || verifiedEmail,
-          council,
-          suggestedSubjectId,
-          onLogout: handleLogoutTeacher,
-        }}
-      />
     );
   }
 
@@ -780,17 +818,30 @@ export default function ProfessorPreConselhoClient({
             !isAckByOtherTeacher && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-950">
                 <span>
-                  Aguardando a equipe pedagógica registrar a conversa ou os combinados para liberar a assinatura.
+                  {sessionExpired
+                    ? "Sua validação Google expirou. Clique em Trocar conta para entrar novamente com @escola.pr.gov.br."
+                    : "Aguardando a equipe pedagógica registrar a conversa ou os combinados para liberar a assinatura."}
                 </span>
-                <button
-                  type="button"
-                  disabled={checkingRelease}
-                  onClick={() => void refreshLegacyReleaseStatus(true)}
-                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 font-bold transition cursor-pointer shrink-0"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${checkingRelease ? "animate-spin" : ""}`} />
-                  <span>{checkingRelease ? "Verificando..." : "Verificar liberação"}</span>
-                </button>
+                {sessionExpired ? (
+                  <button
+                    type="button"
+                    onClick={handleLogoutTeacher}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-400 bg-white hover:bg-amber-100/70 text-amber-950 font-bold transition cursor-pointer shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Entrar novamente</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={checkingRelease}
+                    onClick={() => void refreshLegacyReleaseStatus(true)}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 font-bold transition cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${checkingRelease ? "animate-spin" : ""}`} />
+                    <span>{checkingRelease ? "Verificando..." : "Verificar liberação"}</span>
+                  </button>
+                )}
               </div>
             )
           )}
@@ -823,7 +874,9 @@ export default function ProfessorPreConselhoClient({
             type="button"
             disabled={
               confirming ||
+              sessionExpired ||
               !selectedConversation ||
+              !canConfirmSelectedLegacy ||
               isClaimedByOtherTeacher ||
               isAckByOtherTeacher
             }

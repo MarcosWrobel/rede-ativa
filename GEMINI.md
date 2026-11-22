@@ -67,7 +67,7 @@ Respeite o modelo de papéis e o isolamento de painéis:
 
 ## 7. Portão de Qualidade Obrigatório
 Antes de dar qualquer tarefa como concluída ou commitar:
-1. Execute `npm test` — garanta que **100% dos testes ativos passem (720 testes aprovados em 76 suítes Vitest — 79 arquivos no total com 3 `skipIf` de banco isolado e 4 casos de Redis/Postgres em `rateLimitDistributed.test.ts` —, incluindo `sereCouncilPdfImport.test.ts`, `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts` a `sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)**.
+1. Execute `npm test` — garanta que **100% dos testes ativos passem (86 arquivos de teste Vitest no total — com 4 `skipIf` de banco isolado e 4 casos de Redis/Postgres em `rateLimitDistributed.test.ts` —, incluindo as 9 suítes do Conselho de Classe: `classCouncilModule.test.ts`, `sereCouncilPdfImport.test.ts`, `councilAnalysisPanel.test.tsx`, `conselhoIndexRedesign.test.tsx`, `seatingMapOrganizer.test.tsx`, `councilTeacherPortalClient.test.tsx`, `councilSsrPages.test.tsx`, `councilUiAndRateLimit.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts`, além de `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts` a `sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`)**.
 2. Execute `npm run build` — garanta que o **TypeScript e o Turbopack compilem com zero erros**.
 3. Se adicionar novas funcionalidades ou regras de negócio, inclua os testes unitários/integrados correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -89,7 +89,7 @@ Antes de dar qualquer tarefa como concluída ou commitar:
 - **Herança de Políticas (Superadmin ➔ SEMEC ➔ Escolas):**
   - O `SUPERADMIN` define a versão atribuída no cadastro da SEMEC (`EducationNetwork`) ou de escolas individuais no painel `/admin/escolas`.
   - Quando os gestores da SEMEC (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
-- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.
+- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync`, `POST /api/serp/sync` e `POST /api/conselho-classe/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de sincronização via raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL` (mantendo `POST /api/conselho-classe/[boardId]/import-pdf` liberado em ambas as edições).
 
 ---
 
@@ -144,18 +144,18 @@ A interface deve seguir os princípios de alta clareza operacional, concisão co
 ---
 
 ## 11. Mapa Arquitetural e Contadores Vivos (SSOT)
-- **Contadores Verificados do Repositório:** **26 models Prisma** (`prisma/schema.prisma`), **33 páginas `page.tsx`** (`src/app/`), **62 Route Handlers `route.ts`** (`src/app/api/`), **10 módulos em `src/services/`**, **46 bibliotecas em `src/lib/`** e **76 suítes aprovadas (79 arquivos, 3 `skipIf` de banco isolado) / 720 testes Vitest aprovados (12 `skipIf`, 732 no total)** + **Extensão MV3 `v1.7.0`**.
+- **Contadores Verificados do Repositório:** **26 models Prisma** (`prisma/schema.prisma`), **35 páginas `page.tsx`** (`src/app/`), **67 Route Handlers `route.ts`** (`src/app/api/`), **10 arquivos TypeScript em `src/services/`** (`7` módulos raiz + `3` em `messaging/`), **48 bibliotecas em `src/lib/`** e **86 arquivos de teste Vitest** (incluindo as 9 suítes do Conselho de Classe: `classCouncilModule.test.ts`, `sereCouncilPdfImport.test.ts`, `councilAnalysisPanel.test.tsx`, `conselhoIndexRedesign.test.tsx`, `seatingMapOrganizer.test.tsx`, `councilTeacherPortalClient.test.tsx`, `councilSsrPages.test.tsx`, `councilUiAndRateLimit.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts`, além de `4` `skipIf` de banco isolado) + **Extensão MV3 `v1.7.0`**.
 - **Estrutura de Referência:**
   ```text
   src/
-  ├── app/                 # 33 páginas SSR + 62 Route Handlers REST (/api/*)
+  ├── app/                 # 35 páginas SSR + 67 Route Handlers REST (/api/*)
   │   ├── /                # Dispatcher por papel ou landing pública ImpactoClient
   │   ├── /login           # Login institucional Google OAuth / dev condicional
   │   ├── /impacto         # Redirecionamento permanente (permanentRedirect("/"))
   │   ├── /preview-landing # Demonstração e simulador interativo público
-  │   ├── /conselho-classe # Acompanhamento Trimestral de Turmas e Pós-Conselho (com importação PDF SERE)
-  │   └── ...              # Demais rotas operacionais, RBAC e portais QR (/validar, /assinar)
-  ├── services/            # 10 módulos de domínio, transações, sync e mensageria
+  │   ├── /conselho-classe # Painel de Turmas, Impressão A4 (5 modos em /[boardId]/imprimir) e Portais Docentes (/professor/[token], /pre-conselho/[token])
+  │   └── api/             # 67 Route Handlers (inclui PATCH /api/classes/[id], POST /api/conselho-classe/sync, /import-pdf, teacher-portal e pre-council-portal)
+  ├── services/            # 10 arquivos em src/services/ (domínio, transações, sync e mensageria)
   │   ├── ataParticipantService.ts
   │   ├── ataFinalizationService.ts
   │   ├── classCouncilService.ts
@@ -165,9 +165,17 @@ A interface deve seguir os princípios de alta clareza operacional, concisão co
   │   ├── messageDispatchService.ts
   │   └── messaging/       # Contratos e capacidade isolados (piloto Evolution MSG-*)
   ├── components/ata/editor/ # Subcomponentes acessíveis e tipagem estrita do editor de atas
-  ├── components/conselho/   # Subcomponentes modulares do Conselho de Classe e Pós-Conselho
-  └── lib/                 # 46 bibliotecas (segurança multi-tenant, criptografia SHA-256, IA e parsers)
+  ├── components/conselho/   # Subcomponentes modulares do Conselho de Classe, Mapa de Sala, Pós-Conselho e Prontuário 360º
+  └── lib/                 # 48 bibliotecas (segurança multi-tenant, criptografia SHA-256, IA, SERE PDF e tokens docentes)
   ```
 - **Pacote da Extensão MV3:** O build gera `/public/extensao-rede-ativa.zip` como artefato principal (mantendo `/public/extensao-leopoldina.zip` automaticamente como alias de retrocompatibilidade).
+
+---
+
+## 12. Diretrizes de UI/UX & Design System (`design-taste-frontend`)
+1. **Ativação Obrigatória:** Sempre que houver criação ou redesign de páginas (`page.tsx`) ou Client Components (`*Client.tsx`), carregar `.agents/skills/design-taste-frontend/SKILL.md` (aplicando diretrizes equivalentes a telas internas de aplicativo SaaS — *App Screens* — sem degradar para visual genérico de landing page; nota: na versão `tasteskill 2.5.1` instalada em `.agents/skills/design-taste-frontend/`, o diretório `references/` utiliza `system.md`, `layout-v4.md`, `sections.md`, `cards.md`, `copy.md`, `copy-voice.md` e `gate.md`, não havendo `app-screens.md` nem flag `--app`).
+2. **Preservação Arquitetural Inviolável:** Manter intactos os Server Components híbridos (`page.tsx` + `*Client.tsx`), o Prisma ORM, a guarda `assertTenantOwnership()`, a segregação entre edições `INSTITUCIONAL_ESSENCIAL` e `PILOTO_INTEGRADA` (`src/lib/platformEditions.ts`) e os atributos/layouts de impressão A4 (`@media print` em `/atas/[id]/imprimir`, `/atas/livro/[ano]`, `/alunos/[id]/dossie` e `/conselho-classe/[boardId]/imprimir`).
+3. **Quality Gate de Interface:** Nenhuma alteração de interface é considerada concluída sem passar pelos scripts de validação disponíveis em `.agents/skills/design-taste-frontend/scripts/` (`copy-lint.mjs`, `consistency.mjs` e `gate.mjs` — não há `lint.mjs` nesta versão da skill), além de `npm test` (Vitest) e `npm run build` (Next.js 16 + Turbopack).
+
 
 

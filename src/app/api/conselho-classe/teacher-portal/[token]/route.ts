@@ -56,6 +56,8 @@ export async function POST(
       boardId: tokenCheck.payload.boardId,
       trimester: tokenCheck.payload.trimester,
       lockedSubjectId: tokenCheck.payload.subjectId,
+      includeCgm: false,
+      verifiedEmail,
     });
 
     const matchedByEmail = council.subjects.find(
@@ -156,7 +158,7 @@ export async function PUT(
       await logAudit({
         action: "TEACHER_ACK_PRE_COUNCIL",
         entityType: "ClassCouncilTrimester",
-        entityId: tokenCheck.payload.boardId,
+        entityId: result.trimesterId,
         schoolId: tokenCheck.payload.schoolId,
         details: {
           boardId: tokenCheck.payload.boardId,
@@ -178,6 +180,8 @@ export async function PUT(
       boardId: tokenCheck.payload.boardId,
       trimester: tokenCheck.payload.trimester,
       lockedSubjectId: tokenCheck.payload.subjectId,
+      includeCgm: false,
+      verifiedEmail,
     });
 
     return NextResponse.json({

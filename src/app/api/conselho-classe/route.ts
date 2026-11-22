@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { logAudit } from "@/lib/audit";
 import { councilBoardUpsertSchema, formatZodError } from "@/lib/schemas";
 import { getCurrentBrasiliaYear } from "@/services/ataFinalizationService";
@@ -9,6 +8,7 @@ import {
   ensureOrUpsertCouncilBoard,
   listSchoolCouncilBoards,
   readSafeJsonBody,
+  resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
 } from "@/services/classCouncilService";
 
@@ -19,7 +19,14 @@ export async function GET(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const school = await getCurrentSchool(authCheck.schoolId);
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    if (!school) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { status: 403 }
+      );
+    }
+
     const rawYear = new URL(req.url).searchParams.get("year");
     const parsedYear = rawYear ? Number.parseInt(rawYear, 10) : getCurrentBrasiliaYear();
     const year =
@@ -45,7 +52,14 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const school = await getCurrentSchool(authCheck.schoolId);
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    if (!school) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { status: 403 }
+      );
+    }
+
     if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },

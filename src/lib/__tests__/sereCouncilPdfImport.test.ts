@@ -111,6 +111,16 @@ describe("sereCouncilPdfParser — extração posicional e consolidação multi-
     expect(normalizeSereTruncatedDisciplineName("LINGUA INGLE").name).toBe("Língua Inglesa");
     expect(normalizeSereTruncatedDisciplineName("GEOGRAFIA I").name).toBe("Geografia I");
     expect(normalizeSereTruncatedDisciplineName("ARTE II").name).toBe("Arte II");
+    expect(normalizeSereTruncatedDisciplineName("MATEMATICA III").name).toBe("Matemática III");
+    expect(normalizeSereTruncatedDisciplineName("QUIMICA III").name).toBe("Química III");
+    expect(normalizeSereTruncatedDisciplineName("MATEMATICA I").name).toBe("Matemática I");
+    expect(normalizeSereTruncatedDisciplineName("MATEMATICA II").name).toBe("Matemática II");
+    expect(normalizeSereTruncatedDisciplineName("MATEMATICA APLICADA").name).toBe(
+      "Matematica Aplicada"
+    );
+    expect(normalizeSereTruncatedDisciplineName("MATEMATICA APLICADA").name).not.toBe(
+      "Matemática"
+    );
   });
 
   it("valida magic bytes %PDF- rejeitando arquivos falsos", () => {
@@ -290,6 +300,102 @@ describe("sereCouncilPdfParser — extração posicional e consolidação multi-
     expect(parsed.students).toHaveLength(1);
     expect(parsed.students[0].grades).toHaveLength(6);
   });
+
+  it("detecta homônimo dentro do mesmo PDF antes de mesclar notas", () => {
+    const parsedHomonym = parseSereCouncilPdfText(
+      [
+        [
+          "Curso: ENSINO MEDIO FGB Seriação: 3ª Série Turno: Manhã Turma: 3",
+          "2026",
+          "Nro. Nome  MATEMATICA  LINGUA PORTU",
+          "T1 T2 T3 T1 T2 T3",
+          "1 JOAO SILVA 8.0 7.0 -- 6.5 7.0 --",
+          "2 JOAO SILVA 4.0 5.0 -- 3.5 4.0 --",
+          "3 MARIA SOUZA 9.0 8.5 -- 8.0 8.5 --",
+        ].join("\n"),
+      ],
+      "homonimo.pdf"
+    );
+
+    const joao = parsedHomonym.students.find((s) => s.rawName === "JOAO SILVA");
+    expect(joao).toBeDefined();
+    expect(joao?.isAmbiguousInPdf).toBe(true);
+    expect(joao?.grades).toHaveLength(0);
+    expect(parsedHomonym.warnings.some((w) => w.includes("homônimo"))).toBe(true);
+
+    const maria = parsedHomonym.students.find((s) => s.rawName === "MARIA SOUZA");
+    expect(maria?.isAmbiguousInPdf).toBeUndefined();
+    expect(maria?.grades).toHaveLength(4);
+  });
+
+  it("detecta homônimos entre páginas distintas em PDF binário real (jsPDF multipágina) e preserva mesclagem legítima", async () => {
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const yFromBottom = (pdfY: number) => pageHeight - pdfY;
+    const firstT1X = 164.2;
+    const tStep = 18.4;
+
+    const drawPage = (
+      subject: string,
+      rows: Array<{ nro: number; name: string; grades: [string, string, string] }>
+    ) => {
+      doc.setFontSize(8);
+      doc.text("GOVERNO DO ESTADO DO PARANÁ", 28.3, yFromBottom(573.5));
+      doc.text("DATA: 18/11/2026", 748, yFromBottom(573.5));
+      doc.text("2026", 802, yFromBottom(539.5));
+      doc.text("Curso: ENSINO MEDIO FGB", 28.3, yFromBottom(528.5));
+      doc.text("Seriação: 3ª Série", 247.7, yFromBottom(528.5));
+      doc.text("Turno: Manhã", 359.5, yFromBottom(528.5));
+      doc.text("Turma: 1", 783.5, yFromBottom(528.5));
+      doc.setFontSize(10);
+      doc.text("RELATÓRIO DE ACOMPANHAMENTO TRIMESTRAL", 318.3, yFromBottom(503));
+      doc.setFontSize(7);
+      doc.text("Disciplinas", 300, yFromBottom(475));
+      doc.text("Nro.", 31.1, yFromBottom(453.5));
+      doc.text("Nome", 48.4, yFromBottom(453.5));
+      doc.text(subject, firstT1X + 5, yFromBottom(458));
+      doc.text("T1", firstT1X, yFromBottom(445));
+      doc.text("T2", firstT1X + tStep, yFromBottom(445));
+      doc.text("T3", firstT1X + tStep * 2, yFromBottom(445));
+
+      let currentY = 432;
+      for (const row of rows) {
+        doc.text(String(row.nro), 31.4, yFromBottom(currentY));
+        doc.text(row.name, 48.4, yFromBottom(currentY));
+        doc.text(row.grades[0], firstT1X - 2, yFromBottom(currentY));
+        doc.text(row.grades[1], firstT1X + tStep - 2, yFromBottom(currentY));
+        doc.text(row.grades[2], firstT1X + tStep * 2 - 2, yFromBottom(currentY));
+        doc.text("--", firstT1X + tStep * 3 + 1.4, yFromBottom(currentY));
+        currentY -= 20;
+      }
+    };
+
+    drawPage("MATEMATICA", [
+      { nro: 1, name: "CARLOS EDUARDO LIMA", grades: ["7.5", "8.0", "--"] },
+      { nro: 3, name: "BEATRIZ MOURA", grades: ["8.5", "9.0", "--"] },
+    ]);
+    doc.addPage("a4", "landscape");
+    drawPage("FISICA", [
+      { nro: 2, name: "CARLOS EDUARDO LIMA", grades: ["4.0", "5.0", "--"] },
+      { nro: 3, name: "BEATRIZ MOURA", grades: ["7.0", "8.2", "--"] },
+    ]);
+
+    const pdfBytes = new Uint8Array(doc.output("arraybuffer"));
+    const parsed = await parseSereCouncilPdfBuffer(pdfBytes, "multipagina.pdf");
+    const merged = mergeParsedSereCouncilReports([parsed]);
+
+    const carlos = merged.students.find((s) => s.rawName === "CARLOS EDUARDO LIMA");
+    expect(carlos).toBeDefined();
+    expect(carlos?.isAmbiguousInPdf).toBe(true);
+    expect(carlos?.grades).toHaveLength(0);
+    expect(carlos?.hasAnyGrade).toBe(false);
+    expect(merged.warnings.some((w) => w.includes("homônimo"))).toBe(true);
+
+    const beatriz = merged.students.find((s) => s.rawName === "BEATRIZ MOURA");
+    expect(beatriz).toBeDefined();
+    expect(beatriz?.isAmbiguousInPdf).toBeUndefined();
+    expect(beatriz?.grades).toHaveLength(4);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -305,9 +411,12 @@ const {
   mockCanMutate,
   mockLogAudit,
   mockSubjectCreate,
+  mockSubjectFindUnique,
+  mockSubjectFindFirst,
+  mockSubjectUpdate,
   mockEvalUpsert,
   mockCardUpdate,
-  mockClassGroupUpdate,
+  mockClassGroupUpdateMany,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockRequireAuth: vi.fn(),
@@ -318,9 +427,12 @@ const {
   mockCanMutate: vi.fn(),
   mockLogAudit: vi.fn(),
   mockSubjectCreate: vi.fn(),
+  mockSubjectFindUnique: vi.fn(),
+  mockSubjectFindFirst: vi.fn(),
+  mockSubjectUpdate: vi.fn(),
   mockEvalUpsert: vi.fn(),
   mockCardUpdate: vi.fn(),
-  mockClassGroupUpdate: vi.fn(),
+  mockClassGroupUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
 }));
 
@@ -348,7 +460,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     classCouncilSubject: {
       create: mockSubjectCreate,
-      update: vi.fn(),
+      findUnique: mockSubjectFindUnique,
+      findFirst: mockSubjectFindFirst,
+      update: mockSubjectUpdate,
     },
     studentCouncilSubjectEntry: {
       upsert: mockEvalUpsert,
@@ -357,7 +471,7 @@ vi.mock("@/lib/prisma", () => ({
       update: mockCardUpdate,
     },
     classGroup: {
-      update: mockClassGroupUpdate,
+      updateMany: mockClassGroupUpdateMany,
     },
     $transaction: mockTransaction,
   },
@@ -375,9 +489,16 @@ vi.mock("@/services/classCouncilService", async (importOriginal) => {
 
 import { POST as importPdfPost } from "@/app/api/conselho-classe/[boardId]/import-pdf/route";
 
-function makePdfFormRequest(files: Array<{ name: string; bytes: Uint8Array }>, mode = "preview") {
+function makePdfFormRequest(
+  files: Array<{ name: string; bytes: Uint8Array }>,
+  mode = "preview",
+  updateClassShift = false
+) {
   const fd = new FormData();
   fd.append("mode", mode);
+  if (updateClassShift) {
+    fd.append("updateClassShift", "true");
+  }
   for (const f of files) {
     fd.append("files", new File([new Uint8Array(f.bytes)], f.name, { type: "application/pdf" }));
   }
@@ -479,6 +600,10 @@ describe("POST /api/conselho-classe/[boardId]/import-pdf — segurança, RBAC e 
       displayOrder: data.displayOrder,
     }));
     mockTransaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    mockSubjectFindUnique.mockResolvedValue(null);
+    mockSubjectFindFirst.mockResolvedValue(null);
+    mockSubjectUpdate.mockResolvedValue({});
+    mockClassGroupUpdateMany.mockResolvedValue({ count: 1 });
     mockEvalUpsert.mockResolvedValue({});
     mockCardUpdate.mockResolvedValue({});
   });
@@ -616,7 +741,7 @@ describe("POST /api/conselho-classe/[boardId]/import-pdf — segurança, RBAC e 
     expect(JSON.stringify(auditPayload.details)).not.toContain("ESTUDANTE SINTETICO ALPHA");
   });
 
-  it("atualiza automaticamente o turno da turma quando o PDF informa turno diferente", async () => {
+  it("exige confirmação explícita para atualizar turno da turma com escopo schoolId", async () => {
     const pdf = buildSyntheticSereCouncilPdf({
       course: "ENSINO MEDIO FGB",
       grade: "3ª Série",
@@ -632,19 +757,61 @@ describe("POST /api/conselho-classe/[boardId]/import-pdf — segurança, RBAC e 
     );
     expect(previewRes.status).toBe(200);
     const previewBody = await previewRes.json();
+    expect(previewBody.preview.detectedShift).toBe("TARDE");
     expect(previewBody.preview.warnings).toContain(
-      "Turno da turma será atualizado de Noite para Tarde conforme o PDF."
+      "O PDF informa turno Tarde, diferente do turno atual da turma (Noite). Confirme abaixo se deseja atualizar o turno da turma."
     );
 
+    const applyWithoutConfirm = await importPdfPost(
+      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "apply", false),
+      { params: Promise.resolve({ boardId: "board-1" }) }
+    );
+    expect(applyWithoutConfirm.status).toBe(200);
+    expect(mockClassGroupUpdateMany).not.toHaveBeenCalled();
+
     const applyRes = await importPdfPost(
-      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "apply"),
+      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "apply", true),
       { params: Promise.resolve({ boardId: "board-1" }) }
     );
     expect(applyRes.status).toBe(200);
-    expect(mockClassGroupUpdate).toHaveBeenCalledWith({
-      where: { id: "cg-1" },
+    expect(mockClassGroupUpdateMany).toHaveBeenCalledWith({
+      where: { id: "cg-1", schoolId: "school-a" },
       data: { shift: "TARDE" },
     });
+  });
+
+  it("recupera conflito P2002 na criação de disciplina e reativa componente existente", async () => {
+    const p2002Err = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    mockSubjectCreate.mockRejectedValueOnce(p2002Err);
+    mockSubjectFindUnique.mockResolvedValueOnce({
+      id: "sub-fis-existing",
+      name: "Física",
+      displayOrder: 3,
+      active: false,
+    });
+
+    const pdf = buildSyntheticSereCouncilPdf({
+      course: "ENSINO MEDIO FGB",
+      grade: "3ª Série",
+      shift: "Noite",
+      classCode: "3",
+      subjects: ["FISICA"],
+      rows: [{ nro: 1, nameLines: ["ESTUDANTE SINTETICO ALPHA"], grades: [["5.2", "6.8", "7.0"]] }],
+    });
+
+    const res = await importPdfPost(
+      makePdfFormRequest([{ name: "fgb.pdf", bytes: pdf }], "apply"),
+      { params: Promise.resolve({ boardId: "board-1" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.summary.subjectsCreated).toBe(0);
+    expect(body.summary.subjectsMatched).toBe(1);
+    expect(mockSubjectUpdate).toHaveBeenCalledWith({
+      where: { id: "sub-fis-existing" },
+      data: { active: true },
+    });
+    expect(mockEvalUpsert).toHaveBeenCalledTimes(3);
   });
 
   it("sanitiza erro interno HTTP 500 sem vazar detalhes de infraestrutura", async () => {

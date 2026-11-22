@@ -39,6 +39,7 @@ export interface CouncilSerePdfPreviewResult {
   boardId: string;
   classGroupName: string;
   classGroupShift: string;
+  detectedShift: string | null;
   year: number;
   files: ParsedSereCouncilMetadata[];
   subjects: CouncilSerePdfPreviewSubject[];
@@ -122,7 +123,7 @@ function buildClassMetadataWarnings(
     const resolvedPdfShift = resolveConsistentPdfShift(files);
     if (resolvedPdfShift && boardShift !== resolvedPdfShift) {
       warnings.push(
-        `Turno da turma será atualizado de ${formatShiftPtBr(classGroupShift)} para ${formatShiftPtBr(resolvedPdfShift)} conforme o PDF.`
+        `O PDF informa turno ${formatShiftPtBr(resolvedPdfShift)}, diferente do turno atual da turma (${formatShiftPtBr(classGroupShift)}). Confirme abaixo se deseja atualizar o turno da turma.`
       );
     }
   }
@@ -238,6 +239,20 @@ export async function previewCouncilSerePdfImport(params: {
       studentsWithoutGrades += 1;
     }
 
+    if (stu.isAmbiguousInPdf || matches.length > 1) {
+      studentsUnmatched += 1;
+      return {
+        rowNumber: stu.rowNumber,
+        pdfName: stu.rawName,
+        matchedStudentId: null,
+        matchedStudentName: null,
+        gradesCount: stu.grades.length,
+        belowAverageCount: belowCount,
+        hasAnyGrade: stu.hasAnyGrade,
+        status: "ambiguous",
+      };
+    }
+
     if (matches.length === 1) {
       const target = matches[0];
       studentsMatched += 1;
@@ -255,20 +270,6 @@ export async function previewCouncilSerePdfImport(params: {
         belowAverageCount: belowCount,
         hasAnyGrade: stu.hasAnyGrade,
         status: "matched",
-      };
-    }
-
-    if (matches.length > 1) {
-      studentsUnmatched += 1;
-      return {
-        rowNumber: stu.rowNumber,
-        pdfName: stu.rawName,
-        matchedStudentId: null,
-        matchedStudentName: null,
-        gradesCount: stu.grades.length,
-        belowAverageCount: belowCount,
-        hasAnyGrade: stu.hasAnyGrade,
-        status: "ambiguous",
       };
     }
 
@@ -313,10 +314,16 @@ export async function previewCouncilSerePdfImport(params: {
   const subjectsToCreate = subjects.filter((s) => s.status === "new").length;
   const trimestersTouched = Array.from(trimestersSet).sort((a, b) => a - b) as SereCouncilTrimesterKey[];
 
+  const resolvedPdfShift = resolveConsistentPdfShift(batch.files);
+  const currentBoardShift = normalizeShiftToken(board.classGroup.shift);
+  const detectedShift =
+    resolvedPdfShift && resolvedPdfShift !== currentBoardShift ? resolvedPdfShift : null;
+
   return {
     boardId: board.id,
     classGroupName: board.classGroup.name,
     classGroupShift: board.classGroup.shift,
+    detectedShift,
     year: board.year,
     files: batch.files,
     subjects,
@@ -352,11 +359,12 @@ export async function applyCouncilSerePdfImport(params: {
   batch: MergedSereCouncilPdfBatch;
   actor: AuditUser;
   req?: Request | Headers | null;
+  confirmShiftUpdate?: boolean;
 }): Promise<{
   board: Awaited<ReturnType<typeof getCouncilBoardDetail>>;
   summary: CouncilSerePdfApplySummary;
 }> {
-  const { boardId, schoolId, batch, actor, req } = params;
+  const { boardId, schoolId, batch, actor, req, confirmShiftUpdate = false } = params;
   const board = await getCouncilBoardDetail(schoolId, boardId);
   if (!board) {
     throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
@@ -396,22 +404,59 @@ export async function applyCouncilSerePdfImport(params: {
         displayOrder: existing.displayOrder,
       });
     } else {
-      const created = await prisma.classCouncilSubject.create({
-        data: {
-          schoolId,
-          boardId: board.id,
-          name: subj.name,
-          displayOrder: nextDisplayOrder++,
+      try {
+        const created = await prisma.classCouncilSubject.create({
+          data: {
+            schoolId,
+            boardId: board.id,
+            name: subj.name,
+            displayOrder: nextDisplayOrder++,
+            active: true,
+          },
+          select: { id: true, name: true, displayOrder: true },
+        });
+        subjectsCreated += 1;
+        resolvedSubjectByMatchKey.set(subj.matchKey, created);
+        subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
+          ...created,
           active: true,
-        },
-        select: { id: true, name: true, displayOrder: true },
-      });
-      subjectsCreated += 1;
-      resolvedSubjectByMatchKey.set(subj.matchKey, created);
-      subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
-        ...created,
-        active: true,
-      });
+        });
+      } catch (err) {
+        if ((err as { code?: string })?.code !== "P2002") {
+          throw err;
+        }
+        const conflicted =
+          (await prisma.classCouncilSubject.findUnique?.({
+            where: { boardId_name: { boardId: board.id, name: subj.name } },
+            select: { id: true, name: true, displayOrder: true, active: true },
+          })) ??
+          (await prisma.classCouncilSubject.findFirst?.({
+            where: { boardId: board.id, schoolId, name: subj.name },
+            select: { id: true, name: true, displayOrder: true, active: true },
+          })) ??
+          null;
+
+        if (!conflicted) {
+          throw err;
+        }
+        if (!conflicted.active) {
+          await prisma.classCouncilSubject.update({
+            where: { id: conflicted.id },
+            data: { active: true },
+          });
+        }
+        subjectsMatched += 1;
+        const resolvedConflicted = {
+          id: conflicted.id,
+          name: conflicted.name,
+          displayOrder: conflicted.displayOrder,
+        };
+        resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
+        subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
+          ...resolvedConflicted,
+          active: true,
+        });
+      }
     }
   }
 
@@ -464,7 +509,7 @@ export async function applyCouncilSerePdfImport(params: {
 
   for (const stu of batch.students) {
     const matches = studentLookup.get(stu.normalizedName) || [];
-    if (matches.length !== 1) {
+    if (stu.isAmbiguousInPdf || matches.length !== 1) {
       studentsUnmatched += 1;
       continue;
     }
@@ -575,17 +620,20 @@ export async function applyCouncilSerePdfImport(params: {
             ? card.trimester2BelowAvgJson
             : card.trimester3BelowAvgJson;
 
-      const existingManualItems = parseBelowAverageJson(existingJson).filter(
-        (item) => !item.subjectId
+      // Recompõe abaixo da média a partir de TODAS as avaliações ativas da ficha naquele trimestre
+      // (preserva disciplinas de outra matriz, itens manuais sem subjectId e registros da Ficha sem nota na matriz)
+      const trimesterEntries = Array.from(cardEvalMap.values()).filter(
+        (entry) => entry.trimester === tri && activeSubjectById.has(entry.subjectId)
+      );
+      const matrixGradedSubjectIds = new Set(
+        trimesterEntries
+          .filter((entry) => entry.grade !== null && entry.grade !== undefined)
+          .map((entry) => entry.subjectId)
       );
 
-      // Recompõe abaixo da média a partir de TODAS as avaliações ativas da ficha naquele trimestre
-      // (isso preserva automaticamente as disciplinas da 1ª matriz quando a 2ª matriz é importada separadamente)
-      const belowFromMatrix: CouncilBelowAvgItem[] = Array.from(cardEvalMap.values())
+      const belowFromMatrix: CouncilBelowAvgItem[] = trimesterEntries
         .filter(
           (entry) =>
-            entry.trimester === tri &&
-            activeSubjectById.has(entry.subjectId) &&
             entry.grade !== null &&
             entry.grade !== undefined &&
             entry.grade < 6.0
@@ -607,7 +655,16 @@ export async function applyCouncilSerePdfImport(params: {
           };
         });
 
-      const mergedList = [...belowFromMatrix, ...existingManualItems];
+      const belowFromMatrixSubjectIds = new Set(belowFromMatrix.map((item) => item.subjectId));
+
+      const preservedExistingItems = parseBelowAverageJson(existingJson).filter(
+        (item) =>
+          !item.subjectId ||
+          (!matrixGradedSubjectIds.has(item.subjectId) &&
+            !belowFromMatrixSubjectIds.has(item.subjectId))
+      );
+
+      const mergedList = [...belowFromMatrix, ...preservedExistingItems];
       const nextJson = mergedList.length > 0 ? JSON.stringify(mergedList) : null;
 
       if (nextJson !== (existingJson ?? null)) {
@@ -638,21 +695,26 @@ export async function applyCouncilSerePdfImport(params: {
   const resolvedPdfShift = resolveConsistentPdfShift(batch.files);
   const currentBoardShift = normalizeShiftToken(board.classGroup.shift);
   let shiftUpdatedTo: string | null = null;
-  if (
-    resolvedPdfShift &&
-    resolvedPdfShift !== currentBoardShift &&
-    typeof prisma.classGroup?.update === "function"
-  ) {
-    await prisma.classGroup.update({
-      where: { id: board.classGroup.id },
-      data: { shift: resolvedPdfShift },
-    });
-    shiftUpdatedTo = resolvedPdfShift;
+  if (confirmShiftUpdate && resolvedPdfShift && resolvedPdfShift !== currentBoardShift) {
+    if (typeof prisma.classGroup?.updateMany === "function") {
+      const updated = await prisma.classGroup.updateMany({
+        where: { id: board.classGroup.id, schoolId },
+        data: { shift: resolvedPdfShift },
+      });
+      if ((updated?.count ?? 1) > 0) {
+        shiftUpdatedTo = resolvedPdfShift;
+      }
+    }
   }
 
   const trimestersTouched = Array.from(trimestersSet).sort((a, b) => a - b) as SereCouncilTrimesterKey[];
   const warnings = [
     ...batch.warnings,
+    ...(!confirmShiftUpdate && resolvedPdfShift && resolvedPdfShift !== currentBoardShift
+      ? [
+          `O PDF informa turno ${formatShiftPtBr(resolvedPdfShift)}, diferente do turno atual da turma (${formatShiftPtBr(board.classGroup.shift)}). Nenhuma alteração automática de turno foi aplicada.`,
+        ]
+      : []),
     ...buildClassMetadataWarnings(
       batch.files,
       board.classGroup.name,

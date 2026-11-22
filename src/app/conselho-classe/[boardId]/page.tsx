@@ -1,12 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   getCouncilBoardDetail,
   listSchoolCouncilBoards,
+  resolveAuthorizedSchoolForCouncil,
 } from "@/services/classCouncilService";
 import type { CouncilTrimesterNumber } from "@/components/conselho/types";
 import ConselhoTurmaClient from "./ConselhoTurmaClient";
@@ -31,7 +31,7 @@ export default async function ConselhoTurmaPage({
   searchParams?: Promise<{ trimestre?: string }>;
 }) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user || session.user.active === false) {
     redirect("/login");
   }
 
@@ -46,9 +46,9 @@ export default async function ConselhoTurmaPage({
   }
 
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
-  const currentSchool = await getCurrentSchool(sessionSchoolId);
+  const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
+  if (!currentSchool || !assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
     notFound();
   }
 

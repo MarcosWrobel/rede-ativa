@@ -32,11 +32,13 @@ import {
 import {
   buildLiveAlertsFromDraft,
   clearTeacherPortalLocalDraft,
+  computePortalPollBackoffMs,
   DEFAULT_PRE_COUNCIL_ACK_STATEMENT,
   formatPreCouncilDatePtBr,
   formatPreCouncilDateTimePtBr,
   loadTeacherPortalLocalDraft,
   saveTeacherPortalLocalDraft,
+  TEACHER_PORTAL_POLL_BASE_MS,
 } from "@/components/conselho/preCouncilUtils";
 
 export interface TeacherPortalSubjectOption {
@@ -290,6 +292,7 @@ export default function ProfessorConselhoClient({
   const [authError, setAuthError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [checkingAckRelease, setCheckingAckRelease] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -301,12 +304,17 @@ export default function ProfessorConselhoClient({
   const [devEmail, setDevEmail] = useState("docente.teste@escola.pr.gov.br");
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
   const checkedDraftKeysRef = useRef<Set<string>>(new Set());
+  const pollInFlightRef = useRef(false);
+  const pollAbortRef = useRef<AbortController | null>(null);
+  const pollDelayMsRef = useRef<number>(TEACHER_PORTAL_POLL_BASE_MS);
 
   const authenticateWithCredential = useCallback(
     async (credential: string) => {
       setAuthError(null);
       setAuthLoading(true);
+      setSessionExpired(false);
       setSubmitFeedback(null);
+      pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
 
       try {
         const res = await fetch(`${portalApiBase}/${encodeURIComponent(token)}`, {
@@ -894,8 +902,15 @@ export default function ProfessorConselhoClient({
   }
 
   const refreshAckReleaseStatus = useCallback(
-    async (manual = false) => {
-      if (!googleIdToken || !council) return;
+    async (manual = false): Promise<"ok" | "expired" | "rate_limited" | "error" | "skipped"> => {
+      if (!googleIdToken || !council || sessionExpired) return "skipped";
+      if (!manual && pollInFlightRef.current) return "skipped";
+
+      pollAbortRef.current?.abort();
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+      pollInFlightRef.current = true;
+
       if (manual) {
         setCheckingAckRelease(true);
         setSubmitFeedback(null);
@@ -906,26 +921,52 @@ export default function ProfessorConselhoClient({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ googleIdToken }),
+          signal: controller.signal,
         });
         const data: {
           success?: boolean;
           error?: string;
+          retryAfter?: number;
           council?: TeacherPortalCouncilContext;
-        } = await res.json();
+        } = await res.json().catch(() => ({}));
+
+        if (controller.signal.aborted) return "skipped";
+
+        if (res.status === 401) {
+          setSessionExpired(true);
+          setSubmitFeedback({
+            type: "error",
+            message: "Sessão Google expirada. Entre novamente com sua conta @escola.pr.gov.br.",
+          });
+          return "expired";
+        }
+
+        if (res.status === 429) {
+          pollDelayMsRef.current = computePortalPollBackoffMs({
+            retryAfterHeader: res.headers.get("retry-after"),
+            retryAfterBody: data.retryAfter,
+            currentDelayMs: pollDelayMsRef.current,
+          });
+          if (manual) {
+            setSubmitFeedback({
+              type: "error",
+              message: data.error || "Muitas consultas em sequência. Aguarde alguns instantes.",
+            });
+          }
+          return "rate_limited";
+        }
 
         if (!res.ok || !data.council) {
           if (manual) {
             setSubmitFeedback({
               type: "error",
-              message:
-                res.status === 401
-                  ? "Sessão expirada. Entre novamente para atualizar."
-                  : data.error || "Não foi possível verificar a liberação agora.",
+              message: data.error || "Não foi possível verificar a liberação agora.",
             });
           }
-          return;
+          return "error";
         }
 
+        pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
         setCouncil(data.council);
         if (manual) {
           const updatedConv = data.council.preCouncil?.conversationsBySubjectId?.[selectedSubjectId];
@@ -941,45 +982,76 @@ export default function ProfessorConselhoClient({
             });
           }
         }
-      } catch {
+        return "ok";
+      } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") {
+          return "skipped";
+        }
         if (manual) {
           setSubmitFeedback({
             type: "error",
             message: "Falha de conexão ao verificar liberação.",
           });
         }
+        return "error";
       } finally {
+        pollInFlightRef.current = false;
+        if (pollAbortRef.current === controller) {
+          pollAbortRef.current = null;
+        }
         if (manual) {
           setCheckingAckRelease(false);
         }
       }
     },
-    [googleIdToken, council, portalApiBase, token, selectedSubjectId]
+    [googleIdToken, council, portalApiBase, token, selectedSubjectId, sessionExpired]
   );
 
-  // Atualiza automaticamente a Etapa 3 enquanto aguarda liberação da equipe pedagógica
+  // Atualiza automaticamente a Etapa 3 enquanto aguarda liberação da equipe pedagógica (com backoff e parada em 401)
   useEffect(() => {
     if (
       activeStep !== "ack" ||
       !googleIdToken ||
       !council ||
+      sessionExpired ||
       isClaimedByOtherTeacher ||
       selectedConv?.digitalAckEmail ||
       selectedConv?.canConfirmAck
     ) {
+      pollAbortRef.current?.abort();
       return;
     }
 
-    const timer = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      void refreshAckReleaseStatus(false);
-    }, 8000);
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearInterval(timer);
+    const scheduleNext = () => {
+      if (cancelled) return;
+      timerId = setTimeout(async () => {
+        if (cancelled) return;
+        if (typeof document !== "undefined" && document.hidden) {
+          scheduleNext();
+          return;
+        }
+        const outcome = await refreshAckReleaseStatus(false);
+        if (!cancelled && outcome !== "expired") {
+          scheduleNext();
+        }
+      }, pollDelayMsRef.current);
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+      pollAbortRef.current?.abort();
+    };
   }, [
     activeStep,
     googleIdToken,
     council,
+    sessionExpired,
     isClaimedByOtherTeacher,
     selectedConv?.digitalAckEmail,
     selectedConv?.canConfirmAck,
@@ -987,7 +1059,20 @@ export default function ProfessorConselhoClient({
   ]);
 
   function handleLogoutTeacher() {
+    pollAbortRef.current?.abort();
+    pollInFlightRef.current = false;
+    pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+
+    if (council && verifiedEmail) {
+      const subjectIds = new Set(council.subjects.map((s) => s.id));
+      if (selectedSubjectId) subjectIds.add(selectedSubjectId);
+      for (const subjId of subjectIds) {
+        clearTeacherPortalLocalDraft(council.boardId, council.trimester, subjId, verifiedEmail);
+      }
+    }
+
     checkedDraftKeysRef.current.clear();
+    setSessionExpired(false);
     setRestoredDraftInfo(null);
     setGoogleIdToken(null);
     setVerifiedEmail(null);
@@ -1822,17 +1907,34 @@ export default function ProfessorConselhoClient({
               ) : (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950">
                   <span>
-                    Você já pode clicar em <strong>Enviar matriz e observações</strong> no rodapé. A confirmação de ciência será liberada automaticamente assim que a equipe pedagógica registrar a conversa ou os combinados do componente.
+                    {sessionExpired
+                      ? "Sua validação Google expirou. Clique em Trocar conta para entrar novamente com @escola.pr.gov.br."
+                      : (
+                        <>
+                          Você já pode clicar em <strong>Enviar matriz e observações</strong> no rodapé. A confirmação de ciência será liberada automaticamente assim que a equipe pedagógica registrar a conversa ou os combinados do componente.
+                        </>
+                      )}
                   </span>
-                  <button
-                    type="button"
-                    disabled={checkingAckRelease}
-                    onClick={() => void refreshAckReleaseStatus(true)}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 text-xs font-bold transition cursor-pointer shrink-0"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${checkingAckRelease ? "animate-spin" : ""}`} />
-                    <span>{checkingAckRelease ? "Verificando..." : "Verificar liberação"}</span>
-                  </button>
+                  {sessionExpired ? (
+                    <button
+                      type="button"
+                      onClick={handleLogoutTeacher}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-amber-400 bg-white hover:bg-amber-100/70 text-amber-950 text-xs font-bold transition cursor-pointer shrink-0"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Entrar novamente</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={checkingAckRelease}
+                      onClick={() => void refreshAckReleaseStatus(true)}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/70 disabled:opacity-60 text-amber-950 text-xs font-bold transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${checkingAckRelease ? "animate-spin" : ""}`} />
+                      <span>{checkingAckRelease ? "Verificando..." : "Verificar liberação"}</span>
+                    </button>
+                  )}
                 </div>
               )}
             </section>

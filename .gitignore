@@ -27,3 +27,4 @@ storage/
 *.log
 *.tsbuildinfo
 
+.taste-skill/

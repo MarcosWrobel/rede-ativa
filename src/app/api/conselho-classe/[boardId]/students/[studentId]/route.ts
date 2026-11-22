@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { councilStudentCardUpdateSchema, formatZodError } from "@/lib/schemas";
@@ -8,6 +7,7 @@ import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   readSafeJsonBody,
+  resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
   updateStudentCouncilCard,
 } from "@/services/classCouncilService";
@@ -28,8 +28,8 @@ export async function PATCH(
       return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
     }
 
-    const school = await getCurrentSchool(authCheck.schoolId);
-    if (!assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }

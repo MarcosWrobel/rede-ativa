@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { findSchoolBySyncToken, safeCompareStrings } from "@/lib/syncToken";
 import {
   checkRateLimit,
@@ -86,17 +85,49 @@ export async function authenticateExtensionSyncToken(params: {
     };
   }
 
-  // 1.2 Token global administrativo
+  // 1.2 Token global administrativo — exige identificação explícita de escola ativa (sem fallback para Escola Piloto)
   if (configuredToken && safeCompareStrings(providedToken, configuredToken)) {
     const { searchParams } = new URL(req.url);
-    const reqSchoolId = searchParams.get("schoolId") || req.headers.get("x-school-id");
-    const resolved = await getCurrentSchool(reqSchoolId);
+    const reqSchoolId = (
+      searchParams.get("schoolId") ||
+      req.headers.get("x-school-id") ||
+      ""
+    ).trim();
+
+    if (!reqSchoolId) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error:
+              "Informe explicitamente o identificador da instituição escolar (schoolId ou cabeçalho x-school-id) ao utilizar o token global de sincronização.",
+          },
+          { status: 400, headers: corsHeaders }
+        ),
+      };
+    }
+
+    const targetSchool = await prisma.school.findUnique({
+      where: { id: reqSchoolId },
+      select: { id: true, name: true, active: true },
+    });
+
+    if (!targetSchool || targetSchool.active === false) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Instituição escolar informada não encontrada ou inativa." },
+          { status: 404, headers: corsHeaders }
+        ),
+      };
+    }
+
     if (rateStatus.count > 0) {
       await resetRateLimit(syncLockKey);
     }
     return {
       ok: true,
-      targetSchoolId: resolved.id,
+      targetSchoolId: targetSchool.id,
       userName: `${label} (API)`,
     };
   }

@@ -3,10 +3,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { formatZodError } from "@/lib/schemas";
-import { canMutateSchoolCouncil } from "@/services/classCouncilService";
+import {
+  canMutateSchoolCouncil,
+  readSafeJsonBody,
+  resolveAuthorizedSchoolForCouncil,
+  resolveCouncilHttpError,
+} from "@/services/classCouncilService";
 
 const updateClassShiftSchema = z.object({
   shift: z.enum(["MANHA", "TARDE", "NOITE", "INTEGRAL"]),
@@ -21,7 +25,16 @@ export async function PATCH(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await context.params;
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const currentSchool = await resolveAuthorizedSchoolForCouncil(
+      authCheck.session,
+      authCheck.schoolId
+    );
+    if (!currentSchool) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { status: 403 }
+      );
+    }
 
     const existing = await prisma.classGroup.findUnique({
       where: { id },
@@ -32,14 +45,16 @@ export async function PATCH(
       return NextResponse.json({ error: "Turma não encontrada." }, { status: 404 });
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, existing.schoolId)) {
+    const targetSchoolId = existing.schoolId || currentSchool.id;
+    if (!canMutateSchoolCouncil(authCheck.session, targetSchoolId)) {
       return NextResponse.json(
         { error: "Sem permissão para alterar o turno desta turma." },
         { status: 403 }
       );
     }
 
-    const parsed = updateClassShiftSchema.safeParse(await req.json());
+    const rawBody = await readSafeJsonBody(req);
+    const parsed = updateClassShiftSchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
@@ -67,7 +82,7 @@ export async function PATCH(
       action: "UPDATE_CLASS_GROUP_SHIFT",
       entityType: "ClassGroup",
       entityId: updated.id,
-      schoolId: existing.schoolId,
+      schoolId: targetSchoolId,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -86,6 +101,10 @@ export async function PATCH(
     });
   } catch (error) {
     console.error("Erro ao atualizar turno da turma:", error);
-    return NextResponse.json({ error: "Erro ao atualizar turno da turma." }, { status: 500 });
+    const { status } = resolveCouncilHttpError(error);
+    return NextResponse.json(
+      { error: status === 400 ? "Corpo da requisição JSON inválido." : "Erro ao atualizar turno da turma." },
+      { status }
+    );
   }
 }

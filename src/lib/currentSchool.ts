@@ -3,7 +3,7 @@ import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { withNeonWakeRetry } from "./neonWakeRetry";
 import { cookies } from "next/headers";
-import { checkIsSuperAdmin } from "./roles";
+import { checkIsSuperAdmin, type AuthSessionLike } from "./roles";
 import { PlatformEdition, resolveSchoolEdition } from "./platformEditions";
 import { resolveSchoolLogoProxyUrl } from "./schoolLogo";
 
@@ -230,6 +230,224 @@ const resolveFirstActiveSchoolInRequest = cache(async (): Promise<SchoolContext>
   return DEFAULT_SCHOOL;
 });
 
+async function resolveSchoolContextById(targetId: string): Promise<SchoolContext | null> {
+  const cleanId = targetId.trim();
+  if (!cleanId) return null;
+
+  if (isCacheEnabled()) {
+    return resolveSchoolByIdInRequest(cleanId);
+  }
+
+  try {
+    const school = await prisma.school.findUnique({
+      where: { id: cleanId },
+      select: SCHOOL_CONTEXT_SELECT,
+    });
+    if (school && school.active !== false) {
+      return mapSchoolRecordToContext(school);
+    }
+  } catch (err) {
+    console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
+  }
+  return null;
+}
+
+async function canSessionAccessCandidateSchool(params: {
+  candidateId: string;
+  isSuper: boolean;
+  role: string;
+  sessionSchoolId: string | null;
+  userSchools: NonNullable<AuthSessionLike["user"]>["schools"];
+  userNetworks: NonNullable<AuthSessionLike["user"]>["networks"];
+  userEmail?: string | null;
+}): Promise<boolean> {
+  const {
+    candidateId,
+    isSuper,
+    role,
+    sessionSchoolId,
+    userSchools = [],
+    userNetworks = [],
+    userEmail,
+  } = params;
+
+  if (isSuper) return true;
+  if (sessionSchoolId && sessionSchoolId === candidateId) return true;
+  if (
+    userSchools.some(
+      (s) =>
+        s.active !== false &&
+        ((s.id && s.id === candidateId) || (s.schoolId && s.schoolId === candidateId))
+    )
+  ) {
+    return true;
+  }
+
+  if (role === "GESTAO_SECRETARIA" && userNetworks.length > 0) {
+    try {
+      const candidateSchool = await prisma.school.findUnique({
+        where: { id: candidateId },
+        select: {
+          id: true,
+          active: true,
+          city: true,
+          network: true,
+          networkId: true,
+        },
+      });
+      if (candidateSchool && candidateSchool.active !== false) {
+        const allowedNetIds = userNetworks
+          .map((n) => n.networkId || n.id)
+          .filter((id): id is string => Boolean(id));
+        const allowedCities = userNetworks
+          .map((n) => (n.city || n.network?.city || "").toLowerCase().trim())
+          .filter(Boolean);
+
+        const matchesNetworkId =
+          Boolean(candidateSchool.networkId) &&
+          allowedNetIds.includes(candidateSchool.networkId!);
+        const matchesMunicipalCity =
+          (candidateSchool.network || "ESTADUAL") === "MUNICIPAL" &&
+          Boolean(candidateSchool.city) &&
+          allowedCities.includes(candidateSchool.city.toLowerCase().trim());
+
+        if (matchesNetworkId || matchesMunicipalCity) {
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn("[currentSchool] Aviso ao validar acesso de rede à escola:", err);
+    }
+  }
+
+  if (userEmail) {
+    console.warn(
+      `[currentSchool] Tentativa de cookie spoofing ignorada para escola ${candidateId} por usuário ${userEmail}`
+    );
+  }
+  return false;
+}
+
+/**
+ * Resolve estritamente a escola autorizada para a sessão autenticada sem fallback para a Escola Piloto
+ * quando a conta não possui vínculo escolar ou de rede válido.
+ */
+export async function getAuthorizedCurrentSchool(
+  session: AuthSessionLike | null | undefined,
+  explicitSchoolId?: string | null
+): Promise<SchoolContext | null> {
+  if (!session?.user || session.user.active === false) {
+    return null;
+  }
+
+  const isSuper = checkIsSuperAdmin(session);
+  const role = (session.user.role || "").toUpperCase();
+  const sessionSchoolId = session.user.schoolId ? String(session.user.schoolId).trim() : null;
+  const userSchools = session.user.schools || [];
+  const userNetworks = session.user.networks || [];
+  const userEmail = session.user.email ?? null;
+
+  let cookieVal: string | null = null;
+  try {
+    const cookieStore = await cookies();
+    cookieVal = cookieStore.get("active_school_id")?.value?.trim() || null;
+  } catch {
+    // Fora do ciclo de requisição HTTP (ex.: testes unitários)
+  }
+
+  if (cookieVal) {
+    const allowedCookie = await canSessionAccessCandidateSchool({
+      candidateId: cookieVal,
+      isSuper,
+      role,
+      sessionSchoolId,
+      userSchools,
+      userNetworks,
+      userEmail,
+    });
+    if (allowedCookie) {
+      const ctx = await resolveSchoolContextById(cookieVal);
+      if (ctx) return ctx;
+    }
+  }
+
+  const cleanExplicitId = explicitSchoolId?.trim() || null;
+  if (cleanExplicitId) {
+    const allowedExplicit = await canSessionAccessCandidateSchool({
+      candidateId: cleanExplicitId,
+      isSuper,
+      role,
+      sessionSchoolId,
+      userSchools,
+      userNetworks,
+      userEmail,
+    });
+    if (allowedExplicit) {
+      const ctx = await resolveSchoolContextById(cleanExplicitId);
+      if (ctx) return ctx;
+    }
+  }
+
+  if (sessionSchoolId) {
+    const ctx = await resolveSchoolContextById(sessionSchoolId);
+    if (ctx) return ctx;
+  }
+
+  for (const link of userSchools) {
+    if (link.active === false) continue;
+    const linkId = (link.schoolId || link.id || "").trim();
+    if (!linkId) continue;
+    const ctx = await resolveSchoolContextById(linkId);
+    if (ctx) return ctx;
+  }
+
+  if (role === "GESTAO_SECRETARIA" && userNetworks.length > 0) {
+    const allowedNetIds = userNetworks
+      .map((n) => n.networkId || n.id)
+      .filter((id): id is string => Boolean(id));
+    const allowedCities = userNetworks
+      .map((n) => (n.city || n.network?.city || "").trim())
+      .filter(Boolean);
+
+    const networkOrConditions: Array<Record<string, unknown>> = [];
+    if (allowedNetIds.length > 0) {
+      networkOrConditions.push({ networkId: { in: allowedNetIds } });
+    }
+    for (const city of allowedCities) {
+      networkOrConditions.push({
+        network: "MUNICIPAL",
+        city: { equals: city, mode: "insensitive" },
+      });
+    }
+
+    if (networkOrConditions.length > 0) {
+      try {
+        const firstNetworkSchool = await withNeonWakeRetry(() =>
+          prisma.school.findFirst({
+            where: {
+              active: true,
+              OR: networkOrConditions,
+            },
+            orderBy: { createdAt: "asc" },
+            select: SCHOOL_CONTEXT_SELECT,
+          })
+        );
+        if (firstNetworkSchool) {
+          return mapSchoolRecordToContext(firstNetworkSchool);
+        }
+      } catch (err) {
+        console.warn("[currentSchool] Aviso ao localizar escola autorizada da rede:", err);
+      }
+    }
+  }
+
+  if (isSuper) {
+    return await resolveFirstActiveSchoolInRequest();
+  }
+
+  return null;
+}
+
 /**
  * Obtém os dados da escola atual para emissão de documentos, cabeçalhos e disparos.
  * Prioridade:
@@ -262,60 +480,18 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
       }
 
       if (cookieVal && session?.user) {
-        const role = session.user.role;
-        const isSuper = checkIsSuperAdmin(session);
-        const userSchools = session.user.schools || [];
-        const userNetworks = session.user.networks || [];
-
-        let hasAccess =
-          isSuper ||
-          sessionSchoolId === cookieVal ||
-          userSchools.some(
-            (s) =>
-              (s.id && s.id === cookieVal) ||
-              (s.schoolId && s.schoolId === cookieVal)
-          );
-
-        // Gestor de Secretaria Municipal: acesso via cookie restrito às escolas de sua rede/município vinculado
-        if (!hasAccess && role === "GESTAO_SECRETARIA" && userNetworks.length > 0) {
-          const candidateSchool = await prisma.school.findUnique({
-            where: { id: cookieVal },
-            select: {
-              id: true,
-              active: true,
-              city: true,
-              network: true,
-              networkId: true,
-            },
-          });
-          if (candidateSchool && candidateSchool.active !== false) {
-            const allowedNetIds = userNetworks
-              .map((n) => n.networkId || n.id)
-              .filter((id): id is string => Boolean(id));
-            const allowedCities = userNetworks
-              .map((n) => (n.city || n.network?.city || "").toLowerCase().trim())
-              .filter(Boolean);
-
-            const matchesNetworkId =
-              Boolean(candidateSchool.networkId) &&
-              allowedNetIds.includes(candidateSchool.networkId!);
-            const matchesMunicipalCity =
-              (candidateSchool.network || "ESTADUAL") === "MUNICIPAL" &&
-              Boolean(candidateSchool.city) &&
-              allowedCities.includes(candidateSchool.city.toLowerCase().trim());
-
-            if (matchesNetworkId || matchesMunicipalCity) {
-              hasAccess = true;
-            }
-          }
-        }
+        const hasAccess = await canSessionAccessCandidateSchool({
+          candidateId: cookieVal,
+          isSuper: checkIsSuperAdmin(session),
+          role: (session.user.role || "").toUpperCase(),
+          sessionSchoolId,
+          userSchools: session.user.schools || [],
+          userNetworks: session.user.networks || [],
+          userEmail: session.user.email ?? null,
+        });
 
         if (hasAccess) {
           targetId = cookieVal;
-        } else {
-          console.warn(
-            `[currentSchool] Tentativa de cookie spoofing ignorada para escola ${cookieVal} por usuário ${session.user.email}`
-          );
         }
       }
     }
@@ -334,23 +510,7 @@ export async function getCurrentSchool(schoolId?: string | null): Promise<School
   }
 
   if (targetId) {
-    const resolved = isCacheEnabled()
-      ? await resolveSchoolByIdInRequest(targetId)
-      : await (async () => {
-          try {
-            const school = await prisma.school.findUnique({
-              where: { id: targetId! },
-              select: SCHOOL_CONTEXT_SELECT,
-            });
-            if (school && school.active !== false) {
-              return mapSchoolRecordToContext(school);
-            }
-          } catch (err) {
-            console.warn("[currentSchool] Aviso ao consultar escola por id:", err);
-          }
-          return null;
-        })();
-
+    const resolved = await resolveSchoolContextById(targetId);
     if (resolved) return resolved;
   }
 

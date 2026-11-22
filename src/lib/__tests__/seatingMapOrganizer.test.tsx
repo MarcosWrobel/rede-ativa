@@ -40,6 +40,40 @@ vi.mock("@/lib/currentSchool", async () => {
   return {
     ...actual,
     getCurrentSchool: vi.fn(async () => hoisted.currentSchool),
+    getAuthorizedCurrentSchool: vi.fn(async (session?: {
+      user?: {
+        role?: string;
+        active?: boolean;
+        schoolId?: string | null;
+        schools?: Array<{ schoolId?: string | null; active?: boolean }>;
+        networks?: string[];
+      };
+    } | null, explicitSchoolId?: string | null) => {
+      const user = session?.user;
+      const school = hoisted.currentSchool as (typeof hoisted.currentSchool & { networkId?: string | null }) | null;
+      if (!user || user.active === false || !school) return null;
+      if (explicitSchoolId && explicitSchoolId !== school.id && user.role !== "SUPERADMIN") {
+        // Defer cross-school explicit checks to callers unless school itself matches
+        const inSchools = Array.isArray(user.schools)
+          ? user.schools.some((s) => s?.schoolId === explicitSchoolId && s?.active !== false)
+          : false;
+        if (!inSchools && user.schoolId !== explicitSchoolId) return null;
+      }
+      if (user.role === "SUPERADMIN") return school;
+      if (user.schoolId && user.schoolId === school.id) return school;
+      if (Array.isArray(user.schools) && user.schools.some((s) => s?.schoolId === school.id && s?.active !== false)) {
+        return school;
+      }
+      if (
+        user.role === "GESTAO_SECRETARIA" &&
+        Array.isArray(user.networks) &&
+        user.networks.length > 0 &&
+        (!school.networkId || user.networks.includes(school.networkId))
+      ) {
+        return school;
+      }
+      return null;
+    }),
   };
 });
 

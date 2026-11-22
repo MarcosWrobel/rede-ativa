@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FilePlus2, Plus, Printer, Save, Trash2 } from "lucide-react";
 import {
   COUNCIL_ACTION_RESPONSIBLE_LABELS,
+  formatCouncilCalendarDateYmd,
   parsePostActionItemsList,
   type CouncilActionResponsible,
   type CouncilPostActionItem,
@@ -21,13 +22,6 @@ interface CouncilPostMeetingTabProps {
   readOnly?: boolean;
 }
 
-function toDateInputValue(val: string | Date | null | undefined): string {
-  if (!val) return "";
-  const dt = val instanceof Date ? val : new Date(val);
-  if (Number.isNaN(dt.getTime())) return "";
-  return dt.toISOString().slice(0, 10);
-}
-
 export default function CouncilPostMeetingTab({
   boardId,
   activeTrimester,
@@ -36,7 +30,9 @@ export default function CouncilPostMeetingTab({
   onNotify,
   readOnly = false,
 }: CouncilPostMeetingTabProps) {
-  const [heldAt, setHeldAt] = useState(toDateInputValue(trimesterRecord?.postCouncilHeldAt));
+  const [heldAt, setHeldAt] = useState(
+    formatCouncilCalendarDateYmd(trimesterRecord?.postCouncilHeldAt)
+  );
   const [advances, setAdvances] = useState(trimesterRecord?.postCouncilAdvances || "");
   const [whatWorked, setWhatWorked] = useState(trimesterRecord?.postCouncilWhatWorked || "");
   const [recognizedAttitudes, setRecognizedAttitudes] = useState(
@@ -68,7 +64,7 @@ export default function CouncilPostMeetingTab({
   const [generatingMinute, setGeneratingMinute] = useState(false);
 
   useEffect(() => {
-    setHeldAt(toDateInputValue(trimesterRecord?.postCouncilHeldAt));
+    setHeldAt(formatCouncilCalendarDateYmd(trimesterRecord?.postCouncilHeldAt));
     setAdvances(trimesterRecord?.postCouncilAdvances || "");
     setWhatWorked(trimesterRecord?.postCouncilWhatWorked || "");
     setRecognizedAttitudes(trimesterRecord?.postCouncilRecognizedAttitudes || "");
@@ -104,7 +100,7 @@ export default function CouncilPostMeetingTab({
     );
   }
 
-  async function savePostCouncilData(): Promise<boolean> {
+  async function savePostCouncilData(): Promise<CouncilTrimesterRecord | null> {
     const cleanActions = actionItems
       .map((item, idx) => ({
         number: idx + 1,
@@ -140,10 +136,10 @@ export default function CouncilPostMeetingTab({
 
     if (!res.ok || !data.trimesterRecord) {
       onNotify(data.error || "Não foi possível salvar a reunião de pós-conselho.", "error");
-      return false;
+      return null;
     }
     onTrimesterUpdated(data.trimesterRecord);
-    return true;
+    return data.trimesterRecord;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -151,8 +147,8 @@ export default function CouncilPostMeetingTab({
     if (readOnly) return;
     setSaving(true);
     try {
-      const ok = await savePostCouncilData();
-      if (ok) {
+      const saved = await savePostCouncilData();
+      if (saved) {
         onNotify("Pós-conselho salvo.", "success");
       }
     } catch {
@@ -166,8 +162,8 @@ export default function CouncilPostMeetingTab({
     if (readOnly) return;
     setGeneratingMinute(true);
     try {
-      const savedOk = await savePostCouncilData();
-      if (!savedOk) return;
+      const savedTrimester = await savePostCouncilData();
+      if (!savedTrimester) return;
 
       const res = await fetch(`/api/conselho-classe/${boardId}/generate-minute`, {
         method: "POST",
@@ -190,6 +186,7 @@ export default function CouncilPostMeetingTab({
       }
 
       setLinkedMinuteId(data.minute.id);
+      onTrimesterUpdated({ ...savedTrimester, linkedMinuteId: data.minute.id });
       onNotify("Minuta gerada no Livro de Atas.", "success");
     } catch {
       onNotify("Falha de conexão ao gerar minuta.", "error");

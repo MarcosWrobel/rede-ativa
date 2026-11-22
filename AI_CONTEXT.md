@@ -18,7 +18,7 @@ Seu trabalho deve seguir estritamente as diretrizes do arquivo AI_CONTEXT.md:
 3. A governança opera em 4 camadas hierárquicas: SUPERADMIN (/admin), GESTAO_SECRETARIA (/secretaria), GESTOR_ESCOLAR (/gestao) e PEDAGOGA (/busca-ativa). Flags restritas a perfis superiores (ex.: updateSchoolInfo: true) devem retornar explicitamente 403 Forbidden.
 4. O Livro de Atas Digital possui arquitetura probatória sob a Lei nº 14.063/2020 (documentação interna) com confirmação de autoria por PIN do servidor (PBKDF2-SHA512), selo SHA-256 canônico, traço vetorial, governança extemporânea (> 5 dias úteis), complementos encadeados ("Em tempo") e biometria móvel WebAuthn. Em toda interface visível (UI, `aria-label` e landing pages), cumpra a Seção 10 de GEMINI.md (sem "fé pública", "imutável", siglas como SHA-256 ou selos legais).
 5. Em conformidade com a LGPD e o ECA (Arts. 17 e 143), dados de menores NUNCA são enviados diretamente para a Google Gemini API sem prévia pseudonimização (aiPseudonymizer.ts).
-6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 79 arquivos: 76 aprovados e 3 `skipIf` de banco isolado pré-existentes; 720 testes aprovados e 12 ignorados (732 testes), incluindo `sereCouncilPdfImport.test.ts`, `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `treinamentoPage.test.tsx`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`) e que o build de produção compile sem erros (`npm run build`).
+6. Antes de finalizar qualquer alteração, garanta que os testes ativos passem (`npm test` — 86 arquivos de teste Vitest no total com 4 `skipIf` de banco isolado e casos condicionais em `rateLimitDistributed.test.ts`, incluindo as 9 suítes do Conselho de Classe: `classCouncilModule.test.ts`, `sereCouncilPdfImport.test.ts`, `councilAnalysisPanel.test.tsx`, `conselhoIndexRedesign.test.tsx`, `seatingMapOrganizer.test.tsx`, `councilTeacherPortalClient.test.tsx`, `councilSsrPages.test.tsx`, `councilUiAndRateLimit.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts`, além de `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `securityAndStabilityAuditV3.test.ts`, `teacherAtas.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `treinamentoPage.test.tsx`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`) e que o build de produção compile sem erros (`npm run build`).
 7. Preserve todos os comentários e docstrings existentes. Utilize o padrão Server Component (page.tsx) + Client Component (*Client.tsx), lembrando que Server Components dinâmicos devem validar auth() e assertTenantOwnership(...).
 ```
 
@@ -93,7 +93,7 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
 
 ### Fase 10: Hardening Referencial, Clean Architecture de Atas & Modularização UI (Novembro/2026)
 - **Contenção Residual & Limites Defensivos (`AUD-04`):** Sanitizados erros HTTP 500 residuais em `/api/ai/test-key`, `/api/ai/generate-template` e `/api/auth/[...nextauth]`, além de limites superiores em `sereBatchImportSchema` (500 turmas / 5.000 estudantes) e tamanho máximo de upload (`MAX_SERE_FILE_SIZE_BYTES = 10 MB`).
-- **Integridade Referencial & DDL Seguro (`AUD-06`):** Relações jurídicas (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student` e `PedagogicalMinute.school`) protegidas com `onDelete: Restrict` e bloqueio explícito de falha silenciosa em produção no `scripts/vercel_db_push.cjs`.
+- **Integridade Referencial & DDL Seguro (`AUD-06`):** Relações jurídicas (`MessageLog.student`, `PedagogicalMinuteStudent.student`, `AbsenceJustification.student`, `InPersonAttendance.student` e `PedagogicalMinute.school`) protegidas com `onDelete: Restrict`, com evolução do DDL controlada por migrations declarativas em `prisma/migrations/` aplicadas explicitamente via `npm run db:migrate:deploy` (sem push automático durante `npm run build`).
 - **`SAAS-ARCH-01` (`src/services/`):** Desacoplamento das regras de pareamento/provas de signatários (`ataParticipantService.ts`) e orquestração transacional da lavratura de atas (`ataFinalizationService.ts`), validados por [`ataServices.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/ataServices.test.ts).
 - **`SAAS-UI-01` (`src/components/ata/editor/`):** Eliminação de 100% das anotações `any` no [`AtaEditorModal.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/AtaEditorModal.tsx) via [`editor/types.ts`](file:///home/marcoswrobel/Documents/Registro/src/components/ata/editor/types.ts) e extração acessível de subcomponentes (`AtaExtemporaneousBanner.tsx`, `AtaAddendumsSection.tsx`, `AtaActionItemsSection.tsx`), validados em [`ataEditorSubcomponents.test.tsx`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/ataEditorSubcomponents.test.tsx).
 - **Blindagem de Sincronização Power BI, CSV & JSON (`10/11/2026`):** Resolvido erro HTTP 500 (`P2002` na chave global `@unique` `Student.cgm`) em `/api/frequencia/sync` e `/api/serp/sync` via [`syncCgmGuard.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/syncCgmGuard.ts) (`populateGlobalTakenCgms` + `applyPendingCgmUpdatesSafely`), otimizado enriquecimento cadastral via *delta check* e `UPDATE` SQL em lote, aprimorado o parser CSV/JSON RFC 4180 de 11 colunas em [`frequencyImportParser.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/frequencyImportParser.ts) e [`FaltasClient.tsx`](file:///home/marcoswrobel/Documents/Registro/src/app/faltas/FaltasClient.tsx), além da atualização do domínio padrão na extensão Chrome para `https://www.redeativa.app.br`, coberto por 12 testes em [`frequenciaSync.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/frequenciaSync.test.ts).
@@ -112,6 +112,12 @@ O projeto nasceu no **Colégio Estadual Leopoldina B. Pedroso** (Tibagi / Ponta 
   - **Eliminação de Trabalho Desnecessário no DOM:** Substituído o `uiHeartbeatTimer` permanente de `1000ms` por `rootContainerObserver` leve (`{ childList: true, subtree: false }` em `document.body`), restrito o `dispatchObserver` (`#app`) apenas à duração de despachos ativos (encerrando imediatamente em `SENT`, `FAILED_NO_WHATSAPP`, cancelamento ou expiração de 45s) e suprimidas reatribuições de estilo/texto sem mudança de valor em `syncCaptureButtonsState` e `createOrUpdateBanner` (-100% de mutações ociosas e em `selectionchange` inalterado nos benchmarks Chromium CDP).
   - **Confiabilidade Estrita de Despachos e Isolamento de Abas:** `evaluateSendConfirmation` exige simultaneamente conversa verificada (`isDispatchConversationVerified` priorizando `#main header`), surgimento de nova bolha de saída posicionada **abaixo** do histórico inicial (`Node.DOCUMENT_POSITION_FOLLOWING` + `WeakSet`/`Set` baseline) e compatibilidade textual com `intendedText` (impedindo falsos positivos por timeout, rolagem de histórico antigo, troca de conversa ou corrida A ➔ B). `background.js` vincula cada `DISPATCH` à aba autorizada (`targetTabId` / `UNAUTHORIZED_WHATSAPP_TAB`), preserva outras abas abertas do WhatsApp (sem `chrome.tabs.remove`) e evita redimensionar/reposicionar janelas popup na reutilização.
   - **Limpeza em Componentes React e Regressão Automatizada:** Corrigidos a remoção do listener `window.addEventListener("message", ...)` no unmount de [`src/components/whatsapp/WhatsAppDispatchToggle.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/whatsapp/WhatsAppDispatchToggle.tsx) e o cancelamento do `toastTimer` + exigência de `logId` correspondente em [`src/app/busca-ativa/BuscaAtivaClient.tsx`](file:///home/marcoswrobel/Documents/Registro/src/app/busca-ativa/BuscaAtivaClient.tsx), validados por 13 testes em [`src/lib/__tests__/whatsappExtensionReliability.test.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/__tests__/whatsappExtensionReliability.test.ts) (`npm test`: **63 arquivos aprovados e 3 `skipIf` (66 arquivos) / 515 testes aprovados e 12 ignorados (527 testes)**; `npm run build` com **0 erros**).
+
+### Fase 11: Módulo Conselho de Classe, Pós-Conselho, Portais Docentes & Remediação Pós-Auditoria (Novembro/2026)
+- **Modelagem Multi-Tenant & Cadeia de Migrations:** Introdução dos 5 modelos do Conselho de Classe (`ClassCouncilBoard`, `ClassCouncilSubject`, `ClassCouncilTrimester`, `StudentCouncilCard`, `StudentCouncilSubjectEntry`) com `onDelete: Restrict` nas entidades-pai (`School`, `ClassGroup`, `Student`) e cadeia idempotente em `prisma/migrations/` (`20261118120000_class_council_module` ➔ `20261119113000_class_council_seating_map_layout` ➔ `20261119140000_class_council_pre_council`).
+- **Operação Pedagógica, Impressão A4 & Integrações:** Implementados o painel de turmas em `/conselho-classe` (`PATCH /api/classes/[id]`), ambiente por turma `/conselho-classe/[boardId]` (Matriz `1..5`, Mapa de Sala com histórico versionado, Pré-Conselho/Pós-Conselho com geração de minuta vinculada no Livro de Atas, Ficha do Estudante e Prontuário 360º via [`CouncilStudent360Section.tsx`](file:///home/marcoswrobel/Documents/Registro/src/components/conselho/CouncilStudent360Section.tsx)), emissão A4 em 5 modos em `/conselho-classe/[boardId]/imprimir` (com `?hideHealthTags=1`), portais externos assinados com HMAC (`/conselho-classe/professor/[token]` e `/conselho-classe/pre-conselho/[token]` autenticados com `@escola.pr.gov.br`), importação multi-PDF do SERE (`POST /api/conselho-classe/[boardId]/import-pdf`, liberada em ambas as edições) e sincronização do BI Aprendizagem (`POST /api/conselho-classe/sync`, exclusiva da edição `PILOTO_INTEGRADA` via Extensão Chrome MV3 `v1.7.0`).
+- **Remediação de Segurança, Transações & Consistência:** Blindagem fail-closed de `canMutateSchoolCouncil` e rotas do módulo (sem fallback silencioso para a Escola Piloto), exigência de `schoolId` explícito para token global em [`extensionSyncAuth.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/extensionSyncAuth.ts), isolamento estrito entre `teacher-portal` (sem exposição de CGM ou pareceres/selos de saúde sensíveis) e `pre-council-portal` (`canConversationConfirmDigitalAck`), verificação fail-closed de `aud` em [`escolaGoogleVerify.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/escolaGoogleVerify.ts), transações atômicas na matriz e portal docente, detecção de homônimos e confirmação explícita de atualização de turno no parser SERE PDF, normalização de datas em `America/Sao_Paulo` e escala `0..10` com preservação de itens manuais na Ficha.
+- **Cobertura Consolidada:** Inclusão das 9 suítes dedicadas (`classCouncilModule.test.ts`, `sereCouncilPdfImport.test.ts`, `councilAnalysisPanel.test.tsx`, `conselhoIndexRedesign.test.tsx`, `seatingMapOrganizer.test.tsx`, `councilTeacherPortalClient.test.tsx`, `councilSsrPages.test.tsx`, `councilUiAndRateLimit.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts`, com apoio do harness `src/lib/__tests__/helpers/reactNodeHarness.ts`), consolidando **86 arquivos de teste Vitest** no repositório (`82` ativos aprovados + `4` `skipIf` de banco isolado, `778` testes aprovados e `16` condicionais ignorados de `794` testes, `0` erros no `npx prisma validate`, `npx tsc --noEmit` e `npm run build`).
 
 ---
 
@@ -160,7 +166,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ### Regra 6: Portão de Qualidade: Testes e Build Verificados
 - Antes de concluir qualquer tarefa ou gerar commit:
-  1. Execute `npm test` — todos os testes ativos da suíte Vitest devem passar sem falhas (estado vigente: **75 arquivos aprovados | 3 ignorados por `skipIf` sem banco isolado local (78 arquivos)** e **703 testes aprovados | 12 ignorados (715 testes)**, incluindo `classCouncilModule.test.ts`, `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`; `ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx` e `faltasPageReal.test.tsx` usam `describe.skipIf(!hasIsolatedDb)` e `rateLimitDistributed.test.ts` possui 4 casos opcionais condicionados a PostgreSQL/Redis).
+  1. Execute `npm test` — todos os testes ativos da suíte Vitest devem passar sem falhas (**86 arquivos de teste no total**, incluindo as 9 suítes do Conselho de Classe: `classCouncilModule.test.ts`, `sereCouncilPdfImport.test.ts`, `councilAnalysisPanel.test.tsx`, `conselhoIndexRedesign.test.tsx`, `seatingMapOrganizer.test.tsx`, `councilTeacherPortalClient.test.tsx`, `councilSsrPages.test.tsx`, `councilUiAndRateLimit.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts`, além de `adversarialQa.test.ts`, `messageReplySecurity.test.ts`, `whatsappReplyCaptureModal.test.tsx`, `whatsappExtensionReliability.test.ts`, `platformEditions.test.ts`, `atasArchiveUsability.test.ts`, `ataServices.test.ts`, `ataEditorSubcomponents.test.tsx`, `qrPollController.test.ts`, `ataQrPollStatusBanner.test.tsx`, `ataSignatureReopenAndExpiry.test.tsx`, `dbWakeAndPollOptimization.test.ts`, `frequenciaSync.test.ts`, `egressAndCacheOptimization.test.ts`, `sectorBRemediation.test.ts`..`sectorERemediation.test.ts` e `systemicIntegrationRemediation.test.ts`; `ataConcurrencyReal.test.ts`, `buscaAtivaPageReal.test.tsx`, `faltasPageReal.test.tsx` e `councilMigrationsAndConcurrencyReal.test.ts` usam `describe.skipIf(!hasIsolatedDb)` e `rateLimitDistributed.test.ts` possui 4 casos opcionais condicionados a PostgreSQL/Redis).
   2. Execute `npm run build` — **o TypeScript e o Turbopack devem compilar com 0 erros**.
 - Se criar uma nova funcionalidade de negócio ou segurança, adicione os testes correspondentes em `src/lib/__tests__/` ou `src/app/api/__tests__/`.
 
@@ -182,7 +188,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 - **Herança de Políticas (Superadmin ➔ SEMEC ➔ Escolas):**
   - O `SUPERADMIN` define a versão no cadastro da SEMEC (`EducationNetwork`) ou de escolas individuais no painel `/admin/escolas`.
   - Quando os gestores da SEMEC (`GESTAO_SECRETARIA`) cadastram novas escolas municipais vinculadas à sua rede, as escolas **herdam automaticamente** a versão definida pelo Superadmin para aquela SEMEC.
-- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync` e `POST /api/serp/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL`.
+- **Blindagem Dupla de Backend:** As rotas `POST /api/frequencia/sync`, `POST /api/serp/sync` e `POST /api/conselho-classe/sync` avaliam a versão do tenant de destino (`currentSchool.edition`) e rejeitam qualquer tentativa de sincronização via raspagem com `403 Forbidden` quando o tenant estiver configurado na edição `INSTITUCIONAL_ESSENCIAL` (mantendo `POST /api/conselho-classe/[boardId]/import-pdf` liberado em ambas as edições).
 
 ---
 
@@ -203,7 +209,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 
 ```text
 ├── src/
-│   ├── app/                        # 33 Páginas SSR + 61 Route Handlers (Next.js 16 App Router)
+│   ├── app/                        # 35 Páginas SSR + 67 Route Handlers (Next.js 16 App Router)
 │   │   ├── login/                  # Login institucional Google OAuth e login dev condicional
 │   │   ├── impacto/                # Redirecionamento permanente para landing pública na raiz (/)
 │   │   ├── preview-landing/        # Pré-visualização da landing pública com PedagogicalFlowSimulator
@@ -215,7 +221,7 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── onboarding/             # Wizard de adesão em 4 etapas para novas escolas/redes
 │   │   ├── busca-ativa/            # Fila inteligente de disparos WhatsApp
 │   │   ├── atas/                   # Livro Oficial Digital de Atas, Impressão A4 e Livro Anual
-│   │   ├── conselho-classe/        # Acompanhamento Trimestral de Turmas, Conselho de Classe e Pós-Conselho
+│   │   ├── conselho-classe/        # Painel de Turmas, Impressão A4 (5 modos em /[boardId]/imprimir) e Portais Docentes externos (/professor/[token] e /pre-conselho/[token])
 │   │   ├── encaminhamentos/        # Gestão de prazos e alertas de combinados das atas
 │   │   ├── alunos/                 # Base cadastral, Importação SERE, Prontuário 360º e Dossiê
 │   │   ├── faltas/                 # Monitoramento de infrequência, SERP e queda abrupta
@@ -229,12 +235,13 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── auditoria/              # Trilha de auditoria imutável escopada por escola
 │   │   ├── validar/ata/[code]/     # Portal público LGPD de validação cega de atas
 │   │   ├── assinar/ata/[token]/    # Portal móvel de assinatura com biometria e traço vetorial
-│   │   └── api/                    # 61 Route Handlers REST serverless
-│   ├── services/                   # Camada de serviços de domínio, sync e mensageria (9 módulos)
+│   │   └── api/                    # 67 Route Handlers REST serverless (inclui PATCH /api/classes/[id], POST /api/conselho-classe/sync, /api/conselho-classe/[boardId]/*, teacher-portal e pre-council-portal)
+│   ├── services/                   # Camada de serviços de domínio, sync e mensageria (10 arquivos TS: 7 serviços + 3 em messaging/)
 │   │   ├── ataParticipantService.ts# Sanitização de rascunhos e pareamento anti-forja de signatários
 │   │   ├── ataFinalizationService.ts# Cálculo de dias úteis BRT, hash SHA-256 e lavratura atômica
-│   │   ├── classCouncilService.ts  # Orquestração trimestral, matriz de descritivos, clonagem curricular e Pós-Conselho
+│   │   ├── classCouncilService.ts  # Orquestração trimestral, matriz de descritivos, mapa de sala, Pré/Pós-Conselho e portais docentes
 │   │   ├── classCouncilBiSyncService.ts # Ingestão Power BI Aprendizagem (ESCOLA, TURMA, MAPA -> Conselho)
+│   │   ├── classCouncilSerePdfService.ts # Prévia e mesclagem não-destrutiva multi-PDF do SERE no Conselho de Classe
 │   │   ├── frequencySyncService.ts # Orquestração de importação e sincronização de frequência
 │   │   ├── messageDispatchService.ts# Despacho auditado de mensagens e hash bipartido
 │   │   └── messaging/              # Contratos e capacidade isolados (piloto Evolution MSG-*)
@@ -242,19 +249,21 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── PedagogicalFlowSimulator.tsx # Simulador 2D interativo em App Shell (âncoras DOM data-sim-target, cadência 3 tempos e Item 10)
 │   │   ├── landing/                # LandingPageClient (flag ENABLE_LEGACY_WORKFLOW_PANELS = false) e painéis legados preservados
 │   │   ├── ata/                    # Editor widescreen (editor/* tipado, qrPollController, hook, banner QR, signatureState, signLinkValidity), PIN modal, scan físico, canvas
-│   │   ├── conselho/               # Subcomponentes modulares do Conselho de Classe, Matriz 1..5, Pós-Conselho e Prontuário 360º
+│   │   ├── conselho/               # Subcomponentes modulares do Conselho de Classe, Matriz 1..5, Mapa de Sala, Pré/Pós-Conselho e Prontuário 360º
 │   │   └── whatsapp/               # Modal de retorno assistido e alternador de Janela Dedicada Compacta
-│   ├── lib/                        # Regras de negócio, segurança, criptografia e integrações
+│   ├── lib/                        # 48 bibliotecas (regras de negócio, segurança, criptografia e parsers)
 │   │   ├── auth.ts / auth.config.ts# Configuração NextAuth v5 (Edge + Prisma)
 │   │   ├── roles.ts / permissions.ts# Hierarquia RBAC 4-Tier e guardas de rota
-│   │   ├── currentSchool.ts        # Resolvedor contextual multi-tenant anti-spoofing
+│   │   ├── currentSchool.ts        # Resolvedor contextual multi-tenant anti-spoofing (getCurrentSchool e getAuthorizedCurrentSchool)
 │   │   ├── tenantGuard.ts          # Guarda atômica assertTenantOwnership (REST e SSR)
+│   │   ├── councilTeacherToken.ts  # Tokens HMAC para portal docente da matriz e Pré-Conselho
 │   │   ├── ataCrypto.ts            # Motor canônico SHA-256, hash-chaining e máscaras ECA
 │   │   ├── signingPin.ts           # Criptografia PBKDF2-SHA512 e lockout do PIN do servidor
 │   │   ├── messageCrypto.ts        # Selagem SHA-256 de comunicações e Dossiê Pericial
 │   │   ├── aiPseudonymizer.ts      # Anonimizador LGPD/ECA pré-chamada ao Gemini
 │   │   ├── csvSanitizer.ts         # Proteção contra CSV Formula Injection (CWE-1236)
 │   │   ├── sereParser.ts           # Parser multiformato (.xls BIFF8, .xlsx, .pdf, .csv)
+│   │   ├── sereCouncilPdfParser.ts # Parser posicional X/Y para Relatório de Acompanhamento Trimestral PDF do SERE
 │   │   ├── frequencyImportParser.ts# Parser CSV/JSON RFC 4180 (11 colunas Power BI / aliases)
 │   │   ├── syncCgmGuard.ts         # Blindagem P2002 de CGM global em sync Power BI / SERP
 │   │   ├── predictiveAnalytics.ts  # Motor preditivo de risco de evasão para SEMEC
@@ -262,12 +271,13 @@ Qualquer assistente de IA ou desenvolvedor deve respeitar rigorosamente estas re
 │   │   ├── whatsappProvider.ts     # Formatação e chaveamento mobile/desktop do WhatsApp
 │   │   ├── audit.ts                # Registrador de auditoria com IP e schoolId raiz
 │   │   ├── prisma.ts               # Instância singleton do Prisma Client
-│   │   └── __tests__/              # Suítes unitárias, SSR e regressão multi-tenant (Vitest)
+│   │   └── __tests__/              # 75 arquivos de teste Vitest em src/lib/__tests__/ (+ 11 em src/app/**/__tests__/, totalizando 86 arquivos no repositório, incluindo as 9 suítes do Conselho de Classe)
 │   └── proxy.ts                    # Middleware de borda (Next.js 16 Proxy)
 ├── prisma/
+│   ├── migrations/                 # 5 migrations declarativas PostgreSQL (0_init, hardening P1 e cadeia Conselho de Classe)
 │   └── schema.prisma               # Schema declarativo multi-tenant PostgreSQL (26 models)
 ├── extension/                      # Extensão Chrome MV3 (v1.7.0) — Power BI (Frequência & Aprendizagem), SERP e WhatsApp
-├── scripts/                        # Scripts ativos (package_extension.cjs, vercel_db_push.cjs, seed.cjs, validate_qr_poll_browser.mjs, validate_ata_editor_reopen_browser.mjs, validate_ata_reopen_expiry_e2e.mjs)
+├── scripts/                        # Scripts ativos (package_extension.cjs, seed.cjs, validate_qr_poll_browser.mjs, validate_ata_editor_reopen_browser.mjs, validate_ata_reopen_expiry_e2e.mjs)
 │   └── legacy/                     # Utilitários históricos arquivados
 └── docs/                           # Documentação canônica (ARQUITETURA_E_ENGENHARIA, BACKLOG, DEPLOY, GUIA_COLABORACAO)
     └── auditorias/                 # Relatórios históricos point-in-time de auditoria
@@ -284,16 +294,22 @@ npm install
 # Gerar o client do Prisma após alterações no schema
 npx prisma generate
 
-# Executar suíte completa de testes (Vitest — 78 arquivos: 75 aprovados e 3 skipIf banco isolado; 703 testes aprovados e 12 ignorados)
+# Validar schema declarativo Prisma
+npx prisma validate
+
+# Executar suíte completa de testes (Vitest — 86 arquivos de teste no total, com 4 skipIf de banco isolado)
 npm test
 
-# Executar compilação completa de produção (Extensão + Schema Check + Turbopack)
+# Executar compilação completa de produção (Extensão + Turbopack — conforme package.json)
 npm run build
 
 # Iniciar servidor local de desenvolvimento (http://localhost:3001)
 npm run dev
 
-# Sincronizar schema Prisma com o banco de desenvolvimento
+# Aplicar migrations declarativas de prisma/migrations/ em ambiente homologado/produção
+npm run db:migrate:deploy
+
+# Sincronizar schema Prisma apenas em banco de desenvolvimento local isolado
 npx prisma db push
 
 # Popular carga inicial de homologação (Escola Piloto)
@@ -305,6 +321,15 @@ npm run seed
 ## ⚠️ 6. Armadilhas Conhecidas e Boas Práticas (Gotchas)
 
 1. **Fusos Horários:** O servidor opera em UTC, mas a escola e os atos jurídicos operam no horário de Brasília (`America/Sao_Paulo`, UTC-3). Em formatações de data por extenso de atas, cálculo de dias úteis de lavratura extemporânea e vigência de atestados, utilize sempre utilitários com fuso explícito (`-03:00`).
-2. **Turbopack e Scripts de Build:** O `npm run build` executa automaticamente `scripts/package_extension.cjs` (gerando `public/extensao-rede-ativa.zip`, mantendo `public/extensao-leopoldina.zip` automaticamente no build como alias de retrocompatibilidade) e `scripts/vercel_db_push.cjs`. Nunca edite manualmente os `.zip` gerados em `public/`.
+2. **Turbopack e Scripts de Build:** O `npm run build` (conforme [`package.json`](file:///home/marcoswrobel/Documents/Registro/package.json)) executa apenas `scripts/package_extension.cjs` (gerando `public/extensao-rede-ativa.zip`, mantendo `public/extensao-leopoldina.zip` como alias de retrocompatibilidade) e `next build`; a evolução do schema em banco ocorre separadamente via `prisma/migrations/` com `npx prisma validate` e `npm run db:migrate:deploy`. Nunca edite manualmente os `.zip` gerados em `public/`.
 3. **Papéis no Prisma:** Campos de papel no banco utilizam strings compatíveis (`SUPERADMIN`, `ADMIN`, `GESTAO_SECRETARIA`, `GESTOR_ESCOLAR`, `PEDAGOGA`). Sempre utilize os helpers de [`src/lib/roles.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/roles.ts) e [`src/lib/permissions.ts`](file:///home/marcoswrobel/Documents/Registro/src/lib/permissions.ts) para checagens de privilégio.
 4. **Transações em Mutações Complexas:** Em operações como lavratura de atas, adendos encadeados, exclusão de escolas ou higienização, use sempre `prisma.$transaction(async (tx) => { ... })` para garantir atomicidade total e prevenir orfandade de registros.
+
+---
+
+## 🎨 7. Diretrizes de UI/UX & Design System (`design-taste-frontend`)
+
+1. **Ativação:** Sempre que houver criação ou redesign de páginas (`page.tsx`) ou Client Components (`*Client.tsx`), carregar `.agents/skills/design-taste-frontend/SKILL.md` aplicando foco em telas internas de aplicativo (*App Screens*; na edição `tasteskill 2.5.1` instalada, as referências aplicáveis ficam em `.agents/skills/design-taste-frontend/references/` — como `system.md`, `layout-v4.md`, `cards.md`, `copy.md` e `gate.md` — sem `app-screens.md` ou flag `--app` dedicados).
+2. **Preservação Arquitetural:** Manter intactos os Server Components híbridos, Prisma ORM, `assertTenantOwnership()`, a separação de edições `INSTITUCIONAL_ESSENCIAL` vs `PILOTO_INTEGRADA` (`src/lib/platformEditions.ts`) e os atributos/layouts de impressão A4 (`@media print` em `/atas/[id]/imprimir`, `/atas/livro/[ano]`, `/alunos/[id]/dossie` e `/conselho-classe/[boardId]/imprimir`).
+3. **Quality Gate:** Nenhuma alteração de interface é considerada concluída sem passar pelos scripts da skill em `.agents/skills/design-taste-frontend/scripts/` (`copy-lint.mjs`, `consistency.mjs` e `gate.mjs` — não há `lint.mjs` nesta instalação), em `npm test` (Vitest) e em `npm run build` (Next.js 16 + Turbopack).
+

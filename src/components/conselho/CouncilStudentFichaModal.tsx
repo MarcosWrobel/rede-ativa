@@ -8,6 +8,7 @@ import {
   COUNCIL_DESCRIPTORS,
   COUNCIL_ENROLLMENT_STATUS_LABELS,
   COUNCIL_STUDENT_TAG_OPTIONS,
+  formatCouncilGradePtBr,
   getCardBelowAvgForTrimester,
   getCardOpinionForTrimester,
   type CouncilBelowAvgItem,
@@ -118,12 +119,11 @@ export default function CouncilStudentFichaModal({
 
   function addBelowAvgRow() {
     if (readOnly) return;
-    const defaultSubject = activeSubjects[0];
     setBelowAvgItems((prev) => [
       ...prev,
       {
-        subjectId: defaultSubject?.id || null,
-        subjectName: defaultSubject?.name || "",
+        subjectId: null,
+        subjectName: "",
         grade: null,
       },
     ]);
@@ -139,7 +139,7 @@ export default function CouncilStudentFichaModal({
         subjectName: item.subjectName.trim(),
         grade:
           item.grade !== null && item.grade !== undefined && Number.isFinite(item.grade)
-            ? Math.max(0, Math.min(100, item.grade))
+            ? Math.max(0, Math.min(10, item.grade))
             : null,
       }))
       .filter((item) => item.subjectName.length > 0);
@@ -406,7 +406,7 @@ export default function CouncilStudentFichaModal({
                                 })}
                                 {entry.grade !== null && entry.grade !== undefined && (
                                   <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 ml-1">
-                                    ({entry.grade})
+                                    ({formatCouncilGradePtBr(entry.grade)})
                                   </span>
                                 )}
                               </div>
@@ -541,11 +541,11 @@ export default function CouncilStudentFichaModal({
                     <input
                       type="number"
                       min={0}
-                      max={100}
+                      max={10}
                       step="0.1"
                       disabled={readOnly}
                       aria-label={`Nota em ${item.subjectName || `item ${idx + 1}`}`}
-                      placeholder="Nota"
+                      placeholder="0,0 a 10,0"
                       value={item.grade !== null && item.grade !== undefined ? String(item.grade) : ""}
                       onChange={(e) => {
                         const val = e.target.value.trim().replace(",", ".");

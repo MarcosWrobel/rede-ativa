@@ -11,10 +11,8 @@ import {
 import {
   confirmPreCouncilTeacherAck,
   getPreCouncilTeacherPortalContext,
-  getTeacherPortalCouncilContext,
   readSafeJsonBody,
   resolveCouncilHttpError,
-  submitTeacherPortalSubjectEntries,
 } from "@/services/classCouncilService";
 
 export const dynamic = "force-dynamic";
@@ -58,66 +56,33 @@ export async function POST(
       boardId: tokenCheck.payload.boardId,
       trimester: tokenCheck.payload.trimester,
       lockedConversationId: tokenCheck.payload.conversationId,
+      verifiedEmail,
     });
 
-    const matchedByEmail = preCouncil.conversations.find(
+    const accessibleConversations = preCouncil.conversations.filter((c) => {
+      const owner = (c.teacherEmail || "").trim().toLowerCase();
+      return !owner || owner === verifiedEmail;
+    });
+    const matchedByEmail = accessibleConversations.find(
       (c) => (c.teacherEmail || "").trim().toLowerCase() === verifiedEmail
     );
-    const firstPendingAck = preCouncil.conversations.find((c) => !c.digitalAckEmail);
+    const firstPendingAck = accessibleConversations.find((c) => !c.digitalAckEmail);
     const suggestedConversationId =
       tokenCheck.payload.conversationId ||
       matchedByEmail?.id ||
       firstPendingAck?.id ||
+      accessibleConversations[0]?.id ||
       preCouncil.conversations[0]?.id ||
       null;
-
-    // Enriquece com contexto da matriz (sem expor CGM ou selos clínicos) para o fluxo unificado
-    const lockedConv = tokenCheck.payload.conversationId
-      ? preCouncil.conversations.find((c) => c.id === tokenCheck.payload.conversationId) || null
-      : null;
-    const lockedSubjectId = lockedConv?.subjectId ?? null;
-
-    let council = null;
-    let suggestedSubjectId: string | null = null;
-    if (!tokenCheck.payload.conversationId || lockedSubjectId) {
-      try {
-        const candidateCouncil = await getTeacherPortalCouncilContext({
-          schoolId: tokenCheck.payload.schoolId,
-          boardId: tokenCheck.payload.boardId,
-          trimester: tokenCheck.payload.trimester,
-          lockedSubjectId,
-          lockedConversationId: tokenCheck.payload.conversationId,
-          includeCgm: false,
-        });
-        if (candidateCouncil.subjects.length > 0) {
-          council = candidateCouncil;
-          const matchedSubj = candidateCouncil.subjects.find(
-            (s) => (s.teacherEmail || "").trim().toLowerCase() === verifiedEmail
-          );
-          const firstUnclaimedSubj = candidateCouncil.subjects.find(
-            (s) => !(s.teacherEmail || "").trim()
-          );
-          suggestedSubjectId =
-            lockedSubjectId ||
-            matchedSubj?.id ||
-            firstUnclaimedSubj?.id ||
-            candidateCouncil.subjects[0]?.id ||
-            null;
-        }
-      } catch {
-        // Mantém fallback legado quando o componente ainda não tiver disciplina vinculada
-        council = null;
-      }
-    }
 
     return NextResponse.json({
       success: true,
       verifiedEmail,
       verifiedName,
       suggestedConversationId,
-      suggestedSubjectId,
+      suggestedSubjectId: null,
       preCouncil,
-      council,
+      council: null,
     });
   } catch (err) {
     console.error("[POST /api/conselho-classe/pre-council-portal/[token]] Erro:", err);
@@ -160,109 +125,19 @@ export async function PUT(
     const verifiedEmail = googleCheck.tokenInfo.email.toLowerCase().trim();
     const verifiedName = googleCheck.tokenInfo.name || verifiedEmail.split("@")[0];
 
-    const isUnifiedPayload =
-      Boolean(parsed.data.subjectId) &&
-      ((parsed.data.entries?.length ?? 0) > 0 ||
-        parsed.data.preCouncil !== undefined ||
-        parsed.data.confirmAck !== undefined);
-
-    if (isUnifiedPayload && parsed.data.subjectId) {
-      let lockedSubjectId: string | null = null;
-      if (tokenCheck.payload.conversationId) {
-        const currentCtx = await getPreCouncilTeacherPortalContext({
-          schoolId: tokenCheck.payload.schoolId,
-          boardId: tokenCheck.payload.boardId,
-          trimester: tokenCheck.payload.trimester,
-          lockedConversationId: tokenCheck.payload.conversationId,
-        });
-        lockedSubjectId = currentCtx.conversations[0]?.subjectId ?? null;
-        if (!lockedSubjectId || lockedSubjectId !== parsed.data.subjectId) {
-          return NextResponse.json(
-            { error: "Este link é exclusivo para outro componente curricular." },
-            { status: 403 }
-          );
-        }
-      }
-
-      const result = await submitTeacherPortalSubjectEntries({
-        schoolId: tokenCheck.payload.schoolId,
-        boardId: tokenCheck.payload.boardId,
-        trimester: tokenCheck.payload.trimester,
-        lockedSubjectId,
-        subjectId: parsed.data.subjectId,
-        verifiedEmail,
-        verifiedName,
-        entries: parsed.data.entries,
-        preCouncil: parsed.data.preCouncil,
-        confirmAck: Boolean(parsed.data.confirmAck),
-      });
-
-      if ((parsed.data.entries?.length ?? 0) > 0 || parsed.data.preCouncil !== undefined) {
-        await logAudit({
-          action: "TEACHER_SUBMIT_COUNCIL_SUBJECT",
-          entityType: "ClassCouncilBoard",
-          entityId: tokenCheck.payload.boardId,
-          schoolId: tokenCheck.payload.schoolId,
-          details: {
-            boardId: tokenCheck.payload.boardId,
-            subjectId: result.subjectId,
-            trimester: result.trimester,
-            updatedCount: result.updatedCount,
-            hasPreCouncilNotes: Boolean(parsed.data.preCouncil),
-            monitoredCount: parsed.data.preCouncil?.monitoredStudentIds.length ?? 0,
-          },
-          user: {
-            name: verifiedName,
-            email: verifiedEmail,
-          },
-          req,
-        });
-      }
-
-      if (result.ackConfirmed) {
-        await logAudit({
-          action: "TEACHER_ACK_PRE_COUNCIL",
-          entityType: "ClassCouncilTrimester",
-          entityId: tokenCheck.payload.boardId,
-          schoolId: tokenCheck.payload.schoolId,
-          details: {
-            boardId: tokenCheck.payload.boardId,
-            trimester: result.trimester,
-            conversationId: result.conversationId,
-            subjectId: result.subjectId,
-            subjectName: result.subjectName,
-          },
-          user: {
-            name: verifiedName,
-            email: verifiedEmail,
-          },
-          req,
-        });
-      }
-
-      const [preCouncil, council] = await Promise.all([
-        getPreCouncilTeacherPortalContext({
-          schoolId: tokenCheck.payload.schoolId,
-          boardId: tokenCheck.payload.boardId,
-          trimester: tokenCheck.payload.trimester,
-          lockedConversationId: tokenCheck.payload.conversationId,
-        }),
-        getTeacherPortalCouncilContext({
-          schoolId: tokenCheck.payload.schoolId,
-          boardId: tokenCheck.payload.boardId,
-          trimester: tokenCheck.payload.trimester,
-          lockedSubjectId,
-          lockedConversationId: tokenCheck.payload.conversationId,
-          includeCgm: false,
-        }),
-      ]);
-
-      return NextResponse.json({
-        success: true,
-        result,
-        preCouncil,
-        council,
-      });
+    // Isolamento estrito de escopo: o link de ciência do Pré-Conselho não permite editar a matriz de descritivos
+    if (
+      (parsed.data.entries?.length ?? 0) > 0 ||
+      parsed.data.preCouncil !== undefined ||
+      (Boolean(parsed.data.subjectId) && !parsed.data.conversationId)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "O link de Pré-Conselho é exclusivo para consulta e confirmação de ciência. Utilize o link do portal docente para lançamentos na matriz.",
+        },
+        { status: 403 }
+      );
     }
 
     if (!parsed.data.conversationId) {
@@ -285,12 +160,13 @@ export async function PUT(
     await logAudit({
       action: "TEACHER_ACK_PRE_COUNCIL",
       entityType: "ClassCouncilTrimester",
-      entityId: tokenCheck.payload.boardId,
+      entityId: ack.trimesterId,
       schoolId: tokenCheck.payload.schoolId,
       details: {
         boardId: tokenCheck.payload.boardId,
         trimester: ack.trimester,
         conversationId: ack.conversationId,
+        ...(ack.subjectId ? { subjectId: ack.subjectId } : {}),
         subjectName: ack.subjectName,
       },
       user: {
@@ -305,6 +181,7 @@ export async function PUT(
       boardId: tokenCheck.payload.boardId,
       trimester: tokenCheck.payload.trimester,
       lockedConversationId: tokenCheck.payload.conversationId,
+      verifiedEmail,
     });
 
     return NextResponse.json({

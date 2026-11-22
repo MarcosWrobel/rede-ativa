@@ -683,3 +683,33 @@ export function clearTeacherPortalLocalDraft(
     buildTeacherPortalDraftKeySuffix(boardId, trimester, subjectId, verifiedEmail)
   );
 }
+
+export const TEACHER_PORTAL_POLL_BASE_MS = 15_000;
+export const TEACHER_PORTAL_POLL_MAX_MS = 120_000;
+
+export function computePortalPollBackoffMs(params: {
+  retryAfterHeader?: string | null;
+  retryAfterBody?: unknown;
+  currentDelayMs?: number;
+  baseMs?: number;
+  maxMs?: number;
+}): number {
+  const baseMs = params.baseMs ?? TEACHER_PORTAL_POLL_BASE_MS;
+  const maxMs = params.maxMs ?? TEACHER_PORTAL_POLL_MAX_MS;
+  const current = Math.max(baseMs, params.currentDelayMs ?? baseMs);
+
+  const headerSeconds = Number.parseInt((params.retryAfterHeader || "").trim(), 10);
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+    return Math.min(maxMs, Math.max(baseMs, headerSeconds * 1000));
+  }
+
+  const bodySeconds =
+    typeof params.retryAfterBody === "number"
+      ? params.retryAfterBody
+      : Number.parseInt(String(params.retryAfterBody ?? ""), 10);
+  if (Number.isFinite(bodySeconds) && bodySeconds > 0) {
+    return Math.min(maxMs, Math.max(baseMs, bodySeconds * 1000));
+  }
+
+  return Math.min(maxMs, current * 2);
+}

@@ -32,9 +32,14 @@ export async function verifyEscolaGoogleIdToken(
     return { ok: false, error: "Token do Google não informado." };
   }
 
-  // Fallback para ambiente de desenvolvimento / teste
+  const isStrictEnv =
+    process.env.NODE_ENV === "production" ||
+    process.env.VERCEL_ENV === "production" ||
+    process.env.VERCEL_ENV === "preview";
+
+  // Fallback exclusivo para ambiente local de desenvolvimento / teste
   if (
-    process.env.NODE_ENV !== "production" &&
+    !isStrictEnv &&
     process.env.ENABLE_DEV_AUTH === "true" &&
     token.startsWith("dev-mock-token:")
   ) {
@@ -85,18 +90,41 @@ export async function verifyEscolaGoogleIdToken(
       };
     }
 
-    // 2. Validação do Client ID se configurado (rejeição estrita contra cross-client token injection)
-    const configuredClientId =
-      expectedClientId || process.env.GOOGLE_CLIENT_ID || "";
-    if (configuredClientId && info.aud && info.aud !== configuredClientId) {
-      console.error(`[ESCOLA-AUTH] Client ID divergente rejeitado: recebido ${info.aud}, esperado ${configuredClientId}`);
+    // 2. Validação fail-closed do Client ID (rejeição estrita contra cross-client token injection)
+    const configuredClientId = (
+      expectedClientId ||
+      process.env.GOOGLE_CLIENT_ID ||
+      ""
+    ).trim();
+    if (!configuredClientId) {
+      if (isStrictEnv) {
+        console.error("[ESCOLA-AUTH] GOOGLE_CLIENT_ID ausente em ambiente restrito.");
+        return {
+          ok: false,
+          error: "Autenticação Google institucional indisponível por configuração pendente.",
+        };
+      }
+    } else if (!info.aud || info.aud !== configuredClientId) {
+      console.error(
+        `[ESCOLA-AUTH] Client ID divergente ou ausente rejeitado: recebido ${info.aud || "(ausente)"}, esperado ${configuredClientId}`
+      );
       return {
         ok: false,
         error: "Credencial inválida: token de autenticação emitido para outra aplicação.",
       };
     }
 
-    // 3. Validação de e-mail verificado
+    // 3. Validação de expiração explícita e e-mail verificado
+    if (info.exp !== undefined) {
+      const expSeconds = Number(info.exp);
+      if (Number.isFinite(expSeconds) && expSeconds * 1000 <= Date.now()) {
+        return {
+          ok: false,
+          error: "Sessão Google institucional expirada. Faça login novamente.",
+        };
+      }
+    }
+
     if (String(info.email_verified) !== "true") {
       return { ok: false, error: "O e-mail informado não está verificado no Google." };
     }

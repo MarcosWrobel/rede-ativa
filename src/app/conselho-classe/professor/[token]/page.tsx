@@ -102,6 +102,7 @@ export default async function ProfessorConselhoPage({ params }: Props) {
   const enableDevAuth =
     process.env.NODE_ENV !== "production" &&
     process.env.VERCEL_ENV !== "production" &&
+    process.env.VERCEL_ENV !== "preview" &&
     process.env.ENABLE_DEV_AUTH === "true";
 
   return (

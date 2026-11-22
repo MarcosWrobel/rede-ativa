@@ -13,14 +13,15 @@ import {
   parseAttendancePercent,
 } from "@/lib/studentMatcher";
 import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import * as currentSchoolModule from "@/lib/currentSchool";
+import type { SchoolContext } from "@/lib/currentSchool";
 import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
 import {
   authenticateExtensionSyncToken,
   type ExtensionSyncLabel,
 } from "@/lib/extensionSyncAuth";
 
-export type ResolvedSchool = Awaited<ReturnType<typeof getCurrentSchool>>;
+export type ResolvedSchool = SchoolContext;
 export type StudentNameMap = ReturnType<typeof buildStudentLookupMaps>["nameMap"];
 
 export type SyncAuthContextResult =
@@ -76,7 +77,42 @@ export async function resolveExtensionOrSessionSyncContext(options: {
     userName = tokenAuth.userName;
   }
 
-  const currentSchool = await getCurrentSchool(targetSchoolId);
+  let currentSchool: currentSchoolModule.SchoolContext | null = null;
+  if (authMethod === "SESSION") {
+    let authorizedResolver: typeof currentSchoolModule.getAuthorizedCurrentSchool | undefined;
+    try {
+      authorizedResolver = currentSchoolModule.getAuthorizedCurrentSchool;
+    } catch {
+      authorizedResolver = undefined;
+    }
+    if (typeof authorizedResolver === "function") {
+      currentSchool = await authorizedResolver(session, targetSchoolId);
+    } else if (
+      (session?.user?.role || "").toUpperCase() === "SUPERADMIN" ||
+      Boolean(targetSchoolId) ||
+      Boolean(
+        session?.user?.schools?.some(
+          (s) => s.active !== false && Boolean(s.schoolId || s.id)
+        )
+      ) ||
+      ((session?.user?.role || "").toUpperCase() === "GESTAO_SECRETARIA" &&
+        Boolean(session?.user?.networks?.length))
+    ) {
+      currentSchool = await currentSchoolModule.getCurrentSchool(targetSchoolId);
+    }
+  } else {
+    currentSchool = await currentSchoolModule.getCurrentSchool(targetSchoolId);
+  }
+
+  if (!currentSchool) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { status: 403, headers: corsHeaders }
+      ),
+    };
+  }
 
   if (currentSchool.edition === "INSTITUCIONAL_ESSENCIAL") {
     return {

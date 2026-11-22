@@ -325,6 +325,7 @@ export default function CouncilPreCouncilTab({
           agreements: c.agreements.trim(),
           conversationStatus: c.conversationStatus,
           conversationDate: c.conversationDate?.trim() || null,
+          teacherSubmittedAt: c.teacherSubmittedAt ?? null,
         })),
         synthesis: {
           mainDifficulties: draft.synthesis.mainDifficulties.trim(),
