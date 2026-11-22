@@ -1,16 +1,10 @@
 # Rede Ativa SaaS — Plataforma Multi-Escola de Busca Ativa, Gestão de Frequência & Livro Oficial de Atas Pedagógicas
 
-> **Unidade Piloto Fundadora / Laboratório de Validação Tecnológica e Pedagógica:**  
-> **Colégio Estadual Leopoldina B. Pedroso** (INEP `41042730`) — Ponta Grossa / Tibagi, Paraná (SEED-PR)  
-> *Ambiente real onde o sistema foi idealizado, homologado com 689 estudantes e consolidado como padrão de referência para redes municipais e estaduais.*
-
----
-
 ## 🌟 Sobre a Plataforma Rede Ativa SaaS
 
 O **Rede Ativa SaaS** é uma solução completa em nuvem (*Software as a Service*) projetada para transformar o combate à evasão escolar, o acompanhamento da frequência e a formalização de intervenções pedagógicas em redes públicas e privadas de ensino.
 
-Originalmente desenvolvido no Colégio Estadual Leopoldina B. Pedroso (**Escola Piloto**), o sistema opera em **arquitetura SaaS multi-escola de alta performance**, permitindo que múltiplas instituições e secretarias municipais de educação (SEMEC) atuem de forma simultânea e independente, com isolamento lógico estrito de dados e governança hierárquica.
+O sistema opera em **arquitetura SaaS multi-escola de alta performance**, permitindo que múltiplas instituições e secretarias municipais de educação (SEMEC) atuem de forma simultânea e independente, com isolamento lógico estrito de dados e governança hierárquica.
 
 A plataforma unifica:
 1. **Busca Ativa Assistida & Comunicação via WhatsApp** (com detecção inteligente Mobile/Desktop, Janela Dedicada Compacta `480x760px` e acompanhamento assistido via Extensão `v1.6.5`);
