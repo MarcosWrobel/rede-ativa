@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import Link from "next/link";
 import {
   GraduationCap,
@@ -83,17 +83,53 @@ export default function GestaoClient({
     "MANHA" | "TARDE" | "NOITE" | "INTEGRAL"
   >("MANHA");
   const [isSubmittingClass, setIsSubmittingClass] = useState(false);
+  const [classNameError, setClassNameError] = useState("");
   const [classError, setClassError] = useState("");
   const [classSuccessToast, setClassSuccessToast] = useState("");
 
+  const classNameInputId = useId();
+  const classNameErrorId = useId();
+  const classSegmentInputId = useId();
+  const classShiftInputId = useId();
+  const classNameInputRef = useRef<HTMLInputElement>(null);
+
+  const validateClassName = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return "Informe o nome da turma.";
+    if (trimmed.length < 2) return "O nome da turma deve ter ao menos 2 caracteres.";
+    return "";
+  };
+
+  const handleOpenClassModal = () => {
+    setNewClassName("");
+    setNewClassSegment("FUNDAMENTAL");
+    setNewClassShift("MANHA");
+    setClassNameError("");
+    setClassError("");
+    setIsAddClassModalOpen(true);
+  };
+
+  const handleCloseClassModal = () => {
+    if (isSubmittingClass) return;
+    setIsAddClassModalOpen(false);
+    setClassNameError("");
+    setClassError("");
+  };
+
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newClassName.trim()) {
-      setClassError("Informe o nome da turma.");
+    if (isSubmittingClass) return;
+
+    const fieldMsg = validateClassName(newClassName);
+    if (fieldMsg) {
+      setClassNameError(fieldMsg);
+      setClassError("");
+      classNameInputRef.current?.focus();
       return;
     }
 
     setIsSubmittingClass(true);
+    setClassNameError("");
     setClassError("");
 
     try {
@@ -107,18 +143,21 @@ export default function GestaoClient({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || "Erro ao cadastrar turma.");
       }
 
       setClasses((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       setTotalClassesCount((prev) => prev + 1);
+      setNewClassName("");
+      setClassNameError("");
+      setClassError("");
       setIsAddClassModalOpen(false);
-      setClassSuccessToast(`Turma "${data.name}" cadastrada com sucesso!`);
-      setTimeout(() => setClassSuccessToast(""), 4000);
+      setClassSuccessToast(`Turma "${data.name}" vinculada à escola ${school.name} com sucesso.`);
+      setTimeout(() => setClassSuccessToast(""), 5000);
     } catch (err: any) {
-      setClassError(err.message || "Erro inesperado ao salvar turma.");
+      setClassError(err.message || "Erro inesperado ao salvar turma. Revise e tente novamente.");
     } finally {
       setIsSubmittingClass(false);
     }
@@ -127,7 +166,11 @@ export default function GestaoClient({
   return (
     <div className="space-y-6">
       {classSuccessToast && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center space-x-2"
+        >
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{classSuccessToast}</span>
         </div>
@@ -350,13 +393,25 @@ export default function GestaoClient({
       {/* Two-column layout: Critical Students & Classes summary */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Critical Students */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-white flex items-center space-x-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-              <span>Alunos em Risco Crítico</span>
-            </h3>
-            <Link href="/faltas" className="text-xs font-bold text-sky-600 hover:text-sky-800">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-red-200 dark:border-red-900/60 p-6 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-red-100 dark:border-red-900/40">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 shrink-0">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Alunos em Risco Crítico</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-900 border border-red-300 text-[11px] font-black tabular-nums">
+                    {criticalStudents.length}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Estudantes abaixo de 75% de frequência aguardando acompanhamento prioritário
+                </p>
+              </div>
+            </div>
+            <Link href="/faltas" className="text-xs font-bold text-sky-700 hover:text-sky-900 dark:text-sky-400 shrink-0">
               Ver todos &rarr;
             </Link>
           </div>
@@ -367,29 +422,33 @@ export default function GestaoClient({
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {criticalStudents.map((st) => (
-                <div key={st.id} className="py-3 flex items-center justify-between">
-                  <div className="min-w-0 pr-3">
-                    <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                      {st.name}
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Turma: {st.className}
-                    </p>
+              {[...criticalStudents]
+                .sort((a, b) => a.attendancePercent - b.attendancePercent)
+                .map((st) => (
+                  <div key={st.id} className="py-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {st.name}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Turma: {st.className}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <span className="inline-flex items-center gap-1 text-xs font-extrabold text-red-900 dark:text-red-200 bg-red-100 dark:bg-red-950/60 border border-red-200 dark:border-red-800 px-2.5 py-1 rounded-full tabular-nums">
+                        <span>Crítico</span>
+                        <span aria-hidden="true">•</span>
+                        <span>{st.attendancePercent}%</span>
+                      </span>
+                      <Link
+                        href={`/busca-ativa?studentId=${st.id}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition shadow-2xs"
+                      >
+                        <span>Revisar e enviar</span>
+                      </Link>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-3">
-                    <span className="text-xs font-extrabold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 rounded-full">
-                      {st.attendancePercent}%
-                    </span>
-                    <Link
-                      href={`/busca-ativa?studentId=${st.id}`}
-                      className="text-xs font-bold text-sky-600 hover:underline"
-                    >
-                      Disparar
-                    </Link>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
@@ -404,13 +463,7 @@ export default function GestaoClient({
             <div className="flex items-center space-x-2">
               <button
                 type="button"
-                onClick={() => {
-                  setNewClassName("");
-                  setNewClassSegment("FUNDAMENTAL");
-                  setNewClassShift("MANHA");
-                  setClassError("");
-                  setIsAddClassModalOpen(true);
-                }}
+                onClick={handleOpenClassModal}
                 className="inline-flex items-center space-x-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-sky-600 hover:bg-sky-700 text-white transition shadow-xs cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -427,13 +480,7 @@ export default function GestaoClient({
               <p>Nenhuma turma cadastrada nesta escola ainda.</p>
               <button
                 type="button"
-                onClick={() => {
-                  setNewClassName("");
-                  setNewClassSegment("FUNDAMENTAL");
-                  setNewClassShift("MANHA");
-                  setClassError("");
-                  setIsAddClassModalOpen(true);
-                }}
+                onClick={handleOpenClassModal}
                 className="mt-3 inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 font-bold hover:bg-sky-100 transition border border-sky-200 dark:border-sky-800 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -449,7 +496,7 @@ export default function GestaoClient({
                 >
                   <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{cg.name}</p>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{cg.shift}</p>
-                  <p className="text-xs font-black text-sky-600 dark:text-sky-400 mt-1">
+                  <p className="text-xs font-black text-sky-600 dark:text-sky-400 mt-1 tabular-nums">
                     {cg.studentsCount} alunos
                   </p>
                 </div>
@@ -462,82 +509,139 @@ export default function GestaoClient({
       {/* Modal Nova Turma */}
       <ModalDialog
         open={isAddClassModalOpen}
-        onClose={() => setIsAddClassModalOpen(false)}
+        onClose={handleCloseClassModal}
+        preventClose={isSubmittingClass}
         title="Cadastrar Nova Turma"
-        subtitle="Adicione uma turma manual para enturmação de alunos nesta escola."
+        subtitle={`Vincular nova turma à unidade ${school.name}.`}
       >
-        <form onSubmit={handleCreateClass} className="space-y-4 text-xs">
+        <form onSubmit={handleCreateClass} noValidate className="space-y-4 text-xs">
+          <div className="rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/30 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <span className="font-bold text-sky-950 dark:text-sky-200 truncate">
+              Unidade: {school.name}
+            </span>
+            <span className="font-mono font-bold text-sky-800 dark:text-sky-300 tabular-nums">
+              INEP {school.inepCode}
+            </span>
+          </div>
+
+          <fieldset className="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+            <legend className="px-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Identificação e Turno
+            </legend>
+
+            <div className="space-y-1">
+              <label htmlFor={classNameInputId} className="font-semibold text-slate-700 dark:text-slate-200 block">
+                Nome da Turma *
+              </label>
+              <input
+                ref={classNameInputRef}
+                id={classNameInputId}
+                type="text"
+                data-autofocus
+                placeholder="Ex: 6º Ano A, 1º Ano Médio B, EJA Fase I..."
+                value={newClassName}
+                disabled={isSubmittingClass}
+                aria-invalid={Boolean(classNameError)}
+                aria-describedby={classNameError ? classNameErrorId : undefined}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setNewClassName(val);
+                  if (classNameError) {
+                    setClassNameError(validateClassName(val));
+                  }
+                }}
+                onBlur={() => {
+                  if (newClassName.trim()) {
+                    setClassNameError(validateClassName(newClassName));
+                  }
+                }}
+                className={`w-full p-2.5 border rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 disabled:opacity-60 ${
+                  classNameError
+                    ? "border-red-400 focus:ring-red-500"
+                    : "border-slate-300 dark:border-slate-700 focus:ring-sky-500"
+                }`}
+              />
+              {classNameError ? (
+                <p id={classNameErrorId} role="alert" className="text-[11px] text-red-700 dark:text-red-300 font-semibold">
+                  {classNameError}
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Use nomenclaturas padronizadas (ex: &ldquo;6º Ano A&rdquo; ou &ldquo;1ª Série Noturno&rdquo;).
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label htmlFor={classSegmentInputId} className="font-semibold text-slate-700 dark:text-slate-200 block">
+                  Segmento / Nível *
+                </label>
+                <select
+                  id={classSegmentInputId}
+                  value={newClassSegment}
+                  disabled={isSubmittingClass}
+                  onChange={(e) => setNewClassSegment(e.target.value as any)}
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white disabled:opacity-60"
+                >
+                  <option value="FUNDAMENTAL">Ensino Fundamental</option>
+                  <option value="MEDIO">Ensino Médio</option>
+                  <option value="NOTURNO">Noturno / EJA</option>
+                  <option value="INFANTIL">Educação Infantil</option>
+                  <option value="EJA">EJA Geral</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor={classShiftInputId} className="font-semibold text-slate-700 dark:text-slate-200 block">
+                  Turno *
+                </label>
+                <select
+                  id={classShiftInputId}
+                  value={newClassShift}
+                  disabled={isSubmittingClass}
+                  onChange={(e) => setNewClassShift(e.target.value as any)}
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white disabled:opacity-60"
+                >
+                  <option value="MANHA">Manhã</option>
+                  <option value="TARDE">Tarde</option>
+                  <option value="NOITE">Noite</option>
+                  <option value="INTEGRAL">Integral</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          {isSubmittingClass && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-2.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs font-semibold flex items-center gap-2"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <span>Cadastrando turma para {school.name}...</span>
+            </div>
+          )}
+
           {classError && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 font-medium">
+            <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 font-semibold">
               {classError}
             </div>
           )}
 
-          <div>
-            <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
-              Nome da Turma *:
-            </label>
-            <input
-              type="text"
-              required
-              autoFocus
-              placeholder="Ex: 6º Ano A, 1º Ano Médio B, EJA Fase I..."
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
-            />
-            <p className="text-[11px] text-slate-500 mt-1">
-              Dica: Use nomenclaturas padronizadas (ex: &ldquo;6º Ano A&rdquo; ou &ldquo;1ª Série Noturno&rdquo;).
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
-                Segmento / Nível *:
-              </label>
-              <select
-                value={newClassSegment}
-                onChange={(e) => setNewClassSegment(e.target.value as any)}
-                className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
-              >
-                <option value="FUNDAMENTAL">Ensino Fundamental</option>
-                <option value="MEDIO">Ensino Médio</option>
-                <option value="NOTURNO">Noturno / EJA</option>
-                <option value="INFANTIL">Educação Infantil</option>
-                <option value="EJA">EJA Geral</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700 dark:text-slate-200 block mb-1">
-                Turno *:
-              </label>
-              <select
-                value={newClassShift}
-                onChange={(e) => setNewClassShift(e.target.value as any)}
-                className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white text-slate-900 dark:text-white"
-              >
-                <option value="MANHA">Manhã</option>
-                <option value="TARDE">Tarde</option>
-                <option value="NOITE">Noite</option>
-                <option value="INTEGRAL">Integral</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-2 flex justify-end space-x-2">
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              onClick={() => setIsAddClassModalOpen(false)}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-medium hover:bg-slate-50"
+              onClick={handleCloseClassModal}
+              disabled={isSubmittingClass}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSubmittingClass}
-              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold flex items-center space-x-1.5 disabled:opacity-50"
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
             >
               {isSubmittingClass ? (
                 <>

@@ -115,9 +115,12 @@ export default function BuscaAtivaClient({
   const [queueCursor, setQueueCursor] = useState(0);
   const [isQueueBusy, setIsQueueBusy] = useState(false);
   const [queueError, setQueueError] = useState("");
+  const [queueLiveAnnouncement, setQueueLiveAnnouncement] = useState("");
 
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
   const queueProgressLabelId = useId();
+  const queuePhoneInputId = useId();
+  const queueMessageTextareaId = useId();
 
   // Inicializa aluno vindo via URL (?studentId=...&phone=...)
   useEffect(() => {
@@ -473,6 +476,9 @@ export default function BuscaAtivaClient({
     setQueueItems(builtItems);
     setQueueCursor(0);
     setQueueError("");
+    setQueueLiveAnnouncement(
+      `Fila da turma iniciada com ${builtItems.length} estudante(s). Revise a mensagem e abra o WhatsApp de ${builtItems[0]?.student.name || "primeiro contato"}.`
+    );
     setQueueActive(true);
   };
 
@@ -507,6 +513,9 @@ export default function BuscaAtivaClient({
           studentName: currentQueueItem.student.name,
           phone: currentQueueItem.phone,
         });
+        setQueueLiveAnnouncement(
+          `Conversa reaberta no WhatsApp para ${currentQueueItem.student.name}. Confirme o envio após disparar a mensagem.`
+        );
         return;
       }
 
@@ -530,6 +539,10 @@ export default function BuscaAtivaClient({
         whatsappUrl: data.whatsappUrl,
         outcome: "OPENED",
       });
+
+      setQueueLiveAnnouncement(
+        `Conversa aberta no WhatsApp para ${currentQueueItem.student.name}. O envio ainda não foi confirmado: conclua em Confirmar envio ou Sem WhatsApp.`
+      );
 
       dispatchWhatsAppToBrowser(data.whatsappUrl, {
         logId: data.logId,
@@ -587,12 +600,30 @@ export default function BuscaAtivaClient({
         syncLocalInvalidContact(currentQueueItem.student.id, currentQueueItem.phone);
       }
 
-      setQueueItems((prev) =>
-        prev.map((item, idx) =>
-          idx === queueCursor ? { ...item, logId: targetLogId, outcome: status } : item
-        )
+      const nextItems = queueItems.map((item, idx) =>
+        idx === queueCursor ? { ...item, logId: targetLogId, outcome: status } : item
       );
-      setQueueCursor((c) => c + 1);
+      const nextCursor = queueCursor + 1;
+      setQueueItems(nextItems);
+      setQueueCursor(nextCursor);
+
+      const actionNotice =
+        status === "SENT"
+          ? `Envio confirmado e registrado para ${currentQueueItem.student.name}.`
+          : `Telefone registrado como sem WhatsApp para ${currentQueueItem.student.name}.`;
+
+      if (nextCursor >= nextItems.length) {
+        const sentCount = nextItems.filter((i) => i.outcome === "SENT").length;
+        const failedCount = nextItems.filter((i) => i.outcome === "FAILED_NO_WHATSAPP").length;
+        const skippedCount = nextItems.filter((i) => i.outcome === "SKIPPED").length;
+        setQueueLiveAnnouncement(
+          `${actionNotice} Fila da turma concluída: ${sentCount} enviados, ${failedCount} sem WhatsApp e ${skippedCount} ignorados.`
+        );
+      } else {
+        setQueueLiveAnnouncement(
+          `${actionNotice} Próximo estudante: ${nextItems[nextCursor]?.student.name || ""}.`
+        );
+      }
     } catch (err: any) {
       setQueueError(err.message || "Falha ao concluir item da fila.");
     } finally {
@@ -601,10 +632,27 @@ export default function BuscaAtivaClient({
   };
 
   const handleQueueSkip = () => {
-    setQueueItems((prev) =>
-      prev.map((item, idx) => (idx === queueCursor ? { ...item, outcome: "SKIPPED" } : item))
+    if (!currentQueueItem) return;
+    const nextItems = queueItems.map((item, idx) =>
+      idx === queueCursor ? { ...item, outcome: "SKIPPED" as const } : item
     );
-    setQueueCursor((c) => c + 1);
+    const nextCursor = queueCursor + 1;
+    setQueueItems(nextItems);
+    setQueueCursor(nextCursor);
+    setQueueError("");
+
+    if (nextCursor >= nextItems.length) {
+      const sentCount = nextItems.filter((i) => i.outcome === "SENT").length;
+      const failedCount = nextItems.filter((i) => i.outcome === "FAILED_NO_WHATSAPP").length;
+      const skippedCount = nextItems.filter((i) => i.outcome === "SKIPPED").length;
+      setQueueLiveAnnouncement(
+        `Estudante ${currentQueueItem.student.name} pulado nesta fila. Fila da turma concluída: ${sentCount} enviados, ${failedCount} sem WhatsApp e ${skippedCount} ignorados.`
+      );
+    } else {
+      setQueueLiveAnnouncement(
+        `Estudante ${currentQueueItem.student.name} pulado. Próximo estudante: ${nextItems[nextCursor]?.student.name || ""}.`
+      );
+    }
   };
 
   const handleResetQueue = () => {
@@ -612,6 +660,7 @@ export default function BuscaAtivaClient({
     setQueueItems([]);
     setQueueCursor(0);
     setQueueError("");
+    setQueueLiveAnnouncement("");
   };
 
   // Escuta confirmações automáticas vindas da Extensão Sincronizadora (whatsapp-content.js)
@@ -1165,10 +1214,14 @@ export default function BuscaAtivaClient({
               {/* AUT-01: Confirmação Real de Entrega ou Saneamento de Número pós-wa.me */}
               {lastSentSuccess && (
                 <div
+                  role="status"
+                  aria-live="polite"
                   className={`p-4 rounded-xl border text-xs space-y-3 ${
                     lastSentSuccess.deliveryStatus === "FAILED_NO_WHATSAPP"
                       ? "bg-rose-50 border-rose-200 text-rose-900"
-                      : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : lastSentSuccess.deliveryStatus === "SENT"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : "bg-sky-50 border-sky-200 text-sky-950"
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1178,11 +1231,18 @@ export default function BuscaAtivaClient({
                           <PhoneOff className="w-4 h-4 mr-1.5 text-rose-600" />
                           <span>Número sem WhatsApp</span>
                         </>
-                      ) : (
+                      ) : lastSentSuccess.deliveryStatus === "SENT" ? (
                         <>
                           <CheckCircle className="w-4 h-4 mr-1.5 text-emerald-600" />
                           <span>
-                            Mensagem registrada para {lastSentSuccess.studentName}
+                            Envio confirmado para {lastSentSuccess.studentName}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <ExternalLink className="w-4 h-4 mr-1.5 text-sky-600" />
+                          <span>
+                            Conversa aberta no WhatsApp para {lastSentSuccess.studentName}
                           </span>
                         </>
                       )}
@@ -1196,7 +1256,9 @@ export default function BuscaAtivaClient({
                   <p className="text-[11px] opacity-90">
                     {lastSentSuccess.deliveryStatus === "FAILED_NO_WHATSAPP"
                       ? `Telefone ${lastSentSuccess.phoneUsed} marcado como sem WhatsApp.`
-                      : "Confirme o envio da mensagem:"}
+                      : lastSentSuccess.deliveryStatus === "SENT"
+                      ? "Envio confirmado e registrado no histórico."
+                      : "Tentativa registrada (conversa aberta no WhatsApp). Confirme abaixo após enviar a mensagem."}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -1526,22 +1588,28 @@ export default function BuscaAtivaClient({
       {/* ===================================================================== */}
       {dispatchMode === "fila" && queueActive && (
         <div className="max-w-3xl mx-auto space-y-5">
-          {/* Cabeçalho com <progress> nativo acessível (Modern Web Guidance: progress) */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+          {/* Cabeçalho com <progress> nativo acessível e região aria-live persistente */}
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span id={queueProgressLabelId} className="text-sm font-extrabold text-slate-900">
-                Progresso da Fila
-              </span>
-
-              <div className="flex items-center space-x-2">
-                <WhatsAppDispatchToggle compact />
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="text-xs font-bold text-sky-800 bg-sky-50 px-3 py-1 rounded-full border border-sky-200"
-                >
+              <div className="flex flex-wrap items-center gap-2">
+                <span id={queueProgressLabelId} className="text-sm font-extrabold text-slate-900">
+                  Progresso da Fila
+                </span>
+                <span className="text-xs font-bold text-sky-900 bg-sky-50 px-3 py-1 rounded-full border border-sky-200 tabular-nums">
                   {completedQueueCount} de {queueItems.length} concluídos
-                </div>
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <WhatsAppDispatchToggle compact />
+                <button
+                  type="button"
+                  onClick={handleResetQueue}
+                  className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 hover:text-slate-900 transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Voltar à turma</span>
+                </button>
               </div>
             </div>
 
@@ -1552,108 +1620,199 @@ export default function BuscaAtivaClient({
               aria-labelledby={queueProgressLabelId}
             />
 
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
               <span>
-                Motivo: <strong>{selectedTemplate?.title}</strong>
+                Motivo: <strong className="text-slate-800">{selectedTemplate?.title}</strong>
               </span>
-              <button
-                type="button"
-                onClick={handleResetQueue}
-                className="inline-flex items-center space-x-1 font-bold text-slate-600 hover:text-slate-900"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Voltar à turma</span>
-              </button>
+              {!isQueueFinished && currentQueueItem && (
+                <span className="font-semibold text-slate-500 tabular-nums">
+                  Restantes: {queueItems.length - completedQueueCount}
+                </span>
+              )}
+            </div>
+
+            <div
+              role="status"
+              aria-live="polite"
+              className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                isQueueFinished
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                  : currentQueueItem?.outcome === "OPENED"
+                  ? "bg-sky-50 border-sky-200 text-sky-900"
+                  : "bg-slate-50 border-slate-200 text-slate-700"
+              }`}
+            >
+              {queueLiveAnnouncement ||
+                `${completedQueueCount} de ${queueItems.length} concluídos`}
             </div>
           </div>
 
           {/* Cartão do Estudante Atual na Fila */}
           {!isQueueFinished && currentQueueItem && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-100">
-                <div>
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-sky-600">
-                    Estudante {queueCursor + 1} de {queueItems.length}
+            <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              {/* Agrupamento de contexto: Estudante atual, turma, progresso e telefone de destino */}
+              <div className="rounded-xl bg-slate-50/90 border border-slate-200 p-3.5 sm:p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-900 text-white text-[11px] font-extrabold tabular-nums">
+                      Estudante {queueCursor + 1} de {queueItems.length}
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
+                      ({completedQueueCount} concluído{completedQueueCount === 1 ? "" : "s"})
+                    </span>
+                  </div>
+
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                      currentQueueItem.outcome === "OPENED"
+                        ? "bg-sky-100 text-sky-900 border-sky-300"
+                        : "bg-amber-50 text-amber-900 border-amber-300"
+                    }`}
+                  >
+                    {currentQueueItem.outcome === "OPENED"
+                      ? "Conversa aberta — aguardando confirmação"
+                      : "Pronto para revisar e abrir WhatsApp"}
                   </span>
-                  <h2 className="text-xl font-black text-slate-900 mt-0.5">
-                    {currentQueueItem.student.name}
-                  </h2>
-                  <p className="text-xs text-slate-600">
-                    Turma: <strong>{currentQueueItem.student.classGroup?.name || "Sem Turma"}</strong> • Responsável:{" "}
-                    <strong>{currentQueueItem.guardianName || "Não informado"}</strong>
-                  </p>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <Phone className="w-4 h-4 text-sky-600" />
-                  <input
-                    type="text"
-                    value={currentQueueItem.phone}
-                    onChange={(e) => updateCurrentQueueField({ phone: e.target.value })}
-                    className="font-mono text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white w-36"
-                    title="Telefone de destino para este estudante"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start pt-1 border-t border-slate-200/80">
+                  <div className="md:col-span-7 space-y-1 min-w-0">
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900 leading-tight">
+                      {currentQueueItem.student.name}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-700">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-white border border-slate-200 font-bold text-slate-800">
+                        Turma: {currentQueueItem.student.classGroup?.name || "Sem Turma"}
+                      </span>
+                      <span>
+                        Responsável:{" "}
+                        <strong className="text-slate-900">
+                          {currentQueueItem.guardianName || "Não informado"}
+                        </strong>
+                      </span>
+                      {currentQueueItem.student.lowAttendanceRecord?.attendancePercent !== undefined && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[11px] tabular-nums">
+                          Frequência: {currentQueueItem.student.lowAttendanceRecord.attendancePercent}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-5 space-y-1">
+                    <label
+                      htmlFor={queuePhoneInputId}
+                      className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Telefone de destino</span>
+                    </label>
+                    <input
+                      id={queuePhoneInputId}
+                      type="tel"
+                      value={currentQueueItem.phone}
+                      onChange={(e) => updateCurrentQueueField({ phone: e.target.value })}
+                      className="w-full font-mono tabular-nums text-sm font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <textarea
-                rows={7}
-                value={currentQueueItem.message}
-                onChange={(e) => updateCurrentQueueField({ message: e.target.value })}
-                className="w-full text-sm p-3.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white leading-relaxed"
-              />
+              {/* Bloco destacado para revisão humana da mensagem */}
+              <div className="rounded-xl border border-sky-200/90 bg-sky-50/35 p-3.5 sm:p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    htmlFor={queueMessageTextareaId}
+                    className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5"
+                  >
+                    <Edit3 className="w-4 h-4 text-sky-600" />
+                    <span>Revisão da mensagem antes do envio</span>
+                  </label>
+                  <span className="text-[11px] text-slate-600">
+                    Confira destinatário e texto antes de enviar.
+                  </span>
+                </div>
+
+                <textarea
+                  id={queueMessageTextareaId}
+                  rows={7}
+                  value={currentQueueItem.message}
+                  onChange={(e) => updateCurrentQueueField({ message: e.target.value })}
+                  className="w-full text-sm p-3.5 border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 leading-relaxed shadow-2xs"
+                />
+              </div>
 
               {queueError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs font-semibold">
-                  {queueError}
+                <div
+                  role="alert"
+                  className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs font-semibold flex items-center gap-2"
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{queueError}</span>
                 </div>
               )}
 
-              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  disabled={isQueueBusy}
-                  onClick={handleQueueSkip}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
-                >
-                  <SkipForward className="w-4 h-4" />
-                  <span>Pular estudante</span>
-                </button>
+              {/* Ações: distinção clara entre abrir conversa no WhatsApp e concluir o registro */}
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <p className="text-[11px] font-medium text-slate-600">
+                  {currentQueueItem.outcome === "OPENED"
+                    ? "Passo atual: confirme se a mensagem foi enviada no WhatsApp ou marque o número como sem WhatsApp para concluir este registro."
+                    : "Passo atual: abra a conversa no WhatsApp para enviar manualmente. A abertura da janela não conclui o registro."}
+                </p>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
                   <button
                     type="button"
                     disabled={isQueueBusy}
-                    onClick={handleQueueOpenWhatsApp}
-                    className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
+                    onClick={handleQueueSkip}
+                    className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 transition cursor-pointer disabled:opacity-50"
                   >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>
-                      {currentQueueItem.outcome === "OPENED"
-                        ? "Reabrir no WhatsApp"
-                        : "1. Abrir WhatsApp"}
-                    </span>
+                    <SkipForward className="w-4 h-4" />
+                    <span>Pular estudante</span>
                   </button>
 
-                  <button
-                    type="button"
-                    disabled={isQueueBusy}
-                    onClick={() => handleQueueResolveAndNext("SENT")}
-                    className="inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>2. Enviado</span>
-                  </button>
+                  <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isQueueBusy}
+                      onClick={handleQueueOpenWhatsApp}
+                      className={`inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer disabled:opacity-50 ${
+                        currentQueueItem.outcome === "OPENED"
+                          ? "bg-white hover:bg-sky-50 text-sky-800 border border-sky-300"
+                          : "bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-2 ring-sky-500/20"
+                      }`}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>
+                        {currentQueueItem.outcome === "OPENED"
+                          ? "Reabrir no WhatsApp"
+                          : "1. Abrir WhatsApp"}
+                      </span>
+                    </button>
 
-                  <button
-                    type="button"
-                    disabled={isQueueBusy}
-                    onClick={() => handleQueueResolveAndNext("FAILED_NO_WHATSAPP")}
-                    className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold transition cursor-pointer"
-                  >
-                    <PhoneOff className="w-4 h-4" />
-                    <span>Sem WhatsApp</span>
-                  </button>
+                    <button
+                      type="button"
+                      disabled={isQueueBusy}
+                      onClick={() => handleQueueResolveAndNext("SENT")}
+                      className={`inline-flex items-center justify-center space-x-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer disabled:opacity-50 ${
+                        currentQueueItem.outcome === "OPENED"
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-500/30"
+                          : "bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300"
+                      }`}
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>2. Confirmar envio</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isQueueBusy}
+                      onClick={() => handleQueueResolveAndNext("FAILED_NO_WHATSAPP")}
+                      className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                    >
+                      <PhoneOff className="w-4 h-4" />
+                      <span>Sem WhatsApp</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1665,11 +1824,16 @@ export default function BuscaAtivaClient({
               <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
                 <CheckCircle className="w-6 h-6" />
               </div>
-              <h2 className="text-lg font-black text-slate-900">
-                Fila da turma concluída
-              </h2>
+              <div className="space-y-1">
+                <h2 className="text-lg font-black text-slate-900">
+                  Fila da turma concluída
+                </h2>
+                <p className="text-xs text-slate-600 tabular-nums">
+                  {queueItems.length} estudante(s) processado(s) na fila desta turma.
+                </p>
+              </div>
 
-              <div className="grid grid-cols-3 gap-3 max-w-lg mx-auto text-xs">
+              <div className="grid grid-cols-3 gap-3 max-w-lg mx-auto text-xs tabular-nums">
                 <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                   <div className="text-xl font-black text-emerald-700">
                     {queueItems.filter((i) => i.outcome === "SENT").length}

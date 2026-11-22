@@ -1835,6 +1835,7 @@ export default function AtaEditorModal({
       <AtaDialog
         isOpen={isOpen}
         onClose={onClose}
+        hasActiveChildModal={showPinModal || isScanModalOpen}
         title={
           isVoid
             ? `Ata Pedagógica nº ${cleanNum}/${viewMinuteData.year} (Tornada Sem Efeito)`
@@ -2252,6 +2253,7 @@ export default function AtaEditorModal({
     <AtaDialog
       isOpen={isOpen}
       onClose={onClose}
+      hasActiveChildModal={showPinModal || isScanModalOpen}
       title="Lavratura de Ata do Atendimento Pedagógico"
       description="Registra atendimentos, participantes e combinados vinculados ao histórico do estudante."
       maxWidthClass="max-w-[98vw] 2xl:max-w-[1560px]"
@@ -3075,21 +3077,31 @@ export default function AtaEditorModal({
                 </div>
 
                 {/* Texto Formal da Ata */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-extrabold text-slate-900 block text-xs">
+                <div className="space-y-1.5 rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label htmlFor="ata-editor-summary" className="font-extrabold text-slate-900 block text-xs">
                       Texto Oficial da Ata: <span className="text-rose-600">*</span>
                     </label>
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      Etapa de redação • Salve como minuta ou avance para confirmação por PIN
+                    </span>
                   </div>
                   <textarea
+                    id="ata-editor-summary"
                     rows={9}
                     value={summary}
+                    aria-invalid={Boolean(finalizeError && summary.trim().length < 10)}
                     onChange={(e) => {
+                      markLocalEdit();
                       setSummary(e.target.value);
                       if (finalizeError) setFinalizeError(null);
                     }}
                     placeholder="Redija o texto oficial da ata ou formalize a partir das anotações..."
-                    className="w-full p-3.5 border border-slate-300 rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs"
+                    className={`w-full p-3.5 border rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs ${
+                      finalizeError && summary.trim().length < 10
+                        ? "border-rose-400"
+                        : "border-slate-300"
+                    }`}
                   />
                 </div>
 
@@ -4004,26 +4016,33 @@ export default function AtaEditorModal({
 
             {/* Feedback de Rascunho Salvo */}
             {draftSavedMsg && (
-              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center space-x-2 font-bold">
+              <div
+                role="status"
+                aria-live="polite"
+                className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center space-x-2 font-bold"
+              >
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>{draftSavedMsg}</span>
               </div>
             )}
 
-            {/* Aviso de Erro Visual na Lavratura */}
+            {/* Aviso de Erro Visual na Lavratura ou Salvamento de Minuta */}
             {finalizeError && (
-              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start space-x-2.5">
+              <div
+                role="alert"
+                className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 flex items-start space-x-2.5"
+              >
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
-                  <strong className="font-bold text-xs">Atenção antes de lavrar a ata:</strong>
+                  <strong className="font-bold text-xs">Não foi possível concluir a operação:</strong>
                   <p className="text-xs leading-relaxed">{finalizeError}</p>
                 </div>
               </div>
             )}
 
-            {/* Barra de Ações Inferior da Etapa 2 */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-200">
-              <div className="flex items-center space-x-2">
+            {/* Barra de Ações Inferior da Etapa 2 — Separação entre Navegação, Minuta e Confirmação Final */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-4 border-t border-slate-200">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setStep(1)}
@@ -4035,31 +4054,38 @@ export default function AtaEditorModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-800 font-medium text-xs transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:text-slate-900 font-medium text-xs transition cursor-pointer"
                 >
                   Fechar
                 </button>
               </div>
 
-              <div className="flex items-center space-x-2.5">
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
-                >
-                  {saving ? "Salvando..." : "Salvar Rascunho"}
-                </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-slate-200 bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
+                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer shadow-2xs"
+                  >
+                    {saving ? "Salvando minuta..." : "Salvar Rascunho"}
+                  </button>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleFinalize()}
-                  disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
-                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
-                >
-                  <FileCheck2 className="w-4 h-4 text-emerald-200" />
-                  <span>{savingFinal ? "Lavrando..." : "Lavrar Ata"}</span>
-                </button>
+                <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-emerald-200 bg-emerald-50/60">
+                  <button
+                    type="button"
+                    onClick={() => handleFinalize()}
+                    disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <FileCheck2 className="w-4 h-4 text-emerald-100" />
+                    <span>{savingFinal ? "Confirmando..." : "Lavrar Ata"}</span>
+                  </button>
+                  <span className="text-[10px] font-semibold text-emerald-900 pr-2 hidden sm:inline">
+                    Confirma autoria por PIN
+                  </span>
+                </div>
               </div>
             </div>
           </div>

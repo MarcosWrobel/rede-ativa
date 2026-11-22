@@ -1,4 +1,12 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import AtasClient from "@/app/atas/AtasClient";
+import AtaDialog from "@/components/ata/AtaDialog";
+import SigningPinModal from "@/components/ata/SigningPinModal";
+import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import {
   numberToPortugueseWords,
   formatFormalOpeningDate,
@@ -192,6 +200,82 @@ describe("Atas Usability & Archival: Livro Anual & Filtros de Arquivo", () => {
 
       const res2 = computeScanState(minuteWithMimeType);
       expect(res2.isCurrentPdf).toBe(true);
+    });
+  });
+
+  describe("AtasClient & Submodais (Fase 3 UX, Foco & Separação Editorial)", () => {
+    it("renderiza AtasClient com ModalDialog para Validação de Integridade e distinção Minuta vs Ata confirmada", () => {
+      const html = renderToString(
+        React.createElement(AtasClient, {
+          school: { id: "sch-1", name: "Escola Teste Atas" },
+          currentYear: 2026,
+          availableStudents: [],
+          isAdmin: true,
+        })
+      );
+
+      expect(html).toContain("Livro de Atas Pedagógicas");
+      expect(html).toContain("<dialog");
+      expect(html).toContain("Validação de integridade");
+
+      const atasSource = fs.readFileSync(
+        path.join(process.cwd(), "src/app/atas/AtasClient.tsx"),
+        "utf8"
+      );
+      expect(atasSource).toContain("Ata confirmada • nº");
+      expect(atasSource).toContain("Minuta em edição");
+      expect(atasSource).toContain("Ata sem efeito • nº");
+      expect(atasSource).toContain("Abrir Página de Validação");
+      expect(atasSource).not.toContain("Certidão");
+    });
+
+    it("garante hasActiveChildModal em AtaDialog/AtaEditorModal e semântica de diálogo acessível em PIN e Via Física", () => {
+      const dialogHtml = renderToString(
+        React.createElement(AtaDialog, {
+          isOpen: true,
+          onClose: () => {},
+          title: "Lavratura Teste",
+          description: "Descrição auxiliar",
+          hasActiveChildModal: true,
+          children: React.createElement("p", null, "Conteúdo do editor"),
+        })
+      );
+      expect(dialogHtml).toContain("<dialog");
+      expect(dialogHtml).toContain('closedby="none"');
+      expect(dialogHtml).toContain("aria-labelledby=");
+      expect(dialogHtml).toContain("aria-describedby=");
+
+      const pinHtml = renderToString(
+        React.createElement(SigningPinModal, {
+          isOpen: true,
+          onClose: () => {},
+          onSuccess: () => {},
+          hasPinInitial: true,
+        })
+      );
+      expect(pinHtml).toContain('role="dialog"');
+      expect(pinHtml).toContain('aria-modal="true"');
+      expect(pinHtml).toContain("Confirmação de autoria por PIN");
+
+      const scanHtml = renderToString(
+        React.createElement(PhysicalScanModal, {
+          isOpen: true,
+          onClose: () => {},
+          onSuccess: () => {},
+          minute: { id: "m-1", ataNumber: 12, year: 2026, subject: "Atendimento Teste" },
+        })
+      );
+      expect(scanHtml).toContain('role="dialog"');
+      expect(scanHtml).toContain('aria-modal="true"');
+      expect(scanHtml).toContain("Anexo de Via Física");
+
+      const editorSource = fs.readFileSync(
+        path.join(process.cwd(), "src/components/ata/AtaEditorModal.tsx"),
+        "utf8"
+      );
+      expect(editorSource).toContain("hasActiveChildModal={showPinModal || isScanModalOpen}");
+      expect(editorSource).toContain("Salvar Rascunho");
+      expect(editorSource).toContain("Confirma autoria por PIN");
     });
   });
 });

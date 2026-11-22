@@ -667,8 +667,11 @@ progress.queue-progress::-moz-progress-bar {
     display: none;
   }
 
-  .sim-stage-enter > :not([aria-hidden]) {
+  .sim-stage-enter > :not([aria-hidden]),
+  .sim-internal-scenario-enter {
     animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 
@@ -925,4 +928,21 @@ progress.queue-progress::-moz-progress-bar {
 /* Entrada suave ao alternar telas no palco do simulador */
 .sim-stage-enter > :not([aria-hidden]) {
   animation: landingFadeUp 360ms var(--ease-smooth-out) backwards;
+}
+
+@keyframes simInternalScenarioEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sim-internal-scenario-enter {
+    animation: simInternalScenarioEnter 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import Link from "next/link";
+import ModalDialog from "@/components/ModalDialog";
 import {
   Landmark,
   Building2,
@@ -123,9 +124,61 @@ export default function SecretariaClient({
     email: "",
     district: "",
   });
+  const [createFieldErrors, setCreateFieldErrors] = useState<{
+    inep?: string;
+    name?: string;
+    email?: string;
+  }>({});
+  const [createModalError, setCreateModalError] = useState("");
   const [creating, setCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  const inepInputId = useId();
+  const inepErrorId = useId();
+  const nameInputId = useId();
+  const nameErrorId = useId();
+  const districtInputId = useId();
+  const phoneInputId = useId();
+  const emailInputId = useId();
+  const emailErrorId = useId();
+
+  const inepInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
+
+  const validateSchoolField = (field: "inep" | "name" | "email", value: string) => {
+    const trimmed = value.trim();
+    if (field === "inep") {
+      if (!trimmed || trimmed.length < 4) {
+        return "Informe o código INEP ou identificador municipal (mínimo 4 caracteres).";
+      }
+      return undefined;
+    }
+    if (field === "name") {
+      if (!trimmed || trimmed.length < 3) {
+        return "Informe o nome completo da escola (mínimo 3 caracteres).";
+      }
+      return undefined;
+    }
+    if (field === "email" && trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      return "Informe um e-mail institucional válido.";
+    }
+    return undefined;
+  };
+
+  const handleOpenCreateModal = () => {
+    setCreateFieldErrors({});
+    setCreateModalError("");
+    setShowCreateModal(true);
+  };
+
+  const handleCloseCreateModal = () => {
+    if (creating) return;
+    setShowCreateModal(false);
+    setCreateFieldErrors({});
+    setCreateModalError("");
+  };
 
   const handleSwitchSchool = async (schoolId: string) => {
     setSwitching(schoolId);
@@ -149,12 +202,33 @@ export default function SecretariaClient({
 
   const handleCreateSchool = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSchool.name.trim() || !newSchool.inep.trim()) {
-      setErrorMsg("Nome e Código INEP são obrigatórios.");
+    if (creating) return;
+
+    const nextErrors = {
+      inep: validateSchoolField("inep", newSchool.inep),
+      name: validateSchoolField("name", newSchool.name),
+      email: validateSchoolField("email", newSchool.email),
+    };
+    const filteredErrors = Object.fromEntries(
+      Object.entries(nextErrors).filter(([, value]) => Boolean(value))
+    ) as typeof createFieldErrors;
+
+    if (Object.keys(filteredErrors).length > 0) {
+      setCreateFieldErrors(filteredErrors);
+      setCreateModalError("");
+      if (filteredErrors.inep) {
+        inepInputRef.current?.focus();
+      } else if (filteredErrors.name) {
+        nameInputRef.current?.focus();
+      } else if (filteredErrors.email) {
+        emailInputRef.current?.focus();
+      }
       return;
     }
 
     setCreating(true);
+    setCreateFieldErrors({});
+    setCreateModalError("");
     setErrorMsg("");
     setSuccessMsg("");
 
@@ -176,12 +250,12 @@ export default function SecretariaClient({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || "Erro ao cadastrar escola");
       }
 
-      setSuccessMsg(`Escola "${data.school.name}" cadastrada com sucesso!`);
+      setSuccessMsg(`Escola "${data.school.name}" cadastrada e ativada na rede municipal.`);
       const sc = data.school;
       setSchools((prev) => [
         ...prev,
@@ -209,9 +283,11 @@ export default function SecretariaClient({
         },
       ]);
       setNewSchool({ inep: "", name: "", phone: "", email: "", district: "" });
+      setCreateFieldErrors({});
+      setCreateModalError("");
       setShowCreateModal(false);
     } catch (e: any) {
-      setErrorMsg(e.message || "Erro ao criar escola municipal");
+      setCreateModalError(e.message || "Erro ao criar escola municipal. Revise os dados e tente novamente.");
     } finally {
       setCreating(false);
     }
@@ -310,7 +386,7 @@ export default function SecretariaClient({
             </Link>
             <button
               type="button"
-              onClick={() => setShowCreateModal(true)}
+              onClick={handleOpenCreateModal}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-sky-900 hover:bg-sky-50 text-xs font-bold rounded-xl shadow-md transition transform active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4 text-sky-600" />
@@ -329,37 +405,12 @@ export default function SecretariaClient({
         </div>
       </div>
 
-      {/* Alerta Executivo de Defasagem de Sincronização SERE */}
-      {outdatedSchools.length > 0 && (
-        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-200/80 text-amber-900 flex items-center justify-center shrink-0">
-              <AlertTriangle className="w-5 h-5 text-amber-800" />
-            </div>
-            <div>
-              <p className="text-xs font-black text-amber-900">
-                Alerta de Defasagem SERE: {outdatedSchools.length}{" "}
-                {outdatedSchools.length === 1 ? "escola municipal requer" : "escolas municipais requerem"} sincronização
-              </p>
-              <p className="text-[11px] text-amber-800/90">
-                Unidades com mais de 7 dias sem importação de faltas ou com base de alunos zerada.
-                A defasagem compromete a identificação imediata de infrequência e evasão.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setFilterStatus(filterStatus === "OUTDATED_ONLY" ? "ALL" : "OUTDATED_ONLY")}
-            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shrink-0 transition cursor-pointer"
-          >
-            {filterStatus === "OUTDATED_ONLY" ? "Exibir Todas as Escolas" : "Ver Apenas Defasadas"}
-          </button>
-        </div>
-      )}
-
       {/* Feedback Messages */}
       {errorMsg && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between text-xs text-red-700">
+        <div
+          role="alert"
+          className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between text-xs text-red-700"
+        >
           <span>{errorMsg}</span>
           <button
             type="button"
@@ -371,7 +422,11 @@ export default function SecretariaClient({
         </div>
       )}
       {successMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-700">
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-semibold text-emerald-800"
+        >
           <span>{successMsg}</span>
           <button
             type="button"
@@ -394,7 +449,7 @@ export default function SecretariaClient({
               <Building2 className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 tabular-nums">
             {metrics.totalSchools}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">Na rede de {city}</span>
@@ -409,10 +464,10 @@ export default function SecretariaClient({
               <Users className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 tabular-nums">
             {metrics.totalStudents.toLocaleString("pt-BR")}
           </p>
-          <span className="text-[11px] text-slate-500 mt-1 block">
+          <span className="text-[11px] text-slate-500 mt-1 block tabular-nums">
             {metrics.totalClasses} turmas cadastradas
           </span>
         </div>
@@ -426,7 +481,7 @@ export default function SecretariaClient({
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-black text-emerald-600 mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-emerald-600 mt-2 tabular-nums">
             {metrics.networkAverageAttendance}%
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">Média consolidada</span>
@@ -441,7 +496,7 @@ export default function SecretariaClient({
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-black text-amber-600 mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-amber-600 mt-2 tabular-nums">
             {metrics.criticalStudentsCount}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">Em alerta na rede</span>
@@ -456,7 +511,7 @@ export default function SecretariaClient({
               <Send className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-2 tabular-nums">
             {metrics.messagesSentThisMonth}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">Contatos registrados</span>
@@ -556,46 +611,85 @@ export default function SecretariaClient({
           </div>
         </div>
 
-        {/* Chips de Filtragem Rápida */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => setFilterStatus("ALL")}
-            className={`px-3 py-1 rounded-full font-bold transition cursor-pointer ${
-              filterStatus === "ALL"
-                ? "bg-slate-900 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Todas ({schools.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterStatus("CRITICAL_ONLY")}
-            className={`px-3 py-1 rounded-full font-bold transition cursor-pointer flex items-center space-x-1 ${
-              filterStatus === "CRITICAL_ONLY"
-                ? "bg-amber-600 text-white"
-                : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200"
-            }`}
-          >
-            <span>🚨 Apenas com Risco Crítico</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterStatus("OUTDATED_ONLY")}
-            className={`px-3 py-1 rounded-full font-bold transition cursor-pointer flex items-center space-x-1 ${
-              filterStatus === "OUTDATED_ONLY"
-                ? "bg-rose-600 text-white"
-                : "bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200"
-            }`}
-          >
-            <span>⚠️ Sincronização Defasada ({outdatedSchools.length})</span>
-          </button>
+        {/* Alerta de Sincronização SERE + Chips de Filtragem Rápida */}
+        <div className="space-y-3">
+          {outdatedSchools.length > 0 && (
+            <div className="bg-amber-50/90 border border-amber-300 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-200/80 text-amber-900 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-amber-800" />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-amber-950 tabular-nums">
+                    Alerta de Defasagem SERE: {outdatedSchools.length}{" "}
+                    {outdatedSchools.length === 1 ? "unidade requer" : "unidades requerem"} atualização de frequência
+                  </p>
+                  <p className="text-[11px] text-amber-900/90">
+                    Unidades com mais de 7 dias sem importação de faltas ou base inicial zerada aparecem sinalizadas abaixo.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFilterStatus(filterStatus === "OUTDATED_ONLY" ? "ALL" : "OUTDATED_ONLY")}
+                className="px-3.5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-extrabold text-xs shrink-0 transition cursor-pointer"
+              >
+                {filterStatus === "OUTDATED_ONLY" ? "Exibir Todas as Escolas" : "Ver Apenas Defasadas"}
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFilterStatus("ALL")}
+                className={`px-3 py-1.5 rounded-full font-bold transition cursor-pointer tabular-nums ${
+                  filterStatus === "ALL"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Todas ({schools.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus("CRITICAL_ONLY")}
+                className={`px-3 py-1.5 rounded-full font-bold transition cursor-pointer flex items-center space-x-1 ${
+                  filterStatus === "CRITICAL_ONLY"
+                    ? "bg-amber-600 text-white"
+                    : "bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200"
+                }`}
+              >
+                <span>Apenas com Risco Crítico</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus("OUTDATED_ONLY")}
+                aria-pressed={filterStatus === "OUTDATED_ONLY"}
+                className={`px-3 py-1.5 rounded-full font-bold transition cursor-pointer flex items-center space-x-1 tabular-nums ${
+                  filterStatus === "OUTDATED_ONLY"
+                    ? "bg-rose-600 text-white"
+                    : "bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200"
+                }`}
+              >
+                <span>Sincronização Defasada ({outdatedSchools.length})</span>
+              </button>
+            </div>
+            <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
+              Exibindo {filteredAndSortedSchools.length} de {schools.length} escolas
+            </span>
+          </div>
         </div>
 
         {/* Visualização 1: Tabela de Ranking & Comparativo Visual */}
         {viewMode === "RANKING" && (
-          <div className="overflow-x-auto">
+          <div
+            tabIndex={0}
+            role="region"
+            aria-label="Ranking comparativo das escolas"
+            className="overflow-x-auto focus:outline-none"
+          >
             {filteredAndSortedSchools.length === 0 ? (
               <div className="p-12 text-center space-y-2">
                 <Building2 className="w-10 h-10 text-slate-300 mx-auto" />
@@ -606,12 +700,12 @@ export default function SecretariaClient({
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-2 text-center w-12">Pos</th>
-                    <th className="py-3 px-3">Unidade Escolar & Polo</th>
-                    <th className="py-3 px-3 min-w-[200px]">Frequência da Unidade</th>
-                    <th className="py-3 px-3 text-center">Risco Crítico (&lt;75%)</th>
-                    <th className="py-3 px-3 text-center">Alunos / Turmas</th>
-                    <th className="py-3 px-3 text-center">Atas Lavradas</th>
+                    <th className="py-3 px-2 text-center w-12 tabular-nums">Pos</th>
+                    <th className="py-3 px-3 min-w-[230px]">Unidade Escolar &amp; Polo</th>
+                    <th className="py-3 px-3 text-right min-w-[200px] tabular-nums">Frequência da Unidade</th>
+                    <th className="py-3 px-3 text-right tabular-nums">Risco Crítico (&lt;75%)</th>
+                    <th className="py-3 px-3 text-right tabular-nums">Alunos / Turmas</th>
+                    <th className="py-3 px-3 text-right tabular-nums">Atas Lavradas</th>
                     <th className="py-3 px-3">Sincronização SERE</th>
                     <th className="py-3 px-3 text-right">Ação</th>
                   </tr>
@@ -620,13 +714,20 @@ export default function SecretariaClient({
                   {filteredAndSortedSchools.map((s, idx) => {
                     const diff = Number((s.averageAttendance - metrics.networkAverageAttendance).toFixed(1));
                     const isAboveNetwork = diff >= 0;
+                    const needsAttention =
+                      s.averageAttendance < 75 || s.criticalCount > 0 || Boolean(s.isSyncOutdated);
 
                     return (
-                      <tr key={s.id} className="hover:bg-slate-50/80 transition">
+                      <tr
+                        key={s.id}
+                        className={`hover:bg-slate-50/80 transition ${
+                          s.averageAttendance < 75 ? "bg-rose-50/20" : ""
+                        }`}
+                      >
                         {/* Posição no Ranking */}
-                        <td className="py-3.5 px-2 text-center">
+                        <td className="py-3.5 px-2 text-center tabular-nums">
                           <span
-                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-[11px] ${
+                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-[11px] tabular-nums ${
                               idx === 0
                                 ? "bg-amber-100 text-amber-900 border border-amber-300"
                                 : idx === 1
@@ -655,11 +756,18 @@ export default function SecretariaClient({
                               </div>
                             )}
                             <div>
-                              <p className="font-extrabold text-slate-900 text-xs leading-snug">
-                                {s.name}
-                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <p className="font-extrabold text-slate-900 text-xs leading-snug">
+                                  {s.name}
+                                </p>
+                                {needsAttention && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold border border-amber-200">
+                                    Prioridade
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center space-x-2 text-[10px] text-slate-500 mt-0.5">
-                                <span>INEP: {s.inepCode}</span>
+                                <span className="tabular-nums">INEP: {s.inepCode}</span>
                                 <span>•</span>
                                 <span className="inline-flex items-center gap-0.5">
                                   <MapPin className="w-2.5 h-2.5 text-slate-400" />
@@ -671,11 +779,18 @@ export default function SecretariaClient({
                         </td>
 
                         {/* Frequência Média com Barra Visual e Comparativo vs Rede */}
-                        <td className="py-3.5 px-3">
+                        <td className="py-3.5 px-3 text-right tabular-nums">
                           <div className="space-y-1">
-                            <div className="flex items-baseline justify-between text-xs">
+                            <div className="flex items-baseline justify-end gap-2 text-xs">
                               <span
-                                className={`font-black text-sm ${
+                                className={`text-[10px] font-bold tabular-nums ${
+                                  isAboveNetwork ? "text-emerald-700" : "text-rose-600"
+                                }`}
+                              >
+                                {isAboveNetwork ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`} vs rede
+                              </span>
+                              <span
+                                className={`font-black text-sm tabular-nums ${
                                   s.averageAttendance < 75
                                     ? "text-rose-600"
                                     : s.averageAttendance < 85
@@ -683,14 +798,7 @@ export default function SecretariaClient({
                                     : "text-emerald-700"
                                 }`}
                               >
-                                {s.averageAttendance}%
-                              </span>
-                              <span
-                                className={`text-[10px] font-bold ${
-                                  isAboveNetwork ? "text-emerald-700" : "text-rose-600"
-                                }`}
-                              >
-                                {isAboveNetwork ? `+${diff}%` : `${diff}%`} vs rede
+                                {s.averageAttendance.toFixed(1)}%
                               </span>
                             </div>
 
@@ -711,9 +819,9 @@ export default function SecretariaClient({
                         </td>
 
                         {/* Risco Crítico */}
-                        <td className="py-3.5 px-3 text-center">
+                        <td className="py-3.5 px-3 text-right tabular-nums">
                           {s.criticalCount > 0 ? (
-                            <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs">
+                            <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs tabular-nums">
                               <span>{s.criticalCount}</span>
                               {s.studentsCount > 0 && (
                                 <span className="text-[10px] font-medium opacity-80">
@@ -722,18 +830,18 @@ export default function SecretariaClient({
                               )}
                             </span>
                           ) : (
-                            <span className="text-slate-400 text-xs">0</span>
+                            <span className="text-slate-400 text-xs tabular-nums">0</span>
                           )}
                         </td>
 
                         {/* Alunos & Turmas */}
-                        <td className="py-3.5 px-3 text-center">
+                        <td className="py-3.5 px-3 text-right tabular-nums">
                           <p className="font-bold text-slate-800">{s.studentsCount}</p>
-                          <span className="text-[10px] text-slate-400">{s.classesCount} turmas</span>
+                          <span className="text-[10px] text-slate-500">{s.classesCount} turmas</span>
                         </td>
 
                         {/* Atas Lavradas */}
-                        <td className="py-3.5 px-3 text-center">
+                        <td className="py-3.5 px-3 text-right tabular-nums">
                           <span className="font-bold text-slate-800">{s.minutesCount}</span>
                         </td>
 
@@ -1196,118 +1304,235 @@ export default function SecretariaClient({
       </div>
 
       {/* Modal Criar Escola Municipal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+      <ModalDialog
+        open={showCreateModal}
+        onClose={handleCloseCreateModal}
+        preventClose={creating}
+        title={`Nova Escola Municipal — ${city}`}
+        subtitle="A unidade será vinculada à rede com modelos pedagógicos iniciais e base isolada de estudantes."
+      >
+        <form onSubmit={handleCreateSchool} noValidate className="space-y-4 text-xs">
+          <fieldset className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+            <legend className="px-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
+              Identificação Institucional
+            </legend>
+
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Landmark className="w-5 h-5 text-sky-600" />
-                <span>Nova Escola Municipal — {city}</span>
-              </h3>
-              <p className="text-xs text-slate-500">
-                A escola será provisionada na rede municipal com starter pack de modelos pedagógicos e
-                instância isolada de dados.
-              </p>
+              <label htmlFor={inepInputId} className="text-[11px] font-bold text-slate-700 block">
+                Código INEP da Escola *
+              </label>
+              <input
+                ref={inepInputRef}
+                id={inepInputId}
+                type="text"
+                inputMode="numeric"
+                placeholder="Ex: 41042730 ou identificador municipal"
+                value={newSchool.inep}
+                disabled={creating}
+                aria-invalid={Boolean(createFieldErrors.inep)}
+                aria-describedby={createFieldErrors.inep ? inepErrorId : undefined}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setNewSchool({ ...newSchool, inep: val });
+                  if (createFieldErrors.inep) {
+                    setCreateFieldErrors((prev) => ({
+                      ...prev,
+                      inep: validateSchoolField("inep", val),
+                    }));
+                  }
+                }}
+                onBlur={() => {
+                  if (newSchool.inep.trim()) {
+                    setCreateFieldErrors((prev) => ({
+                      ...prev,
+                      inep: validateSchoolField("inep", newSchool.inep),
+                    }));
+                  }
+                }}
+                className={`w-full px-3 py-2 bg-white border rounded-xl text-xs focus:ring-2 text-slate-900 font-medium tabular-nums disabled:opacity-60 ${
+                  createFieldErrors.inep
+                    ? "border-red-400 focus:ring-red-500"
+                    : "border-slate-300 focus:ring-sky-500"
+                }`}
+              />
+              {createFieldErrors.inep && (
+                <p id={inepErrorId} role="alert" className="text-[11px] text-red-700 font-semibold">
+                  {createFieldErrors.inep}
+                </p>
+              )}
             </div>
 
-            <form onSubmit={handleCreateSchool} className="space-y-4">
+            <div className="space-y-1">
+              <label htmlFor={nameInputId} className="text-[11px] font-bold text-slate-700 block">
+                Nome da Escola Municipal *
+              </label>
+              <input
+                ref={nameInputRef}
+                id={nameInputId}
+                type="text"
+                placeholder="Ex: Escola Municipal Professor David Federmann"
+                value={newSchool.name}
+                disabled={creating}
+                aria-invalid={Boolean(createFieldErrors.name)}
+                aria-describedby={createFieldErrors.name ? nameErrorId : undefined}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setNewSchool({ ...newSchool, name: val });
+                  if (createFieldErrors.name) {
+                    setCreateFieldErrors((prev) => ({
+                      ...prev,
+                      name: validateSchoolField("name", val),
+                    }));
+                  }
+                }}
+                onBlur={() => {
+                  if (newSchool.name.trim()) {
+                    setCreateFieldErrors((prev) => ({
+                      ...prev,
+                      name: validateSchoolField("name", newSchool.name),
+                    }));
+                  }
+                }}
+                className={`w-full px-3 py-2 bg-white border rounded-xl text-xs focus:ring-2 text-slate-900 font-medium disabled:opacity-60 ${
+                  createFieldErrors.name
+                    ? "border-red-400 focus:ring-red-500"
+                    : "border-slate-300 focus:ring-sky-500"
+                }`}
+              />
+              {createFieldErrors.name && (
+                <p id={nameErrorId} role="alert" className="text-[11px] text-red-700 font-semibold">
+                  {createFieldErrors.name}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor={districtInputId} className="text-[11px] font-bold text-slate-700 block">
+                Polo / Distrito Escolar
+              </label>
+              <input
+                id={districtInputId}
+                type="text"
+                placeholder="Ex: Sede Urbana, Caetano Mendes, São Bento..."
+                value={newSchool.district}
+                disabled={creating}
+                onChange={(e) => setNewSchool({ ...newSchool, district: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium disabled:opacity-60"
+              />
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+            <legend className="px-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
+              Canais de Contato
+            </legend>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700">
-                  Código INEP da Escola *
+                <label htmlFor={phoneInputId} className="text-[11px] font-bold text-slate-700 block">
+                  Telefone Institucional
                 </label>
                 <input
+                  id={phoneInputId}
                   type="text"
-                  placeholder="Ex: 41042730 ou identificador municipal"
-                  value={newSchool.inep}
-                  onChange={(e) => setNewSchool({ ...newSchool, inep: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700">
-                  Nome da Escola Municipal *
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Escola Municipal Professor David Federmann"
-                  value={newSchool.name}
-                  onChange={(e) => setNewSchool({ ...newSchool, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700">
-                  Polo / Distrito Escolar
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Sede Urbana, Caetano Mendes, São Bento..."
-                  value={newSchool.district}
-                  onChange={(e) => setNewSchool({ ...newSchool, district: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-700">
-                    Telefone Institucional
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="(42) 3275-0000"
-                    value={newSchool.phone}
-                    onChange={(e) => setNewSchool({ ...newSchool, phone: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-700">
-                    E-mail Oficial
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="escola@tibagi.pr.gov.br"
-                    value={newSchool.email}
-                    onChange={(e) => setNewSchool({ ...newSchool, email: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  placeholder="(42) 3275-0000"
+                  value={newSchool.phone}
                   disabled={creating}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="inline-flex items-center gap-2 px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl transition shadow-xs disabled:opacity-50 cursor-pointer"
-                >
-                  {creating ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Cadastrando...</span>
-                    </>
-                  ) : (
-                    <span>Cadastrar e Ativar</span>
-                  )}
-                </button>
+                  onChange={(e) => setNewSchool({ ...newSchool, phone: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 text-slate-900 font-medium tabular-nums disabled:opacity-60"
+                />
               </div>
-            </form>
+
+              <div className="space-y-1">
+                <label htmlFor={emailInputId} className="text-[11px] font-bold text-slate-700 block">
+                  E-mail Oficial
+                </label>
+                <input
+                  ref={emailInputRef}
+                  id={emailInputId}
+                  type="email"
+                  placeholder="escola@rede.pr.gov.br"
+                  value={newSchool.email}
+                  disabled={creating}
+                  aria-invalid={Boolean(createFieldErrors.email)}
+                  aria-describedby={createFieldErrors.email ? emailErrorId : undefined}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewSchool({ ...newSchool, email: val });
+                    if (createFieldErrors.email) {
+                      setCreateFieldErrors((prev) => ({
+                        ...prev,
+                        email: validateSchoolField("email", val),
+                      }));
+                    }
+                  }}
+                  onBlur={() => {
+                    setCreateFieldErrors((prev) => ({
+                      ...prev,
+                      email: validateSchoolField("email", newSchool.email),
+                    }));
+                  }}
+                  className={`w-full px-3 py-2 bg-white border rounded-xl text-xs focus:ring-2 text-slate-900 font-medium disabled:opacity-60 ${
+                    createFieldErrors.email
+                      ? "border-red-400 focus:ring-red-500"
+                      : "border-slate-300 focus:ring-sky-500"
+                  }`}
+                />
+                {createFieldErrors.email && (
+                  <p id={emailErrorId} role="alert" className="text-[11px] text-red-700 font-semibold">
+                    {createFieldErrors.email}
+                  </p>
+                )}
+              </div>
+            </div>
+          </fieldset>
+
+          {creating && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-2.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs font-semibold flex items-center gap-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <span>Cadastrando unidade escolar e preparando ambiente isolado...</span>
+            </div>
+          )}
+
+          {createModalError && (
+            <div
+              role="alert"
+              className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold"
+            >
+              {createModalError}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={handleCloseCreateModal}
+              disabled={creating}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={creating}
+              className="inline-flex items-center gap-2 px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl transition shadow-xs disabled:opacity-50 cursor-pointer"
+            >
+              {creating ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Cadastrando...</span>
+                </>
+              ) : (
+                <span>Cadastrar e Ativar</span>
+              )}
+            </button>
           </div>
-        </div>
-      )}
+        </form>
+      </ModalDialog>
     </div>
   );
 }

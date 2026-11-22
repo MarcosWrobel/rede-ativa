@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   X,
   Camera,
@@ -38,6 +38,103 @@ export default function PhysicalScanModal({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const dialogPanelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const titleId = useId();
+
+  useEffect(() => {
+    let focusRaf = 0;
+
+    if (isOpen && minute) {
+      if (!wasOpenRef.current) {
+        triggerRef.current =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
+      wasOpenRef.current = true;
+
+      focusRaf = window.requestAnimationFrame(() => {
+        const panel = dialogPanelRef.current;
+        if (!panel) return;
+        const firstInteractive = panel.querySelector<HTMLElement>(
+          'button:not(:disabled), input:not([type="hidden"]):not(.hidden):not(:disabled), a[href]'
+        );
+        firstInteractive?.focus({ preventScroll: true });
+      });
+
+      const handleKeyDown = (event: KeyboardEvent) => {
+        const panel = dialogPanelRef.current;
+        if (!panel) return;
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!loading) {
+            onClose();
+          }
+          return;
+        }
+
+        if (event.key === "Tab") {
+          const focusables = Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'button:not(:disabled), input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => !el.classList.contains("hidden") && (el.offsetParent !== null || el === document.activeElement));
+
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement;
+
+          if (event.shiftKey) {
+            if (active === first || !panel.contains(active)) {
+              event.preventDefault();
+              last.focus();
+            }
+          } else if (active === last || !panel.contains(active)) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      };
+
+      document.addEventListener("keydown", handleKeyDown, true);
+      return () => {
+        if (focusRaf) window.cancelAnimationFrame(focusRaf);
+        document.removeEventListener("keydown", handleKeyDown, true);
+      };
+    }
+
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      const trigger = triggerRef.current;
+      if (trigger && trigger.isConnected) {
+        window.requestAnimationFrame(() => {
+          if (trigger.isConnected) {
+            trigger.focus({ preventScroll: true });
+          }
+        });
+      }
+    }
+
+    return () => {
+      if (focusRaf) window.cancelAnimationFrame(focusRaf);
+    };
+  }, [isOpen, minute, loading, onClose]);
+
+  useEffect(() => {
+    return () => {
+      const trigger = triggerRef.current;
+      if (wasOpenRef.current && trigger && trigger.isConnected) {
+        window.requestAnimationFrame(() => {
+          if (trigger.isConnected) {
+            trigger.focus({ preventScroll: true });
+          }
+        });
+      }
+    };
+  }, []);
 
   if (!isOpen || !minute) return null;
 
@@ -148,38 +245,63 @@ export default function PhysicalScanModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
+    >
+      <div
+        ref={dialogPanelRef}
+        className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90dvh]"
+      >
         {/* Topo do Modal */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 gap-3">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 shrink-0">
               <Camera className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                Anexo de Via Física & Assinatura Gov.br
+            <div className="min-w-0">
+              <h2 id={titleId} className="text-base font-extrabold text-slate-900 dark:text-white">
+                Anexo de Via Física &amp; Assinatura Gov.br
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                 Ata nº {minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N"}/{minute.year} — {minute.subject}
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            disabled={loading}
+            aria-label="Fechar"
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer disabled:opacity-40 shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Corpo com Scroll */}
-        <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700 dark:text-slate-300">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-xs text-slate-700 dark:text-slate-300">
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 flex items-center space-x-2">
+            <div
+              role="alert"
+              className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 flex items-center space-x-2 font-semibold"
+            >
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {loading && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center space-x-2 font-semibold"
+            >
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              <span>Processando anexo da via física...</span>
             </div>
           )}
 
@@ -301,19 +423,25 @@ export default function PhysicalScanModal({
 
           {/* Pré-visualização do Novo Arquivo Selecionado */}
           {fileDataUrl && (
-            <div className="p-3.5 rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2">
-              <div className="flex items-center justify-between">
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-3.5 rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-bold text-indigo-900 dark:text-indigo-200 flex items-center space-x-1.5">
                   {fileType === "image" ? <ImageIcon className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-                  <span>{fileName || "Arquivo selecionado"}</span>
+                  <span>Arquivo pronto para envio: {fileName || "Arquivo selecionado"}</span>
                 </span>
                 <button
                   type="button"
+                  disabled={loading}
+                  aria-label="Remover arquivo selecionado"
                   onClick={() => {
                     setFileDataUrl(null);
                     setFileName("");
                   }}
-                  className="text-slate-400 hover:text-slate-600"
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>

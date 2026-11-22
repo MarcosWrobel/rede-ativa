@@ -37,6 +37,7 @@ import {
 import AtaEditorModal from "@/components/ata/AtaEditorModal";
 import PhysicalScanModal from "@/components/ata/PhysicalScanModal";
 import AtaQrCode from "@/components/ata/AtaQrCode";
+import ModalDialog from "@/components/ModalDialog";
 import { getAtaValidationUrl, getBaseAppUrl } from "@/lib/qrCode";
 
 function getCategoryConfig(category?: string) {
@@ -442,16 +443,16 @@ export default function AtasClient({
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       {isFinal ? (
-                        <span className="px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800 text-[11px] font-extrabold font-mono">
-                          Ata nº {ataNumStr}/{m.year}
+                        <span className="px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 text-[11px] font-extrabold tabular-nums">
+                          Ata confirmada • nº {ataNumStr}/{m.year}
                         </span>
                       ) : isVoid ? (
-                        <span className="px-2.5 py-1 rounded-md bg-rose-100 text-rose-800 text-[11px] font-extrabold line-through">
-                          Ata nº {ataNumStr}/{m.year} (Sem Efeito)
+                        <span className="px-2.5 py-1 rounded-md bg-rose-100 text-rose-900 border border-rose-200 text-[11px] font-extrabold line-through tabular-nums">
+                          Ata sem efeito • nº {ataNumStr}/{m.year}
                         </span>
                       ) : (
-                        <span className="px-2.5 py-1 rounded-md bg-amber-100 text-amber-800 text-[11px] font-extrabold">
-                          Rascunho em Edição
+                        <span className="px-2.5 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-extrabold">
+                          Minuta em edição
                         </span>
                       )}
 
@@ -592,7 +593,7 @@ export default function AtasClient({
                             setCopiedValidationUrl(false);
                           }}
                           className="p-2 rounded-xl border border-slate-200 hover:bg-emerald-50 hover:border-emerald-200 text-slate-700 hover:text-emerald-700 transition cursor-pointer"
-                          title="Visualizar QR Code e Certidão de Validação Pública"
+                          title="Visualizar QR Code e Link de Validação Pública"
                         >
                           <QrCode className="w-4 h-4" />
                         </button>
@@ -738,109 +739,135 @@ export default function AtasClient({
       />
 
       {/* Modal de Validação Pública & QR Code */}
-      {isQrModalOpen && selectedMinuteForQr && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-5 relative">
-            <button
-              type="button"
-              onClick={() => {
-                setIsQrModalOpen(false);
-                setSelectedMinuteForQr(null);
-              }}
-              className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      <ModalDialog
+        open={isQrModalOpen && Boolean(selectedMinuteForQr)}
+        onClose={() => {
+          setIsQrModalOpen(false);
+          setSelectedMinuteForQr(null);
+        }}
+        title="Validação de integridade"
+        subtitle={
+          selectedMinuteForQr
+            ? `Ata confirmada nº ${String(selectedMinuteForQr.ataNumber).padStart(3, "0")}/${selectedMinuteForQr.year}`
+            : undefined
+        }
+      >
+        {selectedMinuteForQr && (() => {
+          const validationUrl = selectedMinuteForQr.verificationCode
+            ? getAtaValidationUrl(selectedMinuteForQr.verificationCode, origin)
+            : "";
 
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5" />
+          return (
+            <div className="space-y-4">
+              {/* Identificação Priorizada da Ata */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3.5 space-y-1.5 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-200 font-extrabold text-[11px] tabular-nums">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>
+                      Ata nº {String(selectedMinuteForQr.ataNumber).padStart(3, "0")}/{selectedMinuteForQr.year}
+                    </span>
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
+                    {new Date(selectedMinuteForQr.attendedAt).toLocaleDateString("pt-BR")}
+                  </span>
+                </div>
+                <p className="font-bold text-slate-900 leading-snug">
+                  {selectedMinuteForQr.subject}
+                </p>
+                {selectedMinuteForQr.authorName && (
+                  <p className="text-[11px] text-slate-500">
+                    Autoria registrada: <strong className="text-slate-700">{selectedMinuteForQr.authorName}</strong>
+                  </p>
+                )}
               </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900">
-                  Validação de integridade
-                </h3>
-                <p className="text-xs text-slate-500 font-medium">
-                  Ata nº {String(selectedMinuteForQr.ataNumber).padStart(3, "0")}/{selectedMinuteForQr.year}
+
+              {/* QR Code e Código de Validação */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex flex-col items-center justify-center space-y-3">
+                <div className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200 flex items-center justify-center">
+                  <AtaQrCode
+                    value={validationUrl}
+                    size={160}
+                    className="w-full h-full"
+                    alt="QR Code de Validação"
+                  />
+                </div>
+                <div className="text-center space-y-1 w-full">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block tracking-wider">
+                    Código de Validação
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums tracking-widest text-slate-900 block">
+                    {selectedMinuteForQr.verificationCode || "Pendente"}
+                  </span>
+                  {validationUrl && (
+                    <div className="pt-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block tracking-wider">
+                        Endereço Público de Validação
+                      </span>
+                      <code className="block mt-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] font-mono text-slate-700 break-all select-all">
+                        {validationUrl}
+                      </code>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Ações Rápidas */}
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyValidationUrl(selectedMinuteForQr.verificationCode)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex items-center justify-center space-x-2 transition cursor-pointer"
+                >
+                  {copiedValidationUrl ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span>Link Copiado com Sucesso!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copiar Link de Validação</span>
+                    </>
+                  )}
+                </button>
+
+                <div role="status" aria-live="polite" className="sr-only">
+                  {copiedValidationUrl ? "Link de validação copiado para a área de transferência." : ""}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/validar/ata/${selectedMinuteForQr.verificationCode}`}
+                    target="_blank"
+                    className="flex-1 min-w-[170px] py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition"
+                  >
+                    <span>Abrir Página de Validação</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  </Link>
+
+                  <Link
+                    href={`/atas/${selectedMinuteForQr.id}/imprimir`}
+                    target="_blank"
+                    className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Imprimir A4</span>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Aviso de privacidade */}
+              <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200/70 text-[11px] text-amber-900 space-y-1">
+                <p className="font-bold">Privacidade na conferência pública:</p>
+                <p className="text-amber-800 leading-relaxed text-[10px]">
+                  A página pública de validação exibe apenas dados mascarados e a verificação de integridade, sem expor o conteúdo do atendimento.
                 </p>
               </div>
             </div>
-
-            {/* QR Code de Alta Resolução Autônomo */}
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col items-center justify-center space-y-3">
-              <div className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200 flex items-center justify-center">
-                <AtaQrCode
-                  value={
-                    selectedMinuteForQr.verificationCode
-                      ? getAtaValidationUrl(selectedMinuteForQr.verificationCode, origin)
-                      : ""
-                  }
-                  size={160}
-                  className="w-full h-full"
-                  alt="QR Code de Validação"
-                />
-              </div>
-              <div className="text-center">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                  Código de Autenticação
-                </span>
-                <span className="text-lg font-black font-mono tracking-widest text-slate-900">
-                  {selectedMinuteForQr.verificationCode || "Pendente"}
-                </span>
-              </div>
-            </div>
-
-            {/* Ações Rápidas */}
-            <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={() => handleCopyValidationUrl(selectedMinuteForQr.verificationCode)}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex items-center justify-center space-x-2 transition cursor-pointer"
-              >
-                {copiedValidationUrl ? (
-                  <>
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    <span>Link Copiado com Sucesso!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    <span>Copiar Link de Validação</span>
-                  </>
-                )}
-              </button>
-
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/validar/ata/${selectedMinuteForQr.verificationCode}`}
-                  target="_blank"
-                  className="flex-1 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition"
-                >
-                  <span>Abrir Certidão Cega</span>
-                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                </Link>
-
-                <Link
-                  href={`/atas/${selectedMinuteForQr.id}/imprimir`}
-                  target="_blank"
-                  className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition"
-                >
-                  <Printer className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Imprimir A4</span>
-                </Link>
-              </div>
-            </div>
-
-            {/* Aviso de privacidade */}
-            <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/60 text-[11px] text-amber-900 space-y-1">
-              <p className="font-bold">Privacidade na conferência pública:</p>
-              <p className="text-amber-800 leading-relaxed text-[10px]">
-                A página pública de validação exibe apenas dados mascarados e a verificação de integridade, sem expor o conteúdo do atendimento.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
+      </ModalDialog>
 
       {/* Modal de Captura de Via Física e Assinatura Gov.br (JUR-04) */}
       {scanningMinute && (

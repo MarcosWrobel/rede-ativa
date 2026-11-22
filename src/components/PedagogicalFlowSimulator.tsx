@@ -373,6 +373,7 @@ export default function PedagogicalFlowSimulator({
   const isPublic = mode === "public";
   const simulatorRef = useRef<HTMLElement>(null);
   const [inView, setInView] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
   const tabIndicatorRef = useRef<HTMLSpanElement>(null);
@@ -490,15 +491,26 @@ export default function PedagogicalFlowSimulator({
 
   useEffect(() => {
     const simulator = simulatorRef.current;
-    if (!isPublic || !simulator || typeof window === "undefined") return;
+    if (!simulator || typeof window === "undefined") return;
 
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const pauseForReducedMotion = () => {
-      if (preference.matches) setIsPlaying(false);
+    const syncReducedMotion = () => {
+      const matches = Boolean(preference.matches);
+      setPrefersReducedMotion(matches);
+      if (matches) {
+        setIsPlaying(false);
+      }
     };
 
-    pauseForReducedMotion();
-    preference.addEventListener("change", pauseForReducedMotion);
+    syncReducedMotion();
+    preference.addEventListener("change", syncReducedMotion);
+
+    if (!isPublic) {
+      setInView(true);
+      return () => {
+        preference.removeEventListener("change", syncReducedMotion);
+      };
+    }
 
     const observer =
       typeof IntersectionObserver === "undefined"
@@ -509,7 +521,7 @@ export default function PedagogicalFlowSimulator({
 
     return () => {
       observer?.disconnect();
-      preference.removeEventListener("change", pauseForReducedMotion);
+      preference.removeEventListener("change", syncReducedMotion);
     };
   }, [isPublic]);
 
@@ -614,14 +626,14 @@ export default function PedagogicalFlowSimulator({
   }, [measureTarget, viewMode, activeIndex, subPhase, actionCommitted]);
 
   const handleSelectStep = (idx: number) => {
-    if (isPublic) setIsPlaying(false);
+    setIsPlaying(false);
     setActiveIndex(idx);
     setSubPhase(0);
     setCycleKey((k) => k + 1);
   };
 
   const handleSelectSubPhase = (nextSub: SubPhaseIndex) => {
-    if (isPublic) setIsPlaying(false);
+    setIsPlaying(false);
     setSubPhase(nextSub);
     setCycleKey((k) => k + 1);
   };
@@ -629,7 +641,7 @@ export default function PedagogicalFlowSimulator({
   const handleRestart = () => {
     setActiveIndex(0);
     setSubPhase(0);
-    setIsPlaying(true);
+    setIsPlaying(!prefersReducedMotion);
     setCycleKey((k) => k + 1);
   };
 
@@ -682,6 +694,16 @@ export default function PedagogicalFlowSimulator({
 
           {viewMode === "simulator" && (
             <>
+              {!isPlaying && (
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 border border-amber-200 text-amber-900"
+                >
+                  Reprodução pausada
+                </span>
+              )}
+
               <button
                 type="button"
                 onClick={() => setIsPlaying((p) => !p)}
@@ -909,8 +931,8 @@ export default function PedagogicalFlowSimulator({
                   {/* Palco Relativo das Telas + Cursor Virtual Ancorado ao DOM */}
                   <div
                     ref={stageRef}
-                    className={`relative flex-1 p-3 sm:p-4 overflow-hidden sim-stage-enter ${
-                      isPublic ? "sim-public-stage" : ""
+                    className={`relative flex-1 p-3 sm:p-4 overflow-hidden ${
+                      isPublic ? "sim-stage-enter sim-public-stage" : ""
                     }`}
                   >
                     <VirtualCursor
@@ -920,46 +942,35 @@ export default function PedagogicalFlowSimulator({
                       cursorState={cursorState}
                     />
 
-                    {currentStep.id === 1 && (
-                      <StageOneReplica
-                        subPhase={subPhase}
-                        cursorState={cursorState}
-                        actionCommitted={actionCommitted}
-                        activeTargetId={activeTargetId}
-                      />
-                    )}
-                    {currentStep.id === 2 && (
-                      <StageTwoReplica
-                        subPhase={subPhase}
-                        cursorState={cursorState}
-                        actionCommitted={actionCommitted}
-                        activeTargetId={activeTargetId}
-                      />
-                    )}
-                    {currentStep.id === 3 && (
-                      <StageThreeReplica
-                        subPhase={subPhase}
-                        cursorState={cursorState}
-                        actionCommitted={actionCommitted}
-                        activeTargetId={activeTargetId}
-                      />
-                    )}
-                    {currentStep.id === 4 && (
-                      <StageFourReplica
-                        subPhase={subPhase}
-                        cursorState={cursorState}
-                        actionCommitted={actionCommitted}
-                        activeTargetId={activeTargetId}
-                      />
-                    )}
-                    {currentStep.id === 5 && (
-                      <StageFiveReplica
-                        subPhase={subPhase}
-                        cursorState={cursorState}
-                        actionCommitted={actionCommitted}
-                        activeTargetId={activeTargetId}
-                      />
-                    )}
+                    {(() => {
+                      const stageMap = {
+                        1: StageOneReplica,
+                        2: StageTwoReplica,
+                        3: StageThreeReplica,
+                        4: StageFourReplica,
+                        5: StageFiveReplica,
+                      } as const;
+                      const ActiveStage = stageMap[currentStep.id];
+                      const stageNode = (
+                        <ActiveStage
+                          subPhase={subPhase}
+                          cursorState={cursorState}
+                          actionCommitted={actionCommitted}
+                          activeTargetId={activeTargetId}
+                        />
+                      );
+
+                      if (isPublic) return stageNode;
+
+                      return (
+                        <div
+                          key={`internal-step-${currentStep.id}`}
+                          className={!prefersReducedMotion ? "sim-internal-scenario-enter" : undefined}
+                        >
+                          {stageNode}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

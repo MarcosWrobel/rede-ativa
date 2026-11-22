@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import PedagogicalFlowSimulator from "@/components/PedagogicalFlowSimulator";
@@ -194,5 +196,36 @@ describe("Central de Orientação e Treinamento (/treinamento) & Simulador 2D", 
     assertItem10Compliance(htmlPiloto);
     assertItem10Compliance(htmlSimPublic);
     assertItem10Compliance(htmlSimInternal);
+  });
+
+  it("aplica transição curta por cenário apenas no modo interno, pausa ao selecionar manualmente e respeita prefers-reduced-motion", () => {
+    const internalHtml = renderToString(
+      <PedagogicalFlowSimulator
+        mode="internal"
+        schoolEdition="INSTITUCIONAL_ESSENCIAL"
+      />
+    );
+    const publicHtml = renderToString(
+      <PedagogicalFlowSimulator mode="public" />
+    );
+
+    expect(internalHtml).toContain("sim-internal-scenario-enter");
+    expect(publicHtml).not.toContain("sim-internal-scenario-enter");
+    expect(publicHtml).toContain("sim-stage-enter sim-public-stage");
+
+    const simSource = fs.readFileSync(
+      path.join(process.cwd(), "src/components/PedagogicalFlowSimulator.tsx"),
+      "utf8"
+    );
+    expect(simSource).toContain("prefers-reduced-motion: reduce");
+    expect(simSource).toContain("Reprodução pausada");
+    expect(simSource).not.toMatch(/dark:[a-zA-Z0-9_-]+/);
+
+    const cssSource = fs.readFileSync(
+      path.join(process.cwd(), "src/app/globals.css"),
+      "utf8"
+    );
+    expect(cssSource).toContain(".sim-internal-scenario-enter");
+    expect(cssSource).toContain("simInternalScenarioEnter");
   });
 });

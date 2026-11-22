@@ -1,4 +1,9 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import GestaoClient from "@/app/gestao/GestaoClient";
 import { classGroupCreateSchema } from "@/lib/schemas";
 import { parseSereRawFiles } from "@/lib/sereParser";
 
@@ -112,6 +117,53 @@ describe("Gestão de Turmas (ClassGroup) e Importação de Testes", () => {
       expect(tNoite).toBeDefined();
       expect(tNoite?.shift).toBe("NOITE");
       expect(tNoite?.segment).toBe("NOTURNO");
+    });
+  });
+
+  describe("GestaoClient SSR & Modal Cadastrar Nova Turma", () => {
+    it("destaca estudantes em situação crítica e exibe vínculo escolar no modal de turma", () => {
+      const html = renderToString(
+        React.createElement(GestaoClient, {
+          school: {
+            id: "sch-g1",
+            name: "Colégio Estadual Exemplo",
+            inepCode: "41009999",
+            city: "Curitiba",
+            state: "PR",
+          },
+          metrics: {
+            totalStudents: 240,
+            totalClasses: 8,
+            lowAttendanceCount: 15,
+            messagesThisMonth: 21,
+            totalMinutes: 6,
+            staffCount: 18,
+            averageAttendancePercent: 86.2,
+          },
+          classesSummary: [
+            { id: "cg-1", name: "7º Ano A", segment: "FUNDAMENTAL", shift: "MANHA", studentsCount: 30 },
+          ],
+          criticalStudents: [
+            { id: "st-c1", name: "Estudante Crítico Gestão", className: "7º Ano A", attendancePercent: 61 },
+          ],
+          currentUser: { name: "Gestor Teste", email: "gestor@teste.pr.gov.br", role: "GESTOR_ESCOLAR" },
+        })
+      );
+
+      const plainHtml = html.replace(/<!-- -->/g, "");
+      expect(plainHtml).toContain("Alunos em Risco Crítico");
+      expect(plainHtml).toContain("Estudante Crítico Gestão");
+      expect(plainHtml).toContain("Revisar e enviar");
+      expect(plainHtml).toContain("Cadastrar Nova Turma");
+      expect(plainHtml).toContain("Colégio Estadual Exemplo");
+      expect(plainHtml).toContain("INEP 41009999");
+
+      const source = fs.readFileSync(
+        path.join(process.cwd(), "src/app/gestao/GestaoClient.tsx"),
+        "utf8"
+      );
+      expect(source).toContain("preventClose={isSubmittingClass}");
+      expect(source).toContain('aria-invalid={Boolean(classNameError)}');
     });
   });
 });

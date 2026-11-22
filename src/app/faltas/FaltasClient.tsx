@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useId, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ModalDialog from "@/components/ModalDialog";
 import { 
   AlertTriangle, 
   Search, 
@@ -113,11 +114,27 @@ export default function FaltasClient({
   const [actionText, setActionText] = useState("");
   const [percentText, setPercentText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [editFieldErrors, setEditFieldErrors] = useState<{ percent?: string }>({});
+  const [editSubmitError, setEditSubmitError] = useState("");
+  const [editSuccessBanner, setEditSuccessBanner] = useState("");
+  const editPercentInputRef = useRef<HTMLInputElement | null>(null);
+  const editPercentErrorId = useId();
+  const editActionsFieldId = useId();
+  const editPercentFieldId = useId();
+  const editSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [recordsList, setRecordsList] = useState(lowAttendance);
 
   useEffect(() => {
     setRecordsList(lowAttendance);
   }, [lowAttendance]);
+
+  useEffect(() => {
+    return () => {
+      if (editSuccessTimerRef.current) {
+        clearTimeout(editSuccessTimerRef.current);
+      }
+    };
+  }, []);
 
   // Import Power BI Modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -126,6 +143,8 @@ export default function FaltasClient({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [importError, setImportError] = useState("");
+  const importFileInputId = useId();
+  const importTextareaId = useId();
   const [copyTokenStatus, setCopyTokenStatus] = useState<"idle" | "copied" | "missing" | "unauthorized">("idle");
 
   const handleCopyExtensionToken = async () => {
@@ -212,9 +231,88 @@ export default function FaltasClient({
   } | null>(null);
   const [isUpdatingDrawerStatus, setIsUpdatingDrawerStatus] = useState(false);
   const [messageError, setMessageError] = useState<string>("");
+  const drawerPanelRef = useRef<HTMLDivElement | null>(null);
+  const drawerCloseBtnRef = useRef<HTMLButtonElement | null>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const drawerTitleId = useId();
+  const drawerPhoneInputId = useId();
+  const drawerTemplateSelectId = useId();
+  const drawerMessageTextareaId = useId();
+
+  const handleCloseMessageDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    const trigger = drawerTriggerRef.current;
+    if (trigger && trigger.isConnected) {
+      window.requestAnimationFrame(() => {
+        if (trigger.isConnected) {
+          trigger.focus({ preventScroll: true });
+        }
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+
+    const focusRaf = window.requestAnimationFrame(() => {
+      if (drawerCloseBtnRef.current) {
+        drawerCloseBtnRef.current.focus({ preventScroll: true });
+      } else {
+        drawerPanelRef.current?.focus({ preventScroll: true });
+      }
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCloseMessageDrawer();
+        return;
+      }
+
+      if (event.key === "Tab" && drawerPanelRef.current) {
+        const focusable = Array.from(
+          drawerPanelRef.current.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => el.offsetParent !== null || el.getClientRects().length > 0);
+
+        if (focusable.length === 0) {
+          event.preventDefault();
+          return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+
+        if (!drawerPanelRef.current.contains(active)) {
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+
+        if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusRaf);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDrawerOpen, handleCloseMessageDrawer]);
 
   // Abre o Painel com os dados do Aluno e Frequência do B.I.
   const handleOpenMessageDrawer = (rec: any, isRankingItem: boolean = false) => {
+    drawerTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     const student = rec.student;
     let attendanceInfo: any = null;
 
@@ -627,31 +725,75 @@ export default function FaltasClient({
     URL.revokeObjectURL(url);
   };
 
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setSelectedSegment("TODOS");
+    setSelectedShift("TODOS");
+    setSelectedTurma("");
+    setSelectedRiskRange("TODOS");
+    setSelectedActionStatus("TODOS");
+    setCurrentPage(1);
+  };
+
+  const handleCloseEditModal = () => {
+    if (isSaving) return;
+    setEditingRecord(null);
+    setEditFieldErrors({});
+    setEditSubmitError("");
+  };
+
   // Salvar ação pedagógica
   const handleSaveAction = async () => {
-    if (!editingRecord) return;
+    if (!editingRecord || isSaving) return;
+
+    const normalizedPercent = percentText.trim().replace(",", ".");
+    const numericPercent = Number(normalizedPercent);
+    if (!normalizedPercent || !Number.isFinite(numericPercent) || numericPercent < 0 || numericPercent > 100) {
+      setEditFieldErrors({
+        percent: "Informe um percentual de frequência válido entre 0% e 100%.",
+      });
+      setEditSubmitError("");
+      editPercentInputRef.current?.focus();
+      return;
+    }
+
+    setEditFieldErrors({});
+    setEditSubmitError("");
     setIsSaving(true);
+
     try {
       const res = await fetch("/api/low-attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           studentId: editingRecord.student.id,
-          attendancePercent: percentText,
+          attendancePercent: numericPercent,
           enrollmentDetail: editingRecord.enrollmentDetail,
           actionsTaken: actionText,
         }),
       });
 
-      if (res.ok) {
-        const updated = await res.json();
-        setRecordsList((prev) =>
-          prev.map((r) => (r.id === editingRecord.id ? updated : r))
-        );
-        setEditingRecord(null);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Não foi possível salvar as alterações.");
       }
-    } catch (err) {
-      console.error(err);
+
+      const savedStudentName = editingRecord.student.name;
+      setRecordsList((prev) =>
+        prev.map((r) => (r.id === editingRecord.id ? data : r))
+      );
+      setEditingRecord(null);
+      setEditFieldErrors({});
+      setEditSubmitError("");
+      setEditSuccessBanner(`Encaminhamento atualizado para ${savedStudentName}.`);
+      if (editSuccessTimerRef.current) {
+        clearTimeout(editSuccessTimerRef.current);
+      }
+      editSuccessTimerRef.current = setTimeout(() => {
+        setEditSuccessBanner("");
+      }, 5000);
+    } catch (err: any) {
+      setEditSubmitError(err?.message || "Erro de conexão ao salvar encaminhamento.");
     } finally {
       setIsSaving(false);
     }
@@ -684,7 +826,7 @@ export default function FaltasClient({
   };
 
   const handleConfirmSync = async () => {
-    if (parsedData.length === 0) return;
+    if (parsedData.length === 0 || isSyncing) return;
     setIsSyncing(true);
     setImportError("");
     setSyncResult(null);
@@ -703,13 +845,18 @@ export default function FaltasClient({
       } catch {}
 
       if (!res.ok) {
-        throw new Error(data.error || `Falha na sincronização (HTTP ${res.status}).`);
+        throw new Error(
+          data.error ||
+            (isIntegrated
+              ? `Falha na sincronização (HTTP ${res.status}).`
+              : `Falha na importação (HTTP ${res.status}).`)
+        );
       }
 
       setSyncResult(data);
       router.refresh();
     } catch (e: any) {
-      setImportError(e.message || "Erro de rede ao conectar com a API.");
+      setImportError(e.message || "Erro de rede ao conectar com o servidor.");
     } finally {
       setIsSyncing(false);
     }
@@ -878,6 +1025,27 @@ export default function FaltasClient({
         </div>
       </div>
 
+      {editSuccessBanner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-bold flex items-center justify-between gap-2"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{editSuccessBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEditSuccessBanner("")}
+            aria-label="Fechar aviso"
+            className="text-emerald-700 hover:text-emerald-950 p-1 rounded cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* 2. Cards de Resumo Executivo (KPIs) */}
       {activeTab === "serp" && (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
@@ -889,7 +1057,7 @@ export default function FaltasClient({
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Monitorados
               </span>
-              <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none">
+              <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none tabular-nums">
                 {kpis.total}
               </strong>
             </div>
@@ -903,9 +1071,9 @@ export default function FaltasClient({
               <span className="text-[11px] font-semibold text-red-600 uppercase tracking-wider block">
                 Risco Crítico (&lt;75%)
               </span>
-              <strong className="text-lg sm:text-xl font-black text-red-700 leading-none">
+              <strong className="text-lg sm:text-xl font-black text-red-700 leading-none tabular-nums">
                 {kpis.critico}
-                <span className="text-xs font-normal text-red-500 ml-1">
+                <span className="text-xs font-normal text-red-500 ml-1 tabular-nums">
                   ({kpis.total > 0 ? ((kpis.critico / kpis.total) * 100).toFixed(0) : 0}%)
                 </span>
               </strong>
@@ -920,7 +1088,7 @@ export default function FaltasClient({
               <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block">
                 Atenção (75-85%)
               </span>
-              <strong className="text-lg sm:text-xl font-black text-amber-800 leading-none">
+              <strong className="text-lg sm:text-xl font-black text-amber-800 leading-none tabular-nums">
                 {kpis.atencao}
               </strong>
             </div>
@@ -934,7 +1102,7 @@ export default function FaltasClient({
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Média da Escola
               </span>
-              <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none">
+              <strong className="text-lg sm:text-xl font-black text-slate-900 leading-none tabular-nums">
                 {kpis.mediaGeral}%
               </strong>
             </div>
@@ -948,7 +1116,7 @@ export default function FaltasClient({
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Conselho Tutelar
               </span>
-              <strong className="text-lg sm:text-xl font-black text-purple-800 leading-none">
+              <strong className="text-lg sm:text-xl font-black text-purple-800 leading-none tabular-nums">
                 {kpis.conselhoTutelar}
               </strong>
             </div>
@@ -1127,16 +1295,8 @@ export default function FaltasClient({
             {(searchTerm || selectedSegment !== "TODOS" || selectedShift !== "TODOS" || selectedTurma || selectedRiskRange !== "TODOS" || selectedActionStatus !== "TODOS") && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearchTerm("");
-                  setSelectedSegment("TODOS");
-                  setSelectedShift("TODOS");
-                  setSelectedTurma("");
-                  setSelectedRiskRange("TODOS");
-                  setSelectedActionStatus("TODOS");
-                  setCurrentPage(1);
-                }}
-                className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-semibold"
+                onClick={handleClearFilters}
+                className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-semibold cursor-pointer"
               >
                 Limpar Filtros
               </button>
@@ -1151,11 +1311,11 @@ export default function FaltasClient({
           {/* Barra de Status da Tabela */}
           <div className="p-3 bg-slate-50/80 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center space-x-2">
-              <span className="font-bold text-slate-800 dark:text-slate-200">
+              <span className="font-bold text-slate-800 dark:text-slate-200 tabular-nums">
                 Mostrando {filteredLowAttendance.length} alunos
               </span>
               {filteredLowAttendance.length !== recordsList.length && (
-                <span className="text-slate-500 dark:text-slate-400 font-normal">
+                <span className="text-slate-500 dark:text-slate-400 font-normal tabular-nums">
                   (de um total de {recordsList.length})
                 </span>
               )}
@@ -1169,7 +1329,7 @@ export default function FaltasClient({
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="border border-slate-300 dark:border-slate-700 rounded-md py-0.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-semibold"
+                className="border border-slate-300 dark:border-slate-700 rounded-md py-0.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-semibold tabular-nums"
               >
                 <option value={25}>25</option>
                 <option value={50}>50</option>
@@ -1189,13 +1349,13 @@ export default function FaltasClient({
             <table className="w-full text-left text-xs border-collapse">
               <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold border-b border-slate-200 dark:border-slate-700 shadow-2xs">
                 <tr>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} w-10 text-center`}>#</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} w-10 text-center tabular-nums`}>#</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[200px]`}>Estudante</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[120px]`}>Turma / Turno</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[130px]`}>Média Geral</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Atual</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[95px]`}>Semana Ant.</th>
-                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-center min-w-[100px]`}>Variação</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right tabular-nums min-w-[140px]`}>Média Geral</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right tabular-nums min-w-[95px]`}>Semana Atual</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right tabular-nums min-w-[95px]`}>Semana Ant.</th>
+                  <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} text-right tabular-nums min-w-[100px]`}>Variação</th>
                   <th className={`p-3 ${density === "compact" ? "py-2" : "py-3"} min-w-[220px]`}>
                     {isIntegrated ? "Encaminhamentos (SERP / CT)" : "Encaminhamentos e Medidas"}
                   </th>
@@ -1205,8 +1365,35 @@ export default function FaltasClient({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-200">
                 {paginatedRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="p-10 text-center text-slate-400 dark:text-slate-500">
-                      Nenhum estudante encontrado.
+                    <td colSpan={9} className="p-10 text-center text-slate-500 dark:text-slate-400">
+                      {recordsList.length === 0 ? (
+                        <div className="space-y-1.5 max-w-md mx-auto">
+                          <p className="font-bold text-slate-700 dark:text-slate-200">
+                            Nenhum registro de frequência cadastrado nesta unidade.
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {isIntegrated
+                              ? "Use o botão Sincronizar Power BI para carregar os dados de frequência."
+                              : "Use o botão Importar Frequência para carregar a planilha compatível com relatórios."}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 max-w-md mx-auto">
+                          <p className="font-bold text-slate-700 dark:text-slate-200">
+                            Nenhum estudante encontrado para os filtros aplicados.
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Ajuste os filtros acima ou limpe a seleção para visualizar os {recordsList.length} registros disponíveis.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleClearFilters}
+                            className="inline-flex items-center px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                          >
+                            Limpar filtros
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -1217,6 +1404,7 @@ export default function FaltasClient({
                     const percent = rec.attendancePercent;
                     const isCritical = percent < 75;
                     const isAttention = percent >= 75 && percent < 85;
+                    const statusLabel = isCritical ? "Crítico" : isAttention ? "Atenção" : "Regular";
 
                     return (
                       <tr
@@ -1226,7 +1414,7 @@ export default function FaltasClient({
                         }`}
                       >
                         {/* Numeração */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center text-slate-400 dark:text-slate-500 font-mono text-[11px]`}>
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center text-slate-400 dark:text-slate-500 font-mono tabular-nums text-[11px]`}>
                           {rowNum}
                         </td>
 
@@ -1318,23 +1506,25 @@ export default function FaltasClient({
                           </span>
                         </td>
 
-                        {/* Média Geral com Barra de Risco */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center`}>
-                          <div className="inline-flex items-center space-x-2">
+                        {/* Média Geral com Estado Textual Estático e Alinhamento Tabular */}
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right tabular-nums`}>
+                          <div className="inline-flex items-center justify-end gap-1.5">
                             <span
-                              className={`px-2.5 py-0.5 rounded-full font-black text-xs ${
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-bold text-[11px] border tabular-nums ${
                                 isCritical
-                                  ? "bg-red-100 text-red-800 animate-pulse border border-red-300"
+                                  ? "bg-red-100 text-red-900 border-red-300 dark:bg-red-950/70 dark:text-red-200 dark:border-red-800"
                                   : isAttention
-                                  ? "bg-amber-100 text-amber-800 border border-amber-300"
-                                  : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  ? "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-800"
+                                  : "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-800"
                               }`}
                             >
-                              {percent.toFixed(1)}%
+                              <span>{statusLabel}</span>
+                              <span aria-hidden="true">•</span>
+                              <span className="font-black">{percent.toFixed(1)}%</span>
                             </span>
                           </div>
                           {/* Mini barra de progresso visual */}
-                          <div className="w-20 mx-auto bg-slate-200 rounded-full h-1 mt-1 overflow-hidden">
+                          <div className="w-24 ml-auto bg-slate-200 dark:bg-slate-700 rounded-full h-1 mt-1 overflow-hidden">
                             <div
                               className={`h-1 rounded-full ${
                                 isCritical ? "bg-red-500" : isAttention ? "bg-amber-500" : "bg-emerald-500"
@@ -1345,36 +1535,36 @@ export default function FaltasClient({
                         </td>
 
                         {/* Semana Atual */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center font-mono font-bold text-slate-800`}>
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200`}>
                           {d.semanaAtual || "—"}
                         </td>
 
                         {/* Semana Anterior */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center font-mono text-slate-600`}>
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right font-mono tabular-nums text-slate-600 dark:text-slate-400`}>
                           {d.semanaAnterior || "—"}
                         </td>
 
                         {/* Variação Semanal */}
-                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-center font-mono text-xs`}>
+                        <td className={`p-3 ${density === "compact" ? "py-1.5" : "py-3"} text-right font-mono tabular-nums text-xs`}>
                           {d.variacao !== null ? (
                             d.variacao < 0 ? (
-                              <span className="inline-flex items-center space-x-0.5 text-red-600 font-bold bg-red-50 px-1.5 py-0.5 rounded">
+                              <span className="inline-flex items-center justify-end space-x-0.5 text-red-700 font-bold bg-red-50 px-1.5 py-0.5 rounded tabular-nums">
                                 <TrendingDown className="w-3.5 h-3.5" />
                                 <span>{d.variacao}%</span>
                               </span>
                             ) : d.variacao > 0 ? (
-                              <span className="inline-flex items-center space-x-0.5 text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
+                              <span className="inline-flex items-center justify-end space-x-0.5 text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded tabular-nums">
                                 <TrendingUp className="w-3.5 h-3.5" />
                                 <span>+{d.variacao}%</span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center space-x-0.5 text-slate-400 font-medium">
+                              <span className="inline-flex items-center justify-end space-x-0.5 text-slate-500 font-medium tabular-nums">
                                 <Minus className="w-3 h-3" />
                                 <span>0%</span>
                               </span>
                             )
                           ) : (
-                            <span className="text-slate-300">—</span>
+                            <span className="text-slate-400">—</span>
                           )}
                         </td>
 
@@ -1451,9 +1641,12 @@ export default function FaltasClient({
                               setEditingRecord(rec);
                               setPercentText(String(rec.attendancePercent));
                               setActionText(rec.actionsTaken || "");
+                              setEditFieldErrors({});
+                              setEditSubmitError("");
                             }}
-                            className="p-1.5 text-slate-500 hover:text-sky-600 rounded transition align-middle"
+                            className="p-1.5 text-slate-500 hover:text-sky-600 rounded transition align-middle cursor-pointer"
                             title="Editar Medidas / Frequência"
+                            aria-label={`Atualizar encaminhamento de ${rec.student.name}`}
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
@@ -1532,10 +1725,10 @@ export default function FaltasClient({
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                 <tr>
-                  <th className="p-3 w-16 text-center">Posição</th>
+                  <th className="p-3 w-16 text-center tabular-nums">Posição</th>
                   <th className="p-3">Estudante</th>
                   <th className="p-3">Turma</th>
-                  <th className="p-3 text-center">Avisos de Falta</th>
+                  <th className="p-3 text-right tabular-nums">Avisos de Falta</th>
                   <th className="p-3">Último Disparo</th>
                   <th className="p-3 text-right">Ação</th>
                 </tr>
@@ -1550,7 +1743,7 @@ export default function FaltasClient({
                 ) : (
                   rankedAbsences.map((item, index) => (
                     <tr key={item.student.id} className="hover:bg-slate-50 transition">
-                      <td className="p-3 text-center font-bold">
+                      <td className="p-3 text-center font-bold tabular-nums">
                         {index === 0 && <span className="inline-block px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-black">1º</span>}
                         {index === 1 && <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-black">2º</span>}
                         {index === 2 && <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-black">3º</span>}
@@ -1577,10 +1770,10 @@ export default function FaltasClient({
                           {item.student.classGroup.name}
                         </span>
                       </td>
-                      <td className="p-3 text-center font-extrabold text-red-600 text-sm">
+                      <td className="p-3 text-right font-extrabold text-red-600 text-sm tabular-nums">
                         {item.count} avisos
                       </td>
-                      <td className="p-3 text-slate-500">
+                      <td className="p-3 text-slate-500 tabular-nums">
                         {new Date(item.lastDate).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
                       </td>
                       <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
@@ -1603,7 +1796,7 @@ export default function FaltasClient({
                         <button
                           type="button"
                           onClick={() => handleOpenMessageDrawer(item, true)}
-                          className="inline-flex items-center space-x-1.5 px-3 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold border border-sky-200 transition shadow-2xs"
+                          className="inline-flex items-center space-x-1.5 px-3 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold border border-sky-200 transition shadow-2xs cursor-pointer"
                           title="Enviar Mensagem / Busca Ativa"
                         >
                           <Send className="w-3.5 h-3.5 text-sky-600" />
@@ -1619,236 +1812,394 @@ export default function FaltasClient({
         </div>
       )}
 
-      {/* Modal de Importação Power BI */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-2">
-                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
-                  <UploadCloud className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {isIntegrated ? "Sincronizar Frequência (Power BI)" : "Importar Frequência (Planilha)"}
-                  </h3>
-                </div>
+      {/* Modal de Sincronização / Importação de Frequência */}
+      <ModalDialog
+        open={isImportModalOpen}
+        onClose={() => {
+          if (!isSyncing) setIsImportModalOpen(false);
+        }}
+        preventClose={isSyncing}
+        size="xl"
+        title={isIntegrated ? "Sincronizar Frequência (Power BI)" : "Importar Frequência (Planilha)"}
+        subtitle={
+          isIntegrated
+            ? "1. Entrada de dados • 2. Execução no servidor • 3. Resultado consolidado"
+            : "1. Entrada da planilha • 2. Atualização dos registros • 3. Resultado consolidado"
+        }
+      >
+        <div className="space-y-4 text-xs">
+          {/* Etapa 1: Entrada */}
+          {!syncResult && (
+            <div className="space-y-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  1. Entrada de dados
+                </span>
+                {parsedData.length > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold tabular-nums">
+                    {parsedData.length} estudante(s) identificado(s)
+                  </span>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => setIsImportModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Sucesso */}
-            {syncResult && (
-              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
-                <div className="flex items-center space-x-2 text-emerald-800 font-bold text-sm">
-                  <CheckCircle className="w-5 h-5 text-emerald-600" />
-                  <span>Sincronização Concluída com Sucesso!</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
-                  <div className="bg-white p-2 rounded border border-emerald-100">
-                    <span className="text-slate-500 block">Total Recebido</span>
-                    <strong className="text-slate-900 text-sm">{syncResult.totalRecebido}</strong>
-                  </div>
-                  <div className="bg-white p-2 rounded border border-emerald-100">
-                    <span className="text-slate-500 block">Atualizados</span>
-                    <strong className="text-emerald-700 text-sm">{syncResult.atualizados}</strong>
-                  </div>
-                  <div className="bg-white p-2 rounded border border-emerald-100">
-                    <span className="text-slate-500 block">CGMs Vinculados</span>
-                    <strong className="text-sky-700 text-sm">{syncResult.cgmVinculados}</strong>
-                  </div>
-                  <div className="bg-white p-2 rounded border border-emerald-100">
-                    <span className="text-slate-500 block">Alunos em Risco</span>
-                    <strong className="text-red-700 text-sm">{syncResult.emRiscoCount}</strong>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Erro */}
-            {importError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center space-x-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
-                <span>{importError}</span>
-              </div>
-            )}
-
-            {/* Opções de Ingestão */}
-            {!syncResult && (
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center space-x-1.5">
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                    <span>{isIntegrated ? "Opção 1: Enviar arquivo .CSV (Baixado pela Extensão)" : "Opção 1: Enviar arquivo .CSV de frequência"}</span>
-                  </label>
-                  <input
-                    type="file"
-                    accept=".csv,.txt"
-                    onChange={handleFileUpload}
-                    className="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer border border-slate-200 rounded-xl p-1 bg-slate-50"
-                  />
-                </div>
-
-                <div className="flex items-center my-2">
-                  <div className="grow border-t border-slate-200"></div>
-                  <span className="px-3 text-slate-400 text-[11px] font-semibold">OU</span>
-                  <div className="grow border-t border-slate-200"></div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
-                    <span>{isIntegrated ? "Opção 2: Colar Lista JSON" : "Opção 2: Colar dados da planilha"}</span>
-                    <span className="text-[11px] font-normal text-slate-400">
-                      {isIntegrated ? 'Clique em "Copiar JSON" na extensão' : 'Cole a lista de estudantes e frequências'}
-                    </span>
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={importText}
-                    onChange={(e) => {
-                      setImportText(e.target.value);
-                      processInputData(e.target.value);
-                    }}
-                    placeholder={
-                      isIntegrated
-                        ? "Cole aqui o JSON gerado pelo botão 'Copiar JSON' da extensão..."
-                        : 'Cole aqui os dados CSV ou lista de estudantes e frequências...'
-                    }
-                    className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIsImportModalOpen(false)}
-                className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                {syncResult ? "Fechar" : "Cancelar"}
-              </button>
-              {!syncResult && (
-                <button
-                  type="button"
-                  onClick={handleConfirmSync}
-                  disabled={isSyncing || parsedData.length === 0}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs flex items-center space-x-1.5"
+              <div>
+                <label
+                  htmlFor={importFileInputId}
+                  className="text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center space-x-1.5"
                 >
-                  {isSyncing ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Sincronizando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <UploadCloud className="w-3.5 h-3.5" />
-                      <span>Sincronizar no Banco ({parsedData.length} alunos)</span>
-                    </>
-                  )}
-                </button>
-              )}
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    {isIntegrated
+                      ? "Opção 1: Enviar arquivo .CSV (baixado pela extensão)"
+                      : "Opção 1: Enviar arquivo .CSV de frequência"}
+                  </span>
+                </label>
+                <input
+                  id={importFileInputId}
+                  type="file"
+                  accept=".csv,.txt"
+                  disabled={isSyncing}
+                  onChange={handleFileUpload}
+                  className="block w-full text-xs text-slate-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer border border-slate-200 dark:border-slate-700 rounded-xl p-1 bg-white dark:bg-slate-900 disabled:opacity-60"
+                />
+              </div>
+
+              <div className="flex items-center my-1">
+                <div className="grow border-t border-slate-200 dark:border-slate-700"></div>
+                <span className="px-3 text-slate-400 text-[11px] font-semibold">OU</span>
+                <div className="grow border-t border-slate-200 dark:border-slate-700"></div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor={importTextareaId}
+                  className="text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5 flex flex-wrap items-center justify-between gap-1"
+                >
+                  <span>{isIntegrated ? "Opção 2: Colar Lista JSON" : "Opção 2: Colar dados da planilha"}</span>
+                  <span className="text-[11px] font-normal text-slate-500">
+                    {isIntegrated
+                      ? 'Use "Copiar JSON" na extensão'
+                      : "Cole a lista de estudantes e frequências"}
+                  </span>
+                </label>
+                <textarea
+                  id={importTextareaId}
+                  rows={4}
+                  disabled={isSyncing}
+                  value={importText}
+                  onChange={(e) => {
+                    setImportText(e.target.value);
+                    processInputData(e.target.value);
+                  }}
+                  placeholder={
+                    isIntegrated
+                      ? "Cole aqui o JSON gerado pelo botão 'Copiar JSON' da extensão..."
+                      : "Cole aqui os dados CSV ou lista de estudantes e frequências..."
+                  }
+                  className="w-full text-xs font-mono p-3 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 disabled:opacity-60"
+                />
+              </div>
             </div>
+          )}
+
+          {/* Etapa 2: Execução */}
+          {isSyncing && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-4 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 flex items-center gap-3"
+            >
+              <RefreshCw className="w-4 h-4 text-sky-700 animate-spin shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-bold text-xs">
+                  {isIntegrated ? "Sincronização em andamento..." : "Importação em andamento..."}
+                </p>
+                <p className="text-[11px] text-sky-800 tabular-nums">
+                  Processando atualização de {parsedData.length} estudante(s) no servidor.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Etapa 3: Resultado */}
+          {syncResult && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3"
+            >
+              <div className="flex items-center space-x-2 text-emerald-900 font-bold text-sm">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>
+                  {isIntegrated ? "Sincronização concluída" : "Importação concluída"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs tabular-nums">
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                  <span className="text-slate-500 block">Total Recebido</span>
+                  <strong className="text-slate-900 text-sm">{syncResult.totalRecebido}</strong>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                  <span className="text-slate-500 block">Atualizados</span>
+                  <strong className="text-emerald-700 text-sm">{syncResult.atualizados}</strong>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                  <span className="text-slate-500 block">CGMs Vinculados</span>
+                  <strong className="text-sky-700 text-sm">{syncResult.cgmVinculados}</strong>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-100">
+                  <span className="text-slate-500 block">Alunos em Risco</span>
+                  <strong className="text-red-700 text-sm">{syncResult.emRiscoCount}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Erro próximo à ação que o gerou */}
+          {importError && (
+            <div
+              role="alert"
+              className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 font-semibold flex items-start space-x-2"
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
+              <span>{importError}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {syncResult && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSyncResult(null);
+                  setImportError("");
+                  setImportText("");
+                  setParsedData([]);
+                }}
+                className="px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-xs font-bold text-emerald-800 cursor-pointer"
+              >
+                Nova importação
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={isSyncing}
+              onClick={() => setIsImportModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+            >
+              {syncResult ? "Fechar" : "Cancelar"}
+            </button>
+            {!syncResult && (
+              <button
+                type="button"
+                onClick={handleConfirmSync}
+                disabled={isSyncing || parsedData.length === 0}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs flex items-center space-x-1.5 cursor-pointer disabled:cursor-not-allowed tabular-nums"
+              >
+                {isSyncing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isIntegrated ? "Sincronizando..." : "Importando..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Sincronizar no Banco ({parsedData.length} alunos)</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
-      )}
+      </ModalDialog>
 
-      {/* Modal de Edição de Ações */}
-      {editingRecord && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900">
-              Atualizar Encaminhamento
-            </h3>
-            <p className="text-xs text-slate-600">
-              Estudante: <strong>{editingRecord.student.name}</strong> ({editingRecord.student.classGroup.name})
-            </p>
+      {/* Modal de Edição de Encaminhamento */}
+      <ModalDialog
+        open={Boolean(editingRecord)}
+        onClose={handleCloseEditModal}
+        preventClose={isSaving}
+        title="Atualizar Encaminhamento"
+        subtitle={
+          editingRecord
+            ? `${editingRecord.student.name} • ${editingRecord.student.classGroup.name}`
+            : undefined
+        }
+      >
+        {editingRecord && (
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSaveAction();
+            }}
+            className="space-y-4 text-xs"
+          >
+            {/* Identificação clara do estudante e do registro em edição */}
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-0.5 min-w-0">
+                <p className="font-extrabold text-slate-900 dark:text-white truncate">
+                  {editingRecord.student.name}
+                </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  Turma: <strong>{editingRecord.student.classGroup.name}</strong>
+                  {(editingRecord.student.cgm || parseDetail(editingRecord.enrollmentDetail).cgm) && (
+                    <span className="ml-2 font-mono">
+                      • CGM: {editingRecord.student.cgm || parseDetail(editingRecord.enrollmentDetail).cgm}
+                    </span>
+                  )}
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 tabular-nums">
+                Atual: {Number(editingRecord.attendancePercent).toFixed(1)}%
+              </span>
+            </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
+              <label
+                htmlFor={editPercentFieldId}
+                className="text-xs font-semibold text-slate-700 dark:text-slate-200 block mb-1"
+              >
                 Frequência Escolar (%):
               </label>
               <input
-                type="number"
-                step="0.01"
+                id={editPercentFieldId}
+                ref={editPercentInputRef}
+                type="text"
+                inputMode="decimal"
+                disabled={isSaving}
                 value={percentText}
-                onChange={(e) => setPercentText(e.target.value)}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-slate-50 focus:bg-white"
+                aria-invalid={Boolean(editFieldErrors.percent)}
+                aria-describedby={editFieldErrors.percent ? editPercentErrorId : undefined}
+                onChange={(e) => {
+                  setPercentText(e.target.value);
+                  if (editFieldErrors.percent) {
+                    setEditFieldErrors({});
+                  }
+                  if (editSubmitError) {
+                    setEditSubmitError("");
+                  }
+                }}
+                className={`w-full text-xs p-2.5 border rounded-lg focus:ring-2 bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-900 tabular-nums font-semibold ${
+                  editFieldErrors.percent
+                    ? "border-rose-400 focus:ring-rose-500 bg-rose-50/40"
+                    : "border-slate-300 dark:border-slate-700 focus:ring-sky-500"
+                }`}
               />
+              {editFieldErrors.percent && (
+                <p
+                  id={editPercentErrorId}
+                  role="alert"
+                  className="text-[11px] font-semibold text-rose-700 mt-1 flex items-center gap-1"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{editFieldErrors.percent}</span>
+                </p>
+              )}
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
+              <label
+                htmlFor={editActionsFieldId}
+                className="text-xs font-semibold text-slate-700 dark:text-slate-200 block mb-1"
+              >
                 {isIntegrated
                   ? "Ações Tomadas (Encaminhamentos / SERP / CT):"
                   : "Ações Tomadas (Encaminhamentos / Rede de Proteção):"}
               </label>
               <textarea
+                id={editActionsFieldId}
                 rows={4}
+                disabled={isSaving}
                 value={actionText}
-                onChange={(e) => setActionText(e.target.value)}
+                onChange={(e) => {
+                  setActionText(e.target.value);
+                  if (editSubmitError) {
+                    setEditSubmitError("");
+                  }
+                }}
                 placeholder={
                   isIntegrated
                     ? "Ex: 4 buscas SERP realizadas - Encaminhado ao Conselho Tutelar via protocolo 1234/2026..."
                     : "Ex: Contato telefônico realizado e encaminhamento registrado junto ao Conselho Tutelar..."
                 }
-                className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 bg-slate-50 focus:bg-white"
+                className="w-full text-xs p-3 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-sky-500 bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-900"
               />
             </div>
 
-            <div className="flex justify-end space-x-2 pt-2">
+            {editSubmitError && (
+              <div
+                role="alert"
+                className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2"
+              >
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{editSubmitError}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => setEditingRecord(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                disabled={isSaving}
+                onClick={handleCloseEditModal}
+                className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
               >
                 Cancelar
               </button>
               <button
-                type="button"
-                onClick={handleSaveAction}
+                type="submit"
                 disabled={isSaving}
-                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs"
+                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               >
-                {isSaving ? "Salvando..." : "Salvar Alterações"}
+                {isSaving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Salvando...</span>
+                  </>
+                ) : (
+                  <span>Salvar Alterações</span>
+                )}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </form>
+        )}
+      </ModalDialog>
 
       {/* Drawer Lateral In-Page: Disparo Rápido de Mensagem & Busca Ativa */}
       {isDrawerOpen && activeStudentData && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-2xs flex justify-end transition-opacity animate-in fade-in duration-200"
-          onClick={() => setIsDrawerOpen(false)}
+          onClick={handleCloseMessageDrawer}
         >
-          <div 
-            className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col z-50 animate-in slide-in-from-right duration-300"
+          <div
+            ref={drawerPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={drawerTitleId}
+            tabIndex={-1}
+            className="w-full max-w-xl h-dvh bg-white shadow-2xl flex flex-col z-50 animate-in slide-in-from-right duration-300 focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header do Drawer */}
-            <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+            <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50/70 shrink-0">
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold shrink-0">
                   <Send className="w-5 h-5 text-sky-600" />
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 leading-tight">
+                <div className="min-w-0">
+                  <h3 id={drawerTitleId} className="text-base font-bold text-slate-900 leading-tight">
                     Enviar Mensagem
                   </h3>
+                  <p className="text-[11px] text-slate-600 truncate">
+                    {activeStudentData.student.name} • {activeStudentData.student.classGroup?.name}
+                  </p>
                 </div>
               </div>
               <button
+                ref={drawerCloseBtnRef}
                 type="button"
-                onClick={() => setIsDrawerOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 rounded-lg transition"
+                onClick={handleCloseMessageDrawer}
+                aria-label="Fechar painel de mensagem"
+                className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition cursor-pointer shrink-0"
                 title="Fechar (Esc)"
               >
                 <X className="w-5 h-5" />
@@ -1861,17 +2212,17 @@ export default function FaltasClient({
               {/* Card de Identificação do Aluno */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
                 <div className="flex items-start justify-between gap-2">
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Estudante</span>
                     <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
                       {activeStudentData.student.name}
                     </h4>
-                    <div className="flex items-center space-x-2 mt-1 text-slate-600">
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-slate-600">
                       <span className="px-2 py-0.5 bg-white border border-slate-200 rounded font-semibold text-[11px]">
                         {activeStudentData.student.classGroup?.name}
                       </span>
                       {activeStudentData.student.cgm && (
-                        <span className="text-slate-500 text-[11px]">
+                        <span className="text-slate-500 text-[11px] font-mono tabular-nums">
                           CGM: <strong className="text-slate-700">{activeStudentData.student.cgm}</strong>
                         </span>
                       )}
@@ -1879,15 +2230,15 @@ export default function FaltasClient({
                   </div>
 
                   {activeStudentData.attendance?.percent !== undefined && activeStudentData.attendance?.percent !== null && (
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Freq. Geral</span>
                       <span
-                        className={`inline-block px-2.5 py-1 rounded-lg font-black text-xs ${
+                        className={`inline-block px-2.5 py-1 rounded-lg font-black text-xs tabular-nums ${
                           activeStudentData.attendance.percent < 75
-                            ? "bg-red-100 text-red-700 border border-red-200"
+                            ? "bg-red-100 text-red-800 border border-red-200"
                             : activeStudentData.attendance.percent < 85
-                            ? "bg-amber-100 text-amber-700 border border-amber-200"
-                            : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                            ? "bg-amber-100 text-amber-800 border border-amber-200"
+                            : "bg-emerald-100 text-emerald-800 border border-emerald-200"
                         }`}
                       >
                         {Number(activeStudentData.attendance.percent).toFixed(1).replace(".", ",")}%
@@ -1898,7 +2249,7 @@ export default function FaltasClient({
 
                 {/* Métricas do B.I. & SERP em pílulas */}
                 {activeStudentData.attendance && (
-                  <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 gap-2 tabular-nums">
                     <div className="bg-white p-2 rounded-lg border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">Semana Atual:</span>
                       <span className="font-bold text-slate-800 text-[11px]">
@@ -1965,7 +2316,7 @@ export default function FaltasClient({
                     <Stethoscope className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                     <div>
                       <strong className="block font-extrabold">
-                        🩺 Estudante com Atestado / Justificativa Vigente!
+                        Estudante com Atestado / Justificativa Vigente
                       </strong>
                       <span>
                         {JUSTIFICATION_TYPE_LABELS[activeJust.type] || activeJust.type} válido até{" "}
@@ -1987,7 +2338,7 @@ export default function FaltasClient({
                     <button
                       type="button"
                       onClick={() => setCustomPhone(activeStudentData.student.phone || "")}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
                         customPhone === activeStudentData.student.phone
                           ? "bg-sky-600 text-white border-sky-600"
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
@@ -2000,7 +2351,7 @@ export default function FaltasClient({
                         key={c.id}
                         type="button"
                         onClick={() => setCustomPhone(c.phone)}
-                        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
                           customPhone === c.phone
                             ? "bg-sky-600 text-white border-sky-600"
                             : c.whatsappValid
@@ -2019,31 +2370,35 @@ export default function FaltasClient({
               )}
 
               {/* Informações de Contato do Responsável */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50/70 p-3 rounded-xl border border-slate-200">
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    Responsável:
-                  </label>
-                  <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-lg text-slate-800 font-medium truncate">
+                  <span className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Responsável de destino:
+                  </span>
+                  <div className="p-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 font-semibold truncate">
                     {activeStudentData.student.guardianName || "Senhores Pais e/ou Responsáveis"}
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
+                  <label
+                    htmlFor={drawerPhoneInputId}
+                    className="text-[11px] font-semibold text-slate-700 mb-1 flex items-center justify-between"
+                  >
                     <span>Telefone / WhatsApp:</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Editável</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Editável</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
                       <Phone className="w-3.5 h-3.5" />
                     </div>
                     <input
-                      type="text"
+                      id={drawerPhoneInputId}
+                      type="tel"
                       value={customPhone}
                       onChange={(e) => setCustomPhone(e.target.value)}
                       placeholder="(42) 99999-9999"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-sky-500"
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono tabular-nums font-semibold text-slate-900 focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                 </div>
@@ -2052,7 +2407,10 @@ export default function FaltasClient({
               {/* Seletor de Modelo de Mensagem & Turno */}
               <div className="space-y-2 pt-1">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
-                  <label className="text-[11px] font-semibold text-slate-700">
+                  <label
+                    htmlFor={drawerTemplateSelectId}
+                    className="text-[11px] font-semibold text-slate-700"
+                  >
                     Modelo de Mensagem Pedagógico:
                   </label>
 
@@ -2061,7 +2419,7 @@ export default function FaltasClient({
                     <button
                       type="button"
                       onClick={() => handleShiftChange("MANHA")}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition ${
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer ${
                         overrideShift === "MANHA"
                           ? "bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
@@ -2074,7 +2432,7 @@ export default function FaltasClient({
                     <button
                       type="button"
                       onClick={() => handleShiftChange("TARDE")}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition ${
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer ${
                         overrideShift === "TARDE"
                           ? "bg-orange-100 text-orange-800 border border-orange-300 shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
@@ -2087,7 +2445,7 @@ export default function FaltasClient({
                     <button
                       type="button"
                       onClick={() => handleShiftChange("NOITE")}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition ${
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer ${
                         overrideShift === "NOITE"
                           ? "bg-indigo-100 text-indigo-800 border border-indigo-300 shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
@@ -2100,6 +2458,7 @@ export default function FaltasClient({
                 </div>
 
                 <select
+                  id={drawerTemplateSelectId}
                   value={selectedTemplateId}
                   onChange={(e) => handleSelectTemplate(e.target.value)}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-sky-500"
@@ -2113,19 +2472,23 @@ export default function FaltasClient({
                 </select>
               </div>
 
-              {/* Editor de Texto da Mensagem */}
+              {/* Editor de Texto da Mensagem (Prévia) */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold text-slate-700 flex items-center space-x-1.5">
-                    <span>Conteúdo da Mensagem (WhatsApp):</span>
+                  <label
+                    htmlFor={drawerMessageTextareaId}
+                    className="text-[11px] font-semibold text-slate-700 flex items-center space-x-1.5"
+                  >
+                    <span>Prévia da Mensagem (WhatsApp):</span>
                   </label>
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-[10px] text-slate-500 font-mono tabular-nums">
                     {composedMessage.length} caracteres
                   </span>
                 </div>
 
                 <textarea
-                  rows={8}
+                  id={drawerMessageTextareaId}
+                  rows={7}
                   value={composedMessage}
                   onChange={(e) => setComposedMessage(e.target.value)}
                   placeholder="Digite a mensagem que será enviada aos responsáveis..."
@@ -2153,7 +2516,7 @@ export default function FaltasClient({
                         key={item.tag}
                         type="button"
                         onClick={() => handleInsertTag(item.tag)}
-                        className="px-2 py-0.5 bg-slate-100 hover:bg-sky-50 hover:text-sky-700 border border-slate-200 rounded-md text-[10px] font-mono text-slate-600 transition"
+                        className="px-2 py-0.5 bg-slate-100 hover:bg-sky-50 hover:text-sky-700 border border-slate-200 rounded-md text-[10px] font-mono text-slate-600 transition cursor-pointer"
                       >
                         +{item.label}
                       </button>
@@ -2164,7 +2527,10 @@ export default function FaltasClient({
 
               {/* Banner de Feedback de Erro */}
               {messageError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-start space-x-2 text-xs">
+                <div
+                  role="alert"
+                  className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-start space-x-2 text-xs"
+                >
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                   <div>
                     <strong className="block font-bold">Erro ao processar envio:</strong>
@@ -2176,10 +2542,14 @@ export default function FaltasClient({
               {/* Banner de Feedback de Sucesso + Confirmação de Entrega (AUT-01) */}
               {messageSuccessInfo && (
                 <div
+                  role="status"
+                  aria-live="polite"
                   className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
                     messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
                       ? "bg-rose-50 border-rose-200 text-rose-900"
-                      : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : messageSuccessInfo.deliveryStatus === "SENT"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : "bg-sky-50 border-sky-200 text-sky-950"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -2187,7 +2557,7 @@ export default function FaltasClient({
                       {messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP" ? (
                         <>
                           <PhoneOff className="w-4 h-4 text-rose-600 shrink-0" />
-                          <span>Número sinalizado sem WhatsApp!</span>
+                          <span>Número sinalizado sem WhatsApp</span>
                         </>
                       ) : (
                         <>
@@ -2202,7 +2572,9 @@ export default function FaltasClient({
                   <p className="text-[11px] opacity-90">
                     {messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
                       ? "O telefone foi marcado como inválido no cadastro do estudante e constará no histórico de acompanhamento."
-                      : "Confirme se o envio foi concluído no WhatsApp Web ou se o número não possui conta:"}
+                      : messageSuccessInfo.deliveryStatus === "SENT"
+                      ? "Envio confirmado e registrado no histórico."
+                      : "Conversa aberta no WhatsApp. Confirme abaixo após enviar a mensagem ou sinalize se o número não possui WhatsApp:"}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -2211,7 +2583,7 @@ export default function FaltasClient({
                         isUpdatingDrawerStatus || messageSuccessInfo.deliveryStatus === "SENT"
                       }
                       onClick={() => handleUpdateDrawerDeliveryStatus("SENT")}
-                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold transition shadow-2xs"
+                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold transition shadow-2xs cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>
@@ -2228,7 +2600,7 @@ export default function FaltasClient({
                         messageSuccessInfo.deliveryStatus === "FAILED_NO_WHATSAPP"
                       }
                       onClick={() => handleUpdateDrawerDeliveryStatus("FAILED_NO_WHATSAPP")}
-                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 disabled:opacity-50 rounded-lg font-bold transition"
+                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 disabled:opacity-50 rounded-lg font-bold transition cursor-pointer"
                     >
                       <PhoneOff className="w-3.5 h-3.5" />
                       <span>Sem WhatsApp</span>
@@ -2253,13 +2625,13 @@ export default function FaltasClient({
 
             </div>
 
-            {/* Rodapé Fixo de Ação */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+            {/* Rodapé Fixo de Ação (acessível no celular 390px) */}
+            <div className="p-3.5 sm:p-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => setIsDrawerOpen(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-medium transition text-xs"
+                  onClick={handleCloseMessageDrawer}
+                  className="px-3.5 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-medium transition text-xs cursor-pointer"
                 >
                   Fechar
                 </button>
@@ -2270,7 +2642,7 @@ export default function FaltasClient({
                 type="button"
                 onClick={handleSendMessage}
                 disabled={isSendingMessage || !composedMessage.trim()}
-                className="inline-flex items-center space-x-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs transition text-xs"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs transition text-xs cursor-pointer"
               >
                 {isSendingMessage ? (
                   <>
