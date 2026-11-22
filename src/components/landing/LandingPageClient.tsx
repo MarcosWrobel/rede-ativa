@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import styles from './landingMotion.module.css';
 import {
   MessageSquare,
   User,
@@ -82,14 +83,6 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
   const [selectedRole, setSelectedRole] = useState<NetworkRoleKey>('pedagogica');
   const isPreview = mode === 'preview';
 
-  const scrollToDemo = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-    const element = document.getElementById('workflow-demo');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-emerald-100 selection:text-emerald-900">
       {/* 1. Barra Superior de Aviso (exclusiva da rota de preview/homologação) */}
@@ -116,7 +109,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
             href={isPreview ? '/preview-landing' : '/'}
             className="flex items-center group py-1 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
           >
-            <div className="h-12 w-auto flex items-center justify-center p-1.5 rounded-xl bg-slate-50/80 border border-slate-200/80 shadow-xs transition-transform group-hover:scale-102">
+            <div className="h-12 w-auto flex items-center justify-center p-1.5 rounded-xl bg-slate-50/80 border border-slate-200/80 shadow-xs motion-safe:transition-transform motion-safe:group-hover:scale-102">
               <img
                 src="/logo.svg"
                 alt="Rede Ativa"
@@ -131,7 +124,6 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
           >
             <a
               href="#workflow-demo"
-              onClick={scrollToDemo}
               className="hover:text-emerald-700 transition-colors rounded-md px-1 py-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
             >
               Fluxo na prática
@@ -153,7 +145,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
           <div className="flex items-center gap-3">
             <Link
               href="/login"
-              className="px-4.5 py-2.5 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 shadow-sm shadow-slate-900/10 transition-all transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+              className={`px-4.5 py-2.5 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 shadow-sm shadow-slate-900/10 ${styles.action} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600`}
             >
               <LogIn className="w-4 h-4 text-emerald-400" aria-hidden="true" />
               <span>Acessar sistema</span>
@@ -164,7 +156,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
 
       {/* 3. Hero */}
       <section className="relative pt-12 pb-16 md:pt-16 md:pb-24 overflow-hidden border-b border-slate-100 bg-gradient-to-b from-slate-50/80 via-white to-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className={`max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center ${styles.intro}`}>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-2xs mb-5">
             <User className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
             <span>Rotina da equipe pedagógica</span>
@@ -185,8 +177,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <a
               href="#workflow-demo"
-              onClick={scrollToDemo}
-              className="px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              className={`px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 ${styles.action} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700`}
             >
               <span>Conhecer o fluxo</span>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
@@ -243,8 +234,8 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
       </section>
 
       {/* 4. Seção Central: Simulação Demonstrativa */}
-      <section id="workflow-demo" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-        <div className="text-center space-y-3 mb-8">
+      <section id="workflow-demo" className={`py-16 sm:py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto ${styles.anchor}`}>
+        <div className={`text-center space-y-3 mb-8 ${styles.reveal}`}>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
             <Layers className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
             <span>Simulação demonstrativa</span>
@@ -315,7 +306,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
 
       {/* 4.5. Visão por Papel na Rede de Ensino */}
       <section aria-labelledby="visao-papeis-titulo" className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-        <div className="text-center mb-8">
+        <div className={`text-center mb-8 ${styles.reveal}`}>
           <h2
             id="visao-papeis-titulo"
             className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight"
@@ -380,9 +371,9 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
       </section>
 
       {/* 5. Funcionalidades em 3 Colunas */}
-      <section id="beneficios" className="py-16 sm:py-20 bg-slate-50/70 border-y border-slate-200/80">
+      <section id="beneficios" className={`py-16 sm:py-20 bg-slate-50/70 border-y border-slate-200/80 ${styles.anchor}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-12">
+          <div className={`text-center mb-12 ${styles.reveal}`}>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Menos retrabalho na busca ativa e nas atas
             </h2>
@@ -444,7 +435,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
             {/* Coluna 3: Teal */}
             <div
               id="seguranca-dados"
-              className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-200/90 shadow-xs flex flex-col justify-between hover:border-teal-200 transition-colors"
+              className={`bg-white rounded-2xl p-6 sm:p-7 border border-slate-200/90 shadow-xs flex flex-col justify-between hover:border-teal-200 transition-colors ${styles.anchor}`}
             >
               <div className="space-y-4">
                 <div className="w-12 h-12 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center border border-teal-200">
@@ -487,7 +478,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/login"
-              className="px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2 transition-all transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              className={`px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2 ${styles.action} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700`}
             >
               <span>Acessar sistema</span>
               <ArrowRight className="w-4 h-4" aria-hidden="true" />
