@@ -356,7 +356,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
       </section>
 
       {/* 4. Seção Central: Simulação Demonstrativa */}
-      <section id="workflow-demo" className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section id="workflow-demo" className="landing-anchor py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center space-y-3 mb-8">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Da preparação do contato ao histórico do estudante
@@ -424,8 +424,9 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
 
       {/* 4.5. Comparativo Direto por Papel na Rede de Ensino */}
       <section
+        id="visao-papeis"
         aria-labelledby="visao-papeis-titulo"
-        className="py-14 sm:py-18 border-t border-slate-200/80 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+        className="landing-anchor py-14 sm:py-18 border-t border-slate-200/80 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
       >
         <div className="mb-10 max-w-2xl">
           <h2
@@ -458,7 +459,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
       </section>
 
       {/* 5. Funcionalidades e Segurança dos Registros */}
-      <section id="beneficios" className="py-16 sm:py-20 bg-slate-50/70 border-y border-slate-200/80">
+      <section id="beneficios" className="landing-anchor py-16 sm:py-20 bg-slate-50/70 border-y border-slate-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="mb-10 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
             <div className="max-w-xl">
@@ -570,7 +571,7 @@ export default function LandingPageClient({ mode = 'production' }: LandingPageCl
           </div>
 
           {/* Bloco objetivo de Segurança e Integridade Institucional */}
-          <div id="seguranca-dados" className="mt-14 pt-12 border-t border-slate-200">
+          <div id="seguranca-dados" className="landing-anchor mt-14 pt-12 border-t border-slate-200">
             <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight mb-6">
               Segurança dos registros e governança institucional
             </h3>

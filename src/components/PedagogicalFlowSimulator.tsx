@@ -370,6 +370,9 @@ export default function PedagogicalFlowSimulator({
   const [viewMode, setViewMode] = useState<"simulator" | "video">("simulator");
   const [cycleKey, setCycleKey] = useState(0);
 
+  const isPublic = mode === "public";
+  const simulatorRef = useRef<HTMLElement>(null);
+  const [inView, setInView] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
   const tabIndicatorRef = useRef<HTMLSpanElement>(null);
@@ -485,9 +488,34 @@ export default function PedagogicalFlowSimulator({
     };
   }, [activeIndex, subPhase, cycleKey, viewMode, currentSubPhase.hasClick]);
 
+  useEffect(() => {
+    const simulator = simulatorRef.current;
+    if (!isPublic || !simulator || typeof window === "undefined") return;
+
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const pauseForReducedMotion = () => {
+      if (preference.matches) setIsPlaying(false);
+    };
+
+    pauseForReducedMotion();
+    preference.addEventListener("change", pauseForReducedMotion);
+
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? undefined
+        : new IntersectionObserver(([entry]) => setInView(entry.isIntersecting));
+    observer?.observe(simulator);
+    if (!observer) setInView(true);
+
+    return () => {
+      observer?.disconnect();
+      preference.removeEventListener("change", pauseForReducedMotion);
+    };
+  }, [isPublic]);
+
   // Avanço contínuo entre sub-etapas e etapas
   useEffect(() => {
-    if (!isPlaying || viewMode !== "simulator") return;
+    if (!isPlaying || viewMode !== "simulator" || (isPublic && !inView)) return;
 
     const interval = setInterval(() => {
       setSubPhase((prevSub) => {
@@ -501,7 +529,7 @@ export default function PedagogicalFlowSimulator({
     }, SUBPHASE_DURATION_MS);
 
     return () => clearInterval(interval);
-  }, [isPlaying, viewMode, steps.length]);
+  }, [isPlaying, viewMode, steps.length, isPublic, inView]);
 
   // Pilar 1: Rastreamento exato via DOM (getBoundingClientRect + data-sim-target + ResizeObserver)
   const measureTarget = useCallback(() => {
@@ -586,12 +614,14 @@ export default function PedagogicalFlowSimulator({
   }, [measureTarget, viewMode, activeIndex, subPhase, actionCommitted]);
 
   const handleSelectStep = (idx: number) => {
+    if (isPublic) setIsPlaying(false);
     setActiveIndex(idx);
     setSubPhase(0);
     setCycleKey((k) => k + 1);
   };
 
   const handleSelectSubPhase = (nextSub: SubPhaseIndex) => {
+    if (isPublic) setIsPlaying(false);
     setSubPhase(nextSub);
     setCycleKey((k) => k + 1);
   };
@@ -605,6 +635,7 @@ export default function PedagogicalFlowSimulator({
 
   return (
     <section
+      ref={simulatorRef}
       aria-label="Simulação demonstrativa do acompanhamento pedagógico"
       className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden text-slate-900"
     >
@@ -876,7 +907,12 @@ export default function PedagogicalFlowSimulator({
                   </div>
 
                   {/* Palco Relativo das Telas + Cursor Virtual Ancorado ao DOM */}
-                  <div ref={stageRef} className="relative flex-1 p-3 sm:p-4 overflow-hidden">
+                  <div
+                    ref={stageRef}
+                    className={`relative flex-1 p-3 sm:p-4 overflow-hidden sim-stage-enter ${
+                      isPublic ? "sim-public-stage" : ""
+                    }`}
+                  >
                     <VirtualCursor
                       x={cursorPos.x}
                       y={cursorPos.y}

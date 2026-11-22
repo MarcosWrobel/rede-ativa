@@ -662,6 +662,14 @@ progress.queue-progress::-moz-progress-bar {
   .t-tabs-indicator {
     transition: none !important;
   }
+
+  .sim-public-stage > [aria-hidden="true"] {
+    display: none;
+  }
+
+  .sim-stage-enter > :not([aria-hidden]) {
+    animation: none !important;
+  }
 }
 
 /* Transitions.dev Motion Tokens & Recipes (transitions-dev / transitions-polish) */
@@ -907,4 +915,14 @@ progress.queue-progress::-moz-progress-bar {
   background-size: 22px 22px;
   -webkit-mask-image: radial-gradient(ellipse 75% 70% at 50% 40%, #000 35%, transparent 100%);
   mask-image: radial-gradient(ellipse 75% 70% at 50% 40%, #000 35%, transparent 100%);
+}
+
+/* Compensação do cabeçalho fixo para âncoras da landing */
+.landing-anchor {
+  scroll-margin-block-start: 6rem;
+}
+
+/* Entrada suave ao alternar telas no palco do simulador */
+.sim-stage-enter > :not([aria-hidden]) {
+  animation: landingFadeUp 360ms var(--ease-smooth-out) backwards;
 }
