@@ -645,8 +645,266 @@ progress.queue-progress::-moz-progress-bar {
   .sim-sheet-slide,
   .sim-focus-neon,
   .sim-focus-neon::after,
-  .sim-click-ripple {
+  .sim-click-ripple,
+  .landing-hero-line,
+  .landing-hero-rise,
+  .landing-lane-pulse {
     animation: none !important;
     stroke-dashoffset: 0 !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
+
+  .t-learn-chevron,
+  .t-learn-arm,
+  .t-icon-swap .t-icon,
+  .t-text-swap,
+  .t-tabs-indicator {
+    transition: none !important;
+  }
+}
+
+/* Transitions.dev Motion Tokens & Recipes (transitions-dev / transitions-polish) */
+:root {
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --ease-out: ease-out;
+  --ease-linear: linear;
+  --distance-micro: 4px;
+  --blur-small: 2px;
+
+  /* 24-learn-more-hover */
+  --learn-shift: 2px;
+  --learn-spread: 8deg;
+  --learn-in: var(--duration-medium);
+  --learn-out: var(--duration-medium);
+  --learn-ease: var(--ease-smooth-out);
+
+  /* 09-icon-swap */
+  --icon-swap-dur: var(--duration-fast);
+  --icon-swap-blur: var(--blur-small);
+  --icon-swap-start-scale: 0.25;
+  --icon-swap-ease: var(--ease-in-out);
+
+  /* 04-text-states-swap */
+  --text-swap-dur: var(--duration-quick);
+  --text-swap-translate-y: var(--distance-micro);
+  --text-swap-blur: var(--blur-small);
+  --text-swap-ease: var(--ease-in-out);
+
+  /* 16-tabs-sliding */
+  --tabs-dur: var(--duration-fast);
+  --tabs-ease: var(--ease-smooth-out);
+}
+
+/* Taste Skill Motion & Moments (Landing Page) */
+@keyframes landingLineReveal {
+  from {
+    opacity: 0;
+    transform: translateY(105%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landingFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landingLaneDash {
+  from {
+    stroke-dashoffset: 48;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.landing-hero-mask {
+  display: block;
+  overflow: hidden;
+}
+
+.landing-hero-line {
+  display: block;
+  animation: landingLineReveal 700ms var(--ease-smooth-out) both;
+}
+
+.landing-hero-rise {
+  animation: landingFadeUp 520ms var(--ease-smooth-out) both;
+}
+
+.landing-nav-link {
+  position: relative;
+}
+
+.landing-nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1px;
+  background-color: #047857;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-quick) var(--ease-smooth-out);
+}
+
+.landing-nav-link:hover::after,
+.landing-nav-link:focus-visible::after {
+  transform: scaleX(1);
+}
+
+.landing-arrow {
+  transition: transform var(--duration-quick) var(--ease-smooth-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .landing-btn {
+    transition:
+      transform var(--duration-quick) var(--ease-smooth-out),
+      background-color var(--duration-quick) ease,
+      border-color var(--duration-quick) ease;
+  }
+
+  .landing-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .landing-btn:active {
+    transform: translateY(1px) scale(0.985);
+    transition-duration: 90ms;
+  }
+
+  .landing-btn:hover .landing-arrow {
+    transform: translateX(3px);
+  }
+
+  .t-learn:hover .t-learn-chevron {
+    transform: translateX(var(--learn-shift));
+    transition-duration: var(--learn-in);
+  }
+
+  .t-learn:hover .t-learn-arm {
+    transition-duration: var(--learn-in);
+  }
+
+  .t-learn:hover .t-learn-arm-top {
+    transform: rotate(var(--learn-spread));
+  }
+
+  .t-learn:hover .t-learn-arm-bot {
+    transform: rotate(calc(var(--learn-spread) * -1));
+  }
+}
+
+/* 24-learn-more-hover */
+.t-learn-chevron {
+  display: inline-flex;
+  transform: translateX(0);
+  transition: transform var(--learn-out) var(--learn-ease);
+}
+
+.t-learn-arm {
+  transform-box: view-box;
+  transform-origin: 10px 8px;
+  vector-effect: non-scaling-stroke;
+  transition: transform var(--learn-out) var(--learn-ease);
+}
+
+/* 09-icon-swap */
+.t-icon-swap {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--icon-swap-dur) var(--icon-swap-ease),
+    filter var(--icon-swap-dur) var(--icon-swap-ease),
+    transform var(--icon-swap-dur) var(--icon-swap-ease);
+}
+
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--icon-swap-blur));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+/* 04-text-states-swap */
+.t-text-swap {
+  display: inline-block;
+  transform: translateY(0);
+  filter: blur(0);
+  opacity: 1;
+  transition:
+    transform var(--text-swap-dur) var(--text-swap-ease),
+    filter var(--text-swap-dur) var(--text-swap-ease),
+    opacity var(--text-swap-dur) var(--text-swap-ease);
+}
+
+.t-text-swap.is-exit {
+  transform: translateY(calc(var(--text-swap-translate-y) * -1));
+  filter: blur(var(--text-swap-blur));
+  opacity: 0;
+}
+
+.t-text-swap.is-enter-start {
+  transform: translateY(var(--text-swap-translate-y));
+  filter: blur(var(--text-swap-blur));
+  opacity: 0;
+  transition: none;
+}
+
+/* 16-tabs-sliding indicator */
+.t-tabs-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background-color: #059669;
+  pointer-events: none;
+  transition:
+    transform var(--tabs-dur) var(--tabs-ease),
+    width var(--tabs-dur) var(--tabs-ease);
+}
+
+.landing-lane-pulse {
+  stroke-dasharray: 8 16;
+  animation: landingLaneDash 3.2s var(--ease-linear) infinite;
+}
+
+/* Textura sutil Dot Grid para o Hero (Modo Claro, CSS puro) */
+.landing-hero-dot-grid {
+  background-image: radial-gradient(circle, rgba(100, 116, 139, 0.24) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 70% at 50% 40%, #000 35%, transparent 100%);
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 40%, #000 35%, transparent 100%);
 }
