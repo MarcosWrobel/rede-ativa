@@ -231,6 +231,24 @@ export function mergeSubjectsIntoPreCouncilConversations(
   return { conversations: next, addedCount };
 }
 
+/**
+ * Remove IDs órfãos de `monitoredStudentIds` que não existam mais nos cards da turma.
+ */
+export function sanitizePreCouncilMonitoredStudents(
+  data: PreCouncilData,
+  validStudentIds: ReadonlySet<string>
+): PreCouncilData {
+  return {
+    ...data,
+    conversations: data.conversations.map((conv) => ({
+      ...conv,
+      monitoredStudentIds: conv.monitoredStudentIds.filter((id) =>
+        validStudentIds.has(id)
+      ),
+    })),
+  };
+}
+
 export interface PreCouncilProgressSummary {
   total: number;
   completed: number;

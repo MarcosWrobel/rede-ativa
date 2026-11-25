@@ -819,8 +819,19 @@ export async function saveOrCloneCouncilSubjects(params: {
   const updated = await prisma.$transaction(async (tx) => {
     const existingSubjects = await tx.classCouncilSubject.findMany({
       where: { boardId, schoolId },
-      select: { id: true, name: true, active: true },
+      select: { id: true, name: true, active: true, teacherEmail: true, teacherName: true },
     });
+
+    const existingById = new Map(existingSubjects.map((ex) => [ex.id, ex]));
+    const existingByName = new Map(
+      existingSubjects.map((ex) => [ex.name.trim().toLowerCase(), ex])
+    );
+    const prevEmailById = new Map(
+      existingSubjects.map((ex) => [
+        ex.id,
+        ex.teacherEmail?.trim() ? ex.teacherEmail.trim().toLowerCase() : null,
+      ])
+    );
 
     const submittedIdSet = new Set(providedIds);
     const submittedNameSet = normalizedNames;
@@ -842,12 +853,24 @@ export async function saveOrCloneCouncilSubjects(params: {
       });
     }
 
+    const changedTeacherBySubjectId = new Map<
+      string,
+      { teacherEmail: string | null; teacherName: string | null; subjectName: string }
+    >();
+
     for (let idx = 0; idx < incomingSubjects.length; idx++) {
       const item = incomingSubjects[idx];
       const cleanName = item.name.trim();
       const cleanTeacherName = item.teacherName?.trim() || null;
-      const cleanTeacherEmail = item.teacherEmail?.trim() || null;
+      const cleanTeacherEmail = item.teacherEmail?.trim()
+        ? item.teacherEmail.trim().toLowerCase()
+        : null;
       const order = item.displayOrder ?? idx;
+      const prevSubject = item.id
+        ? existingById.get(item.id)
+        : existingByName.get(cleanName.toLowerCase());
+
+      let savedSubjectId = item.id || null;
 
       if (item.id) {
         await tx.classCouncilSubject.update({
@@ -861,7 +884,7 @@ export async function saveOrCloneCouncilSubjects(params: {
           },
         });
       } else {
-        await tx.classCouncilSubject.upsert({
+        const upserted = await tx.classCouncilSubject.upsert({
           where: { boardId_name: { boardId, name: cleanName } },
           create: {
             schoolId,
@@ -879,6 +902,57 @@ export async function saveOrCloneCouncilSubjects(params: {
             active: item.active,
           },
         });
+        savedSubjectId = upserted.id;
+      }
+
+      if (prevSubject && savedSubjectId) {
+        const prevEmailNorm = prevEmailById.get(prevSubject.id) ?? null;
+        if (prevEmailNorm !== cleanTeacherEmail) {
+          changedTeacherBySubjectId.set(savedSubjectId, {
+            teacherEmail: cleanTeacherEmail,
+            teacherName: cleanTeacherName,
+            subjectName: cleanName,
+          });
+        }
+      }
+    }
+
+    if (
+      changedTeacherBySubjectId.size > 0 &&
+      typeof tx.classCouncilTrimester?.findMany === "function" &&
+      typeof tx.classCouncilTrimester?.update === "function"
+    ) {
+      const trimesters = await tx.classCouncilTrimester.findMany({
+        where: { boardId, schoolId },
+        select: { id: true, trimester: true, preCouncilJson: true },
+      });
+
+      for (const tri of trimesters) {
+        const parsedPre = parsePreCouncilData(tri.preCouncilJson);
+        if (!parsedPre) continue;
+        let touched = false;
+        const nextConversations = parsedPre.conversations.map((conv) => {
+          if (!conv.subjectId) return conv;
+          const change = changedTeacherBySubjectId.get(conv.subjectId);
+          if (!change) return conv;
+          touched = true;
+          return {
+            ...conv,
+            teacherEmail: change.teacherEmail,
+            teacherName: change.teacherName ?? conv.teacherName,
+          };
+        });
+        if (touched) {
+          await tx.classCouncilTrimester.update({
+            where: { id: tri.id },
+            data: {
+              preCouncilJson: JSON.stringify({
+                ...parsedPre,
+                conversations: nextConversations,
+              }),
+            },
+          });
+        }
       }
     }
 
@@ -906,7 +980,7 @@ export async function updateCouncilTrimester(params: {
 
   const board = await prisma.classCouncilBoard.findUnique({
     where: { id: boardId },
-    select: { id: true, schoolId: true },
+    select: { id: true, schoolId: true, classGroupId: true },
   });
 
   if (!board) {
@@ -940,6 +1014,16 @@ export async function updateCouncilTrimester(params: {
           }))
         )
       : undefined;
+
+  if (
+    payload.preCouncil !== undefined &&
+    payload.preCouncil !== null &&
+    board.classGroupId &&
+    typeof prisma.student?.findMany === "function" &&
+    typeof prisma.studentCouncilCard?.findMany === "function"
+  ) {
+    await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, board.classGroupId);
+  }
 
   return prisma.$transaction(async (tx) => {
     let serializedPreCouncil: string | null | undefined = undefined;
@@ -1056,10 +1140,17 @@ async function validateAndSerializePreCouncilData(params: {
       distinctSubjectIds.add(conv.subjectId.trim());
     }
     for (const studentId of conv.monitoredStudentIds || []) {
-      distinctStudentIds.add(studentId.trim());
+      const cleanStudentId = studentId.trim();
+      if (cleanStudentId) {
+        distinctStudentIds.add(cleanStudentId);
+      }
     }
   }
 
+  const subjectById = new Map<
+    string,
+    { id: string; teacherEmail: string | null; teacherName: string | null }
+  >();
   if (distinctSubjectIds.size > 0) {
     const subjectIdsArr = Array.from(distinctSubjectIds);
     const matchedSubjects = await client.classCouncilSubject.findMany({
@@ -1068,7 +1159,7 @@ async function validateAndSerializePreCouncilData(params: {
         boardId,
         schoolId,
       },
-      select: { id: true },
+      select: { id: true, teacherEmail: true, teacherName: true },
     });
     if (matchedSubjects.length !== subjectIdsArr.length) {
       throw new CouncilDomainError(
@@ -1076,23 +1167,8 @@ async function validateAndSerializePreCouncilData(params: {
         400
       );
     }
-  }
-
-  if (distinctStudentIds.size > 0) {
-    const studentIdsArr = Array.from(distinctStudentIds);
-    const matchedCards = await client.studentCouncilCard.findMany({
-      where: {
-        boardId,
-        schoolId,
-        studentId: { in: studentIdsArr },
-      },
-      select: { studentId: true },
-    });
-    if (matchedCards.length !== studentIdsArr.length) {
-      throw new CouncilDomainError(
-        "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
-        400
-      );
+    for (const subj of matchedSubjects) {
+      subjectById.set(subj.id, subj);
     }
   }
 
@@ -1106,24 +1182,88 @@ async function validateAndSerializePreCouncilData(params: {
   // Preserva estritamente ciências digitais, envios docentes verificados e contribuições
   // docentes recém-submetidas que ainda não estavam no rascunho da equipe pedagógica.
   const existingById = new Map<string, PreCouncilSubjectConversation>();
+  const existingBySubjectId = new Map<string, PreCouncilSubjectConversation>();
   if (existingParsed) {
     for (const row of existingParsed.conversations) {
       existingById.set(row.id, row);
+      if (row.subjectId) {
+        existingBySubjectId.set(row.subjectId, row);
+      }
+      for (const studentId of row.monitoredStudentIds || []) {
+        const cleanStudentId = studentId.trim();
+        if (cleanStudentId) {
+          distinctStudentIds.add(cleanStudentId);
+        }
+      }
     }
   }
+
+  const validStudentIdSet = new Set<string>();
+  if (distinctStudentIds.size > 0) {
+    const studentIdsArr = Array.from(distinctStudentIds);
+    const matchedCards = await client.studentCouncilCard.findMany({
+      where: {
+        boardId,
+        schoolId,
+        studentId: { in: studentIdsArr },
+      },
+      select: { studentId: true },
+    });
+    for (const card of matchedCards) {
+      validStudentIdSet.add(card.studentId);
+    }
+  }
+
+  // Rejeita apenas IDs novos que não pertencem a StudentCouncilCard(boardId, schoolId);
+  // IDs órfãos previamente persistidos na mesma conversa são podados na normalização abaixo.
+  for (const conv of preCouncil.conversations) {
+    const cleanId = conv.id.trim();
+    const cleanSubjectId = conv.subjectId?.trim() || null;
+    const existing =
+      existingById.get(cleanId) ??
+      (cleanSubjectId ? existingBySubjectId.get(cleanSubjectId) : undefined);
+    const persistedIdsForConv = new Set(existing?.monitoredStudentIds || []);
+    for (const rawId of conv.monitoredStudentIds || []) {
+      const cleanStudentId = rawId.trim();
+      if (!validStudentIdSet.has(cleanStudentId) && !persistedIdsForConv.has(cleanStudentId)) {
+        throw new CouncilDomainError(
+          "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
+          400
+        );
+      }
+    }
+  }
+
+  const subjectTeacherUpdates: Array<{
+    subjectId: string;
+    teacherEmail: string | null;
+    teacherName: string | null;
+  }> = [];
 
   const normalizedConversations: PreCouncilSubjectConversation[] = preCouncil.conversations.map(
     (conv) => {
       const cleanId = conv.id.trim();
-      const existing = existingById.get(cleanId);
+      const cleanSubjectId = conv.subjectId?.trim() || null;
+      const existing =
+        existingById.get(cleanId) ??
+        (cleanSubjectId ? existingBySubjectId.get(cleanSubjectId) : undefined);
       const serverSubmittedAt = existing?.teacherSubmittedAt ?? null;
       const incomingKnownSubmittedAt = (conv.teacherSubmittedAt || "").trim() || null;
       const hasUnseenTeacherSubmission =
         Boolean(serverSubmittedAt) && incomingKnownSubmittedAt !== serverSubmittedAt;
 
-      const incomingIds = Array.from(new Set(conv.monitoredStudentIds || []));
+      const incomingIds = Array.from(
+        new Set(
+          (conv.monitoredStudentIds || [])
+            .map((id) => id.trim())
+            .filter((id) => validStudentIdSet.has(id))
+        )
+      );
+      const existingValidIds = (existing?.monitoredStudentIds || []).filter((id) =>
+        validStudentIdSet.has(id)
+      );
       const mergedMonitoredIds = hasUnseenTeacherSubmission
-        ? Array.from(new Set([...(existing?.monitoredStudentIds || []), ...incomingIds]))
+        ? Array.from(new Set([...existingValidIds, ...incomingIds]))
         : incomingIds;
 
       const existingNotes = (existing?.monitoredStudentsNotes || "").trim();
@@ -1137,12 +1277,64 @@ async function validateAndSerializePreCouncilData(params: {
         }
       }
 
+      const incomingTeacherName = (conv.teacherName || "").trim();
+      const existingTeacherName = (existing?.teacherName || "").trim();
+      const resolvedTeacherName =
+        hasUnseenTeacherSubmission && !incomingTeacherName && existingTeacherName
+          ? existingTeacherName
+          : incomingTeacherName;
+
+      const incomingTeacherEmail = conv.teacherEmail?.trim()
+        ? conv.teacherEmail.trim().toLowerCase()
+        : null;
+      const existingTeacherEmail = existing?.teacherEmail?.trim()
+        ? existing.teacherEmail.trim().toLowerCase()
+        : null;
+      const resolvedTeacherEmail =
+        hasUnseenTeacherSubmission && !incomingTeacherEmail && existingTeacherEmail
+          ? existingTeacherEmail
+          : incomingTeacherEmail;
+
+      if (cleanSubjectId && !hasUnseenTeacherSubmission) {
+        const subj = subjectById.get(cleanSubjectId);
+        if (subj) {
+          const subjEmail = subj.teacherEmail?.trim()
+            ? subj.teacherEmail.trim().toLowerCase()
+            : null;
+          const subjName = (subj.teacherName || "").trim() || null;
+
+          const emailExplicitlyChanged =
+            existing !== undefined
+              ? resolvedTeacherEmail !== existingTeacherEmail
+              : resolvedTeacherEmail !== null && resolvedTeacherEmail !== subjEmail;
+          const emailBackfilled = !subjEmail && resolvedTeacherEmail !== null;
+          const nameBackfilled = !subjName && Boolean(resolvedTeacherName);
+
+          if (
+            (emailExplicitlyChanged && resolvedTeacherEmail !== subjEmail) ||
+            emailBackfilled ||
+            nameBackfilled
+          ) {
+            subjectTeacherUpdates.push({
+              subjectId: cleanSubjectId,
+              teacherEmail:
+                emailExplicitlyChanged || emailBackfilled ? resolvedTeacherEmail : subjEmail,
+              teacherName: nameBackfilled
+                ? resolvedTeacherName
+                : emailExplicitlyChanged && resolvedTeacherName
+                  ? resolvedTeacherName
+                  : subjName,
+            });
+          }
+        }
+      }
+
       return {
         id: cleanId,
-        subjectId: conv.subjectId?.trim() || null,
+        subjectId: cleanSubjectId,
         subjectName: conv.subjectName.trim(),
-        teacherName: (conv.teacherName || "").trim(),
-        teacherEmail: conv.teacherEmail?.trim() ? conv.teacherEmail.trim().toLowerCase() : null,
+        teacherName: resolvedTeacherName,
+        teacherEmail: resolvedTeacherEmail,
         monitoredStudentIds: mergedMonitoredIds,
         monitoredStudentsNotes: mergedNotes,
         agreements: (conv.agreements || "").trim(),
@@ -1155,6 +1347,21 @@ async function validateAndSerializePreCouncilData(params: {
       };
     }
   );
+
+  if (
+    subjectTeacherUpdates.length > 0 &&
+    typeof client.classCouncilSubject?.update === "function"
+  ) {
+    for (const upd of subjectTeacherUpdates) {
+      await client.classCouncilSubject.update({
+        where: { id: upd.subjectId },
+        data: {
+          teacherEmail: upd.teacherEmail,
+          teacherName: upd.teacherName,
+        },
+      });
+    }
+  }
 
   const normalized: PreCouncilData = {
     version: 1,
@@ -2223,24 +2430,6 @@ export async function submitTeacherPortalSubjectEntries(params: {
       );
     }
 
-    if (preCouncilContribution && preCouncilContribution.monitoredStudentIds.length > 0) {
-      const distinctIds = Array.from(new Set(preCouncilContribution.monitoredStudentIds));
-      const matchedCards = await tx.studentCouncilCard.findMany({
-        where: {
-          boardId,
-          schoolId,
-          studentId: { in: distinctIds },
-        },
-        select: { studentId: true },
-      });
-      if (matchedCards.length !== distinctIds.length) {
-        throw new CouncilDomainError(
-          "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
-          400
-        );
-      }
-    }
-
     const [trimesters, activeSubjects] = await Promise.all([
       tx.classCouncilTrimester.findMany({
         where: { boardId, schoolId },
@@ -2285,6 +2474,49 @@ export async function submitTeacherPortalSubjectEntries(params: {
       confirmAck,
     });
 
+    let validatedMonitoredIds: string[] | undefined = undefined;
+    if (preCouncilContribution !== undefined) {
+      const persistedTargetIds = new Set(target.monitoredStudentIds || []);
+      const idsToValidate = Array.from(
+        new Set([
+          ...preCouncilContribution.monitoredStudentIds.map((id) => id.trim()).filter(Boolean),
+          ...persistedTargetIds,
+        ])
+      );
+      const validIdSet = new Set<string>();
+      if (idsToValidate.length > 0) {
+        const matchedCards = await tx.studentCouncilCard.findMany({
+          where: {
+            boardId,
+            schoolId,
+            studentId: { in: idsToValidate },
+          },
+          select: { studentId: true },
+        });
+        for (const card of matchedCards) {
+          validIdSet.add(card.studentId);
+        }
+      }
+
+      for (const rawId of preCouncilContribution.monitoredStudentIds) {
+        const cleanStudentId = rawId.trim();
+        if (!validIdSet.has(cleanStudentId) && !persistedTargetIds.has(cleanStudentId)) {
+          throw new CouncilDomainError(
+            "Um ou mais estudantes selecionados no Pré-Conselho não pertencem a esta turma ou instituição.",
+            400
+          );
+        }
+      }
+
+      validatedMonitoredIds = Array.from(
+        new Set(
+          preCouncilContribution.monitoredStudentIds
+            .map((id) => id.trim())
+            .filter((id) => validIdSet.has(id))
+        )
+      );
+    }
+
     const nextTeacherEmail = existingTeacherEmail || cleanEmail;
     const nextTeacherName = (subject.teacherName || "").trim() || cleanName;
 
@@ -2326,7 +2558,7 @@ export async function submitTeacherPortalSubjectEntries(params: {
       teacherName: target.teacherName.trim() || nextTeacherName,
       ...(preCouncilContribution !== undefined
         ? {
-            monitoredStudentIds: Array.from(new Set(preCouncilContribution.monitoredStudentIds)),
+            monitoredStudentIds: validatedMonitoredIds ?? [],
             monitoredStudentsNotes: preCouncilContribution.monitoredStudentsNotes.trim(),
           }
         : {}),

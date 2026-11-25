@@ -153,6 +153,8 @@ const SYNTHESIS_VIEW_FIELDS: Array<{ key: keyof PreCouncilSynthesis; label: stri
   { key: "pedagogicalActions", label: "Encaminhamentos pedagógicos" },
 ];
 
+const PORTAL_FOCUS_COOLDOWN_MS = 3_000;
+
 function resolveSuggestedSubjectId(
   council: TeacherPortalCouncilContext | null | undefined,
   suggestedSubjectId?: string | null
@@ -307,6 +309,12 @@ export default function ProfessorConselhoClient({
   const pollInFlightRef = useRef(false);
   const pollAbortRef = useRef<AbortController | null>(null);
   const pollDelayMsRef = useRef<number>(TEACHER_PORTAL_POLL_BASE_MS);
+  const nextAllowedPollAtMsRef = useRef<number>(0);
+  const lastPollCompletedAtMsRef = useRef<number>(0);
+  const selectedSubjectIdRef = useRef<string>(selectedSubjectId);
+  selectedSubjectIdRef.current = selectedSubjectId;
+
+  const hasCouncil = Boolean(council);
 
   const authenticateWithCredential = useCallback(
     async (credential: string) => {
@@ -315,6 +323,8 @@ export default function ProfessorConselhoClient({
       setSessionExpired(false);
       setSubmitFeedback(null);
       pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+      nextAllowedPollAtMsRef.current = 0;
+      lastPollCompletedAtMsRef.current = 0;
 
       try {
         const res = await fetch(`${portalApiBase}/${encodeURIComponent(token)}`, {
@@ -429,18 +439,34 @@ export default function ProfessorConselhoClient({
     return council.subjects.find((s) => s.id === selectedSubjectId) || null;
   }, [council, selectedSubjectId]);
 
-  const isClaimedByOtherTeacher = useMemo(() => {
-    if (!selectedSubject?.teacherEmail || !verifiedEmail) return false;
-    return (
-      selectedSubject.teacherEmail.trim().toLowerCase() !==
-      verifiedEmail.trim().toLowerCase()
-    );
-  }, [selectedSubject, verifiedEmail]);
-
   const selectedConv = useMemo<TeacherPortalPreCouncilConversationSummary | null>(() => {
     if (!council || !selectedSubjectId) return null;
     return council.preCouncil?.conversationsBySubjectId?.[selectedSubjectId] || null;
   }, [council, selectedSubjectId]);
+
+  const isClaimedByOtherTeacher = useMemo(() => {
+    if (!verifiedEmail) return false;
+    const cleanViewer = verifiedEmail.trim().toLowerCase();
+    const subjectOwner = (selectedSubject?.teacherEmail || "").trim().toLowerCase();
+    const convOwner = (selectedConv?.teacherEmail || "").trim().toLowerCase();
+    return (
+      (Boolean(subjectOwner) && subjectOwner !== cleanViewer) ||
+      (Boolean(convOwner) && convOwner !== cleanViewer)
+    );
+  }, [selectedSubject, selectedConv, verifiedEmail]);
+
+  const claimedTeacherDisplay = useMemo(() => {
+    const cleanViewer = (verifiedEmail || "").trim().toLowerCase();
+    const subjectOwner = (selectedSubject?.teacherEmail || "").trim().toLowerCase();
+    if (subjectOwner && subjectOwner !== cleanViewer) {
+      return selectedSubject?.teacherName || selectedSubject?.teacherEmail || "";
+    }
+    const convOwner = (selectedConv?.teacherEmail || "").trim().toLowerCase();
+    if (convOwner && convOwner !== cleanViewer) {
+      return selectedConv?.teacherName || selectedConv?.teacherEmail || "";
+    }
+    return "";
+  }, [selectedSubject, selectedConv, verifiedEmail]);
 
   const currentDraftMap = useMemo(() => {
     if (!selectedSubjectId) return {};
@@ -480,7 +506,17 @@ export default function ProfessorConselhoClient({
     const cleanVerified = verifiedEmail.trim().toLowerCase();
     return council.subjects.some((subj) => {
       const subjEmail = (subj.teacherEmail || "").trim().toLowerCase();
-      if (subjEmail && subjEmail !== cleanVerified) return false;
+      const convEmail = (
+        council.preCouncil?.conversationsBySubjectId?.[subj.id]?.teacherEmail || ""
+      )
+        .trim()
+        .toLowerCase();
+      if (
+        (subjEmail && subjEmail !== cleanVerified) ||
+        (convEmail && convEmail !== cleanVerified)
+      ) {
+        return false;
+      }
       return isSubjectDraftDirty({
         council,
         subjectId: subj.id,
@@ -850,6 +886,13 @@ export default function ProfessorConselhoClient({
         council?: TeacherPortalCouncilContext;
       } = await res.json();
 
+      if (res.status === 401) {
+        setSessionExpired(true);
+        throw new Error(
+          data.error || "Sessão Google expirada. Entre novamente com sua conta @escola.pr.gov.br."
+        );
+      }
+
       if (!res.ok || !data.council || !data.result) {
         throw new Error(
           data.error || "Não foi possível salvar os registros do componente."
@@ -903,7 +946,7 @@ export default function ProfessorConselhoClient({
 
   const refreshAckReleaseStatus = useCallback(
     async (manual = false): Promise<"ok" | "expired" | "rate_limited" | "error" | "skipped"> => {
-      if (!googleIdToken || !council || sessionExpired) return "skipped";
+      if (!googleIdToken || !hasCouncil || sessionExpired) return "skipped";
       if (!manual && pollInFlightRef.current) return "skipped";
 
       pollAbortRef.current?.abort();
@@ -942,11 +985,14 @@ export default function ProfessorConselhoClient({
         }
 
         if (res.status === 429) {
-          pollDelayMsRef.current = computePortalPollBackoffMs({
+          const backoffMs = computePortalPollBackoffMs({
             retryAfterHeader: res.headers.get("retry-after"),
             retryAfterBody: data.retryAfter,
             currentDelayMs: pollDelayMsRef.current,
           });
+          pollDelayMsRef.current = backoffMs;
+          nextAllowedPollAtMsRef.current = Date.now() + backoffMs;
+          lastPollCompletedAtMsRef.current = Date.now();
           if (manual) {
             setSubmitFeedback({
               type: "error",
@@ -957,6 +1003,7 @@ export default function ProfessorConselhoClient({
         }
 
         if (!res.ok || !data.council) {
+          lastPollCompletedAtMsRef.current = Date.now();
           if (manual) {
             setSubmitFeedback({
               type: "error",
@@ -967,9 +1014,13 @@ export default function ProfessorConselhoClient({
         }
 
         pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+        nextAllowedPollAtMsRef.current = 0;
+        lastPollCompletedAtMsRef.current = Date.now();
         setCouncil(data.council);
+
+        const updatedConv =
+          data.council.preCouncil?.conversationsBySubjectId?.[selectedSubjectIdRef.current];
         if (manual) {
-          const updatedConv = data.council.preCouncil?.conversationsBySubjectId?.[selectedSubjectId];
           if (updatedConv?.canConfirmAck) {
             setSubmitFeedback({
               type: "success",
@@ -978,15 +1029,26 @@ export default function ProfessorConselhoClient({
           } else {
             setSubmitFeedback({
               type: "error",
-              message: "Ainda aguardando o registro da conversa ou combinados pela equipe pedagógica.",
+              message:
+                "Ainda aguardando o registro da conversa ou combinados pela equipe pedagógica.",
             });
           }
+        } else if (updatedConv?.canConfirmAck) {
+          setSubmitFeedback((prev) =>
+            prev?.type === "error"
+              ? {
+                  type: "success",
+                  message: "Assinatura liberada pela equipe pedagógica.",
+                }
+              : prev
+          );
         }
         return "ok";
       } catch (err) {
         if ((err as { name?: string })?.name === "AbortError") {
           return "skipped";
         }
+        lastPollCompletedAtMsRef.current = Date.now();
         if (manual) {
           setSubmitFeedback({
             type: "error",
@@ -995,24 +1057,24 @@ export default function ProfessorConselhoClient({
         }
         return "error";
       } finally {
-        pollInFlightRef.current = false;
         if (pollAbortRef.current === controller) {
+          pollInFlightRef.current = false;
           pollAbortRef.current = null;
-        }
-        if (manual) {
-          setCheckingAckRelease(false);
+          if (manual) {
+            setCheckingAckRelease(false);
+          }
         }
       }
     },
-    [googleIdToken, council, portalApiBase, token, selectedSubjectId, sessionExpired]
+    [googleIdToken, hasCouncil, portalApiBase, token, sessionExpired]
   );
 
-  // Atualiza automaticamente a Etapa 3 enquanto aguarda liberação da equipe pedagógica (com backoff e parada em 401)
+  // Atualiza automaticamente a Etapa 3 enquanto aguarda liberação da equipe pedagógica (com backoff, foco/visibilidade e parada em 401)
   useEffect(() => {
     if (
       activeStep !== "ack" ||
       !googleIdToken ||
-      !council ||
+      !hasCouncil ||
       sessionExpired ||
       isClaimedByOtherTeacher ||
       selectedConv?.digitalAckEmail ||
@@ -1025,7 +1087,7 @@ export default function ProfessorConselhoClient({
     let cancelled = false;
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    const scheduleNext = () => {
+    const scheduleNext = (delayOverrideMs?: number) => {
       if (cancelled) return;
       timerId = setTimeout(async () => {
         if (cancelled) return;
@@ -1033,24 +1095,52 @@ export default function ProfessorConselhoClient({
           scheduleNext();
           return;
         }
+        const remainingBackoffMs = nextAllowedPollAtMsRef.current - Date.now();
+        if (remainingBackoffMs > 0) {
+          scheduleNext(remainingBackoffMs);
+          return;
+        }
         const outcome = await refreshAckReleaseStatus(false);
         if (!cancelled && outcome !== "expired") {
           scheduleNext();
         }
-      }, pollDelayMsRef.current);
+      }, delayOverrideMs ?? pollDelayMsRef.current);
     };
+
+    const handleVisibilityOrFocus = () => {
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      const now = Date.now();
+      if (now < nextAllowedPollAtMsRef.current) return;
+      if (now - lastPollCompletedAtMsRef.current < PORTAL_FOCUS_COOLDOWN_MS) return;
+      if (pollInFlightRef.current) return;
+      void refreshAckReleaseStatus(false);
+    };
+
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("focus", handleVisibilityOrFocus);
+    }
 
     scheduleNext();
 
     return () => {
       cancelled = true;
       if (timerId) clearTimeout(timerId);
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      }
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+      }
       pollAbortRef.current?.abort();
     };
   }, [
     activeStep,
     googleIdToken,
-    council,
+    hasCouncil,
     sessionExpired,
     isClaimedByOtherTeacher,
     selectedConv?.digitalAckEmail,
@@ -1062,6 +1152,8 @@ export default function ProfessorConselhoClient({
     pollAbortRef.current?.abort();
     pollInFlightRef.current = false;
     pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+    nextAllowedPollAtMsRef.current = 0;
+    lastPollCompletedAtMsRef.current = 0;
 
     if (council && verifiedEmail) {
       const subjectIds = new Set(council.subjects.map((s) => s.id));
@@ -1274,14 +1366,18 @@ export default function ProfessorConselhoClient({
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900"
                 >
                   {council.subjects.map((subj) => {
+                    const convForSubj = council.preCouncil?.conversationsBySubjectId?.[subj.id];
+                    const viewerLower = (verifiedEmail || "").trim().toLowerCase();
+                    const subjOwner = (subj.teacherEmail || "").trim().toLowerCase();
+                    const convOwner = (convForSubj?.teacherEmail || "").trim().toLowerCase();
                     const claimedOther =
-                      Boolean(subj.teacherEmail) &&
-                      subj.teacherEmail!.trim().toLowerCase() !==
-                        (verifiedEmail || "").trim().toLowerCase();
+                      (Boolean(subjOwner) && subjOwner !== viewerLower) ||
+                      (Boolean(convOwner) && convOwner !== viewerLower);
+                    const displayTeacherName = subj.teacherName || convForSubj?.teacherName;
                     return (
                       <option key={subj.id} value={subj.id}>
                         {subj.name}
-                        {subj.teacherName ? ` (${subj.teacherName})` : ""}
+                        {displayTeacherName ? ` (${displayTeacherName})` : ""}
                         {claimedOther ? " — vinculado a outro docente" : ""}
                       </option>
                     );
@@ -1315,8 +1411,10 @@ export default function ProfessorConselhoClient({
           {isClaimedByOtherTeacher && selectedSubject && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 font-semibold">
               Este componente curricular está vinculado a{" "}
-              {selectedSubject.teacherName || selectedSubject.teacherEmail}. Selecione o seu
-              componente ou solicite ajuste à equipe pedagógica.
+              {claimedTeacherDisplay ||
+                selectedSubject.teacherName ||
+                selectedSubject.teacherEmail}
+              . Selecione o seu componente ou solicite ajuste à equipe pedagógica.
             </div>
           )}
 

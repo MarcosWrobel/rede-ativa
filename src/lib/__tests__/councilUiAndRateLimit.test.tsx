@@ -38,7 +38,14 @@ import {
   createPreCouncilTeacherToken,
 } from "@/lib/councilTeacherToken";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
+import CouncilPreCouncilConversationsView from "@/components/conselho/CouncilPreCouncilConversationsView";
+import CouncilPreCouncilTab from "@/components/conselho/CouncilPreCouncilTab";
 import CouncilStudentFichaModal from "@/components/conselho/CouncilStudentFichaModal";
+import {
+  buildPreCouncilStudentAlertsBySubject,
+  getMatrixFillStatsBySubject,
+  parsePreCouncilData,
+} from "@/components/conselho/preCouncilUtils";
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
 import type {
   CouncilBoardDetailRecord,
@@ -560,5 +567,266 @@ describe("Conselho de Classe — Rate Limit 429 dos Portais e Interações de UI
     await app2.flush();
 
     expect(applyForms[1]).toEqual({ mode: "apply", updateClassShift: "true" });
+  });
+
+  it("CouncilPreCouncilTab: sanitiza studentIds órfãos no payload/UI e sinaliza necessidade de salvar para liberar ciência docente", async () => {
+    const board = buildBoardStub();
+    board.subjects = [
+      {
+        id: "subj-arte",
+        schoolId: "school-a",
+        boardId: "board-1",
+        name: "Arte",
+        teacherName: "Prof. Marcos",
+        teacherEmail: "prof@escola.pr.gov.br",
+        displayOrder: 0,
+        active: true,
+      },
+      {
+        id: "subj-mat",
+        schoolId: "school-a",
+        boardId: "board-1",
+        name: "Matemática",
+        teacherName: "Prof. Helena",
+        teacherEmail: "helena@escola.pr.gov.br",
+        displayOrder: 1,
+        active: true,
+      },
+    ];
+    board.studentCards = [buildStudentCardStub()];
+
+    const initialPreJson = JSON.stringify({
+      version: 1,
+      periodLabel: "1º Trimestre",
+      objectiveText: "Objetivo",
+      responsiblePedagogueName: "Pedagoga Ana",
+      responsiblePedagogueRole: "Pedagoga Responsável",
+      conversations: [
+        {
+          id: "subj-arte",
+          subjectId: "subj-arte",
+          subjectName: "Arte",
+          teacherName: "Prof. Marcos",
+          teacherEmail: "prof@escola.pr.gov.br",
+          monitoredStudentIds: [],
+          monitoredStudentsNotes: "",
+          agreements: "",
+          conversationStatus: "PENDING",
+          conversationDate: null,
+          teacherSubmittedAt: null,
+          digitalAckEmail: null,
+          digitalAckName: null,
+          digitalAckAt: null,
+        },
+        {
+          id: "subj-mat",
+          subjectId: "subj-mat",
+          subjectName: "Matemática",
+          teacherName: "Prof. Helena",
+          teacherEmail: "helena@escola.pr.gov.br",
+          monitoredStudentIds: ["stu-orphan-ghost", "stu-1"],
+          monitoredStudentsNotes: "",
+          agreements: "",
+          conversationStatus: "PENDING",
+          conversationDate: null,
+          teacherSubmittedAt: null,
+          digitalAckEmail: null,
+          digitalAckName: null,
+          digitalAckAt: null,
+        },
+      ],
+      synthesis: {
+        mainDifficulties: "",
+        priorityStudents: "",
+        attendanceIssues: "",
+        behaviorIssues: "",
+        pedagogicalActions: "",
+      },
+    });
+
+    const initialTrimester: CouncilTrimesterRecord = {
+      id: "tri-1",
+      schoolId: "school-a",
+      boardId: "board-1",
+      trimester: 1,
+      status: "IN_PROGRESS",
+      positivePoints: null,
+      attentionPoints: null,
+      plannedActions: null,
+      preCouncilJson: initialPreJson,
+      postCouncilHeldAt: null,
+      postCouncilAdvances: null,
+      postCouncilWhatWorked: null,
+      postCouncilRecognizedAttitudes: null,
+      postCouncilCriticalSubjects: null,
+      postCouncilPerformanceFactors: null,
+      postCouncilBehaviorAttendance: null,
+      postCouncilWhatToImprove: null,
+      postCouncilHowTeachersCanHelp: null,
+      postCouncilCommitments: null,
+      postCouncilActionItemsJson: null,
+      linkedMinuteId: null,
+      updatedByName: null,
+      updatedByEmail: null,
+      updatedAt: "2026-11-24T20:00:00Z",
+    };
+
+    let sentPreCouncilPayload: any = null;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      sentPreCouncilPayload = body.preCouncil;
+      const savedJson = JSON.stringify({
+        ...body.preCouncil,
+        conversations: body.preCouncil.conversations.map((c: any) => ({
+          ...c,
+          digitalAckEmail: null,
+          digitalAckName: null,
+          digitalAckAt: null,
+        })),
+      });
+      return new Response(
+        JSON.stringify({
+          success: true,
+          trimesterRecord: {
+            ...initialTrimester,
+            preCouncilJson: savedJson,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const onNotify = vi.fn();
+    let currentTrimester = initialTrimester;
+
+    const app = mountReactComponent(CouncilPreCouncilTab, {
+      board,
+      activeTrimester: 1,
+      trimesterRecord: currentTrimester,
+      currentUserName: "Pedagoga Ana",
+      hideSensitiveTags: false,
+      onOpenStudentModal: vi.fn(),
+      onOpenSubjectsModal: vi.fn(),
+      onTrimesterUpdated: (updated) => {
+        currentTrimester = updated;
+      },
+      onMatrixSaved: async () => {},
+      onNotify,
+    });
+    unmounts.push(app.unmount);
+    await app.flush();
+
+    // 1. CouncilPreCouncilTab sanitiza studentIds órfãos já na hidratação passada à view filha
+    const convViewEl = app.findAll((el) => el.type === CouncilPreCouncilConversationsView)[0];
+    expect(convViewEl).toBeDefined();
+    const initialChildDraft = convViewEl.props.draft as ReturnType<typeof parsePreCouncilData>;
+    expect(initialChildDraft?.conversations[1].monitoredStudentIds).toEqual(["stu-1"]);
+
+    // 2. Simula marcar "Realizada" em Arte e salvar em CouncilPreCouncilTab
+    const onUpdateDraftFromChild = convViewEl.props.onUpdateDraft as (
+      updater: (prev: NonNullable<ReturnType<typeof parsePreCouncilData>>) => NonNullable<ReturnType<typeof parsePreCouncilData>>
+    ) => void;
+    onUpdateDraftFromChild((prev) => ({
+      ...prev,
+      conversations: prev.conversations.map((c, idx) =>
+        idx === 0 ? { ...c, conversationStatus: "COMPLETED", conversationDate: "2026-11-24" } : c
+      ),
+    }));
+    await app.flush();
+
+    (app.findButton("Salvar pré-conselho").props.onClick as () => void)();
+    await app.flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentPreCouncilPayload.conversations[1].monitoredStudentIds).toEqual(["stu-1"]);
+    expect(onNotify).toHaveBeenCalledWith("Pré-Conselho salvo.", "success");
+
+    // 3. CouncilPreCouncilConversationsView oculta contagens órfãs e sinaliza necessidade de salvar
+    const rawPreBeforeSave = parsePreCouncilData(initialPreJson)!;
+    const savedMapBeforeSave = new Map(rawPreBeforeSave.conversations.map((c) => [c.id, c]));
+    let viewDraft = parsePreCouncilData(initialPreJson)!;
+
+    const alertsBundle = buildPreCouncilStudentAlertsBySubject(board, 1);
+    const matrixStats = getMatrixFillStatsBySubject(board, 1);
+
+    const viewApp = mountReactComponent(CouncilPreCouncilConversationsView, {
+      board,
+      activeTrimester: 1,
+      draft: viewDraft,
+      selectedConvId: "subj-arte",
+      onSelectConvId: vi.fn(),
+      onUpdateDraft: (updater) => {
+        viewDraft = updater(viewDraft);
+      },
+      onSyncSubjects: vi.fn(),
+      onAddCustomRow: vi.fn(),
+      onRemoveConversation: vi.fn(),
+      onOpenUnifiedTeacherLink: vi.fn(),
+      onMatrixSaved: async () => {},
+      onNotify: vi.fn(),
+      alertsBundle,
+      matrixStatsBySubjectId: matrixStats,
+      savedConversationsById: savedMapBeforeSave,
+      hideSensitiveTags: false,
+    });
+    unmounts.push(viewApp.unmount);
+
+    // Matemática tinha ["stu-orphan-ghost", "stu-1"], mas exibição filtrada mostra apenas 1 em acomp.
+    expect(viewApp.getText()).toContain("• 1 em acomp.");
+    expect(viewApp.getText()).not.toContain("• 2 em acomp.");
+
+    // Clicar em "Realizada" em Arte (sem salvar ainda) exibe aviso âmbar
+    const markCompletedBtn = viewApp.findAll(
+      (el) => el.type === "button" && extractNodeText(el) === "Realizada"
+    )[0];
+    expect(markCompletedBtn).toBeDefined();
+    (markCompletedBtn.props.onClick as () => void)();
+    await viewApp.updateProps({
+      board,
+      activeTrimester: 1,
+      draft: viewDraft,
+      selectedConvId: "subj-arte",
+      onSelectConvId: vi.fn(),
+      onUpdateDraft: (updater) => {
+        viewDraft = updater(viewDraft);
+      },
+      onSyncSubjects: vi.fn(),
+      onAddCustomRow: vi.fn(),
+      onRemoveConversation: vi.fn(),
+      onOpenUnifiedTeacherLink: vi.fn(),
+      onMatrixSaved: async () => {},
+      onNotify: vi.fn(),
+      alertsBundle,
+      matrixStatsBySubjectId: matrixStats,
+      savedConversationsById: savedMapBeforeSave,
+      hideSensitiveTags: false,
+    });
+    expect(viewApp.getText()).toContain("Salve o pré-conselho para liberar a ciência docente.");
+
+    // Após salvar no servidor (savedConversationsById atualizado), exibe liberação confirmada
+    const savedMapAfterSave = new Map(viewDraft.conversations.map((c) => [c.id, c]));
+    await viewApp.updateProps({
+      board,
+      activeTrimester: 1,
+      draft: viewDraft,
+      selectedConvId: "subj-arte",
+      onSelectConvId: vi.fn(),
+      onUpdateDraft: (updater) => {
+        viewDraft = updater(viewDraft);
+      },
+      onSyncSubjects: vi.fn(),
+      onAddCustomRow: vi.fn(),
+      onRemoveConversation: vi.fn(),
+      onOpenUnifiedTeacherLink: vi.fn(),
+      onMatrixSaved: async () => {},
+      onNotify: vi.fn(),
+      alertsBundle,
+      matrixStatsBySubjectId: matrixStats,
+      savedConversationsById: savedMapAfterSave,
+      hideSensitiveTags: false,
+    });
+    expect(viewApp.getText()).toContain("Ciência docente liberada no link do professor.");
+    expect(viewApp.getText()).not.toContain("Salve o pré-conselho para liberar a ciência docente.");
   });
 });
