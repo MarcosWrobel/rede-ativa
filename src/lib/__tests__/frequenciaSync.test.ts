@@ -65,8 +65,8 @@ vi.mock("@/lib/audit", async () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaObj: any = {
     student: {
       findMany: hoisted.studentFindMany,
       update: hoisted.studentUpdate,
@@ -78,9 +78,12 @@ vi.mock("@/lib/prisma", () => ({
       deleteMany: hoisted.absenceJustificationDeleteMany,
     },
     $executeRaw: hoisted.executeRaw,
-    $transaction: hoisted.transaction,
-  },
-}));
+  };
+  prismaObj.$transaction = vi.fn(async (arg: any) =>
+    typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
+  );
+  return { prisma: prismaObj };
+});
 
 import { parseFrequencyImportInput } from "@/lib/frequencyImportParser";
 import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
@@ -233,8 +236,11 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       expect(data.cgmVinculados).toBe(0);
       // Não tentou atualizar Student.cgm para o valor colidente
       expect(hoisted.studentUpdate).not.toHaveBeenCalled();
-      // Gravou LowAttendanceRecord e AttendanceSnapshot normalmente
-      expect(hoisted.executeRaw).toHaveBeenCalledTimes(2);
+      // Gravou LowAttendanceRecord e AttendanceSnapshot normalmente (excluindo set_config de withTenantContext)
+      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
+        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
+      );
+      expect(dataSqlCalls).toHaveLength(2);
     });
 
     it("recupera sem HTTP 500 se uma colisão concorrente P2002 ocorrer durante o update de CGM", async () => {
@@ -295,8 +301,11 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       const data = await res.json();
       expect(data.atualizados).toBe(1);
       expect(data.estudantesEnriquecidos).toBe(0);
-      // Apenas 2 chamadas $executeRaw (LowAttendanceRecord + AttendanceSnapshot), sem UPDATE Student redundante
-      expect(hoisted.executeRaw).toHaveBeenCalledTimes(2);
+      // Apenas 2 chamadas $executeRaw de dados (LowAttendanceRecord + AttendanceSnapshot), sem UPDATE Student redundante
+      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
+        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
+      );
+      expect(dataSqlCalls).toHaveLength(2);
     });
 
     it("executa atualização em lote via SQL quando há alteração real de idade/PCD/Ganhando Mundo", async () => {
@@ -331,8 +340,11 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.estudantesEnriquecidos).toBe(1);
-      // LowAttendanceRecord + AttendanceSnapshot + bulk UPDATE Student
-      expect(hoisted.executeRaw).toHaveBeenCalledTimes(3);
+      // LowAttendanceRecord + AttendanceSnapshot + bulk UPDATE Student (excluindo set_config de withTenantContext)
+      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
+        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
+      );
+      expect(dataSqlCalls).toHaveLength(3);
     });
 
     it("permite reverter badges isExchangeStudent/isSpecialNeeds quando payload envia false explícito e preserva quando omitido", async () => {

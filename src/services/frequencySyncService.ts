@@ -17,6 +17,7 @@ import { getIsoWeekKey } from "@/lib/pedagogicalClassifier";
 import * as currentSchoolModule from "@/lib/currentSchool";
 import type { SchoolContext } from "@/lib/currentSchool";
 import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   authenticateExtensionSyncToken,
   type ExtensionSyncLabel,
@@ -58,10 +59,11 @@ export async function resolveExtensionOrSessionSyncContext(options: {
   let userEmail = process.env.SYSTEM_SYNC_EMAIL || "sistema@redeativa.com.br";
   let userId: string | undefined = undefined;
   let targetSchoolId: string | undefined = undefined;
+  let sessionSnapshot: Awaited<ReturnType<typeof resolveServerUserAuthSnapshot>> = null;
 
   if (session?.user?.email && session.user.active !== false) {
-    const snapshot = await resolveServerUserAuthSnapshot(session);
-    if (!snapshot || snapshot.active === false) {
+    sessionSnapshot = await resolveServerUserAuthSnapshot(session);
+    if (!sessionSnapshot || sessionSnapshot.active === false) {
       return {
         ok: false,
         response: NextResponse.json(
@@ -71,10 +73,10 @@ export async function resolveExtensionOrSessionSyncContext(options: {
       };
     }
     authMethod = "SESSION";
-    userEmail = snapshot.email;
-    userName = snapshot.name || snapshot.email.split("@")[0];
-    userId = snapshot.id;
-    targetSchoolId = snapshot.schoolId ?? undefined;
+    userEmail = sessionSnapshot.email;
+    userName = sessionSnapshot.name || sessionSnapshot.email.split("@")[0];
+    userId = sessionSnapshot.id;
+    targetSchoolId = sessionSnapshot.schoolId ?? undefined;
   } else {
     const tokenAuth = await authenticateExtensionSyncToken({
       req,
@@ -97,7 +99,9 @@ export async function resolveExtensionOrSessionSyncContext(options: {
       authorizedResolver = undefined;
     }
     if (typeof authorizedResolver === "function") {
-      currentSchool = await authorizedResolver(session, targetSchoolId);
+      currentSchool = await authorizedResolver(session, targetSchoolId, sessionSnapshot, {
+        allowSuperAdminReadOnlyFallback: false,
+      });
     } else if (
       (session?.user?.role || "").toUpperCase() === "SUPERADMIN" ||
       Boolean(
@@ -162,25 +166,29 @@ export async function loadSchoolStudentMatcherContext(
   schoolId: string | null | undefined,
   incomingRawCgms: Array<string | number | null | undefined>
 ) {
-  if (!schoolId || !schoolId.trim()) {
+  const normalizedSchoolId = (schoolId || "").trim();
+  if (!normalizedSchoolId) {
     throw new Error("TENANT_REQUIRED");
   }
 
-  const allStudents = await prisma.student.findMany({
-    where: { schoolId: schoolId.trim(), active: true },
-    select: {
-      id: true,
-      cgm: true,
-      name: true,
-      isExchangeStudent: true,
-      isSpecialNeeds: true,
-      age: true,
-    },
-  });
+  const allStudents = await withTenantContext(prisma, normalizedSchoolId, async (tx) =>
+    tx.student.findMany({
+      where: { schoolId: normalizedSchoolId, active: true },
+      select: {
+        id: true,
+        cgm: true,
+        name: true,
+        isExchangeStudent: true,
+        isSpecialNeeds: true,
+        age: true,
+      },
+    })
+  );
 
   const studentByIdMap = new Map(allStudents.map((s) => [s.id, s]));
   const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(allStudents);
 
+  // Exceção explícita da Fase A: consulta global mínima apenas de `cgm` para prevenir colisão @unique
   await populateGlobalTakenCgms(
     prisma,
     incomingRawCgms.map((c) => String(c ?? "").replace(/\u0000/g, "").trim()),
@@ -417,7 +425,11 @@ export async function executePowerBiFrequencySync(options: {
     }
   }
 
-  const cgmVinculados = await applyPendingCgmUpdatesSafely(prisma, pendingCgmUpdates);
+  const cgmVinculados = await applyPendingCgmUpdatesSafely(
+    prisma,
+    pendingCgmUpdates,
+    currentSchool.id
+  );
 
   const rowsToUpsert = Array.from(batchRecords.values());
   const BATCH_SIZE = 250;
@@ -432,48 +444,86 @@ export async function executePowerBiFrequencySync(options: {
     const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
     const values = chunk.map(
       (r) =>
-        Prisma.sql`(${r.id}, ${r.studentId}, CAST(${r.percent} AS DOUBLE PRECISION), ${r.detail}, ${defaultAction}, NOW())`
+        Prisma.sql`(${r.id}, ${r.studentId}, CAST(${r.percent} AS DOUBLE PRECISION), ${r.detail}, ${defaultAction})`
     );
 
-    await prisma.$executeRaw`
-      INSERT INTO "LowAttendanceRecord" (
-        "id",
-        "studentId",
-        "attendancePercent",
-        "enrollmentDetail",
-        "actionsTaken",
-        "updatedAt"
-      )
-      VALUES ${Prisma.join(values)}
-      ON CONFLICT ("studentId") DO UPDATE SET
-        "attendancePercent" = EXCLUDED."attendancePercent",
-        "enrollmentDetail" = EXCLUDED."enrollmentDetail",
-        "updatedAt" = NOW()
-    `;
+    await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "LowAttendanceRecord" (
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "actionsTaken",
+          "updatedAt"
+        )
+        SELECT
+          v."id",
+          v."studentId",
+          v."attendancePercent",
+          v."enrollmentDetail",
+          v."actionsTaken",
+          NOW()
+        FROM (VALUES ${Prisma.join(values)}) AS v(
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "actionsTaken"
+        )
+        INNER JOIN "Student" AS s
+          ON s."id" = v."studentId"
+         AND s."schoolId" = ${currentSchool.id}
+        ON CONFLICT ("studentId") DO UPDATE SET
+          "attendancePercent" = EXCLUDED."attendancePercent",
+          "enrollmentDetail" = EXCLUDED."enrollmentDetail",
+          "updatedAt" = NOW()
+      `;
+    });
 
     try {
       const snapshotValues = chunk.map(
         (r) =>
-          Prisma.sql`(${r.snapshotId}, ${r.studentId}, ${referenceWeek}, CAST(${r.percent} AS DOUBLE PRECISION), CAST(${r.weeklyPercent} AS DOUBLE PRECISION), CAST(${r.previousWeeklyPercent} AS DOUBLE PRECISION), NOW())`
+          Prisma.sql`(${r.snapshotId}, ${r.studentId}, ${referenceWeek}, CAST(${r.percent} AS DOUBLE PRECISION), CAST(${r.weeklyPercent} AS DOUBLE PRECISION), CAST(${r.previousWeeklyPercent} AS DOUBLE PRECISION))`
       );
 
-      await prisma.$executeRaw`
-        INSERT INTO "AttendanceSnapshot" (
-          "id",
-          "studentId",
-          "referenceWeek",
-          "attendancePercent",
-          "weeklyPercent",
-          "previousWeeklyPercent",
-          "recordedAt"
-        )
-        VALUES ${Prisma.join(snapshotValues)}
-        ON CONFLICT ("studentId", "referenceWeek") DO UPDATE SET
-          "attendancePercent" = EXCLUDED."attendancePercent",
-          "weeklyPercent" = EXCLUDED."weeklyPercent",
-          "previousWeeklyPercent" = EXCLUDED."previousWeeklyPercent",
-          "recordedAt" = NOW()
-      `;
+      await withTenantContext(prisma, currentSchool.id, async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "AttendanceSnapshot" (
+            "id",
+            "studentId",
+            "referenceWeek",
+            "attendancePercent",
+            "weeklyPercent",
+            "previousWeeklyPercent",
+            "recordedAt"
+          )
+          SELECT
+            v."id",
+            v."studentId",
+            v."referenceWeek",
+            v."attendancePercent",
+            v."weeklyPercent",
+            v."previousWeeklyPercent",
+            NOW()
+          FROM (VALUES ${Prisma.join(snapshotValues)}) AS v(
+            "id",
+            "studentId",
+            "referenceWeek",
+            "attendancePercent",
+            "weeklyPercent",
+            "previousWeeklyPercent"
+          )
+          INNER JOIN "Student" AS s
+            ON s."id" = v."studentId"
+           AND s."schoolId" = ${currentSchool.id}
+          ON CONFLICT ("studentId", "referenceWeek") DO UPDATE SET
+            "attendancePercent" = EXCLUDED."attendancePercent",
+            "weeklyPercent" = EXCLUDED."weeklyPercent",
+            "previousWeeklyPercent" = EXCLUDED."previousWeeklyPercent",
+            "recordedAt" = NOW()
+        `;
+      });
     } catch (snapErr: any) {
       console.warn("[frequencia/sync] Aviso ao gravar AttendanceSnapshot:", snapErr?.message);
     }
@@ -488,17 +538,19 @@ export async function executePowerBiFrequencySync(options: {
         ([id, data]) =>
           Prisma.sql`(${id}, CAST(${data.isExchangeStudent ?? null} AS BOOLEAN), CAST(${data.isSpecialNeeds ?? null} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
       );
-      await prisma.$executeRaw`
-        UPDATE "Student" AS s
-        SET
-          "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
-          "isSpecialNeeds" = COALESCE(v."setSpecial", s."isSpecialNeeds"),
-          "age" = COALESCE(v."ageVal", s."age"),
-          "updatedAt" = NOW()
-        FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
-        WHERE s."id" = v."id"
-          AND s."schoolId" = ${currentSchool.id}
-      `;
+      await withTenantContext(prisma, currentSchool.id, async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "Student" AS s
+          SET
+            "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
+            "isSpecialNeeds" = COALESCE(v."setSpecial", s."isSpecialNeeds"),
+            "age" = COALESCE(v."ageVal", s."age"),
+            "updatedAt" = NOW()
+          FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
+          WHERE s."id" = v."id"
+            AND s."schoolId" = ${currentSchool.id}
+        `;
+      });
     }
     estudantesEnriquecidos = studentUpdateEntries.length;
   }
@@ -521,13 +573,15 @@ export async function executePowerBiFrequencySync(options: {
 
   if (exchangeStudentIds.length > 0) {
     try {
-      await prisma.absenceJustification.deleteMany({
-        where: {
-          studentId: { in: exchangeStudentIds },
-          student: { schoolId: currentSchool.id },
-          type: "DISPENSA_LEGAL",
-          OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
-        },
+      await withTenantContext(prisma, currentSchool.id, async (tx) => {
+        await tx.absenceJustification.deleteMany({
+          where: {
+            studentId: { in: exchangeStudentIds },
+            student: { schoolId: currentSchool.id },
+            type: "DISPENSA_LEGAL",
+            OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
+          },
+        });
       });
     } catch (err: any) {
       console.warn(
@@ -539,57 +593,77 @@ export async function executePowerBiFrequencySync(options: {
 
   if (pendingAmparos.size > 0) {
     const studentIdsWithAmparo = Array.from(pendingAmparos.keys());
-    const existingJusts = await prisma.absenceJustification.findMany({
-      where: {
-        studentId: { in: studentIdsWithAmparo },
-        student: { schoolId: currentSchool.id },
-        type: "DISPENSA_LEGAL",
-        OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
-      },
-      select: {
-        id: true,
-        studentId: true,
-        endDate: true,
-      },
-    });
+    const amparoResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const validStudents = await tx.student.findMany({
+        where: {
+          id: { in: studentIdsWithAmparo },
+          schoolId: currentSchool.id,
+        },
+        select: { id: true },
+      });
+      const validStudentIds = new Set(validStudents.map((s) => s.id));
 
-    const existingMap = new Map<string, { id: string; endDate: Date }>();
-    existingJusts.forEach((j) => existingMap.set(j.studentId, j));
-    const now = new Date();
-    const amparoPrefix = isManualOrEssential
-      ? "Importado via arquivo de frequência"
-      : "Sincronizado automaticamente via Power BI";
+      const existingJusts = await tx.absenceJustification.findMany({
+        where: {
+          studentId: { in: Array.from(validStudentIds) },
+          student: { schoolId: currentSchool.id },
+          type: "DISPENSA_LEGAL",
+          OR: [{ notes: { contains: "Power BI" } }, { notes: { contains: "arquivo de frequência" } }],
+        },
+        select: {
+          id: true,
+          studentId: true,
+          endDate: true,
+        },
+      });
 
-    for (const [studentId, amparo] of pendingAmparos.entries()) {
-      const existing = existingMap.get(studentId);
-      if (!existing) {
-        await prisma.absenceJustification.create({
-          data: {
-            studentId,
-            type: "DISPENSA_LEGAL",
-            startDate: amparo.date < now ? amparo.date : now,
-            endDate: amparo.date,
-            notes: `${amparoPrefix} (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
-            createdByName: userName,
-            createdByEmail: userEmail,
-          },
-        });
-        amparosCriados++;
-      } else {
-        const existingTime = new Date(existing.endDate).setHours(0, 0, 0, 0);
-        const newTime = new Date(amparo.date).setHours(0, 0, 0, 0);
-        if (existingTime !== newTime) {
-          await prisma.absenceJustification.update({
-            where: { id: existing.id },
+      const existingMap = new Map<string, { id: string; endDate: Date }>();
+      existingJusts.forEach((j) => existingMap.set(j.studentId, j));
+      const now = new Date();
+      const amparoPrefix = isManualOrEssential
+        ? "Importado via arquivo de frequência"
+        : "Sincronizado automaticamente via Power BI";
+
+      let createdCount = 0;
+      let updatedCount = 0;
+
+      for (const [studentId, amparo] of pendingAmparos.entries()) {
+        if (!validStudentIds.has(studentId)) continue;
+        const existing = existingMap.get(studentId);
+        if (!existing) {
+          await tx.absenceJustification.create({
             data: {
+              studentId,
+              type: "DISPENSA_LEGAL",
+              startDate: amparo.date < now ? amparo.date : now,
               endDate: amparo.date,
-              notes: `${amparoPrefix} (Amparo Legal Vigência Máx atualizada para: ${amparo.vigenciaStr})`,
+              notes: `${amparoPrefix} (Amparo Legal Vigência Máx: ${amparo.vigenciaStr})`,
+              createdByName: userName,
+              createdByEmail: userEmail,
             },
           });
-          amparosAtualizados++;
+          createdCount++;
+        } else {
+          const existingTime = new Date(existing.endDate).setHours(0, 0, 0, 0);
+          const newTime = new Date(amparo.date).setHours(0, 0, 0, 0);
+          if (existingTime !== newTime) {
+            await tx.absenceJustification.update({
+              where: { id: existing.id },
+              data: {
+                endDate: amparo.date,
+                notes: `${amparoPrefix} (Amparo Legal Vigência Máx atualizada para: ${amparo.vigenciaStr})`,
+              },
+            });
+            updatedCount++;
+          }
         }
       }
-    }
+
+      return { createdCount, updatedCount };
+    });
+
+    amparosCriados = amparoResult.createdCount;
+    amparosAtualizados = amparoResult.updatedCount;
   }
 
   const atualizados = rowsToUpsert.length;
@@ -731,7 +805,11 @@ export async function executeSerpProtectionSync(options: {
     }
   }
 
-  const cgmVinculados = await applyPendingCgmUpdatesSafely(prisma, pendingCgmUpdates);
+  const cgmVinculados = await applyPendingCgmUpdatesSafely(
+    prisma,
+    pendingCgmUpdates,
+    currentSchool.id
+  );
 
   const rowsToUpsert = Array.from(batchRecords.values());
   const BATCH_SIZE = 250;
@@ -746,37 +824,62 @@ export async function executeSerpProtectionSync(options: {
           ${r.studentId},
           ${70.0},
           ${defaultEnrollment},
-          ${r.protocoloStr},
+          CAST(${r.protocoloStr} AS TEXT),
           ${r.statusEnum},
-          ${r.dataAbertura},
-          ${r.detailsStr},
-          ${r.actionSummary},
-          NOW()
+          CAST(${r.dataAbertura} AS TIMESTAMP),
+          CAST(${r.detailsStr} AS TEXT),
+          ${r.actionSummary}
         )`
     );
 
-    await prisma.$executeRaw`
-      INSERT INTO "LowAttendanceRecord" (
-        "id",
-        "studentId",
-        "attendancePercent",
-        "enrollmentDetail",
-        "serpProtocol",
-        "serpStatus",
-        "serpOpenedAt",
-        "serpDetails",
-        "actionsTaken",
-        "updatedAt"
-      )
-      VALUES ${Prisma.join(values)}
-      ON CONFLICT ("studentId") DO UPDATE SET
-        "serpProtocol" = EXCLUDED."serpProtocol",
-        "serpStatus" = EXCLUDED."serpStatus",
-        "serpOpenedAt" = EXCLUDED."serpOpenedAt",
-        "serpDetails" = EXCLUDED."serpDetails",
-        "actionsTaken" = EXCLUDED."actionsTaken",
-        "updatedAt" = NOW()
-    `;
+    await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "LowAttendanceRecord" (
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "serpProtocol",
+          "serpStatus",
+          "serpOpenedAt",
+          "serpDetails",
+          "actionsTaken",
+          "updatedAt"
+        )
+        SELECT
+          v."id",
+          v."studentId",
+          v."attendancePercent",
+          v."enrollmentDetail",
+          v."serpProtocol",
+          v."serpStatus",
+          v."serpOpenedAt",
+          v."serpDetails",
+          v."actionsTaken",
+          NOW()
+        FROM (VALUES ${Prisma.join(values)}) AS v(
+          "id",
+          "studentId",
+          "attendancePercent",
+          "enrollmentDetail",
+          "serpProtocol",
+          "serpStatus",
+          "serpOpenedAt",
+          "serpDetails",
+          "actionsTaken"
+        )
+        INNER JOIN "Student" AS s
+          ON s."id" = v."studentId"
+         AND s."schoolId" = ${currentSchool.id}
+        ON CONFLICT ("studentId") DO UPDATE SET
+          "serpProtocol" = EXCLUDED."serpProtocol",
+          "serpStatus" = EXCLUDED."serpStatus",
+          "serpOpenedAt" = EXCLUDED."serpOpenedAt",
+          "serpDetails" = EXCLUDED."serpDetails",
+          "actionsTaken" = EXCLUDED."actionsTaken",
+          "updatedAt" = NOW()
+      `;
+    });
   }
 
   const atualizados = rowsToUpsert.length;

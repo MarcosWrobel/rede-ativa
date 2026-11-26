@@ -203,6 +203,8 @@ import * as rlsTenantContext from "@/lib/rlsTenantContext";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
+import { POST as frequenciaSyncHandler } from "@/app/api/frequencia/sync/route";
+import { POST as serpSyncHandler } from "@/app/api/serp/sync/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -241,6 +243,9 @@ describe.skipIf(!SHOULD_RUN)(
     });
 
     beforeEach(async () => {
+      await prisma.absenceJustification.deleteMany({});
+      await prisma.attendanceSnapshot.deleteMany({});
+      await prisma.lowAttendanceRecord.deleteMany({});
       await prisma.messageLog.deleteMany({});
       await prisma.messageTemplate.deleteMany({});
       await prisma.student.deleteMany({});
@@ -2001,6 +2006,7 @@ describe.skipIf(!SHOULD_RUN)(
 
       testAuthState.useRealPermissions = true;
       testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
 
       try {
         // 1. Sessão sem permissão de gestão (PEDAGOGA) -> 403 em PUT e DELETE, sem auditoria
@@ -2428,6 +2434,7 @@ describe.skipIf(!SHOULD_RUN)(
 
       testAuthState.useRealPermissions = true;
       testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
 
       const capturedContextSchools: Array<string | null> = [];
       const withTenantSpy = vi
@@ -2578,6 +2585,7 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.pendingSessionUser = null;
         testAuthState.useRealPermissions = false;
         testAuthState.useRealCurrentSchool = false;
+        testAuthState.useRealExtensionSyncAuth = false;
       }
     });
 
@@ -3192,6 +3200,568 @@ describe.skipIf(!SHOULD_RUN)(
           delete process.env.WHATSAPP_WEBHOOK_SECRET;
         } else {
           process.env.WHATSAPP_WEBHOOK_SECRET = originalSecret;
+        }
+      }
+    });
+
+    it("integra withTenantContext em POST /api/frequencia/sync e POST /api/serp/sync com auth, lotes, falha de snapshot, colisão concorrente P2002 e isolamento", async () => {
+      const { hashSchoolSyncToken } = await import("@/lib/syncToken");
+      const originalSyncToken = process.env.SYNC_API_TOKEN;
+      process.env.SYNC_API_TOKEN = "global-sync-admin-token-realpg";
+
+      await prisma.absenceJustification.deleteMany({});
+      await prisma.attendanceSnapshot.deleteMany({});
+      await prisma.lowAttendanceRecord.deleteMany({});
+      await prisma.messageLog.deleteMany({});
+      await prisma.messageTemplate.deleteMany({});
+      await prisma.student.deleteMany({});
+      await prisma.classGroup.deleteMany({});
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+      await prisma.school.deleteMany({});
+
+      const tokenAlpha = "school-alpha-sync-token-realpg";
+      const tokenAlphaHash = hashSchoolSyncToken(tokenAlpha);
+
+      await prisma.school.createMany({
+        data: [
+          {
+            id: "school-alpha",
+            name: "Escola Alpha Integrada",
+            inepCode: "11111111",
+            active: true,
+            syncTokenHash: tokenAlphaHash,
+            settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }),
+          },
+          {
+            id: "school-beta",
+            name: "Escola Beta Integrada",
+            inepCode: "22222222",
+            active: true,
+            settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }),
+          },
+          {
+            id: "school-essencial",
+            name: "Escola Essencial",
+            inepCode: "33333333",
+            active: true,
+            settingsJson: JSON.stringify({ edition: "INSTITUCIONAL_ESSENCIAL" }),
+          },
+        ],
+      });
+
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "cg-alpha-sync", name: "1º Ano A", segment: "EM", schoolId: "school-alpha" },
+          { id: "cg-beta-sync", name: "2º Ano B", segment: "EM", schoolId: "school-beta" },
+          { id: "cg-ess-sync", name: "3º Ano C", segment: "EM", schoolId: "school-essencial" },
+        ],
+      });
+
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-alpha-sync-1",
+            name: "Joao Pedro Sync",
+            cgm: "777000111",
+            phone: "41999991111",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-sync",
+            active: true,
+            isExchangeStudent: false,
+            isSpecialNeeds: false,
+            age: 15,
+          },
+          {
+            id: "stu-alpha-nocgm-ok",
+            name: "Maria Sem Cgm Ok",
+            cgm: null,
+            phone: "41999991112",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-sync",
+            active: true,
+          },
+          {
+            id: "stu-alpha-nocgm-race",
+            name: "Carlos Sem Cgm Race",
+            cgm: null,
+            phone: "41999991113",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-sync",
+            active: true,
+          },
+          {
+            id: "stu-alpha-inactive",
+            name: "Inativo Alpha",
+            cgm: "888000999",
+            phone: "41999991114",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-sync",
+            active: false,
+          },
+          {
+            id: "stu-beta-sync-1",
+            name: "Ana Beta Sync",
+            cgm: "999000111",
+            phone: "41999992222",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-sync",
+            active: true,
+          },
+          {
+            id: "stu-beta-race-holder",
+            name: "Holder Beta Race",
+            cgm: null,
+            phone: "41999992223",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-sync",
+            active: true,
+          },
+        ],
+      });
+
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "sync-pedagoga-a",
+            email: "pedagoga.sync@redeativa.local",
+            name: "Pedagoga Sync Alpha",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "sync-superadmin",
+            email: "super.sync@redeativa.local",
+            name: "Superadmin Sync",
+            role: "SUPERADMIN",
+            schoolId: null,
+            active: true,
+          },
+          {
+            id: "sync-essencial-user",
+            email: "ped.essencial@redeativa.local",
+            name: "Pedagoga Essencial",
+            role: "PEDAGOGA",
+            schoolId: "school-essencial",
+            active: true,
+          },
+        ],
+      });
+      await prisma.userSchool.createMany({
+        data: [
+          {
+            id: "us-sync-ped-a",
+            userId: "sync-pedagoga-a",
+            schoolId: "school-alpha",
+            role: "PEDAGOGA",
+            active: true,
+          },
+          {
+            id: "us-sync-ess",
+            userId: "sync-essencial-user",
+            schoolId: "school-essencial",
+            role: "PEDAGOGA",
+            active: true,
+          },
+        ],
+      });
+
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
+
+      const capturedContextSchools: Array<string | null> = [];
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+
+      try {
+        // 1. Credenciais inválidas e guardas de auth
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        const rNoToken = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alunos: [{ nome: "Joao Pedro Sync", mediaGeral: "70%" }] }),
+          })
+        );
+        expect(rNoToken.status).toBe(401);
+
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        const rBadToken = await serpSyncHandler(
+          new Request("http://127.0.0.1/api/serp/sync", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer token-invalido-xyz",
+            },
+            body: JSON.stringify({ fichas: [{ nome: "Joao Pedro Sync", status: "EM_ACOMPANHAMENTO" }] }),
+          })
+        );
+        expect(rBadToken.status).toBe(401);
+
+        // SUPERADMIN sem escola selecionada -> 403 (allowSuperAdminReadOnlyFallback: false)
+        testAuthState.pendingSessionUser = {
+          id: "sync-superadmin",
+          email: "super.sync@redeativa.local",
+          active: true,
+        };
+        const rSuperNoSchool = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alunos: [{ nome: "Joao Pedro Sync", mediaGeral: "70%" }] }),
+          })
+        );
+        expect(rSuperNoSchool.status).toBe(403);
+
+        // Escola na edição INSTITUCIONAL_ESSENCIAL -> 403
+        testAuthState.pendingSessionUser = {
+          id: "sync-essencial-user",
+          email: "ped.essencial@redeativa.local",
+          active: true,
+        };
+        const rEssencial = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alunos: [{ nome: "Joao Pedro Sync", mediaGeral: "70%" }] }),
+          })
+        );
+        expect(rEssencial.status).toBe(403);
+
+        // 2. Token por escola com schoolId conflitante na query -> opera exclusivamente em school-alpha
+        //    Inclui CGM de school-beta ("999000111") e de estudante inativo ("888000999") -> ambos bloqueados sem erro 500
+        testAuthState.pendingSessionUser = null;
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+
+        const rTokenSync = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync?schoolId=school-beta", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenAlpha}`,
+            },
+            body: JSON.stringify({
+              alunos: [
+                {
+                  cgm: "777000111",
+                  nome: "Joao Pedro Sync",
+                  mediaGeral: "68.5%",
+                  semanaAtual: "60%",
+                  semanaAnterior: "72%",
+                  idade: 16,
+                  deficienciaAltasHabilidades: true,
+                  amparoLegalVigencia: "15/12/2026",
+                },
+                {
+                  cgm: "999000111", // CGM já ocupado por stu-beta-sync-1
+                  nome: "Maria Sem Cgm Ok",
+                  mediaGeral: "74%",
+                },
+                {
+                  cgm: "888000999", // CGM já ocupado por stu-alpha-inactive
+                  nome: "Carlos Sem Cgm Race",
+                  mediaGeral: "71%",
+                },
+                {
+                  cgm: "999000111",
+                  nome: "Ana Beta Sync", // Pertence à outra escola -> naoEncontrados
+                  mediaGeral: "50%",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rTokenSync.status).toBe(200);
+        const tokenSyncJson = await rTokenSync.json();
+        expect(tokenSyncJson).toMatchObject({
+          sucesso: true,
+          totalRecebido: 4,
+          atualizados: 3,
+          cgmVinculados: 0,
+          estudantesEnriquecidos: 1,
+          amparosCriados: 1,
+          naoEncontradosTotal: 1,
+        });
+        expect(capturedContextSchools.length).toBeGreaterThanOrEqual(4);
+        expect(capturedContextSchools.every((v) => v === "school-alpha")).toBe(true);
+
+        const stu1After = await prisma.student.findUnique({ where: { id: "stu-alpha-sync-1" } });
+        expect(stu1After?.age).toBe(16);
+        expect(stu1After?.isSpecialNeeds).toBe(true);
+        const low1 = await prisma.lowAttendanceRecord.findUnique({
+          where: { studentId: "stu-alpha-sync-1" },
+        });
+        expect(low1?.attendancePercent).toBeCloseTo(68.5);
+        expect(
+          await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-beta-sync-1" } })
+        ).toBeNull();
+        expect(
+          (await prisma.student.findUnique({ where: { id: "stu-alpha-nocgm-ok" } }))?.cgm
+        ).toBeNull();
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "UPDATE_LOW_ATTENDANCE",
+            schoolId: "school-alpha",
+          })
+        );
+
+        // 3. Falha simulada em AttendanceSnapshot não invalida transações seguintes (enriquecimento/amparo)
+        capturedContextSchools.length = 0;
+        let snapshotIntercepted = false;
+        const originalImpl = withTenantSpy.getMockImplementation()!;
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return originalImpl(client, schoolId, async (tx) => {
+            const origExec = tx.$executeRaw.bind(tx);
+            const wrappedTx = new Proxy(tx, {
+              get(target, prop, receiver) {
+                if (prop === "$executeRaw") {
+                  return async (strings: TemplateStringsArray, ...values: any[]) => {
+                    const sqlText = strings.join(" ");
+                    if (!snapshotIntercepted && sqlText.includes('"AttendanceSnapshot"')) {
+                      snapshotIntercepted = true;
+                      throw new Error("Simulated AttendanceSnapshot failure");
+                    }
+                    return (origExec as any)(strings, ...values);
+                  };
+                }
+                return Reflect.get(target, prop, receiver);
+              },
+            });
+            return fn(wrappedTx as any);
+          });
+        });
+
+        testAuthState.pendingSessionUser = {
+          id: "sync-pedagoga-a",
+          email: "pedagoga.sync@redeativa.local",
+          active: true,
+        };
+        const rSnapFail = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              alunos: [
+                {
+                  cgm: "777000111",
+                  nome: "Joao Pedro Sync",
+                  mediaGeral: "62%",
+                  idade: 17,
+                },
+              ],
+            }),
+          })
+        );
+        expect(rSnapFail.status).toBe(200);
+        expect(snapshotIntercepted).toBe(true);
+        const snapFailJson = await rSnapFail.json();
+        expect(snapFailJson.atualizados).toBe(1);
+        expect(snapFailJson.estudantesEnriquecidos).toBe(1);
+        expect((await prisma.student.findUnique({ where: { id: "stu-alpha-sync-1" } }))?.age).toBe(17);
+        expect(
+          (
+            await prisma.lowAttendanceRecord.findUnique({
+              where: { studentId: "stu-alpha-sync-1" },
+            })
+          )?.attendancePercent
+        ).toBeCloseTo(62);
+
+        // Restaura implementação padrão do spy
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+
+        // 4. Colisão concorrente P2002 em applyPendingCgmUpdatesSafely + retry em transação válida + SERP sync
+        testAuthState.pendingSessionUser = null;
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        capturedContextSchools.length = 0;
+
+        let racedCgmCollision = false;
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            // Na 2ª chamada withTenantContext (lote de applyPendingCgmUpdatesSafely), simula corrida externa
+            if (!racedCgmCollision && capturedContextSchools.length === 2) {
+              racedCgmCollision = true;
+              await client.student.update({
+                where: { id: "stu-beta-race-holder" },
+                data: { cgm: "555000222" },
+              });
+            }
+            return fn(tx);
+          });
+        });
+
+        const rSerpCollision = await serpSyncHandler(
+          new Request("http://127.0.0.1/api/serp/sync?schoolId=school-alpha", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer global-sync-admin-token-realpg",
+            },
+            body: JSON.stringify({
+              fichas: [
+                {
+                  cgm: "555000111",
+                  nome: "Maria Sem Cgm Ok",
+                  numeroFicha: "SERP-100",
+                  status: "CONSELHO_TUTELAR",
+                },
+                {
+                  cgm: "555000222",
+                  nome: "Carlos Sem Cgm Race",
+                  numeroFicha: "SERP-200",
+                  status: "EM_ACOMPANHAMENTO",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rSerpCollision.status).toBe(200);
+        const serpJson = await rSerpCollision.json();
+        expect(serpJson).toMatchObject({
+          sucesso: true,
+          atualizados: 2,
+          cgmVinculados: 1,
+          conselhoTutelarCount: 1,
+        });
+        expect((await prisma.student.findUnique({ where: { id: "stu-alpha-nocgm-ok" } }))?.cgm).toBe(
+          "555000111"
+        );
+        expect(
+          (await prisma.student.findUnique({ where: { id: "stu-alpha-nocgm-race" } }))?.cgm
+        ).toBeNull();
+        expect(
+          (await prisma.student.findUnique({ where: { id: "stu-beta-race-holder" } }))?.cgm
+        ).toBe("555000222");
+        expect(capturedContextSchools.every((v) => v === "school-alpha")).toBe(true);
+
+        // 5. Falha em lote intermediário (>250 itens): lote 1 confirmado, lote 2 revertido, sem logAudit
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+
+        const bulkStudents: Array<{
+          id: string;
+          name: string;
+          cgm: string;
+          phone: string;
+          schoolId: string;
+          classGroupId: string;
+          active: boolean;
+        }> = [];
+        const bulkFichas: Array<{ cgm: string; nome: string; numeroFicha: string; status: string }> = [];
+        for (let idx = 1; idx <= 251; idx++) {
+          const cgm = `6600${String(idx).padStart(5, "0")}`;
+          const name = `Aluno Lote ${idx}`;
+          bulkStudents.push({
+            id: `stu-lote-${idx}`,
+            name,
+            cgm,
+            phone: "41999990000",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-sync",
+            active: true,
+          });
+          bulkFichas.push({
+            cgm,
+            nome: name,
+            numeroFicha: `LOTE-${idx}`,
+            status: "EM_ACOMPANHAMENTO",
+          });
+        }
+        await prisma.student.createMany({ data: bulkStudents });
+
+        let lowAttBatchCalls = 0;
+        const defaultWithTenant = withTenantSpy.getMockImplementation()!;
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return defaultWithTenant(client, schoolId, async (tx) => {
+            const origExec = tx.$executeRaw.bind(tx);
+            const wrappedTx = new Proxy(tx, {
+              get(target, prop, receiver) {
+                if (prop === "$executeRaw") {
+                  return async (strings: TemplateStringsArray, ...values: any[]) => {
+                    const sqlText = strings.join(" ");
+                    if (sqlText.includes('"LowAttendanceRecord"')) {
+                      lowAttBatchCalls++;
+                      if (lowAttBatchCalls === 2) {
+                        throw new Error("Simulated batch 2 failure");
+                      }
+                    }
+                    return (origExec as any)(strings, ...values);
+                  };
+                }
+                return Reflect.get(target, prop, receiver);
+              },
+            });
+            return fn(wrappedTx as any);
+          });
+        });
+
+        vi.mocked(logAudit).mockClear();
+        testAuthState.pendingSessionUser = {
+          id: "sync-pedagoga-a",
+          email: "pedagoga.sync@redeativa.local",
+          active: true,
+        };
+        const rBatchFail = await serpSyncHandler(
+          new Request("http://127.0.0.1/api/serp/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fichas: bulkFichas }),
+          })
+        );
+        expect(rBatchFail.status).toBe(500);
+        // Lote 1 (250 registros) foi confirmado antes da falha do lote 2 (1 registro restante)
+        expect(
+          await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-lote-1" } })
+        ).not.toBeNull();
+        expect(
+          await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-lote-251" } })
+        ).toBeNull();
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.useRealExtensionSyncAuth = false;
+        if (originalSyncToken === undefined) {
+          delete process.env.SYNC_API_TOKEN;
+        } else {
+          process.env.SYNC_API_TOKEN = originalSyncToken;
         }
       }
     });
