@@ -133,6 +133,34 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(async () => []),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (arg: any) => {
+      if (typeof arg === "function") {
+        return arg({
+          $executeRaw: vi.fn(async () => 0),
+          student: {
+            findUnique: vi.fn(async ({ where }: any) => hoisted.students.get(where.id) || null),
+          },
+          messageTemplate: {
+            findUnique: vi.fn(async () => null),
+          },
+          messageLog: {
+            create: vi.fn(async ({ data }: any) => {
+              const created = { id: `log-${hoisted.messageLogs.size + 1}`, ...data };
+              hoisted.messageLogs.set(created.id, created);
+              return created;
+            }),
+            update: vi.fn(async ({ where, data }: any) => {
+              const existing = hoisted.messageLogs.get(where.id);
+              const updated = { ...existing, ...data };
+              hoisted.messageLogs.set(where.id, updated);
+              return updated;
+            }),
+          },
+        });
+      }
+      return Promise.all(arg);
+    }),
   },
 }));
 

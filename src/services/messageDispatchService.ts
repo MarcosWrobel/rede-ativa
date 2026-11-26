@@ -9,6 +9,7 @@ import {
 } from "@/lib/whatsappProvider";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export interface DispatchMessageInput {
   studentId: string;
@@ -85,98 +86,114 @@ export async function dispatchAndPersistMessage(
     req,
   } = input;
 
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
-    include: { classGroup: true },
-  });
-
-  if (
-    !student ||
-    !assertTenantOwnership(student.schoolId, currentSchoolId, session) ||
-    student.schoolId !== currentSchoolId
-  ) {
-    return {
-      ok: false,
-      status: 404,
-      error: "Aluno não encontrado nesta instituição",
-    };
-  }
-
+  const resolvedSchoolId = currentSchoolId;
   const isPilotSchool =
-    currentSchoolInepCode === "41042730" || currentSchoolId === "default-leopoldina";
+    currentSchoolInepCode === "41042730" || resolvedSchoolId === "default-leopoldina";
+  const initialStatus: DeliveryStatus = initialDeliveryStatus || "LINK_OPENED";
 
-  let validatedTemplateId: string | null = null;
-  if (templateId) {
-    const template = await prisma.messageTemplate.findUnique({
-      where: { id: templateId },
-      select: { id: true, schoolId: true },
+  // 1-2. Validação multi-tenant + persistência atômica dentro do contexto RLS da escola (Tx 1)
+  const txResult = await withTenantContext(prisma, resolvedSchoolId, async (tx) => {
+    const student = await tx.student.findUnique({
+      where: { id: studentId },
+      include: { classGroup: true },
     });
-    if (!template) {
-      return {
-        ok: false,
-        status: 404,
-        error: "Modelo de mensagem não encontrado.",
-      };
-    }
-    const isGlobalTemplateAllowedForPilot = template.schoolId === null && isPilotSchool;
+
     if (
-      !isGlobalTemplateAllowedForPilot &&
-      (!template.schoolId ||
-        !assertTenantOwnership(template.schoolId, currentSchoolId, session) ||
-        template.schoolId !== student.schoolId)
+      !student ||
+      !assertTenantOwnership(student.schoolId, resolvedSchoolId, session) ||
+      student.schoolId !== resolvedSchoolId
     ) {
       return {
-        ok: false,
-        status: 403,
-        error: "Modelo de mensagem não pertence a esta instituição.",
+        ok: false as const,
+        status: 404,
+        error: "Aluno não encontrado nesta instituição",
       };
     }
-    validatedTemplateId = template.id;
-  }
 
-  const digits = normalizeWhatsAppPhone(customPhone || student.phone);
-  if (!digits || digits.length < 10) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Telefone inválido para envio no WhatsApp",
-    };
-  }
+    let validatedTemplateId: string | null = null;
+    if (templateId) {
+      const template = await tx.messageTemplate.findUnique({
+        where: { id: templateId },
+        select: { id: true, schoolId: true },
+      });
+      if (!template) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "Modelo de mensagem não encontrado.",
+        };
+      }
+      const isGlobalTemplateAllowedForPilot = template.schoolId === null && isPilotSchool;
+      if (
+        !isGlobalTemplateAllowedForPilot &&
+        (!template.schoolId ||
+          !assertTenantOwnership(template.schoolId, resolvedSchoolId, session) ||
+          template.schoolId !== student.schoolId)
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Modelo de mensagem não pertence a esta instituição.",
+        };
+      }
+      validatedTemplateId = template.id;
+    }
 
-  const resolvedSchoolId = currentSchoolId;
-  const sentAt = new Date();
+    const digits = normalizeWhatsAppPhone(customPhone || student.phone);
+    if (!digits || digits.length < 10) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Telefone inválido para envio no WhatsApp",
+      };
+    }
 
-  // 1. Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
-  const contentHash = computeMessageContentHash({
-    studentId: student.id,
-    schoolId: resolvedSchoolId,
-    phoneUsed: digits,
-    reasonTitle,
-    messageContent,
-    sentByName: userName,
-    sentAt,
-  });
+    const sentAt = new Date();
 
-  // 2. Persistência garantida antes de acionar qualquer gateway de rede externa
-  const initialStatus: DeliveryStatus = initialDeliveryStatus || "LINK_OPENED";
-  const log = await prisma.messageLog.create({
-    data: {
-      schoolId: resolvedSchoolId,
+    // Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
+    const contentHash = computeMessageContentHash({
       studentId: student.id,
-      templateId: validatedTemplateId,
+      schoolId: resolvedSchoolId,
+      phoneUsed: digits,
       reasonTitle,
       messageContent,
-      phoneUsed: digits,
-      sentByUserId: userId || null,
       sentByName: userName,
-      deliveryStatus: initialStatus,
-      deliveryUpdatedAt: new Date(),
       sentAt,
+    });
+
+    const log = await tx.messageLog.create({
+      data: {
+        schoolId: resolvedSchoolId,
+        studentId: student.id,
+        templateId: validatedTemplateId,
+        reasonTitle,
+        messageContent,
+        phoneUsed: digits,
+        sentByUserId: userId || null,
+        sentByName: userName,
+        deliveryStatus: initialStatus,
+        deliveryUpdatedAt: new Date(),
+        sentAt,
+        contentHash,
+      },
+    });
+
+    return {
+      ok: true as const,
+      log,
+      student,
+      digits,
       contentHash,
-    },
+    };
   });
 
-  // 3. Despacho no gateway / construção de URL otimizada wa.me
+  if (!txResult.ok) {
+    return txResult;
+  }
+
+  const { log, student, digits, contentHash } = txResult;
+
+  // 3. Despacho no gateway / construção de URL otimizada wa.me (somente após commit da Tx 1)
   const dispatch = await dispatchWhatsAppMessage({
     phoneDigits: digits,
     messageText: messageContent,
@@ -185,12 +202,14 @@ export async function dispatchAndPersistMessage(
 
   const finalStatus: DeliveryStatus = initialDeliveryStatus || dispatch.initialStatus;
   if (finalStatus !== initialStatus) {
-    await prisma.messageLog.update({
-      where: { id: log.id },
-      data: {
-        deliveryStatus: finalStatus,
-        deliveryUpdatedAt: new Date(),
-      },
+    await withTenantContext(prisma, resolvedSchoolId, async (tx) => {
+      await tx.messageLog.update({
+        where: { id: log.id },
+        data: {
+          deliveryStatus: finalStatus,
+          deliveryUpdatedAt: new Date(),
+        },
+      });
     });
   }
 

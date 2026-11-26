@@ -79,12 +79,34 @@ vi.mock("@/lib/currentSchool", async () => {
   };
 });
 
+const whatsappProviderMock = vi.hoisted(() => ({
+  overrideDispatch: null as null | ((...args: unknown[]) => Promise<unknown>),
+}));
+
 vi.mock("@/lib/rateLimit", () => ({
   enforceRateLimit: vi.fn(async () => ({ ok: true })),
   RATE_LIMIT_POLICIES: { MESSAGE_REPLY: {} },
 }));
 
+vi.mock("@/lib/whatsappProvider", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/whatsappProvider")>(
+    "@/lib/whatsappProvider"
+  );
+  return {
+    ...actual,
+    dispatchWhatsAppMessage: vi.fn(async (...args: unknown[]) => {
+      if (whatsappProviderMock.overrideDispatch) {
+        return whatsappProviderMock.overrideDispatch(...args);
+      }
+      return actual.dispatchWhatsAppMessage(
+        ...(args as Parameters<typeof actual.dispatchWhatsAppMessage>)
+      );
+    }),
+  };
+});
+
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 
@@ -699,6 +721,114 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.schoolId = "school-alpha";
       }
     });
+
+    it("comprova app.current_school_id ativo na mesma transação das leituras/inserção, visibilidade fora da Tx antes do despacho, atualização pós-despacho (Tx 2) e rollback sem chamar provedor", async () => {
+      testAuthState.schoolId = "school-alpha";
+      testAuthState.inepCode = "99000101";
+
+      // 1. Caminho de sucesso: verificar app.current_school_id na Tx 1 e visibilidade fora da Tx durante o despacho + Tx 2 atualizando status
+      const observedSettingsInTx: Array<string | null> = [];
+      const originalTransaction = prisma.$transaction.bind(prisma);
+      const txSpy = vi.spyOn(prisma, "$transaction").mockImplementation(((fn: unknown, opts?: unknown) => {
+        if (typeof fn === "function") {
+          return originalTransaction(async (tx) => {
+            const result = await (fn as (client: unknown) => Promise<unknown>)(tx);
+            const rows = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            observedSettingsInTx.push(rows[0]?.val ?? null);
+            return result;
+          }, opts as Parameters<typeof originalTransaction>[1]);
+        }
+        return originalTransaction(fn as Parameters<typeof originalTransaction>[0]);
+      }) as typeof prisma.$transaction);
+
+      let visibleLogDuringDispatch: { id: string; schoolId: string | null; deliveryStatus: string } | null = null;
+      vi.mocked(dispatchWhatsAppMessage).mockClear();
+      whatsappProviderMock.overrideDispatch = async () => {
+        const logs = await prisma.messageLog.findMany({
+          where: { schoolId: "school-alpha" },
+          select: { id: true, schoolId: true, deliveryStatus: true },
+        });
+        visibleLogDuringDispatch = logs[0] || null;
+        return {
+          mode: "API_CLOUD",
+          whatsappUrl: "https://wa.me/5541999991111",
+          initialStatus: "QUEUED",
+        };
+      };
+
+      try {
+        const resOk = await sendMessageHandler(
+          new Request("http://127.0.0.1/api/messages/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              studentId: "stu-alpha",
+              templateId: "tpl-alpha",
+              reasonTitle: "Teste Tx1 e Tx2",
+              messageContent: "Mensagem com atualização pós-despacho",
+            }),
+          })
+        );
+        expect(resOk.status).toBe(200);
+        const bodyOk = await resOk.json();
+        expect(bodyOk.deliveryStatus).toBe("QUEUED");
+
+        // Tx 1 e Tx 2 executaram com app.current_school_id === "school-alpha"
+        expect(observedSettingsInTx).toEqual(["school-alpha", "school-alpha"]);
+
+        // Log já estava visível fora da transação quando o despacho externo começou
+        const observedLog = visibleLogDuringDispatch as {
+          id: string;
+          schoolId: string | null;
+          deliveryStatus: string;
+        } | null;
+        expect(observedLog).not.toBeNull();
+        expect(observedLog?.id).toBe(bodyOk.logId);
+        expect(observedLog?.schoolId).toBe("school-alpha");
+        expect(observedLog?.deliveryStatus).toBe("LINK_OPENED");
+
+        // Tx 2 atualizou o status final no banco mantendo schoolId
+        const finalRow = await prisma.messageLog.findUnique({ where: { id: bodyOk.logId } });
+        expect(finalRow?.deliveryStatus).toBe("QUEUED");
+        expect(finalRow?.schoolId).toBe("school-alpha");
+
+        // 2. Simulação de falha após inserção e antes do commit: rollback completo, 0 logs persistidos, 0 chamadas ao provedor
+        await prisma.messageLog.deleteMany({});
+        vi.mocked(dispatchWhatsAppMessage).mockClear();
+        whatsappProviderMock.overrideDispatch = null;
+
+        txSpy.mockImplementationOnce(((fn: unknown, opts?: unknown) => {
+          if (typeof fn === "function") {
+            return originalTransaction(async (tx) => {
+              await (fn as (client: unknown) => Promise<unknown>)(tx);
+              throw new Error("Simulated failure after insert before commit");
+            }, opts as Parameters<typeof originalTransaction>[1]);
+          }
+          return originalTransaction(fn as Parameters<typeof originalTransaction>[0]);
+        }) as typeof prisma.$transaction);
+
+        const resRollback = await sendMessageHandler(
+          new Request("http://127.0.0.1/api/messages/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              studentId: "stu-alpha",
+              templateId: "tpl-alpha",
+              reasonTitle: "Falha antes do commit",
+              messageContent: "Deve sofrer rollback",
+            }),
+          })
+        );
+        expect(resRollback.status).toBe(500);
+        expect(await prisma.messageLog.count()).toBe(0);
+        expect(dispatchWhatsAppMessage).not.toHaveBeenCalled();
+      } finally {
+        whatsappProviderMock.overrideDispatch = null;
+        txSpy.mockRestore();
+      }
+    });
   }
 );
 
@@ -839,7 +969,8 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       ...data,
     }));
 
-    prismaRef.current = {
+    const mockPrismaObj = {
+      $executeRaw: vi.fn(async () => 0),
       student: {
         findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
           where.id === "stu-piloto"
@@ -866,7 +997,10 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
         create: createLogMock,
         update: vi.fn(),
       },
-    } as unknown as PrismaClient;
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(mockPrismaObj)),
+    };
+
+    prismaRef.current = mockPrismaObj as unknown as PrismaClient;
 
     try {
       // 1. Escola Piloto com modelo global (templateId = "tpl-global" != null)

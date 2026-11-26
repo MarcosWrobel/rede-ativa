@@ -267,7 +267,29 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
       return hoisted.db.students;
     });
     hoisted.studentCreateMany.mockResolvedValue({ count: 0 });
-    hoisted.transaction.mockImplementation(async (ops: Promise<any>[]) => Promise.all(ops));
+    hoisted.transaction.mockImplementation(async (arg: any) => {
+      if (typeof arg === "function") {
+        return arg({
+          $executeRaw: vi.fn(async () => 0),
+          student: {
+            findUnique: hoisted.studentFindUnique,
+            findMany: hoisted.studentFindMany,
+            create: hoisted.studentCreate,
+            createMany: hoisted.studentCreateMany,
+            update: hoisted.studentUpdate,
+          },
+          messageTemplate: {
+            findMany: hoisted.templateFindMany,
+            findUnique: hoisted.templateFindUnique,
+          },
+          messageLog: {
+            create: hoisted.messageLogCreate,
+            update: vi.fn(async ({ where, data }: any) => ({ id: where.id, ...data })),
+          },
+        });
+      }
+      return Promise.all(arg);
+    });
   });
 
   it("1. Isola turmas em GET /api/justifications e aplica assertTenantOwnership em POST /api/justifications", async () => {
