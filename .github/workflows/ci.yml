@@ -15,6 +15,24 @@ jobs:
     name: Typecheck, Unit Tests & Production Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://ci:dummy@127.0.0.1:5432/redeativa_phase01_synthetic?connection_limit=1
+      DIRECT_URL: postgresql://ci:dummy@127.0.0.1:5432/redeativa_phase01_synthetic
+      NEXTAUTH_SECRET: ci-testing-dummy-secret-minimum-32-chars-long
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: dummy
+          POSTGRES_DB: redeativa_phase01_synthetic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d redeativa_phase01_synthetic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout Code
@@ -38,15 +56,15 @@ jobs:
       - name: TypeScript Static Typecheck
         run: npx tsc --noEmit
 
+      - name: Migrate Synthetic Test Database
+        run: npm run db:migrate:deploy
+
       - name: Run Vitest Test Suites
-        run: npm test
+        run: npm test -- --testTimeout=20000
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
-          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
+          REDEATIVA_TEST_ISOLATED_DB: "1"
 
       - name: Build Next.js Application (Turbopack)
         run: npm run build
         env:
-          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
           VERCEL: "0"
