@@ -59,13 +59,23 @@ vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
 vi.mock("@/lib/permissions", () => ({
   requireAuth: vi.fn(async () => mockAuthState),
 }));
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async (id?: string) => ({
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  const makeSchool = (id?: string) => ({
     id: id || "school-a",
     name: "Escola Estadual Teste",
     inepCode: "00000001",
-  })),
-}));
+  });
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async (id?: string) => makeSchool(id)),
+    getAuthorizedCurrentSchool: vi.fn(async (_s: any, id?: string | null) => makeSchool(id || undefined)),
+    requireAuthorizedSchool: vi.fn(async (_s: any, id?: string | null) => ({
+      ok: true as const,
+      school: makeSchool(id || undefined),
+    })),
+  };
+});
 vi.mock("@/lib/tenantGuard", () => ({
   assertTenantOwnership: vi.fn((resourceSchoolId: string, activeSchoolId: string) => resourceSchoolId === activeSchoolId),
 }));
@@ -262,8 +272,9 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       expect(merged[1].hasActiveSignLink).toBe(true);
     });
 
-    it("PATCH /api/atas/[id] durante validade preserva token ativo no banco", async () => {
+    it("PATCH /api/atas/[id] durante validade preserva token ativo no banco apenas sem alteração efetiva e revoga em edição real", async () => {
       const futureExpiry = new Date("2026-11-12T15:00:00.000Z");
+      const baseAttendedAt = new Date("2026-11-12T14:00:00.000Z");
       const existingParticipants = [
         {
           id: "part-1",
@@ -273,13 +284,30 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
           signatureData: null,
           mobileSignToken: "tok-keep",
           mobileSignExpiresAt: futureExpiry,
+          mobileSignRevision: 1,
+          hasActiveSignLink: true,
         },
       ];
       mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
         id: "min-1",
         schoolId: "school-a",
         status: "DRAFT",
-        students: [{ studentId: "stu-1" }],
+        contentRevision: 1,
+        category: "BUSCA_ATIVA",
+        isConfidential: false,
+        attendedAt: baseAttendedAt,
+        subject: "Assunto inicial",
+        summary: "Resumo",
+        agreementsSummary: null,
+        rawNotes: null,
+        students: [
+          {
+            studentId: "stu-1",
+            studentNameSnapshot: "Aluno",
+            classNameSnapshot: "9A",
+            cgmSnapshot: "123",
+          },
+        ],
         participants: existingParticipants,
         actionItems: [],
       });
@@ -289,16 +317,20 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       ]);
       mockPrisma.pedagogicalMinute.update.mockResolvedValue({
         id: "min-1",
+        contentRevision: 1,
         participants: [],
         students: [],
         actionItems: [],
       });
 
-      const req = new Request("http://localhost:3001/api/atas/min-1", {
+      // 1) PATCH no-op mantém token ativo, não reescreve linhas no banco e preserva revisão 1
+      const noopReq = new Request("http://localhost:3001/api/atas/min-1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subject: "Assunto atualizado",
+          expectedRevision: 1,
+          subject: "Assunto inicial",
+          summary: "Resumo",
           studentIds: ["stu-1"],
           participants: [
             {
@@ -312,16 +344,55 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         }),
       });
 
-      const res = await patchMinuteHandler(req, { params: Promise.resolve({ id: "min-1" }) });
-      expect(res.status).toBe(200);
+      const noopRes = await patchMinuteHandler(noopReq, { params: Promise.resolve({ id: "min-1" }) });
+      expect(noopRes.status).toBe(200);
+      const noopJson = await noopRes.json();
+      expect(noopJson.minute?.contentRevision).toBe(1);
+      expect(noopJson.minute?.participants?.[0]?.hasActiveSignLink).toBe(true);
+      expect(mockPrisma.pedagogicalMinuteParticipant.createMany).not.toHaveBeenCalled();
+      expect(mockPrisma.pedagogicalMinuteParticipant.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.pedagogicalMinute.update).not.toHaveBeenCalled();
+
+      // 2) PATCH com edição efetiva avança revisão e revoga link ativo anterior
+      mockPrisma.pedagogicalMinuteParticipant.createMany.mockClear();
+      mockPrisma.pedagogicalMinute.update.mockResolvedValueOnce({
+        id: "min-1",
+        contentRevision: 2,
+        participants: [],
+        students: [],
+        actionItems: [],
+      });
+      const editReq = new Request("http://localhost:3001/api/atas/min-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          subject: "Assunto atualizado",
+          summary: "Resumo",
+          studentIds: ["stu-1"],
+          participants: [
+            {
+              id: "part-1",
+              role: "RESPONSAVEL",
+              name: "Mãe",
+              signatureMode: "PENDING",
+              signatureData: null,
+            },
+          ],
+        }),
+      });
+
+      const editRes = await patchMinuteHandler(editReq, { params: Promise.resolve({ id: "min-1" }) });
+      expect(editRes.status).toBe(200);
       expect(mockPrisma.pedagogicalMinuteParticipant.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: [
             expect.objectContaining({
               id: "part-1",
-              mobileSignToken: "tok-keep",
-              mobileSignExpiresAt: futureExpiry,
-              hasActiveSignLink: true,
+              mobileSignToken: null,
+              mobileSignExpiresAt: null,
+              mobileSignRevision: null,
+              hasActiveSignLink: false,
             }),
           ],
         })
@@ -344,13 +415,17 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
 
       let storedToken = null as string | null;
       let storedExpiry = null as Date | null;
+      let storedMobileSignRevision = null as number | null;
+      let storedSignedRevision = null as number | null;
       let storedSignatureData = null as string | null;
       let storedSignedAt = null as Date | null;
 
       mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
         id: "min-1",
         status: "DRAFT",
+        contentRevision: 1,
         schoolId: "school-a",
+        summary: "Texto oficial completo da ata pedagógica.",
         isConfidential: false,
         authorEmail: "pedagoga@escola.pr.gov.br",
       });
@@ -364,14 +439,17 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         signatureData: storedSignatureData,
         signedAt: storedSignedAt,
         hasSignature: Boolean(storedSignatureData),
+        signedRevision: storedSignedRevision,
         verifiedEmail: null,
         mobileSignToken: storedToken,
         mobileSignExpiresAt: storedExpiry,
+        mobileSignRevision: storedMobileSignRevision,
         minute: {
           id: "min-1",
           status: "DRAFT",
+          contentRevision: 1,
           subject: "Atendimento",
-          summary: "Resumo",
+          summary: "Texto oficial completo da ata pedagógica.",
           agreementsSummary: null,
           attendedAt: t0,
           school: { name: "Escola Teste" },
@@ -387,6 +465,8 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       mockPrisma.pedagogicalMinuteParticipant.update.mockImplementation(async ({ data }: any) => {
         if (data.mobileSignToken !== undefined) storedToken = data.mobileSignToken;
         if (data.mobileSignExpiresAt !== undefined) storedExpiry = data.mobileSignExpiresAt;
+        if (data.mobileSignRevision !== undefined) storedMobileSignRevision = data.mobileSignRevision;
+        if (data.signedRevision !== undefined) storedSignedRevision = data.signedRevision;
         if (data.signatureData !== undefined) storedSignatureData = data.signatureData;
         if (data.signedAt !== undefined) storedSignedAt = data.signedAt;
         return { id: "part-1", name: "Mãe", ...data };
@@ -401,17 +481,30 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         }
         storedToken = data.mobileSignToken;
         storedExpiry = data.mobileSignExpiresAt;
+        if (data.mobileSignRevision !== undefined) storedMobileSignRevision = data.mobileSignRevision;
+        if (data.signedRevision !== undefined) storedSignedRevision = data.signedRevision;
         storedSignatureData = data.signatureData;
         storedSignedAt = data.signedAt;
         return { count: 1 };
       });
 
-      // 1) Gera link de 20 minutos
-      const createRes = await createSignTokenHandler(
+      // 0) Sem expectedRevision -> 400
+      const missingRevRes = await createSignTokenHandler(
         new Request("http://localhost:3001/api/atas/min-1/sign-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 20 }),
+        }),
+        { params: Promise.resolve({ id: "min-1" }) }
+      );
+      expect(missingRevRes.status).toBe(400);
+
+      // 1) Gera link de 20 minutos com expectedRevision obrigatório
+      const createRes = await createSignTokenHandler(
+        new Request("http://localhost:3001/api/atas/min-1/sign-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 20, expectedRevision: 1 }),
         }),
         { params: Promise.resolve({ id: "min-1" }) }
       );
@@ -514,6 +607,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         id: "min-1",
         status: "DRAFT",
         schoolId: "school-a",
+        summary: "Texto oficial completo da ata pedagógica.",
         isConfidential: false,
         authorEmail: "pedagoga@escola.pr.gov.br",
       });
@@ -521,7 +615,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request("http://localhost:3001/api/atas/min-1/sign-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 1440 }),
+          body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 1440, expectedRevision: 1 }),
         }),
         { params: Promise.resolve({ id: "min-1" }) }
       );
@@ -592,7 +686,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request("http://localhost:3001/api/atas/min-other/sign-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 20 }),
+          body: JSON.stringify({ participantId: "part-1", expiresInMinutes: 20, expectedRevision: 1 }),
         }),
         { params: Promise.resolve({ id: "min-other" }) }
       );
@@ -649,6 +743,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
           data: {
             mobileSignToken: null,
             mobileSignExpiresAt: null,
+            mobileSignRevision: null,
             hasActiveSignLink: false,
           },
         })
@@ -747,7 +842,9 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         verifiedEmail: null,
         mobileSignToken: "tok-race",
         mobileSignExpiresAt: new Date(Date.now() + 600_000),
-        minute: { id: "min-1", status: "DRAFT" },
+        mobileSignRevision: 1,
+        hasActiveSignLink: true,
+        minute: { id: "min-1", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       // Dentro do lock transacional, o token já havia sido cancelado por outro request
       mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce(null);
@@ -843,6 +940,8 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
         id: "min-refused",
         status: "DRAFT",
+        contentRevision: 1,
+        summary: "Resumo válido com mais de dez caracteres.",
         schoolId: "school-a",
         isConfidential: false,
         authorEmail: "pedagoga@escola.pr.gov.br",
@@ -914,7 +1013,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         new Request("http://localhost:3001/api/atas/min-refused/sign-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ participantId: "part-refused" }),
+          body: JSON.stringify({ participantId: "part-refused", expectedRevision: 1 }),
         }),
         { params: Promise.resolve({ id: "min-refused" }) }
       );
@@ -927,14 +1026,18 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         minuteId: "min-refused",
         mobileSignToken: "tok-refused-race",
         mobileSignExpiresAt: futureExpires,
-        minute: { id: "min-refused", status: "DRAFT" },
+        mobileSignRevision: 1,
+        hasActiveSignLink: true,
+        minute: { id: "min-refused", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce({
         ...refusedDbParticipants[0],
         minuteId: "min-refused",
         mobileSignToken: "tok-refused-race",
         mobileSignExpiresAt: futureExpires,
-        minute: { id: "min-refused", status: "DRAFT" },
+        mobileSignRevision: 1,
+        hasActiveSignLink: true,
+        minute: { id: "min-refused", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       const mobileRefusedRaceRes = await postPublicSignTokenHandler(
         new Request("http://localhost:3001/api/atas/sign-token/tok-refused-race", {

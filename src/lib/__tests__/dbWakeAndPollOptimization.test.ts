@@ -11,7 +11,7 @@ const hoisted = vi.hoisted(() => ({
     schoolId: "school-1",
     session: { user: { id: "user-1", email: "pedagoga@escola.pr.gov.br", role: "PEDAGOGA", schoolId: "school-1" } },
   })),
-  getCurrentSchool: vi.fn(async (schoolId?: string | null) => ({
+  getAuthorizedCurrentSchool: vi.fn(async (_session: any, schoolId?: string | null) => ({
     id: schoolId || "school-1",
     inepCode: "99990001",
     name: "Escola Teste",
@@ -21,6 +21,17 @@ const hoisted = vi.hoisted(() => ({
     network: "ESTADUAL",
     edition: "INSTITUCIONAL_ESSENCIAL",
   })),
+  resolveServerUserAuthSnapshot: vi.fn(async (session: any) => ({
+    id: session?.user?.id || "user-1",
+    email: session?.user?.email || "pedagoga@escola.pr.gov.br",
+    name: session?.user?.name || "Pedagoga Teste",
+    role: session?.user?.role || "PEDAGOGA",
+    active: true,
+    schoolId: session?.user?.schoolId || "school-1",
+    schools: [{ schoolId: "school-1", role: "PEDAGOGA", active: true, school: { id: "school-1", inepCode: "99990001", name: "Escola Teste", city: "Ponta Grossa", network: "ESTADUAL", networkId: null, active: true } }],
+    networks: [],
+    source: "database",
+  })),
   minuteFindUnique: vi.fn(async () => null as any),
   schoolFindMany: vi.fn(async () => [] as any[]),
 }));
@@ -28,6 +39,14 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/auth", () => ({
   auth: hoisted.auth,
 }));
+
+vi.mock("@/lib/serverAuthContext", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/serverAuthContext")>("@/lib/serverAuthContext");
+  return {
+    ...actual,
+    resolveServerUserAuthSnapshot: hoisted.resolveServerUserAuthSnapshot,
+  };
+});
 
 vi.mock("@/lib/permissions", async () => {
   const actual = await vi.importActual<typeof import("@/lib/permissions")>("@/lib/permissions");
@@ -41,7 +60,11 @@ vi.mock("@/lib/currentSchool", async () => {
   const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
   return {
     ...actual,
-    getCurrentSchool: hoisted.getCurrentSchool,
+    getAuthorizedCurrentSchool: hoisted.getAuthorizedCurrentSchool,
+    requireAuthorizedSchool: vi.fn(async (_session: any, schoolId?: string | null) => ({
+      ok: true as const,
+      school: await hoisted.getAuthorizedCurrentSchool(_session, schoolId),
+    })),
     getCachedDirectory: vi.fn(() => null),
     setCachedDirectory: vi.fn(),
   };
@@ -78,30 +101,34 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
   });
 
   describe("RootLayout sem sessão", () => {
-    it("não chama getCurrentSchool nem consulta escolas quando o visitante não está autenticado", async () => {
+    it("não chama getAuthorizedCurrentSchool nem consulta escolas quando o visitante não está autenticado", async () => {
       hoisted.auth.mockResolvedValueOnce(null);
 
       await RootLayout({ children: null });
 
-      expect(hoisted.getCurrentSchool).not.toHaveBeenCalled();
+      expect(hoisted.getAuthorizedCurrentSchool).not.toHaveBeenCalled();
       expect(hoisted.schoolFindMany).not.toHaveBeenCalled();
     });
 
-    it("chama getCurrentSchool com o schoolId da sessão quando o usuário está autenticado", async () => {
+    it("chama getAuthorizedCurrentSchool com o schoolId da sessão quando o usuário está autenticado", async () => {
       hoisted.auth.mockResolvedValueOnce({
         user: {
           name: "Pedagoga Teste",
           email: "pedagoga@escola.pr.gov.br",
           role: "PEDAGOGA",
           schoolId: "school-1",
-          schools: [],
+          schools: [{ schoolId: "school-1", role: "PEDAGOGA", active: true }],
         },
       });
 
       await RootLayout({ children: null });
 
-      expect(hoisted.getCurrentSchool).toHaveBeenCalledTimes(1);
-      expect(hoisted.getCurrentSchool).toHaveBeenCalledWith("school-1");
+      expect(hoisted.getAuthorizedCurrentSchool).toHaveBeenCalledTimes(1);
+      expect(hoisted.getAuthorizedCurrentSchool).toHaveBeenCalledWith(
+        expect.anything(),
+        "school-1",
+        expect.anything()
+      );
     });
   });
 
@@ -157,6 +184,7 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
           signatureMode: "MOBILE_QR",
           hasSignature: true,
           hasActiveSignLink: false,
+          signedRevision: null,
           institutionalVerificationComplete: false,
           linkExpired: false,
         },
@@ -166,6 +194,7 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
           signatureMode: "ESCOLA_OAUTH",
           hasSignature: false,
           hasActiveSignLink: true,
+          signedRevision: null,
           institutionalVerificationComplete: false,
           linkExpired: true,
         },

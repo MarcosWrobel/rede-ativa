@@ -3,10 +3,21 @@ import "./globals.css";
 import AppLayoutClient from "@/components/AppLayoutClient";
 import PwaRegister from "@/components/PwaRegister";
 import { auth } from "@/lib/auth";
-import { getCurrentSchool, getCachedDirectory, setCachedDirectory } from "@/lib/currentSchool";
+import {
+  getAuthorizedCurrentSchool,
+  getCachedDirectory,
+  setCachedDirectory,
+} from "@/lib/currentSchool";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { prisma } from "@/lib/prisma";
-import { isBootstrapAdminEmail } from "@/lib/roles";
+import {
+  buildSessionFromSnapshot,
+  isSnapshotSuperAdmin,
+  resolveEffectiveRoleForSchool,
+  resolveEffectiveSessionRoleWithoutSchool,
+  resolveServerUserAuthSnapshot,
+  type ServerUserAuthSnapshot,
+} from "@/lib/serverAuthContext";
 
 export const dynamic = "force-dynamic";
 
@@ -40,14 +51,27 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  let session: any = null;
+  let effectiveSession: any = null;
+  let snapshot: ServerUserAuthSnapshot | null = null;
   let currentSchool: any = null;
 
   try {
-    session = await auth();
-    const sessionUser = session?.user as any;
-    if (session?.user) {
-      currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+    const rawSession = await auth();
+    if (rawSession?.user) {
+      snapshot = await resolveServerUserAuthSnapshot(rawSession);
+      if (snapshot && snapshot.active !== false) {
+        effectiveSession = buildSessionFromSnapshot(rawSession, snapshot);
+        currentSchool = await getAuthorizedCurrentSchool(
+          effectiveSession,
+          effectiveSession?.user?.schoolId,
+          snapshot
+        );
+        if (currentSchool) {
+          effectiveSession = buildSessionFromSnapshot(effectiveSession, snapshot, currentSchool);
+        }
+      } else {
+        snapshot = null;
+      }
     }
   } catch (err: any) {
     if (err?.digest === "DYNAMIC_SERVER_USAGE" || err?.message?.includes("Dynamic server usage")) {
@@ -56,12 +80,14 @@ export default async function RootLayout({
     console.error("[RootLayout] Erro na resolução da sessão ou escola:", err);
   }
 
-  const sessionUser = session?.user as any;
-  const isSuper =
-    isBootstrapAdminEmail(sessionUser?.email) ||
-    sessionUser?.role === "SUPERADMIN" ||
-    sessionUser?.role === "ADMIN";
-  const isSecretariat = sessionUser?.role === "GESTAO_SECRETARIA";
+  const sessionUser = effectiveSession?.user as any;
+  const isSuper = isSnapshotSuperAdmin(snapshot);
+  const activeNetworks = (snapshot?.networks || []).filter(
+    (n) => n.active && n.network?.active !== false
+  );
+  const isSecretariat =
+    !isSuper &&
+    activeNetworks.some((n) => n.role.toUpperCase() === "GESTAO_SECRETARIA");
 
   let userSchoolsList = Array.isArray(sessionUser?.schools) ? sessionUser.schools : [];
   if (isSuper) {
@@ -96,22 +122,20 @@ export default async function RootLayout({
     } catch (e) {
       console.warn("[RootLayout] Falha não crítica ao buscar escolas para SuperAdmin:", e);
     }
-  } else if (isSecretariat) {
+  } else if (isSecretariat && activeNetworks.length > 0) {
     try {
-      const userNetworks = Array.isArray(sessionUser?.networks) ? sessionUser.networks : [];
-      const networkIds = userNetworks.map((n: any) => n.networkId);
-      const cacheKey = `secretariat_schools:${networkIds.join(",")}:${userNetworks.map((n: any) => n.city || "").join(",")}`;
+      const networkIds = Array.from(
+        new Set(activeNetworks.map((n) => n.networkId).filter(Boolean))
+      );
+      const cacheKey = `secretariat_schools:${[...networkIds].sort().join(",")}`;
       const cachedList = getCachedDirectory<any>(cacheKey);
       if (cachedList) {
         userSchoolsList = cachedList;
-      } else {
+      } else if (networkIds.length > 0) {
         const networkSchools = await prisma.school.findMany({
           where: {
             active: true,
-            OR: [
-              { networkId: { in: networkIds } },
-              ...userNetworks.map((n: any) => ({ city: n.city, network: "MUNICIPAL" })),
-            ],
+            networkId: { in: networkIds },
           },
           select: {
             id: true,
@@ -139,12 +163,18 @@ export default async function RootLayout({
     }
   }
 
-  const currentUser = session?.user
+  const resolvedRole = isSuper
+    ? "SUPERADMIN"
+    : (currentSchool ? resolveEffectiveRoleForSchool(snapshot, currentSchool) : null) ||
+      resolveEffectiveSessionRoleWithoutSchool(snapshot) ||
+      "PEDAGOGA";
+
+  const currentUser = effectiveSession?.user
     ? {
-        name: session.user.name || "Pedagoga",
-        email: session.user.email || "",
-        role: isSuper ? "SUPERADMIN" : sessionUser?.role || "PEDAGOGA",
-        schoolId: currentSchool?.id || sessionUser?.schoolId || null,
+        name: effectiveSession.user.name || "Pedagoga",
+        email: effectiveSession.user.email || "",
+        role: resolvedRole,
+        schoolId: currentSchool?.id || null,
         schools: userSchoolsList,
         networks: Array.isArray(sessionUser?.networks) ? sessionUser.networks : [],
       }

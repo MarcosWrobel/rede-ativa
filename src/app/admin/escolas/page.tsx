@@ -1,8 +1,14 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getAuthorizedCurrentSchool } from "@/lib/currentSchool";
+import { buildSessionFromSnapshot, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { checkIsSuperAdmin, checkIsSecretariat, checkIsSchoolManager } from "@/lib/roles";
+import {
+  getExternalFormalizeServerStatus,
+  parseSchoolAiExternalFormalizeFlag,
+} from "@/lib/aiPolicy";
+import { sanitizePublicSchoolSettings } from "@/lib/schoolSettingsMutation";
 import { prisma } from "@/lib/prisma";
 import AdminEscolasClient from "./AdminEscolasClient";
 
@@ -14,23 +20,33 @@ export const metadata = {
 
 export default async function AdminEscolasPage() {
   const session = await auth();
-  const sessionUser = session?.user as any;
 
   if (!session?.user) {
     redirect("/login");
   }
 
-  if (!checkIsSuperAdmin(session)) {
-    if (checkIsSecretariat(session)) {
+  const snapshot = await resolveServerUserAuthSnapshot(session);
+  if (!snapshot || snapshot.active === false) {
+    redirect("/login?error=AccountInactive");
+  }
+
+  const freshSession = buildSessionFromSnapshot(session, snapshot);
+
+  if (!checkIsSuperAdmin(freshSession)) {
+    if (checkIsSecretariat(freshSession)) {
       redirect("/secretaria");
     }
-    if (checkIsSchoolManager(session)) {
+    if (checkIsSchoolManager(freshSession)) {
       redirect("/gestao");
     }
     redirect("/busca-ativa");
   }
 
-  const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+  const currentSchool = await getAuthorizedCurrentSchool(
+    freshSession,
+    freshSession?.user?.schoolId,
+    snapshot
+  );
 
   // Fetch all registered schools with aggregate counts and recent activity (sem logoUrl Base64)
   const schools = await prisma.school.findMany({
@@ -75,11 +91,8 @@ export default async function AdminEscolasPage() {
   });
 
   const formattedSchools = schools.map((s) => {
-    let settings: any = {};
-    try {
-      if (s.settingsJson) settings = JSON.parse(s.settingsJson);
-    } catch {}
-
+    const settings = sanitizePublicSchoolSettings(s.settingsJson);
+    const aiPolicyFlag = parseSchoolAiExternalFormalizeFlag(s.settingsJson);
     const lastSyncAt = s.students[0]?.updatedAt ? s.students[0].updatedAt.toISOString() : null;
 
     return {
@@ -99,6 +112,16 @@ export default async function AdminEscolasPage() {
         updatedAt: s.updatedAt,
       }),
       settings,
+      aiExternalFormalizeEnabled: aiPolicyFlag.verified && aiPolicyFlag.enabled,
+      legacyPolicyPendingTransition: aiPolicyFlag.legacyFlagPendingTransition,
+      aiExternalFormalizeUpdatedAt:
+        typeof settings.aiExternalFormalizeUpdatedAt === "string"
+          ? settings.aiExternalFormalizeUpdatedAt
+          : null,
+      aiExternalFormalizeUpdatedBy:
+        typeof settings.aiExternalFormalizeUpdatedBy === "string"
+          ? settings.aiExternalFormalizeUpdatedBy
+          : null,
       hasSyncToken: Boolean(s.syncTokenHash),
       lastSyncAt,
       studentsCount: s._count.students,
@@ -111,13 +134,17 @@ export default async function AdminEscolasPage() {
         role: us.role || us.user.role,
       })),
       createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
     };
   });
+
+  const aiServerStatus = getExternalFormalizeServerStatus();
 
   return (
     <AdminEscolasClient
       schools={formattedSchools}
       activeSchoolId={currentSchool?.id || null}
+      aiServerStatus={aiServerStatus}
     />
   );
 }

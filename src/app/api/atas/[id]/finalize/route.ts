@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
 import { checkRateLimit, resetRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
@@ -32,7 +33,17 @@ export async function POST(
       rawBody = null;
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+      : authCheck.session;
+    const scopedRole = (effectiveSession?.user as { role?: string } | undefined)?.role || authCheck.role || "PEDAGOGA";
 
     // Proteção Anti-Brute-Force contra adivinhação de PIN de Fé Pública (SEC-08)
     const pinLockKey = `pin-fail:${authCheck.userId}`;
@@ -79,12 +90,12 @@ export async function POST(
         userId: authCheck.userId,
         userName: authCheck.userName,
         email: authCheck.email,
-        role: authCheck.role || "PEDAGOGA",
+        role: scopedRole,
         ip,
       },
       verifyTenantOwnership: (minuteSchoolId) =>
-        assertTenantOwnership(minuteSchoolId, currentSchool.id, authCheck.session),
-      session: authCheck.session,
+        assertTenantOwnership(minuteSchoolId, currentSchool.id, effectiveSession),
+      session: effectiveSession,
     });
 
     if (alreadyFinalized) {

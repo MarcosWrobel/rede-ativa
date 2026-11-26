@@ -446,6 +446,11 @@ vi.mock("@/lib/permissions", () => ({
 
 vi.mock("@/lib/currentSchool", () => ({
   getCurrentSchool: mockGetCurrentSchool,
+  getAuthorizedCurrentSchool: mockGetCurrentSchool,
+  requireAuthorizedSchool: vi.fn(async () => ({
+    ok: true,
+    school: await mockGetCurrentSchool(),
+  })),
 }));
 
 vi.mock("@/lib/tenantGuard", () => ({

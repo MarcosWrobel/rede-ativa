@@ -1,17 +1,14 @@
-import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import EncaminhamentosClient from "./EncaminhamentosClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function EncaminhamentosPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-
-  const school = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const school = ctx.school;
 
   const now = new Date();
   const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);

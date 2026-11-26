@@ -26,15 +26,29 @@ vi.mock("@/lib/audit", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async (schoolId?: string | null) => ({
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  const makeSchool = (schoolId?: string | null) => ({
     id: schoolId || "school-leopoldina",
     name: "Colégio Estadual Leopoldina B. Pedroso",
     inepCode: "41042730",
     nre: "Ponta Grossa",
     city: "Tibagi",
-  })),
-}));
+    network: "ESTADUAL",
+    networkId: null,
+  });
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async (schoolId?: string | null) => makeSchool(schoolId)),
+    getAuthorizedCurrentSchool: vi.fn(async (_s: any, schoolId?: string | null) =>
+      makeSchool(schoolId)
+    ),
+    requireAuthorizedSchool: vi.fn(async (_s: any, schoolId?: string | null) => ({
+      ok: true as const,
+      school: makeSchool(schoolId),
+    })),
+  };
+});
 
 describe("Arcabouço Jurídico: JUR-03 (Alertas de Prazos) & JUR-04 (Via Física / Gov.br)", () => {
   const mockedAuth = auth as unknown as { mockResolvedValueOnce: any };

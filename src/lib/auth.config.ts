@@ -309,25 +309,27 @@ export const authConfig: NextAuthConfig = {
       if (session.user) {
         const email = (session.user.email || "").toLowerCase().trim();
         const isRoot = isBootstrapAdminEmail(email);
+        const isActive = token.active !== false;
         if (token.userId) {
           session.user.id = String(token.userId);
         }
-        session.user.role = resolveTokenRole({
-          isRootAdmin: isRoot,
-          dbRole: token.role as string | undefined,
-        });
-        session.user.active = isRoot ? true : token.active !== false;
+        session.user.active = isActive;
+        session.user.role = isActive
+          ? resolveTokenRole({
+              isRootAdmin: isRoot,
+              dbRole: token.role as string | undefined,
+            })
+          : "PEDAGOGA";
         if (token.name) {
           session.user.name = String(token.name);
         }
-        if (token.schoolId) {
-          session.user.schoolId = String(token.schoolId);
-        }
+        session.user.schoolId =
+          isActive && token.schoolId ? String(token.schoolId) : null;
         if (token.userSchools) {
-          session.user.schools = token.userSchools;
+          session.user.schools = isActive ? token.userSchools : [];
         }
         if (token.userNetworks) {
-          session.user.networks = token.userNetworks;
+          session.user.networks = isActive ? token.userNetworks : [];
         }
       }
       return session;
@@ -339,5 +341,7 @@ export const authConfig: NextAuthConfig = {
   },
   session: {
     strategy: "jwt",
+    maxAge: 8 * 60 * 60, // 8 horas de teto absoluto para cookie JWT
+    updateAge: 5 * 60,
   },
 };

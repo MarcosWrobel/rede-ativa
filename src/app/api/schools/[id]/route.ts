@@ -6,6 +6,8 @@ import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { isProxyLogoPath, resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
+import { parseSchoolAiExternalFormalizeFlag } from "@/lib/aiPolicy";
+import { mutateSchoolSettingsAtomically } from "@/lib/schoolSettingsMutation";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,8 @@ const updateSchoolSchema = z.object({
   email: z.string().email("E-mail institucional inválido").optional().nullable(),
   logoUrl: z.string().optional().nullable(),
   edition: z.enum(["PILOTO_INTEGRADA", "INSTITUCIONAL_ESSENCIAL"]).optional(),
+  aiExternalFormalizeEnabled: z.boolean().optional(),
+  expectedUpdatedAt: z.string().optional().nullable(),
   settingsJson: z.string().optional().nullable(),
   settings: z.record(z.string(), z.any()).optional().nullable(),
 });
@@ -82,6 +86,7 @@ export async function GET(
     }
 
     const { syncTokenHash, ...safeSchool } = school;
+    const aiPolicyFlag = parseSchoolAiExternalFormalizeFlag(school.settingsJson);
 
     return NextResponse.json({
       success: true,
@@ -93,6 +98,7 @@ export async function GET(
           updatedAt: school.updatedAt,
         }),
         edition: resolveSchoolEdition(school),
+        aiExternalFormalizeEnabled: aiPolicyFlag.verified && aiPolicyFlag.enabled,
         hasSyncToken: Boolean(syncTokenHash),
       },
     });
@@ -119,10 +125,17 @@ export async function PUT(
 
     const data = parsed.data;
 
-    // Busca o registro atual da escola para validações de integridade
+    // Busca o registro atual da escola para validações de integridade e auditoria
     const currentSchoolRecord = await prisma.school.findUnique({
       where: { id },
-      select: { inepCode: true, name: true, network: true, networkId: true },
+      select: {
+        inepCode: true,
+        name: true,
+        network: true,
+        networkId: true,
+        settingsJson: true,
+        updatedAt: true,
+      },
     });
 
     if (!currentSchoolRecord) {
@@ -144,7 +157,50 @@ export async function PUT(
       );
     }
 
-    // Restrição de autoelevação de edição e metadados estruturais exclusivamente ao SuperAdmin
+    let parsedInputSettingsJson: Record<string, any> | null = null;
+    if (typeof data.settingsJson === "string" && data.settingsJson.trim().length > 0) {
+      try {
+        const tmp = JSON.parse(data.settingsJson);
+        if (!tmp || typeof tmp !== "object" || Array.isArray(tmp)) {
+          return NextResponse.json({ error: "Campo settingsJson inválido." }, { status: 400 });
+        }
+        parsedInputSettingsJson = tmp;
+      } catch {
+        return NextResponse.json({ error: "Campo settingsJson inválido." }, { status: 400 });
+      }
+    }
+
+    const attemptsAiPolicyMutation =
+      data.aiExternalFormalizeEnabled !== undefined ||
+      (data.settings !== null &&
+        data.settings !== undefined &&
+        typeof data.settings === "object" &&
+        (Object.prototype.hasOwnProperty.call(data.settings, "aiExternalFormalizeEnabled") ||
+          Object.prototype.hasOwnProperty.call(data.settings, "aiExternalFormalizePolicyVersion") ||
+          Object.prototype.hasOwnProperty.call(data.settings, "aiExternalFormalizeTransitionedAt") ||
+          Object.prototype.hasOwnProperty.call(
+            data.settings,
+            "aiExternalFormalizeTransitionOutcome"
+          ))) ||
+      (parsedInputSettingsJson !== null &&
+        (Object.prototype.hasOwnProperty.call(
+          parsedInputSettingsJson,
+          "aiExternalFormalizeEnabled"
+        ) ||
+          Object.prototype.hasOwnProperty.call(
+            parsedInputSettingsJson,
+            "aiExternalFormalizePolicyVersion"
+          ) ||
+          Object.prototype.hasOwnProperty.call(
+            parsedInputSettingsJson,
+            "aiExternalFormalizeTransitionedAt"
+          ) ||
+          Object.prototype.hasOwnProperty.call(
+            parsedInputSettingsJson,
+            "aiExternalFormalizeTransitionOutcome"
+          )));
+
+    // Restrição de autoelevação de edição, IA externa e metadados estruturais exclusivamente ao SuperAdmin
     const isSuper = checkIsSuperAdmin(authCheck.session);
     const rawNetworkIdProvided =
       rawBody !== null &&
@@ -152,6 +208,7 @@ export async function PUT(
       Object.prototype.hasOwnProperty.call(rawBody, "networkId");
     const hasRestrictedMetadata =
       data.edition !== undefined ||
+      attemptsAiPolicyMutation ||
       data.settings !== undefined ||
       data.settingsJson !== undefined ||
       rawNetworkIdProvided ||
@@ -162,9 +219,19 @@ export async function PUT(
       return NextResponse.json(
         {
           error:
-            "Apenas o SuperAdmin pode alterar edição, configurações avançadas, INEP ou rede da instituição.",
+            "Apenas o SuperAdmin pode alterar edição, controle de IA externa, configurações avançadas, INEP ou rede da instituição.",
         },
         { status: 403 }
+      );
+    }
+
+    if (isSuper && attemptsAiPolicyMutation) {
+      return NextResponse.json(
+        {
+          error:
+            "Ligar ou desligar a formalização externa de atas exige a ação explícita de política de IA da escola (/api/schools/[id]/ai-policy).",
+        },
+        { status: 400 }
       );
     }
 
@@ -185,70 +252,116 @@ export async function PUT(
       }
     }
 
-    let finalSettingsJson: string | undefined = undefined;
-    if (isSuper && (data.settings !== undefined || data.settingsJson !== undefined || data.edition !== undefined)) {
-      let currentSettingsObj: Record<string, any> = {};
-      try {
-        const existingSchool = await prisma.school.findUnique({
-          where: { id },
-          select: { settingsJson: true },
-        });
-        if (existingSchool?.settingsJson) {
-          currentSettingsObj = JSON.parse(existingSchool.settingsJson);
-        }
-      } catch {}
+    const shouldUpdateLogoUrl = data.logoUrl !== undefined && !isProxyLogoPath(data.logoUrl);
+    const scalarUpdateData: Record<string, any> = {
+      ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+      ...(isSuper && data.inepCode?.trim() ? { inepCode: data.inepCode.trim() } : {}),
+      ...(data.city?.trim() ? { city: data.city.trim() } : {}),
+      ...(data.state?.trim() ? { state: data.state.trim().toUpperCase() } : {}),
+      ...(data.nre?.trim() ? { nre: data.nre.trim() } : {}),
+      ...(isSuper && data.network ? { network: data.network } : {}),
+      ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
+      ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
+      ...(shouldUpdateLogoUrl ? { logoUrl: data.logoUrl?.trim() || null } : {}),
+    };
 
-      if (data.settings !== undefined) {
-        currentSettingsObj = { ...currentSettingsObj, ...(data.settings || {}) };
-      } else if (data.settingsJson !== undefined && data.settingsJson) {
-        try {
-          currentSettingsObj = { ...currentSettingsObj, ...JSON.parse(data.settingsJson) };
-        } catch {}
+    const previousAiExternalFormalizeEnabled = parseSchoolAiExternalFormalizeFlag(
+      currentSchoolRecord.settingsJson
+    ).enabled;
+
+    const touchesSettings =
+      isSuper &&
+      (data.settings !== undefined ||
+        data.settingsJson !== undefined ||
+        data.edition !== undefined);
+    const hasExpectedVersion =
+      data.expectedUpdatedAt !== undefined &&
+      data.expectedUpdatedAt !== null &&
+      String(data.expectedUpdatedAt).trim() !== "";
+
+    let updated: any;
+
+    if (touchesSettings || hasExpectedVersion) {
+      const atomicRes = await mutateSchoolSettingsAtomically({
+        schoolId: id,
+        expectedUpdatedAt: data.expectedUpdatedAt ?? null,
+        buildPatch: (currentSettings) => {
+          let nextSettings: Record<string, unknown> = { ...currentSettings };
+          if (isSuper) {
+            if (data.settings !== undefined && data.settings) {
+              nextSettings = { ...nextSettings, ...data.settings };
+            } else if (parsedInputSettingsJson !== null) {
+              nextSettings = { ...nextSettings, ...parsedInputSettingsJson };
+            }
+            if (data.edition) {
+              nextSettings.edition = data.edition;
+            }
+          }
+
+          // Preserva chaves de segurança/controle independentes da gravação geral
+          const protectedKeys = [
+            "syncTokenEncrypted",
+            "aiExternalFormalizeEnabled",
+            "aiExternalFormalizePolicyVersion",
+            "aiExternalFormalizeTransitionedAt",
+            "aiExternalFormalizeTransitionOutcome",
+            "aiExternalFormalizeUpdatedAt",
+            "aiExternalFormalizeUpdatedBy",
+          ] as const;
+          for (const key of protectedKeys) {
+            if (Object.prototype.hasOwnProperty.call(currentSettings, key)) {
+              nextSettings[key] = currentSettings[key];
+            } else {
+              delete nextSettings[key];
+            }
+          }
+
+          return {
+            ok: true,
+            nextSettings,
+            extraData: scalarUpdateData,
+          };
+        },
+      });
+
+      if (!atomicRes.ok) {
+        return NextResponse.json(
+          { error: atomicRes.error, code: atomicRes.reason },
+          { status: atomicRes.status }
+        );
       }
 
-      if (data.edition) {
-        currentSettingsObj.edition = data.edition;
-      }
-
-      finalSettingsJson = JSON.stringify(currentSettingsObj);
+      updated = atomicRes.updatedRow;
+    } else {
+      updated = await prisma.school.update({
+        where: { id },
+        data: scalarUpdateData,
+        select: {
+          id: true,
+          inepCode: true,
+          name: true,
+          city: true,
+          state: true,
+          nre: true,
+          network: true,
+          phone: true,
+          email: true,
+          active: true,
+          syncTokenHash: true,
+          settingsJson: true,
+          networkId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
     }
 
-    const shouldUpdateLogoUrl = data.logoUrl !== undefined && !isProxyLogoPath(data.logoUrl);
-
-    const updated = await prisma.school.update({
-      where: { id },
-      data: {
-        ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-        ...(isSuper && data.inepCode?.trim() ? { inepCode: data.inepCode.trim() } : {}),
-        ...(data.city?.trim() ? { city: data.city.trim() } : {}),
-        ...(data.state?.trim() ? { state: data.state.trim().toUpperCase() } : {}),
-        ...(data.nre?.trim() ? { nre: data.nre.trim() } : {}),
-        ...(isSuper && data.network ? { network: data.network } : {}),
-        ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
-        ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
-        ...(shouldUpdateLogoUrl ? { logoUrl: data.logoUrl?.trim() || null } : {}),
-        ...(isSuper && finalSettingsJson !== undefined ? { settingsJson: finalSettingsJson } : {}),
-      },
-      select: {
-        id: true,
-        inepCode: true,
-        name: true,
-        city: true,
-        state: true,
-        nre: true,
-        network: true,
-        phone: true,
-        email: true,
-        active: true,
-        syncTokenHash: true,
-        settingsJson: true,
-        networkId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
     invalidateSchoolCache(id);
+
+    const nextAiFlag = parseSchoolAiExternalFormalizeFlag(
+      updated.settingsJson ?? currentSchoolRecord.settingsJson
+    );
+    const nextAiExternalFormalizeEnabled = nextAiFlag.verified && nextAiFlag.enabled;
 
     await logAudit({
       action: "UPDATE_SCHOOL",
@@ -260,6 +373,10 @@ export async function PUT(
         inepCode: updated.inepCode,
         network: updated.network,
         city: updated.city,
+        previousAiExternalFormalizeEnabled,
+        aiExternalFormalizeEnabled: nextAiExternalFormalizeEnabled,
+        aiExternalFormalizeChanged:
+          previousAiExternalFormalizeEnabled !== nextAiExternalFormalizeEnabled,
       },
       user: {
         id: authCheck.userId,
@@ -280,6 +397,7 @@ export async function PUT(
           logoUrl: (updated as { logoUrl?: string | null }).logoUrl,
           updatedAt: updated.updatedAt,
         }),
+        aiExternalFormalizeEnabled: nextAiExternalFormalizeEnabled,
         hasSyncToken: Boolean(updatedSyncTokenHash),
       },
     });

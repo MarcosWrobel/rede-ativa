@@ -87,9 +87,15 @@ vi.mock("@/components/whatsapp/WhatsAppReplyCaptureModal", () => ({
   default: () => null,
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async () => hoisted.cookieSchool),
-}));
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async () => hoisted.cookieSchool),
+    getAuthorizedCurrentSchool: vi.fn(async () => hoisted.cookieSchool),
+    requireAuthorizedSchool: vi.fn(async () => ({ ok: true as const, school: hoisted.cookieSchool })),
+  };
+});
 
 vi.mock("@/lib/safePhase3Queries", () => ({
   loadStudent360Bundle: vi.fn(async () => hoisted.bundle),

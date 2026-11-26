@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { hashSchoolSyncToken, encryptSyncToken, decryptSyncToken } from "@/lib/syncToken";
+import { mutateSchoolSettingsAtomically } from "@/lib/schoolSettingsMutation";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -69,30 +70,29 @@ export async function POST(
     const tokenDigest = hashSchoolSyncToken(rawToken);
     const encryptedToken = encryptSyncToken(rawToken);
 
-    const currentRecord = await prisma.school.findUnique({
-      where: { id },
-      select: { settingsJson: true },
+    const mutation = await mutateSchoolSettingsAtomically({
+      schoolId: id,
+      maxRetries: 4,
+      buildPatch: (currentSettings) => ({
+        ok: true,
+        nextSettings: {
+          ...currentSettings,
+          syncTokenEncrypted: encryptedToken,
+        },
+        extraData: {
+          syncTokenHash: tokenDigest,
+        },
+      }),
     });
 
-    let settings: Record<string, any> = {};
-    if (currentRecord?.settingsJson) {
-      try {
-        settings = JSON.parse(currentRecord.settingsJson);
-      } catch {}
+    if (!mutation.ok) {
+      return NextResponse.json(
+        { error: mutation.error, code: mutation.reason },
+        { status: mutation.status }
+      );
     }
-    settings.syncTokenEncrypted = encryptedToken;
 
-    const updatedSchool = await prisma.school.update({
-      where: { id },
-      data: {
-        syncTokenHash: tokenDigest,
-        settingsJson: JSON.stringify(settings),
-      },
-      select: {
-        id: true,
-        updatedAt: true,
-      },
-    });
+    const updatedSchool = mutation.updatedRow;
 
     await logAudit({
       action: "UPDATE_USER",
@@ -140,31 +140,28 @@ export async function DELETE(
     const authCheck = await requireSchoolAdmin(id);
     if (!authCheck.ok) return authCheck.response;
 
-    const currentRecord = await prisma.school.findUnique({
-      where: { id },
-      select: { id: true, settingsJson: true },
-    });
-
-    if (!currentRecord) {
-      return NextResponse.json({ error: "Instituição não encontrada" }, { status: 404 });
-    }
-
-    let settings: Record<string, any> = {};
-    if (currentRecord.settingsJson) {
-      try {
-        settings = JSON.parse(currentRecord.settingsJson);
-      } catch {}
-    }
-    delete settings.syncTokenEncrypted;
-
-    await prisma.school.update({
-      where: { id },
-      data: {
-        syncTokenHash: null,
-        settingsJson: Object.keys(settings).length > 0 ? JSON.stringify(settings) : null,
+    const mutation = await mutateSchoolSettingsAtomically({
+      schoolId: id,
+      maxRetries: 4,
+      buildPatch: (currentSettings) => {
+        const nextSettings = { ...currentSettings };
+        delete nextSettings.syncTokenEncrypted;
+        return {
+          ok: true,
+          nextSettings,
+          extraData: {
+            syncTokenHash: null,
+          },
+        };
       },
-      select: { id: true },
     });
+
+    if (!mutation.ok) {
+      return NextResponse.json(
+        { error: mutation.error, code: mutation.reason },
+        { status: mutation.status }
+      );
+    }
 
     await logAudit({
       action: "UPDATE_USER",

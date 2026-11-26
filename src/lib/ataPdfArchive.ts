@@ -4,7 +4,7 @@ import crypto from "crypto";
 import QRCode from "qrcode";
 import { PDFDocument, rgb, PDFName, PDFString, PDFHexString } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { anonymizeOtherMinorsInText } from "./ataCrypto";
+import { anonymizeOtherMinorsInText, buildStudentMaskingEntries } from "./ataCrypto";
 import { getAtaValidationUrl } from "./qrCode";
 import { formatParticipantRoleLabel } from "./participantKinship";
 
@@ -141,10 +141,7 @@ export async function generateAtaPdfA1b(
   pdfDoc.catalog.set(PDFName.of("OutputIntents"), pdfDoc.context.obj([outputIntentRef]));
 
   // 3. Anonimização de outros menores (ECA Art. 143) se emitido para entrega a estudante/responsável específico
-  const linkedStudents = ((minute.students || []) as any[]).map((s: any) => ({
-    id: s.studentId,
-    name: s.studentNameSnapshot || "",
-  }));
+  const linkedStudents = buildStudentMaskingEntries((minute.students || []) as any[]);
   const isTargeted = Boolean(options.targetStudentId);
   const safeSubject = isTargeted
     ? anonymizeOtherMinorsInText(minute.subject, options.targetStudentId, linkedStudents)

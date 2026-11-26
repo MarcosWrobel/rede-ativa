@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
@@ -74,15 +74,13 @@ async function verifyActiveSchoolCandidateAccess(
     };
   }
 
-  const hasDirectSchoolAccess =
-    (dbUser.schoolId === currentSchoolId && (!schoolLink || schoolLink.active !== false)) ||
-    Boolean(schoolLink && schoolLink.active !== false);
+  const hasDirectSchoolAccess = Boolean(schoolLink && schoolLink.active !== false);
 
   if (hasDirectSchoolAccess) {
     return { ok: true };
   }
 
-  // Para GESTAO_SECRETARIA, comprova vínculo ativo com a rede/município da escola solicitada no banco
+  // Para GESTAO_SECRETARIA, comprova vínculo ativo pelo networkId exato da escola solicitada no banco
   const normalizedRole = (dbUser.role || session?.user?.role || "").trim().toUpperCase();
   if (normalizedRole === "GESTAO_SECRETARIA") {
     const activeNetworks = (dbUser.networks || []).filter(
@@ -100,20 +98,10 @@ async function verifyActiveSchoolCandidateAccess(
         },
       });
 
-      if (targetSchool && targetSchool.active !== false) {
-        const schoolCity = (targetSchool.city || "").trim().toLowerCase();
-        const matchesNetwork = activeNetworks.some((link) => {
-          if (targetSchool.networkId && link.networkId === targetSchool.networkId) {
-            return true;
-          }
-          const linkCity = (link.network?.city || "").trim().toLowerCase();
-          return (
-            (targetSchool.network || "ESTADUAL") === "MUNICIPAL" &&
-            Boolean(schoolCity) &&
-            Boolean(linkCity) &&
-            schoolCity === linkCity
-          );
-        });
+      if (targetSchool && targetSchool.active !== false && targetSchool.networkId) {
+        const matchesNetwork = activeNetworks.some(
+          (link) => link.networkId === targetSchool.networkId
+        );
 
         if (matchesNetwork) {
           return { ok: true };
@@ -134,7 +122,18 @@ export async function GET(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição de ensino autorizada está ativa para esta sessão." },
+        { status: 403, headers: NO_STORE_HEADERS }
+      );
+    }
+    const currentSchool = schoolRes.school;
     const { searchParams } = new URL(req.url);
 
     const requestedSchoolId = searchParams.get("schoolId")?.trim();
@@ -233,13 +232,7 @@ export async function GET(req: Request) {
       const staffRows = await prisma.user.findMany({
         where: {
           active: true,
-          OR: [
-            { schoolId: currentSchool.id },
-            { schools: { some: { schoolId: currentSchool.id, active: true } } },
-          ],
-          NOT: {
-            schools: { some: { schoolId: currentSchool.id, active: false } },
-          },
+          schools: { some: { schoolId: currentSchool.id, active: true } },
         },
         orderBy: [{ name: "asc" }, { email: "asc" }],
         take: STAFF_CANDIDATES_LIMIT + 1,

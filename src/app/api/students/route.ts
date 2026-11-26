@@ -3,14 +3,16 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, studentCreateSchema, studentUpdateSchema } from "@/lib/schemas";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 
 export async function GET(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
     const classGroupId = searchParams.get("classGroupId");
@@ -53,7 +55,9 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const parsed = studentCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -145,7 +149,9 @@ export async function PUT(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const parsed = studentUpdateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -253,7 +259,9 @@ export async function DELETE(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "ID ausente" }, { status: 400 });

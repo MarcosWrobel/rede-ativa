@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { requireAuth, requireAdmin, isBootstrapAdminEmail } from "@/lib/permissions";
-import { checkIsSuperAdmin } from "@/lib/roles";
+import { requireAuth, requireSecretariat } from "@/lib/permissions";
+import { checkIsSuperAdmin, checkIsSecretariat } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
+import {
+  AI_EXTERNAL_FORMALIZE_POLICY_VERSION,
+  parseSchoolAiExternalFormalizeFlag,
+} from "@/lib/aiPolicy";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +24,12 @@ const createSchoolSchema = z
     state: z.string().default("PR"),
     nre: z.string().optional().nullable(),
     network: z.enum(["ESTADUAL", "MUNICIPAL", "PRIVADA"]).default("MUNICIPAL"),
+    networkId: z.string().optional().nullable(),
     phone: z.string().optional().nullable(),
     email: z.string().optional().nullable(),
     logoUrl: z.string().optional().nullable(),
     edition: z.enum(["PILOTO_INTEGRADA", "INSTITUCIONAL_ESSENCIAL"]).optional(),
+    aiExternalFormalizeEnabled: z.boolean().optional(),
     settings: z.record(z.string(), z.any()).optional().nullable(),
   })
   .transform((d) => {
@@ -39,6 +45,8 @@ const createSchoolSchema = z
       phone: rawPhone,
       state: (d.state || "PR").trim().toUpperCase(),
       edition: d.edition,
+      networkId: d.networkId?.trim() || null,
+      aiExternalFormalizeEnabled: d.aiExternalFormalizeEnabled,
       settings: d.settings || null,
     };
   })
@@ -56,7 +64,7 @@ export async function GET() {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const isRootAdmin = isBootstrapAdminEmail(authCheck.email);
+    const isRootAdmin = checkIsSuperAdmin(authCheck.session);
 
     let schools;
     if (isRootAdmin) {
@@ -91,52 +99,112 @@ export async function GET() {
         orderBy: [{ network: "asc" }, { name: "asc" }],
       });
     } else {
-      // Servidor comum lista apenas as escolas onde possui vínculo em UserSchool
+      // Servidor comum lista apenas escolas com vínculo ativo em UserSchool ou UserNetwork (por networkId)
+      const schoolSelectWithCounts = {
+        id: true,
+        inepCode: true,
+        name: true,
+        city: true,
+        state: true,
+        nre: true,
+        network: true,
+        phone: true,
+        email: true,
+        active: true,
+        syncTokenHash: true,
+        settingsJson: true,
+        networkId: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            students: { where: { active: true } },
+            classGroups: true,
+            pedagogicalMinutes: true,
+          },
+        },
+      } as const;
+
       const userSchools = await prisma.userSchool.findMany({
-        where: { userId: authCheck.userId, active: true },
+        where: { userId: authCheck.userId, active: true, school: { active: true } },
         include: {
           school: {
-            select: {
-              id: true,
-              inepCode: true,
-              name: true,
-              city: true,
-              state: true,
-              nre: true,
-              network: true,
-              phone: true,
-              email: true,
-              active: true,
-              syncTokenHash: true,
-              settingsJson: true,
-              networkId: true,
-              createdAt: true,
-              updatedAt: true,
-              _count: {
-                select: {
-                  students: { where: { active: true } },
-                  classGroups: true,
-                  pedagogicalMinutes: true,
-                },
-              },
-            },
+            select: schoolSelectWithCounts,
           },
         },
         orderBy: { school: { name: "asc" } },
       });
 
-      schools = userSchools.map((us) => {
+      const byId = new Map<string, any>();
+      for (const us of userSchools) {
+        if (!us.school || us.school.active === false) continue;
         const { syncTokenHash, ...safeSchool } = us.school as any;
-        return {
+        byId.set(safeSchool.id, {
           ...safeSchool,
           hasSyncToken: Boolean(syncTokenHash),
           userRole: us.role,
-        };
-      });
+        });
+      }
+
+      let activeSecNetworkIds = (authCheck.snapshot?.networks || [])
+        .filter(
+          (n) =>
+            n.active !== false &&
+            n.network?.active !== false &&
+            (!n.role || n.role.toUpperCase() === "GESTAO_SECRETARIA")
+        )
+        .map((n) => n.networkId)
+        .filter(Boolean);
+
+      if (
+        activeSecNetworkIds.length === 0 &&
+        authCheck.userId &&
+        typeof (prisma as any).userNetwork?.findMany === "function"
+      ) {
+        const dbNets = await prisma.userNetwork.findMany({
+          where: { userId: authCheck.userId, active: true },
+          include: { network: true },
+        });
+        activeSecNetworkIds = (dbNets as any[])
+          .filter(
+            (un) =>
+              un?.active !== false &&
+              un?.network?.active !== false &&
+              (!un?.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA")
+          )
+          .map((un) => String(un.networkId || "").trim())
+          .filter(Boolean);
+      }
+
+      if (activeSecNetworkIds.length > 0 && typeof (prisma as any).school?.findMany === "function") {
+        const netSchools = await prisma.school.findMany({
+          where: {
+            active: true,
+            networkId: { in: Array.from(new Set(activeSecNetworkIds)) },
+          },
+          select: schoolSelectWithCounts,
+          orderBy: { name: "asc" },
+        });
+        for (const ns of netSchools as any[]) {
+          if (!byId.has(ns.id)) {
+            const { syncTokenHash, ...safeSchool } = ns;
+            byId.set(ns.id, {
+              ...safeSchool,
+              hasSyncToken: Boolean(syncTokenHash),
+              userRole: "GESTAO_SECRETARIA",
+            });
+          }
+        }
+      }
+
+      schools = Array.from(byId.values()).sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), "pt-BR")
+      );
     }
 
     const sanitizedSchools = schools.map((s: any) => {
       const { syncTokenHash, userBySchools, ...safe } = s;
+      const flag = parseSchoolAiExternalFormalizeFlag(s.settingsJson);
       return {
         ...safe,
         logoUrl: resolveSchoolLogoProxyUrl({
@@ -145,6 +213,7 @@ export async function GET() {
           updatedAt: s.updatedAt,
         }),
         edition: resolveSchoolEdition(s),
+        aiExternalFormalizeEnabled: flag.verified && flag.enabled,
         hasSyncToken: safe.hasSyncToken ?? Boolean(syncTokenHash),
       };
     });
@@ -158,13 +227,12 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const authCheck = await requireAdmin();
+    const authCheck = await requireSecretariat();
     if (!authCheck.ok) return authCheck.response;
 
     const isSuper = checkIsSuperAdmin(authCheck.session);
-    const effectiveRole = authCheck.role || (authCheck.session?.user as any)?.role;
-    const isRoot = isBootstrapAdminEmail(authCheck.email) || effectiveRole === "SUPERADMIN" || effectiveRole === "ADMIN";
-    const isSec = effectiveRole === "GESTAO_SECRETARIA";
+    const isRoot = isSuper;
+    const isSec = checkIsSecretariat(authCheck.session);
 
     if (!isRoot && !isSec) {
       return NextResponse.json(
@@ -181,21 +249,42 @@ export async function POST(req: Request) {
 
     const data = parsed.data;
 
-    // Restringe a definição manual de edição exclusivamente ao SuperAdmin
+    // Restringe a definição manual de edição e IA externa exclusivamente ao SuperAdmin
     const rawSettings = (data.settings || {}) as Record<string, any>;
+    const hasReservedAiPolicySettings =
+      rawSettings.aiExternalFormalizeEnabled !== undefined ||
+      rawSettings.aiExternalFormalizePolicyVersion !== undefined ||
+      rawSettings.aiExternalFormalizeTransitionedAt !== undefined ||
+      rawSettings.aiExternalFormalizeTransitionOutcome !== undefined;
     if (
       !isSuper &&
       (data.edition !== undefined ||
+        data.aiExternalFormalizeEnabled !== undefined ||
+        hasReservedAiPolicySettings ||
         rawSettings.edition !== undefined ||
         rawSettings.enablePowerBiSync !== undefined)
     ) {
       return NextResponse.json(
-        { error: "Apenas o SuperAdmin pode definir a edição da plataforma." },
+        { error: "Apenas o SuperAdmin pode definir a edição ou configurações de IA externa da plataforma." },
         { status: 403 }
       );
     }
 
-    // Gestor de Secretaria Municipal só pode provisionar escolas municipais vinculadas ao seu município
+    if (
+      data.aiExternalFormalizeEnabled === true ||
+      hasReservedAiPolicySettings
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Escolas novas iniciam obrigatoriamente com a formalização externa desligada. Utilize a ação explícita de política de IA no painel.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Gestor de Secretaria Municipal só pode provisionar escolas municipais vinculadas ao seu networkId ativo
+    let secAuthorizedNetworkId: string | undefined = undefined;
     if (!isSuper && isSec) {
       if (data.network !== "MUNICIPAL") {
         return NextResponse.json(
@@ -203,27 +292,79 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      const sessionNets = ((authCheck.session?.user as any)?.networks as any[]) || [];
-      let allowedCities = sessionNets
-        .map((n: any) => (n.city || n.network?.city || "").toLowerCase().trim())
-        .filter(Boolean);
 
-      if (allowedCities.length === 0 && authCheck.userId && (prisma as any).userNetwork?.findMany) {
+      const activeNetworksList: Array<{ networkId: string; city: string }> = [];
+      for (const n of authCheck.snapshot?.networks || []) {
+        if (
+          n.active !== false &&
+          n.network?.active !== false &&
+          (!n.role || n.role.toUpperCase() === "GESTAO_SECRETARIA") &&
+          n.networkId
+        ) {
+          activeNetworksList.push({
+            networkId: n.networkId,
+            city: (n.network?.city || "").toLowerCase().trim(),
+          });
+        }
+      }
+      if (activeNetworksList.length === 0) {
+        const sessionNets = ((authCheck.session?.user as any)?.networks as any[]) || [];
+        for (const n of sessionNets) {
+          if (
+            n?.active !== false &&
+            n?.network?.active !== false &&
+            (!n?.role || String(n.role).toUpperCase() === "GESTAO_SECRETARIA")
+          ) {
+            const nid = String(n.networkId || n.id || "").trim();
+            if (nid) {
+              activeNetworksList.push({
+                networkId: nid,
+                city: String(n.city || n.network?.city || "").toLowerCase().trim(),
+              });
+            }
+          }
+        }
+      }
+      if (
+        activeNetworksList.length === 0 &&
+        authCheck.userId &&
+        (prisma as any).userNetwork?.findMany
+      ) {
         const dbNets = await prisma.userNetwork.findMany({
           where: { userId: authCheck.userId, active: true },
           include: { network: true },
         });
-        allowedCities = dbNets
-          .map((un: any) => (un.network?.city || "").toLowerCase().trim())
-          .filter(Boolean);
+        for (const un of dbNets as any[]) {
+          if (
+            un?.active !== false &&
+            un?.network?.active !== false &&
+            (!un?.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA") &&
+            un?.networkId
+          ) {
+            activeNetworksList.push({
+              networkId: String(un.networkId).trim(),
+              city: String(un.network?.city || "").toLowerCase().trim(),
+            });
+          }
+        }
       }
 
-      if (allowedCities.length === 0 || !allowedCities.includes(data.city.toLowerCase().trim())) {
+      const targetCityNorm = data.city.toLowerCase().trim();
+      const matchedNetwork = activeNetworksList.find((n) => {
+        if (data.networkId) {
+          return n.networkId === data.networkId && (!n.city || n.city === targetCityNorm);
+        }
+        return n.city === targetCityNorm;
+      });
+
+      if (!matchedNetwork) {
         return NextResponse.json(
-          { error: `Você não possui autorização para provisionar unidades fora do seu município (${data.city}).` },
+          { error: `Você não possui autorização para provisionar unidades fora da sua rede vinculada (${data.city}).` },
           { status: 403 }
         );
       }
+
+      secAuthorizedNetworkId = matchedNetwork.networkId;
     }
 
     const effectiveNetwork = !isSuper && isSec ? "MUNICIPAL" : data.network;
@@ -250,8 +391,8 @@ export async function POST(req: Request) {
     }
 
     // 2. Resolve Rede Municipal (SEMEC) se aplicável
-    let networkId: string | undefined = undefined;
-    if (effectiveNetwork === "MUNICIPAL") {
+    let networkId: string | undefined = secAuthorizedNetworkId || data.networkId || undefined;
+    if (!networkId && effectiveNetwork === "MUNICIPAL") {
       const cleanCity = data.city.trim();
       const semecId = `semec-${cleanCity.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-")}`;
       try {
@@ -306,14 +447,22 @@ export async function POST(req: Request) {
     const sanitizedSettings = data.settings
       ? Object.fromEntries(
           Object.entries(data.settings).filter(
-            ([k]) => isSuper || (k !== "edition" && k !== "enablePowerBiSync")
+            ([k]) =>
+              k !== "aiExternalFormalizeEnabled" &&
+              k !== "aiExternalFormalizePolicyVersion" &&
+              k !== "aiExternalFormalizeTransitionedAt" &&
+              k !== "aiExternalFormalizeTransitionOutcome" &&
+              (isSuper || (k !== "edition" && k !== "enablePowerBiSync"))
           )
         )
       : null;
 
-    const mergedSettings = effectiveEdition
-      ? { ...(sanitizedSettings || {}), edition: effectiveEdition }
-      : sanitizedSettings || null;
+    const mergedSettings = {
+      ...(sanitizedSettings || {}),
+      ...(effectiveEdition ? { edition: effectiveEdition } : {}),
+      aiExternalFormalizeEnabled: false,
+      aiExternalFormalizePolicyVersion: AI_EXTERNAL_FORMALIZE_POLICY_VERSION,
+    };
 
     // 4. Cria a nova escola no banco de dados
     const createdSchool = await prisma.school.create({
@@ -372,8 +521,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. Vincula automaticamente o usuário criador como GESTOR/ADMIN da nova escola
+    // 5. Vincula automaticamente o usuário criador como GESTOR_ESCOLAR (ou GESTAO_SECRETARIA) na nova escola, sem usar "ADMIN" legado
     if (authCheck.userId) {
+      const localCreatorRole = isSec && !isSuper ? "GESTAO_SECRETARIA" : "GESTOR_ESCOLAR";
       await prisma.userSchool.upsert({
         where: {
           userId_schoolId: {
@@ -381,11 +531,11 @@ export async function POST(req: Request) {
             schoolId: createdSchool.id,
           },
         },
-        update: { role: "ADMIN", active: true },
+        update: { role: localCreatorRole, active: true },
         create: {
           userId: authCheck.userId,
           schoolId: createdSchool.id,
-          role: "ADMIN",
+          role: localCreatorRole,
           active: true,
         },
       });
@@ -401,6 +551,7 @@ export async function POST(req: Request) {
         inepCode: createdSchool.inepCode,
         network: createdSchool.network,
         city: createdSchool.city,
+        aiExternalFormalizeEnabled: false,
       },
       user: {
         id: authCheck.userId,
@@ -412,7 +563,16 @@ export async function POST(req: Request) {
 
     invalidateSchoolCache(createdSchool.id);
 
-    return NextResponse.json({ success: true, school: createdSchool }, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        school: {
+          ...createdSchool,
+          aiExternalFormalizeEnabled: false,
+        },
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error("[POST /api/schools] Erro:", error);
     return NextResponse.json({ error: "Erro ao criar instituição escolar" }, { status: 500 });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
-import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
 import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone } from "@/lib/sereParser";
@@ -29,7 +29,9 @@ export async function POST(req: Request) {
     const { turmas, students, transferredStudents, options } = parsed.data;
 
     // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por SuperAdmin)
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     let schoolRecord: any = currentSchool;
 
     // RBAC Guard: apenas SuperAdmin pode atualizar dados cadastrais da instituição (Ponto 5)
@@ -60,7 +62,7 @@ export async function POST(req: Request) {
         console.warn("[students/import] Aviso ao atualizar dados da escola:", err);
       }
     }
-    const schoolId: string = schoolRecord?.id || currentSchool.id || "default-leopoldina";
+    const schoolId: string = schoolRecord?.id || currentSchool.id;
     const schoolFilter = { schoolId };
 
     // 2. Sincroniza Turmas (ClassGroups) isoladas por escola

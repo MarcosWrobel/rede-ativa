@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import Link from "next/link";
+import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 import ModalDialog from "@/components/ModalDialog";
 import {
   Landmark,
@@ -193,6 +194,7 @@ export default function SecretariaClient({
         const err = await res.json();
         throw new Error(err.error || "Falha ao acessar escola");
       }
+      await clearRedeAtivaCachesOnly().catch(() => {});
       window.location.href = "/";
     } catch (e: any) {
       setErrorMsg(e.message || "Erro de conexão ao acessar unidade");

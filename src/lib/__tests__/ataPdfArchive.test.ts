@@ -7,7 +7,9 @@ const mockState = {
       name: "Natiele Pacheco",
       email: "natiele.pacheco@escola.pr.gov.br",
       role: "PEDAGOGA",
+      active: true,
       schoolId: "school-leopoldina",
+      schools: [{ schoolId: "school-leopoldina", role: "PEDAGOGA", active: true }],
     },
   } as any,
 };
@@ -33,6 +35,22 @@ vi.mock("@/lib/currentSchool", () => ({
     id: schoolId || "school-leopoldina",
     name: "Colégio Estadual Leopoldina B. Pedroso",
     inepCode: "41042730",
+    edition: "PILOTO_INTEGRADA",
+  })),
+  getAuthorizedCurrentSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => ({
+    id: explicitSchoolId || "school-leopoldina",
+    name: "Colégio Estadual Leopoldina B. Pedroso",
+    inepCode: "41042730",
+    edition: "PILOTO_INTEGRADA",
+  })),
+  requireAuthorizedSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => ({
+    ok: true,
+    school: {
+      id: explicitSchoolId || "school-leopoldina",
+      name: "Colégio Estadual Leopoldina B. Pedroso",
+      inepCode: "41042730",
+      edition: "PILOTO_INTEGRADA",
+    },
   })),
 }));
 
@@ -42,6 +60,31 @@ import { GET as getPdfaRoute } from "@/app/api/atas/[id]/pdfa/route";
 import { prisma } from "../prisma";
 
 describe("JUR-08: Preservação Arquivística Binária PDF/A-1b (ISO 19005-1 Level B)", () => {
+  beforeEach(() => {
+    vi.spyOn(prisma.user, "findUnique").mockResolvedValue({
+      id: "usr_pedagoga_1",
+      email: "natiele.pacheco@escola.pr.gov.br",
+      name: "Natiele Pacheco",
+      role: "PEDAGOGA",
+      active: true,
+      schoolId: "school-leopoldina",
+      schools: [
+        {
+          schoolId: "school-leopoldina",
+          role: "PEDAGOGA",
+          active: true,
+          school: {
+            id: "school-leopoldina",
+            name: "Colégio Estadual Leopoldina B. Pedroso",
+            inepCode: "41042730",
+            edition: "PILOTO_INTEGRADA",
+          },
+        },
+      ],
+      networks: [],
+    } as any);
+  });
+
   const dummyMinute = {
     id: "ata-pdfa-test-1",
     schoolId: "school-leopoldina",

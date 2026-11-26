@@ -49,6 +49,7 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
   const isStandalonePage =
     pathname === "/" ||
     pathname === "/login" ||
+    pathname === "/sem-escola" ||
     pathname === "/impacto" ||
     pathname === "/preview-landing" ||
     pathname.startsWith("/impacto/") ||

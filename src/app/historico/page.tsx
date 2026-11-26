@@ -1,23 +1,17 @@
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { checkIsAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import HistoricoClient from "./HistoricoClient";
-import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 const INITIAL_PAGE_SIZE = 30;
 
 export default async function HistoricoPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
-  const isAdmin = checkIsAdmin(session);
+  const isAdmin = ctx.isSchoolManager;
 
   let logs: any[] = [];
   let totalCount = 0;
@@ -71,7 +65,8 @@ export default async function HistoricoPage() {
       currentUser={{
         name: session.user.name || "Pedagoga",
         email: session.user.email || "",
-        role: isAdmin ? "ADMIN" : "PEDAGOGA",
+        role: ctx.effectiveRole || (isAdmin ? "GESTOR_ESCOLAR" : "PEDAGOGA"),
+        isAdmin,
       }}
     />
   );

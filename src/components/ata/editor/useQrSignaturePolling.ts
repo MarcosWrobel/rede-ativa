@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AtaParticipantDraft } from "./types";
+import type { AtaMinuteRecord, AtaParticipantDraft } from "./types";
 import {
   createQrPollController,
   type QrPollController,
@@ -17,6 +17,7 @@ export interface UseQrSignaturePollingParams {
     openId: string;
   } | null;
   onParticipantsSynced: (participants: AtaParticipantDraft[]) => void;
+  onMinuteSynced?: (minute: AtaMinuteRecord) => void;
   onCompletedClose: () => void;
   onSaved?: () => void;
 }
@@ -25,6 +26,7 @@ export function useQrSignaturePolling({
   minuteId,
   qrModalInfo,
   onParticipantsSynced,
+  onMinuteSynced,
   onCompletedClose,
   onSaved,
 }: UseQrSignaturePollingParams) {
@@ -37,6 +39,7 @@ export function useQrSignaturePolling({
 
   const callbacksRef = useRef({
     onParticipantsSynced,
+    onMinuteSynced,
     onCompletedClose,
     onSaved,
   });
@@ -44,10 +47,11 @@ export function useQrSignaturePolling({
   useEffect(() => {
     callbacksRef.current = {
       onParticipantsSynced,
+      onMinuteSynced,
       onCompletedClose,
       onSaved,
     };
-  }, [onParticipantsSynced, onCompletedClose, onSaved]);
+  }, [onParticipantsSynced, onMinuteSynced, onCompletedClose, onSaved]);
 
   const controllerRef = useRef<QrPollController | null>(null);
 
@@ -80,6 +84,9 @@ export function useQrSignaturePolling({
         },
         onParticipantsSynced: (parts) => {
           callbacksRef.current.onParticipantsSynced(parts);
+        },
+        onMinuteSynced: (minute) => {
+          callbacksRef.current.onMinuteSynced?.(minute);
         },
         onCompletedClose: () => {
           callbacksRef.current.onCompletedClose();

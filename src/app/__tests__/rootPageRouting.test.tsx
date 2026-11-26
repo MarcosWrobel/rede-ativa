@@ -30,6 +30,27 @@ vi.mock("@/lib/auth", () => ({
   auth: async () => mockSession,
 }));
 
+vi.mock("@/lib/serverAuthContext", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/serverAuthContext")>("@/lib/serverAuthContext");
+  return {
+    ...actual,
+    resolveServerUserAuthSnapshot: vi.fn(async (session: any) => {
+      if (!session?.user?.email || session.user.active === false) return null;
+      return {
+        id: "usr-mock",
+        email: session.user.email,
+        name: session.user.name || "Usuária",
+        role: session.user.role || "PEDAGOGA",
+        active: true,
+        schoolId: "school-mock",
+        schools: [{ schoolId: "school-mock", role: session.user.role || "PEDAGOGA", active: true, school: { id: "school-mock", inepCode: "99990001", name: "Escola", city: "Ponta Grossa", network: "ESTADUAL", networkId: null, active: true } }],
+        networks: session.user.role === "GESTAO_SECRETARIA" ? [{ networkId: "net-1", role: "GESTAO_SECRETARIA", active: true, network: { id: "net-1", name: "SEMEC", shortName: "SEMEC", city: "Tibagi", type: "MUNICIPAL", active: true } }] : [],
+        source: "database",
+      };
+    }),
+  };
+});
+
 describe("Roteamento Inteligente da Raiz (src/app/page.tsx)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

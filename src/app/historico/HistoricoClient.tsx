@@ -42,6 +42,7 @@ interface Props {
     name: string;
     email: string;
     role: string;
+    isAdmin?: boolean;
   };
 }
 
@@ -98,7 +99,11 @@ export default function HistoricoClient({
   const [deleteError, setDeleteError] = useState("");
 
   const isAdmin =
-    currentUser.role === "ADMIN" || isBootstrapAdminEmail(currentUser.email);
+    currentUser.isAdmin === true ||
+    currentUser.role === "SUPERADMIN" ||
+    currentUser.role === "GESTOR_ESCOLAR" ||
+    currentUser.role === "GESTAO_SECRETARIA" ||
+    isBootstrapAdminEmail(currentUser.email);
 
   // Debounce search input (300ms)
   useEffect(() => {

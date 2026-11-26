@@ -3,7 +3,7 @@
  * Compartilhadas entre src/proxy.ts e os testes automatizados
  */
 
-export const PUBLIC_PATHS = ["/", "/login", "/impacto", "/preview-landing"];
+export const PUBLIC_PATHS = ["/", "/login", "/impacto", "/preview-landing", "/sw.js"];
 
 export const PUBLIC_PREFIXES = [
   "/validar/ata/",

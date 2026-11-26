@@ -17,6 +17,7 @@ export type AuditAction =
   | "LOGIN_DENIED"
   | "CREATE_USER"
   | "UPDATE_USER"
+  | "UPDATE_USER_GLOBAL"
   | "DEACTIVATE_USER"
   | "GENERATE_DOSSIER"
   | "CREATE_STUDENT_CONTACT"
@@ -30,6 +31,8 @@ export type AuditAction =
   | "UPDATE_ATA_DRAFT"
   | "DELETE_ATA_DRAFT"
   | "ADMIN_DELETE_ATA"
+  | "SIGN_ATA_SCREEN"
+  | "REOPEN_ATA_DRAFT"
   | "FINALIZE_ATA"
   | "ADD_ATA_ADDENDUM"
   | "VOID_ATA"
@@ -39,6 +42,8 @@ export type AuditAction =
   | "GENERATE_WEEKLY_DIGEST"
   | "CREATE_SCHOOL"
   | "UPDATE_SCHOOL"
+  | "UPDATE_SCHOOL_AI_POLICY"
+  | "TRANSITION_SCHOOL_AI_POLICY"
   | "DELETE_SCHOOL"
   | "SANITIZE_SCHOOL"
   | "CREATE_CLASS_GROUP"
@@ -62,7 +67,8 @@ export type AuditAction =
   | "CREATE_COUNCIL_TEACHER_LINK"
   | "TEACHER_SUBMIT_COUNCIL_SUBJECT"
   | "CREATE_PRE_COUNCIL_TEACHER_LINK"
-  | "TEACHER_ACK_PRE_COUNCIL";
+  | "TEACHER_ACK_PRE_COUNCIL"
+  | "AI_OPERATIONAL_EVENT";
 
 
 export interface AuditUser {
@@ -84,16 +90,7 @@ export function extractClientIp(source?: Request | Headers | null): string | nul
   return null;
 }
 
-export async function logAudit({
-  action,
-  entityType,
-  entityId,
-  details,
-  user,
-  schoolId,
-  ipAddress,
-  req,
-}: {
+export type AuditLogInput = {
   action: AuditAction;
   entityType: string;
   entityId?: string;
@@ -102,24 +99,60 @@ export async function logAudit({
   schoolId?: string | null;
   ipAddress?: string | null;
   req?: Request | Headers | null;
-}) {
-  try {
-    const detailsStr = typeof details === "object" ? JSON.stringify(details) : details;
-    const resolvedIp = ipAddress || extractClientIp(req) || null;
+};
 
-    await prisma.auditLog.create({
+export type AuditLogWriter = {
+  auditLog: {
+    create: (args: {
       data: {
-        userId: user.id || null,
-        userEmail: user.email,
-        userName: user.name,
-        action,
-        entityType,
-        entityId: entityId || null,
-        details: detailsStr || null,
-        schoolId: schoolId || null,
-        ipAddress: resolvedIp,
-      },
-    });
+        userId: string | null;
+        userEmail: string;
+        userName: string;
+        action: string;
+        entityType: string;
+        entityId: string | null;
+        details: string | null;
+        schoolId: string | null;
+        ipAddress: string | null;
+      };
+    }) => Promise<unknown>;
+  };
+};
+
+export async function logAuditStrict(
+  {
+    action,
+    entityType,
+    entityId,
+    details,
+    user,
+    schoolId,
+    ipAddress,
+    req,
+  }: AuditLogInput,
+  dbClient: AuditLogWriter = prisma as unknown as AuditLogWriter
+) {
+  const detailsStr = typeof details === "object" ? JSON.stringify(details) : details;
+  const resolvedIp = ipAddress || extractClientIp(req) || null;
+
+  await dbClient.auditLog.create({
+    data: {
+      userId: user.id || null,
+      userEmail: user.email,
+      userName: user.name,
+      action,
+      entityType,
+      entityId: entityId || null,
+      details: detailsStr || null,
+      schoolId: schoolId || null,
+      ipAddress: resolvedIp,
+    },
+  });
+}
+
+export async function logAudit(input: AuditLogInput) {
+  try {
+    await logAuditStrict(input);
   } catch (err) {
     console.error("Failed to log audit event:", err);
   }

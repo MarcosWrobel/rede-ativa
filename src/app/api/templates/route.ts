@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
-import { getCurrentSchool, isDefaultSchoolContext } from "@/lib/currentSchool";
+import { requireAuthorizedSchool, isDefaultSchoolContext } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export async function GET(req: Request) {
@@ -11,7 +11,9 @@ export async function GET(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const { searchParams } = new URL(req.url);
     const segment = searchParams.get("segment");
 
@@ -42,7 +44,9 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     const parsed = templateCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -93,7 +97,9 @@ export async function PUT(req: Request) {
     }
 
     const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = parsed.data;
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
 
     const existing = await prisma.messageTemplate.findUnique({
       where: { id },

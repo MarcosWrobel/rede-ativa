@@ -22,18 +22,37 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const sessionNetworks = ((authCheck.session?.user as any)?.networks as any[]) || [];
-    let allowedCities = sessionNetworks
-      .map((n: any) => (n.city || n.network?.city || "").trim())
-      .filter(Boolean);
-    let allowedNetworkIds = sessionNetworks
-      .map((n: any) => (n.networkId || n.id || "").trim())
-      .filter(Boolean);
+    const snapshotNetworks = (authCheck.snapshot?.networks || []).filter(
+      (n) => n.active !== false && n.network?.active !== false && (!n.role || n.role.toUpperCase() === "GESTAO_SECRETARIA")
+    );
+    const sessionNetworks = (((authCheck.session?.user as any)?.networks as any[]) || []).filter(
+      (n: any) => n?.active !== false && n?.network?.active !== false && (!n?.role || String(n.role).toUpperCase() === "GESTAO_SECRETARIA")
+    );
+
+    const resolvedNetworks: Array<{ networkId: string; city: string }> = [];
+    for (const net of snapshotNetworks) {
+      if (net.networkId) {
+        resolvedNetworks.push({
+          networkId: net.networkId,
+          city: (net.network?.city || "").trim(),
+        });
+      }
+    }
+    if (resolvedNetworks.length === 0) {
+      for (const net of sessionNetworks) {
+        const nid = String(net.networkId || net.id || "").trim();
+        if (nid) {
+          resolvedNetworks.push({
+            networkId: nid,
+            city: String(net.city || net.network?.city || "").trim(),
+          });
+        }
+      }
+    }
 
     if (
       !isSuper &&
-      allowedCities.length === 0 &&
-      allowedNetworkIds.length === 0 &&
+      resolvedNetworks.length === 0 &&
       authCheck.userId &&
       (prisma as any).userNetwork?.findMany
     ) {
@@ -41,17 +60,39 @@ export async function GET(req: Request) {
         where: { userId: authCheck.userId, active: true },
         include: { network: true },
       });
-      allowedCities = dbNetworks
-        .map((un: any) => (un.network?.city || "").trim())
-        .filter(Boolean);
-      allowedNetworkIds = dbNetworks
-        .map((un: any) => (un.networkId || "").trim())
-        .filter(Boolean);
+      for (const un of dbNetworks as any[]) {
+        if (
+          un?.active !== false &&
+          un?.network?.active !== false &&
+          (!un?.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA") &&
+          un?.networkId
+        ) {
+          resolvedNetworks.push({
+            networkId: String(un.networkId).trim(),
+            city: String(un.network?.city || "").trim(),
+          });
+        }
+      }
     }
 
-    if (!isSuper && allowedCities.length === 0 && allowedNetworkIds.length === 0) {
+    const allowedNetworkIds = Array.from(
+      new Set(resolvedNetworks.map((n) => n.networkId).filter(Boolean))
+    );
+    const allowedCities = Array.from(
+      new Set(resolvedNetworks.map((n) => n.city).filter(Boolean))
+    );
+
+    if (!isSuper && allowedNetworkIds.length === 0) {
       return NextResponse.json(
         { error: "Nenhuma rede municipal vinculada ao seu perfil." },
+        { status: 403 }
+      );
+    }
+
+    const rawNetworkIdParam = searchParams.get("networkId")?.trim();
+    if (rawNetworkIdParam && !isSuper && !allowedNetworkIds.includes(rawNetworkIdParam)) {
+      return NextResponse.json(
+        { error: "Acesso negado às métricas consolidadas de outra rede municipal." },
         { status: 403 }
       );
     }
@@ -59,9 +100,9 @@ export async function GET(req: Request) {
     const rawCityParam = searchParams.get("city")?.trim();
     const requestedCity = rawCityParam || allowedCities[0] || "";
 
-    if (!isSuper && allowedCities.length > 0) {
+    if (!isSuper && rawCityParam && allowedCities.length > 0) {
       const isCityAllowed = allowedCities.some(
-        (c) => c.toLowerCase() === requestedCity.toLowerCase()
+        (c) => c.toLowerCase() === rawCityParam.toLowerCase()
       );
       if (!isCityAllowed) {
         return NextResponse.json(
@@ -71,15 +112,19 @@ export async function GET(req: Request) {
       }
     }
 
-    // 1. Busca todas as escolas municipais da cidade (ou da rede vinculada)
+    const effectiveNetworkIds = rawNetworkIdParam ? [rawNetworkIdParam] : allowedNetworkIds;
+
+    // 1. Busca estritamente escolas municipais cujo networkId pertença às redes ativas vinculadas ao usuário
     const municipalSchools = await prisma.school.findMany({
       where: {
         active: true,
         network: "MUNICIPAL",
+        ...(!isSuper
+          ? { networkId: { in: effectiveNetworkIds } }
+          : rawNetworkIdParam
+            ? { networkId: rawNetworkIdParam }
+            : {}),
         ...(requestedCity ? { city: { equals: requestedCity, mode: "insensitive" } } : {}),
-        ...(!isSuper && allowedCities.length === 0 && allowedNetworkIds.length > 0
-          ? { networkId: { in: allowedNetworkIds } }
-          : {}),
       },
       select: {
         id: true,

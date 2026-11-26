@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp } from "@/lib/audit";
-import { anonymizeOtherMinorsInText, validatePngSignatureDataUrl } from "@/lib/ataCrypto";
+import {
+  anonymizeOtherMinorsInText,
+  buildStudentMaskingEntries,
+  validatePngSignatureDataUrl,
+} from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import { z } from "zod";
 import {
@@ -10,6 +14,11 @@ import {
 } from "@/lib/escolaGoogleVerify";
 import { enforceRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { acquireMinuteWriteLock } from "@/lib/minuteLock";
+import {
+  evaluateMinuteRevisionLock,
+  hasMinimumOfficialSummary,
+  OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+} from "@/lib/ataRevision";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +27,7 @@ const MAX_SIG_BASE64_CHARS = 700_000;
 const MAX_STROKE_BYTES = 200 * 1024; // 200 KB
 
 const submitSignSchema = z.object({
+  expectedRevision: z.number().int().min(1).optional(),
   // Modo 1: Assinatura manuscrita em tela (canvas)
   signatureData: z.string().optional().nullable(),
   biometricStrokeData: z.string().optional().nullable(),
@@ -47,15 +57,34 @@ export async function GET(
           select: {
             id: true,
             status: true,
+            contentRevision: true,
+            physicalScanRevision: true,
+            physicalScanSupersededAt: true,
+            hasPhysicalScan: true,
+            govBrVerified: true,
             subject: true,
             summary: true,
             agreementsSummary: true,
             attendedAt: true,
             school: { select: { name: true } },
+            participants: {
+              select: {
+                id: true,
+                signatureMode: true,
+                hasSignature: true,
+                signatureData: true,
+                verifiedEmail: true,
+                signedAt: true,
+                biometricVerified: true,
+                signedRevision: true,
+              },
+            },
             students: {
               select: {
                 studentId: true,
                 studentNameSnapshot: true,
+                previousNameSnapshots: true,
+                student: { select: { name: true } },
               },
             },
           },
@@ -66,7 +95,11 @@ export async function GET(
     if (!participant) {
       console.warn("[GET /api/atas/sign-token] Acesso recusado:", { reason: "token_not_found" });
       return NextResponse.json(
-        { error: "Link de assinatura inválido, substituído, revogado ou já utilizado." },
+        {
+          error:
+            "Link de assinatura inválido, substituído, revogado após alteração da ata ou já utilizado. Solicite um novo link à equipe escolar.",
+          code: "LINK_REVOKED_OR_SUPERSEDED",
+        },
         { status: 404 }
       );
     }
@@ -80,6 +113,33 @@ export async function GET(
       return NextResponse.json(
         { error: "Esta ata pedagógica já foi finalizada ou cancelada." },
         { status: 410 }
+      );
+    }
+
+    const lockState = evaluateMinuteRevisionLock(participant.minute);
+    if (lockState.hasLegacyUnprovableProof) {
+      return NextResponse.json(
+        {
+          error:
+            "Esta ata possui registro anterior sem comprovação de revisão. Solicite à equipe escolar a reabertura e um novo link atualizado.",
+          code: "LEGACY_SIGNATURE_REQUIRES_REOPEN",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (
+      participant.mobileSignRevision === null ||
+      participant.mobileSignRevision === undefined ||
+      participant.mobileSignRevision !== lockState.currentRevision
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "O conteúdo desta ata foi atualizado após a emissão deste link. Solicite um novo link atualizado à equipe escolar.",
+          code: "REVISION_SUPERSEDED",
+        },
+        { status: 409 }
       );
     }
 
@@ -102,10 +162,17 @@ export async function GET(
       );
     }
 
-    const linkedStudents = ((participant.minute as any).students || []).map((s: any) => ({
-      id: s.studentId,
-      name: s.studentNameSnapshot || "",
-    }));
+    if (!hasMinimumOfficialSummary(participant.minute.summary)) {
+      return NextResponse.json(
+        {
+          error: OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+          code: "OFFICIAL_SUMMARY_REQUIRED",
+        },
+        { status: 409 }
+      );
+    }
+
+    const linkedStudents = buildStudentMaskingEntries((participant.minute as any).students || []);
     const shouldAnonymizeOthers =
       linkedStudents.length > 1 &&
       (participant.role === "RESPONSAVEL" ||
@@ -138,6 +205,7 @@ export async function GET(
         agreementsSummary: safeAgreements,
         attendedAt: participant.minute.attendedAt,
         expiresAt: participant.mobileSignExpiresAt?.toISOString() || null,
+        minuteRevision: lockState.currentRevision,
       },
     });
   } catch (error: any) {
@@ -162,14 +230,22 @@ export async function POST(
     const participant = await prisma.pedagogicalMinuteParticipant.findUnique({
       where: { mobileSignToken: token },
       include: {
-        minute: true,
+        minute: {
+          include: {
+            participants: true,
+          },
+        },
       },
     });
 
     if (!participant) {
       console.warn("[POST /api/atas/sign-token] Submissão recusada:", { reason: "token_not_found" });
       return NextResponse.json(
-        { error: "Link de assinatura inválido, substituído, revogado ou já utilizado." },
+        {
+          error:
+            "Este link não é mais válido porque a ata foi atualizada, reaberta ou o link foi revogado. Solicite um novo link atualizado à equipe escolar.",
+          code: "LINK_REVOKED_OR_SUPERSEDED",
+        },
         { status: 404 }
       );
     }
@@ -204,11 +280,58 @@ export async function POST(
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Payload de assinatura inválido" }, { status: 400 });
     }
 
-    const { signatureData, biometricStrokeData, clientTimestampIso, biometricVerified, biometricDeviceType, googleIdToken, dryRun } = parsed.data;
+    const {
+      expectedRevision,
+      signatureData,
+      biometricStrokeData,
+      clientTimestampIso,
+      biometricVerified,
+      biometricDeviceType,
+      googleIdToken,
+      dryRun,
+    } = parsed.data;
+
+    const preLockState = evaluateMinuteRevisionLock(participant.minute);
+    if (preLockState.hasLegacyUnprovableProof) {
+      return NextResponse.json(
+        {
+          error:
+            "Esta ata possui assinatura anterior sem comprovação de revisão. Solicite à equipe escolar a reabertura e um novo link atualizado.",
+          code: "LEGACY_SIGNATURE_REQUIRES_REOPEN",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (
+      participant.mobileSignRevision === null ||
+      participant.mobileSignRevision === undefined ||
+      participant.mobileSignRevision !== preLockState.currentRevision ||
+      (expectedRevision !== undefined && expectedRevision !== preLockState.currentRevision)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "O conteúdo desta ata foi atualizado após a emissão deste link. Solicite um novo link atualizado à equipe escolar.",
+          code: "REVISION_SUPERSEDED",
+        },
+        { status: 409 }
+      );
+    }
 
     if (participant.signedAt || participant.signatureData || participant.verifiedEmail) {
       return NextResponse.json(
         { error: "Esta assinatura já foi registrada anteriormente. Solicite um novo link caso precise assinar novamente." },
+        { status: 409 }
+      );
+    }
+
+    if (!hasMinimumOfficialSummary(participant.minute.summary)) {
+      return NextResponse.json(
+        {
+          error: OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+          code: "OFFICIAL_SUMMARY_REQUIRED",
+        },
         { status: 409 }
       );
     }
@@ -286,17 +409,55 @@ export async function POST(
 
         const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
           where: { id: participant.id, mobileSignToken: token },
-          include: { minute: true },
+          include: { minute: { include: { participants: true } } },
         });
 
         if (!freshParticipant) {
-          return { ok: false as const, status: 404, error: "Link de assinatura inválido, substituído, revogado ou já utilizado." };
+          return {
+            ok: false as const,
+            status: 404,
+            code: "LINK_REVOKED_OR_SUPERSEDED",
+            error:
+              "Este link não é mais válido porque a ata foi atualizada, reaberta ou o link foi revogado. Solicite um novo link atualizado à equipe escolar.",
+          };
         }
         if (freshParticipant.minute.status !== "DRAFT") {
           return { ok: false as const, status: 410, error: "Esta ata pedagógica já foi finalizada ou cancelada." };
         }
         if (isSignTokenExpired(freshParticipant.mobileSignExpiresAt, Date.now())) {
           return { ok: false as const, status: 410, error: "Este link de assinatura expirou." };
+        }
+        const txLockState = evaluateMinuteRevisionLock(freshParticipant.minute);
+        if (txLockState.hasLegacyUnprovableProof) {
+          return {
+            ok: false as const,
+            status: 409,
+            code: "LEGACY_SIGNATURE_REQUIRES_REOPEN",
+            error:
+              "Esta ata possui assinatura anterior sem comprovação de revisão. Solicite à equipe escolar a reabertura e um novo link atualizado.",
+          };
+        }
+        if (
+          freshParticipant.mobileSignRevision === null ||
+          freshParticipant.mobileSignRevision === undefined ||
+          freshParticipant.mobileSignRevision !== txLockState.currentRevision ||
+          (expectedRevision !== undefined && expectedRevision !== txLockState.currentRevision)
+        ) {
+          return {
+            ok: false as const,
+            status: 409,
+            code: "REVISION_SUPERSEDED",
+            error:
+              "O conteúdo desta ata foi atualizado após a emissão deste link. Solicite um novo link atualizado à equipe escolar.",
+          };
+        }
+        if (!hasMinimumOfficialSummary(freshParticipant.minute.summary)) {
+          return {
+            ok: false as const,
+            status: 409,
+            code: "OFFICIAL_SUMMARY_REQUIRED",
+            error: OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+          };
         }
         if (
           freshParticipant.signedAt ||
@@ -344,6 +505,8 @@ export async function POST(
           biometricAuthTime: biometricVerified ? now : null,
           mobileSignToken: null, // Queima token de uso único
           mobileSignExpiresAt: null,
+          mobileSignRevision: null,
+          signedRevision: txLockState.currentRevision,
           hasSignature: true,
           hasActiveSignLink: false,
         };
@@ -371,11 +534,18 @@ export async function POST(
           });
         }
 
-        return { ok: true as const, studentId: freshParticipant.studentId };
+        return {
+          ok: true as const,
+          studentId: freshParticipant.studentId,
+          signedRevision: txLockState.currentRevision,
+        };
       });
 
       if (!txResult.ok) {
-        return NextResponse.json({ error: txResult.error }, { status: txResult.status });
+        return NextResponse.json(
+          { error: txResult.error, ...(txResult.code ? { code: txResult.code } : {}) },
+          { status: txResult.status }
+        );
       }
 
       // Se houver studentId vinculado e o e-mail no cadastro do aluno estiver vazio, atualiza automaticamente
@@ -394,6 +564,7 @@ export async function POST(
         success: true,
         mode: "ESCOLA_OAUTH",
         verifiedEmail,
+        signedRevision: txResult.signedRevision,
         message: "Assinatura digital institucional @escola.pr.gov.br confirmada com sucesso!",
       });
     }
@@ -407,23 +578,6 @@ export async function POST(
     }
 
     const now = new Date();
-    const updateData = {
-      signatureMode: "MOBILE_QR",
-      signatureData,
-      signedAt: now,
-      signerIp: ip,
-      signerUserAgent: userAgent,
-      biometricStrokeData: biometricStrokeData || null,
-      clientTimestampIso: clientTimestampIso || now.toISOString(),
-      biometricVerified,
-      biometricDeviceType: biometricDeviceType || null,
-      biometricAuthTime: biometricVerified ? now : null,
-      mobileSignToken: null, // Queima o token de uso único atomicamente
-      mobileSignExpiresAt: null,
-      hasSignature: true,
-      hasActiveSignLink: false,
-    };
-
     const targetMinuteId = participant.minuteId || participant.minute.id;
     const runTx =
       typeof prisma.$transaction === "function"
@@ -435,17 +589,55 @@ export async function POST(
 
       const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
         where: { id: participant.id, mobileSignToken: token },
-        include: { minute: true },
+        include: { minute: { include: { participants: true } } },
       });
 
       if (!freshParticipant) {
-        return { ok: false as const, status: 404, error: "Link de assinatura inválido, substituído, revogado ou já utilizado." };
+        return {
+          ok: false as const,
+          status: 404,
+          code: "LINK_REVOKED_OR_SUPERSEDED",
+          error:
+            "Este link não é mais válido porque a ata foi atualizada, reaberta ou o link foi revogado. Solicite um novo link atualizado à equipe escolar.",
+        };
       }
       if (freshParticipant.minute.status !== "DRAFT") {
         return { ok: false as const, status: 410, error: "Esta ata pedagógica já foi finalizada ou cancelada." };
       }
       if (isSignTokenExpired(freshParticipant.mobileSignExpiresAt, Date.now())) {
         return { ok: false as const, status: 410, error: "Este link de assinatura expirou." };
+      }
+      const txLockState = evaluateMinuteRevisionLock(freshParticipant.minute);
+      if (txLockState.hasLegacyUnprovableProof) {
+        return {
+          ok: false as const,
+          status: 409,
+          code: "LEGACY_SIGNATURE_REQUIRES_REOPEN",
+          error:
+            "Esta ata possui assinatura anterior sem comprovação de revisão. Solicite à equipe escolar a reabertura e um novo link atualizado.",
+        };
+      }
+      if (
+        freshParticipant.mobileSignRevision === null ||
+        freshParticipant.mobileSignRevision === undefined ||
+        freshParticipant.mobileSignRevision !== txLockState.currentRevision ||
+        (expectedRevision !== undefined && expectedRevision !== txLockState.currentRevision)
+      ) {
+        return {
+          ok: false as const,
+          status: 409,
+          code: "REVISION_SUPERSEDED",
+          error:
+            "O conteúdo desta ata foi atualizado após a emissão deste link. Solicite um novo link atualizado à equipe escolar.",
+        };
+      }
+      if (!hasMinimumOfficialSummary(freshParticipant.minute.summary)) {
+        return {
+          ok: false as const,
+          status: 409,
+          code: "OFFICIAL_SUMMARY_REQUIRED",
+          error: OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+        };
       }
       if (
         freshParticipant.signedAt ||
@@ -460,6 +652,25 @@ export async function POST(
           error: "Este link de assinatura já foi utilizado ou o participante possui registro de recusa.",
         };
       }
+
+      const updateData = {
+        signatureMode: "MOBILE_QR",
+        signatureData,
+        signedAt: now,
+        signerIp: ip,
+        signerUserAgent: userAgent,
+        biometricStrokeData: biometricStrokeData || null,
+        clientTimestampIso: clientTimestampIso || now.toISOString(),
+        biometricVerified,
+        biometricDeviceType: biometricDeviceType || null,
+        biometricAuthTime: biometricVerified ? now : null,
+        mobileSignToken: null, // Queima o token de uso único atomicamente
+        mobileSignExpiresAt: null,
+        mobileSignRevision: null,
+        signedRevision: txLockState.currentRevision,
+        hasSignature: true,
+        hasActiveSignLink: false,
+      };
 
       if (typeof (tx.pedagogicalMinuteParticipant as any).updateMany === "function") {
         const atomicRes = await tx.pedagogicalMinuteParticipant.updateMany({
@@ -484,16 +695,20 @@ export async function POST(
         });
       }
 
-      return { ok: true as const };
+      return { ok: true as const, signedRevision: txLockState.currentRevision };
     });
 
     if (!txResult.ok) {
-      return NextResponse.json({ error: txResult.error }, { status: txResult.status });
+      return NextResponse.json(
+        { error: txResult.error, ...(txResult.code ? { code: txResult.code } : {}) },
+        { status: txResult.status }
+      );
     }
 
     return NextResponse.json({
       success: true,
       mode: "MOBILE_QR",
+      signedRevision: txResult.signedRevision,
       message: "Assinatura coletada com sucesso. Obrigado!",
     });
   } catch (error: any) {

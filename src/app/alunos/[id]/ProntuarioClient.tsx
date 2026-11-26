@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import {
   ArrowLeft,
   FileText,
@@ -1054,6 +1055,7 @@ export default function ProntuarioClient({
                 {minutes.map((m) => {
                   const isFinal = m.status === "FINALIZED";
                   const isVoid = m.status === "VOIDED";
+                  const isRestrictedConfidential = Boolean(m.restrictedConfidential);
                   const numStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
 
                   return (
@@ -1094,58 +1096,70 @@ export default function ProntuarioClient({
                             {m.subject}
                           </h3>
 
-                          <p className="text-slate-600">
-                            Lavrada por: <strong>{m.authorName}</strong> • Presentes:{" "}
-                            {m.participants?.map((p: any) => p.name).join(", ") || "Nenhum informado"}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => setScanningMinute(m)}
-                            className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                              m.hasPhysicalScan || m.physicalSignedScanData || m.physicalScanStorageKey
-                                ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                            }`}
-                            title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
-                          >
-                            <Camera className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>
-                              {m.hasPhysicalScan || m.physicalSignedScanData || m.physicalScanStorageKey
-                                ? m.govBrVerified
-                                  ? "🏛️ Gov.br Anexo"
-                                  : "📄 Via Física Anexa"
-                                : "Anexar Via Física"}
-                            </span>
-                          </button>
-
-                          {isFinal && (
-                            <Link
-                              href={`/atas/${m.id}/imprimir`}
-                              target="_blank"
-                              className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition"
-                              title="Imprimir Via A4 Oficial"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </Link>
+                          {!isRestrictedConfidential && (
+                            <p className="text-slate-600">
+                              Lavrada por: <strong>{m.authorName}</strong> • Presentes:{" "}
+                              {m.participants?.map((p: any) => p.name).join(", ") || "Nenhum informado"}
+                            </p>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingMinute(m);
-                              setIsAtaEditorOpen(true);
-                            }}
-                            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
-                              !isFinal && !isVoid
-                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                                : "border border-slate-200 bg-white hover:bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {!isFinal && !isVoid ? "Editar / Lavrar" : "Detalhes / Adendo"}
-                          </button>
                         </div>
+
+                        {!isRestrictedConfidential && (
+                          <div className="flex flex-wrap items-center space-x-2">
+                            {(() => {
+                              const physicalProof = evaluateEffectivePhysicalProof(m);
+                              const hasCurrentScan =
+                                physicalProof.hasValidPhysicalProof &&
+                                physicalProof.hasPhysicalArtifact;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setScanningMinute(m)}
+                                  className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                                    hasCurrentScan
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                  }`}
+                                  title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
+                                >
+                                  <Camera className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>
+                                    {hasCurrentScan
+                                      ? physicalProof.isValidGovBrVerified
+                                        ? "🏛️ Gov.br Anexo"
+                                        : "📄 Via Física Anexa"
+                                      : "Anexar Via Física"}
+                                  </span>
+                                </button>
+                              );
+                            })()}
+
+                            {isFinal && (
+                              <Link
+                                href={`/atas/${m.id}/imprimir`}
+                                target="_blank"
+                                className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition"
+                                title="Imprimir Via A4 Oficial"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </Link>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMinute(m);
+                                setIsAtaEditorOpen(true);
+                              }}
+                              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
+                                !isFinal && !isVoid
+                                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  : "border border-slate-200 bg-white hover:bg-slate-100 text-slate-700"
+                              }`}
+                            >
+                              {!isFinal && !isVoid ? "Editar / Lavrar" : "Detalhes / Adendo"}
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <p className="text-slate-700 leading-relaxed font-serif bg-white p-3 rounded-xl border border-slate-100">
@@ -1798,7 +1812,21 @@ export default function ProntuarioClient({
         onClose={() => setScanningMinute(null)}
         onSuccess={(updated) => {
           setMinutes((prev) =>
-            prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+            prev.map((m) => {
+              if (m.id !== updated.id) return m;
+              const merged = {
+                ...m,
+                ...updated,
+                physicalProofHistory: updated.physicalProofHistory ?? m.physicalProofHistory,
+              };
+              const proof = evaluateEffectivePhysicalProof(merged);
+              return {
+                ...merged,
+                hasPhysicalScan: proof.hasValidPhysicalProof && proof.hasPhysicalArtifact,
+                govBrVerified: proof.isValidGovBrVerified,
+                govBrProtocol: proof.effectiveGovBrProtocol,
+              };
+            })
           );
           setScanningMinute(null);
         }}

@@ -8,7 +8,6 @@ import {
   isExtensionActive,
   openWhatsAppChatViaExtension,
 } from "@/lib/clientDispatcher";
-import { getStoredPreference } from "@/lib/storageKeys";
 import {
   REPLY_CATEGORY_OPTIONS,
   type ReplyCategory,
@@ -323,10 +322,6 @@ function WhatsAppReplyCaptureModalContent({
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-        const savedKey = getStoredPreference("gemini_api_key");
-        if (savedKey && savedKey.trim().length > 10) {
-          headers["x-gemini-key"] = savedKey.trim();
-        }
 
         const res = await fetch("/api/ai/classify-reply", {
           method: "POST",

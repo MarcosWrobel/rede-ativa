@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getSchoolContextByVerifiedId, UnauthorizedSchoolError } from "@/lib/currentSchool";
 
 export interface WeeklyDigestData {
   generatedAt: string;
@@ -49,7 +49,10 @@ export interface WeeklyDigestData {
 }
 
 export async function compileWeeklyDigest(targetSchoolId?: string): Promise<WeeklyDigestData> {
-  const school = await getCurrentSchool(targetSchoolId);
+  const school = await getSchoolContextByVerifiedId(targetSchoolId);
+  if (!school) {
+    throw new UnauthorizedSchoolError();
+  }
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 

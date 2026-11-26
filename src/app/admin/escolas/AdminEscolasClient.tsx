@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import type { ExternalAiServerStatus } from "@/lib/aiPolicy";
+import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 import {
   Landmark,
   Plus,
@@ -50,6 +52,10 @@ export interface SchoolItem {
   email: string | null;
   logoUrl: string | null;
   edition?: "PILOTO_INTEGRADA" | "INSTITUCIONAL_ESSENCIAL";
+  aiExternalFormalizeEnabled?: boolean;
+  legacyPolicyPendingTransition?: boolean;
+  aiExternalFormalizeUpdatedAt?: string | null;
+  aiExternalFormalizeUpdatedBy?: string | null;
   settings?: Record<string, any>;
   hasSyncToken: boolean;
   lastSyncAt?: string | null;
@@ -58,19 +64,32 @@ export interface SchoolItem {
   staffCount: number;
   staff?: StaffMember[];
   createdAt: string;
+  updatedAt?: string;
 }
+
+const DEFAULT_AI_SERVER_STATUS: ExternalAiServerStatus = {
+  provider: "google_gemini",
+  providerLabel: "Provedor configurado no servidor",
+  globalEnabled: false,
+  credentialConfigured: false,
+  available: false,
+  unavailableReason: "disabled_globally",
+};
 
 interface AdminEscolasClientProps {
   schools: SchoolItem[];
   activeSchoolId: string | null;
+  aiServerStatus?: ExternalAiServerStatus;
 }
 
 export default function AdminEscolasClient({
   schools: initialSchools,
   activeSchoolId: initialActiveId,
+  aiServerStatus: initialAiServerStatus = DEFAULT_AI_SERVER_STATUS,
 }: AdminEscolasClientProps) {
   const [schools, setSchools] = useState<SchoolItem[]>(initialSchools);
   const [activeSchoolId, setActiveSchoolId] = useState<string | null>(initialActiveId);
+  const [aiServerStatus, setAiServerStatus] = useState<ExternalAiServerStatus>(initialAiServerStatus);
   const [search, setSearch] = useState("");
   const [networkFilter, setNetworkFilter] = useState<string>("ALL");
 
@@ -101,6 +120,10 @@ export default function AdminEscolasClient({
     emergencyContactPhone: "",
   });
   const [updating, setUpdating] = useState(false);
+
+  // Política explícita de IA externa por escola (ação separada de SUPERADMIN com trava otimista)
+  const [aiPolicySchool, setAiPolicySchool] = useState<SchoolItem | null>(null);
+  const [aiPolicySubmitting, setAiPolicySubmitting] = useState(false);
 
   // Staff Modal State
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
@@ -174,6 +197,7 @@ export default function AdminEscolasClient({
         email: editFormData.email.trim() || null,
         logoUrl: editFormData.logoUrl.trim() || null,
         edition: editFormData.edition,
+        expectedUpdatedAt: editingSchool.updatedAt || editingSchool.createdAt,
         settings: {
           criticalAbsenceThreshold: Number(editFormData.criticalAbsenceThreshold) || 5,
           emergencyContactPhone: editFormData.emergencyContactPhone.trim() || null,
@@ -214,7 +238,13 @@ export default function AdminEscolasClient({
                 phone: sc.phone,
                 email: sc.email,
                 logoUrl: sc.logoUrl,
-                settings: payload.settings,
+                edition: payload.edition,
+                aiExternalFormalizeEnabled: Boolean(sc.aiExternalFormalizeEnabled),
+                updatedAt: sc.updatedAt || s.updatedAt,
+                settings: {
+                  ...s.settings,
+                  ...payload.settings,
+                },
               }
             : s
         )
@@ -230,6 +260,100 @@ export default function AdminEscolasClient({
       setFeedback({ type: "error", message: err.message || "Falha ao atualizar instituição." });
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleOpenAiPolicyModal = (school: SchoolItem) => {
+    setAiPolicySchool(school);
+    setFeedback(null);
+  };
+
+  const handleSubmitAiPolicy = async () => {
+    if (!aiPolicySchool) return;
+    const currentlyEnabled = Boolean(aiPolicySchool.aiExternalFormalizeEnabled);
+    const nextEnabled = !currentlyEnabled;
+
+    setAiPolicySubmitting(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/schools/${aiPolicySchool.id}/ai-policy`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          aiExternalFormalizeEnabled: nextEnabled,
+          expectedUpdatedAt: aiPolicySchool.updatedAt || aiPolicySchool.createdAt,
+          expectedPreviousEnabled: currentlyEnabled,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.serverAvailability) {
+        setAiServerStatus(data.serverAvailability);
+      }
+
+      if (res.status === 409 && data.school) {
+        setSchools((prev) =>
+          prev.map((s) =>
+            s.id === data.school.id
+              ? {
+                  ...s,
+                  aiExternalFormalizeEnabled: Boolean(data.school.aiExternalFormalizeEnabled),
+                  legacyPolicyPendingTransition: Boolean(data.school.legacyPolicyPendingTransition),
+                  aiExternalFormalizeUpdatedAt:
+                    data.school.aiExternalFormalizeUpdatedAt ?? s.aiExternalFormalizeUpdatedAt,
+                  aiExternalFormalizeUpdatedBy:
+                    data.school.aiExternalFormalizeUpdatedBy ?? s.aiExternalFormalizeUpdatedBy,
+                  updatedAt: data.school.updatedAt || s.updatedAt,
+                }
+              : s
+          )
+        );
+        setAiPolicySchool((prev) =>
+          prev
+            ? {
+                ...prev,
+                aiExternalFormalizeEnabled: Boolean(data.school.aiExternalFormalizeEnabled),
+                legacyPolicyPendingTransition: Boolean(data.school.legacyPolicyPendingTransition),
+                aiExternalFormalizeUpdatedAt:
+                  data.school.aiExternalFormalizeUpdatedAt ?? prev.aiExternalFormalizeUpdatedAt,
+                aiExternalFormalizeUpdatedBy:
+                  data.school.aiExternalFormalizeUpdatedBy ?? prev.aiExternalFormalizeUpdatedBy,
+                updatedAt: data.school.updatedAt || prev.updatedAt,
+              }
+            : null
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Não foi possível alterar a política de IA da escola.");
+      }
+
+      setSchools((prev) =>
+        prev.map((s) =>
+          s.id === data.school.id
+            ? {
+                ...s,
+                aiExternalFormalizeEnabled: Boolean(data.school.aiExternalFormalizeEnabled),
+                legacyPolicyPendingTransition: false,
+                aiExternalFormalizeUpdatedAt:
+                  data.school.aiExternalFormalizeUpdatedAt ?? s.aiExternalFormalizeUpdatedAt,
+                aiExternalFormalizeUpdatedBy:
+                  data.school.aiExternalFormalizeUpdatedBy ?? s.aiExternalFormalizeUpdatedBy,
+                updatedAt: data.school.updatedAt || s.updatedAt,
+              }
+            : s
+        )
+      );
+
+      setFeedback({
+        type: "success",
+        message: `Política de IA de "${aiPolicySchool.name}" atualizada.`,
+      });
+      setAiPolicySchool(null);
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "Falha ao atualizar política de IA." });
+    } finally {
+      setAiPolicySubmitting(false);
     }
   };
 
@@ -383,7 +507,7 @@ export default function AdminEscolasClient({
       const sc = data.school;
       const shortName = sc.name.replace(/^(Colégio Estadual|Escola Municipal|C\.E\.|E\.M\.)\s+/i, "");
 
-      // Append new school to list
+      // Append new school to list (novas unidades iniciam com formalização externa desligada)
       setSchools((prev) => [
         ...prev,
         {
@@ -397,11 +521,15 @@ export default function AdminEscolasClient({
           phone: sc.phone,
           email: sc.email,
           logoUrl: sc.logoUrl,
+          edition: formData.edition,
+          aiExternalFormalizeEnabled: false,
+          settings: payload.settings,
           hasSyncToken: false,
           studentsCount: 0,
           classesCount: 0,
           staffCount: 1,
           createdAt: sc.createdAt || new Date().toISOString(),
+          updatedAt: sc.updatedAt || sc.createdAt || new Date().toISOString(),
         },
       ]);
 
@@ -444,6 +572,7 @@ export default function AdminEscolasClient({
         throw new Error(data.error || "Erro ao alternar de escola.");
       }
 
+      await clearRedeAtivaCachesOnly().catch(() => {});
       setActiveSchoolId(schoolId);
       // Reload page to refresh all server components in new school context
       window.location.reload();
@@ -519,6 +648,42 @@ export default function AdminEscolasClient({
           <span>{feedback.message}</span>
         </div>
       )}
+
+      {/* Disponibilidade geral no servidor para IA externa */}
+      <div
+        data-testid="ai-server-availability-banner"
+        className={`p-3.5 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
+          aiServerStatus.available
+            ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200"
+            : "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-950 dark:text-amber-200"
+        }`}
+      >
+        <div className="flex items-start sm:items-center gap-2">
+          <Sparkles className="w-4 h-4 shrink-0 mt-0.5 sm:mt-0" />
+          <div>
+            <strong className="font-bold">
+              Formalização externa de atas no servidor:{" "}
+              {aiServerStatus.available
+                ? "Disponível"
+                : aiServerStatus.unavailableReason === "missing_credential"
+                  ? "Indisponível (credencial do provedor não configurada)"
+                  : "Indisponível (controle geral desligado)"}
+            </strong>
+            <span className="block text-[11px] opacity-85">
+              A autorização de cada instituição é controlada em Política de IA. Retornos de WhatsApp operam sempre em modo local.
+            </span>
+          </div>
+        </div>
+        <span
+          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
+            aiServerStatus.available
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200"
+              : "bg-amber-100 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200"
+          }`}
+        >
+          {aiServerStatus.available ? "Servidor habilitado" : "Modo local geral"}
+        </span>
+      </div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl">
@@ -609,6 +774,21 @@ export default function AdminEscolasClient({
                     >
                       {s.edition === "PILOTO_INTEGRADA" || s.inep === "41042730" ? "Piloto Integrada" : "Institucional"}
                     </span>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        s.aiExternalFormalizeEnabled && aiServerStatus.available
+                          ? "bg-violet-100 text-violet-800 dark:bg-violet-950/80 dark:text-violet-300 border border-violet-200 dark:border-violet-800"
+                          : s.aiExternalFormalizeEnabled
+                            ? "bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                      }`}
+                    >
+                      {s.aiExternalFormalizeEnabled
+                        ? aiServerStatus.available
+                          ? "Atas: IA externa ativa"
+                          : "Atas: IA ligada (servidor off)"
+                        : "Atas: modo local"}
+                    </span>
                   </div>
                 </div>
 
@@ -676,7 +856,21 @@ export default function AdminEscolasClient({
                   )}
                 </div>
 
-                <div className="flex items-center space-x-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAiPolicyModal(s)}
+                    title="Configurar política de formalização externa de atas"
+                    className={`inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition ${
+                      s.aiExternalFormalizeEnabled
+                        ? "border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100"
+                        : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:text-violet-600 hover:border-violet-300"
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3 text-violet-500" />
+                    <span>Política de IA</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => handleOpenEditModal(s)}
@@ -916,6 +1110,15 @@ export default function AdminEscolasClient({
                     />
                   </div>
                 </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+                <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
+                  <strong className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
+                    Formalização externa de atas: desligada por padrão
+                  </strong>
+                  Novas escolas iniciam em modo local. A ativação por unidade é controlada no botão Política de IA após o cadastro, sempre condicionada ao controle geral do servidor. O retorno do WhatsApp permanece local em todas as escolas.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1223,6 +1426,13 @@ export default function AdminEscolasClient({
                     />
                   </div>
                 </div>
+
+                <p className="pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                  <strong className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
+                    Formalização externa de atas
+                  </strong>
+                  Gerenciada pelo botão Política de IA no card da escola, com registro do operador e histórico de alterações. O retorno do WhatsApp permanece local em todas as escolas.
+                </p>
               </div>
 
               <div>
@@ -1366,6 +1576,134 @@ export default function AdminEscolasClient({
               >
                 <Users className="w-3.5 h-3.5" />
                 <span>Gerenciar Equipe no Painel</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiPolicySchool && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+            <button
+              type="button"
+              disabled={aiPolicySubmitting}
+              onClick={() => {
+                setAiPolicySchool(null);
+              }}
+              aria-label="Fechar política de IA"
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2.5 mb-4">
+              <div className="p-2 bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-300 rounded-xl">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Política de IA Externa — {aiPolicySchool.name}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Controle por unidade escolar com registro administrativo
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700 dark:text-slate-300">
+              <div
+                data-testid="ai-policy-modal-status"
+                className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold">Na escola:</span>
+                  <strong className="text-slate-900 dark:text-white">
+                    {aiPolicySchool.aiExternalFormalizeEnabled
+                      ? "Ligada na escola"
+                      : "Desligada (modo local)"}
+                  </strong>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold">No servidor:</span>
+                  <strong
+                    className={
+                      aiServerStatus.available
+                        ? "text-emerald-700 dark:text-emerald-300"
+                        : "text-amber-700 dark:text-amber-300"
+                    }
+                  >
+                    {aiServerStatus.available
+                      ? "Disponível"
+                      : aiServerStatus.unavailableReason === "missing_credential"
+                        ? "Indisponível (credencial não configurada)"
+                        : "Indisponível (controle geral desligado)"}
+                  </strong>
+                </div>
+                {aiPolicySchool.aiExternalFormalizeUpdatedAt && (
+                  <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/80 dark:border-slate-700">
+                    Última alteração:{" "}
+                    {new Date(aiPolicySchool.aiExternalFormalizeUpdatedAt).toLocaleString("pt-BR")}
+                    {aiPolicySchool.aiExternalFormalizeUpdatedBy
+                      ? ` por ${aiPolicySchool.aiExternalFormalizeUpdatedBy}`
+                      : ""}
+                  </p>
+                )}
+              </div>
+
+              {aiPolicySchool.legacyPolicyPendingTransition && (
+                <p
+                  data-testid="ai-policy-pending-transition-notice"
+                  className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 leading-relaxed"
+                >
+                  Esta unidade possuía marcação anterior sem confirmação na transição e permanece em modo local até ativação explícita neste painel.
+                </p>
+              )}
+
+              {aiPolicySchool.aiExternalFormalizeEnabled ? (
+                <p className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 leading-relaxed">
+                  Ao desligar, toda formalização de atas desta escola passa a executar exclusivamente no gerador local, mantendo histórico e retorno do WhatsApp locais.
+                </p>
+              ) : (
+                <p className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 leading-relaxed">
+                  Ao ligar, apenas minutas não sigilosas elegíveis enviam texto mascarado para revisão assistida no provedor configurado no servidor, com retorno automático ao modo local se bloqueado ou indisponível. Retornos de WhatsApp seguem no fluxo local.
+                </p>
+              )}
+
+              {!aiServerStatus.available && !aiPolicySchool.aiExternalFormalizeEnabled && (
+                <p className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 leading-relaxed">
+                  Você pode registrar a autorização desta escola agora; o uso externo só ocorrerá quando o controle geral e a credencial do provedor estiverem ativos no servidor.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={aiPolicySubmitting}
+                onClick={() => {
+                  setAiPolicySchool(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={aiPolicySubmitting}
+                onClick={handleSubmitAiPolicy}
+                className={`inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer ${
+                  aiPolicySchool.aiExternalFormalizeEnabled
+                    ? "bg-amber-600 hover:bg-amber-700 text-white"
+                    : "bg-violet-600 hover:bg-violet-700 text-white"
+                }`}
+              >
+                {aiPolicySubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {aiPolicySchool.aiExternalFormalizeEnabled
+                    ? "Desativar IA externa"
+                    : "Ativar IA externa"}
+                </span>
               </button>
             </div>
           </div>

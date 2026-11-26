@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 import {
   Sparkles,
   Building2,
@@ -246,6 +247,8 @@ export default function OnboardingClient({
         const err = await res.json();
         throw new Error(err.error || "Falha ao comutar para o painel da nova escola");
       }
+
+      await clearRedeAtivaCachesOnly().catch(() => {});
 
       // Redireciona para o painel principal no novo contexto
       window.location.href = "/busca-ativa";

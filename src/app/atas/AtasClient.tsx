@@ -3,6 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
+  evaluateEffectivePhysicalProof,
+  evaluateMinuteRevisionLock,
+  hasMinimumOfficialSummary,
+} from "@/lib/ataRevision";
+import {
   BookOpenCheck,
   Plus,
   Search,
@@ -201,7 +206,7 @@ export default function AtasClient({
 
   const handleQuickFinalize = async (m: any) => {
     setListError(null);
-    if (!m.summary || m.summary.trim().length < 10) {
+    if (!m.summary || m.summary.trim().length < 10 || evaluateMinuteRevisionLock(m).hasLegacyUnprovableProof) {
       setEditingMinute(m);
       setIsCreateModalOpen(true);
       return;
@@ -209,7 +214,13 @@ export default function AtasClient({
 
     setFinalizingId(m.id);
     try {
-      const res = await fetch(`/api/atas/${m.id}/finalize`, { method: "POST" });
+      const res = await fetch(`/api/atas/${m.id}/finalize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: typeof m.contentRevision === "number" ? m.contentRevision : undefined,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erro ao lavrar ata");
       await fetchMinutes();
@@ -230,17 +241,11 @@ export default function AtasClient({
   const displayedMinutes = useMemo(() => {
     if (physicalScanFilter === "ALL") return minutes;
     if (physicalScanFilter === "ATTACHED") {
-      return minutes.filter(
-        (m) => Boolean(m.hasPhysicalScan || m.physicalSignedScanData || m.govBrVerified)
-      );
+      return minutes.filter((m) => evaluateEffectivePhysicalProof(m).hasValidPhysicalProof);
     }
     if (physicalScanFilter === "PENDING") {
       return minutes.filter(
-        (m) =>
-          m.status === "FINALIZED" &&
-          !m.hasPhysicalScan &&
-          !m.physicalSignedScanData &&
-          !m.govBrVerified
+        (m) => m.status === "FINALIZED" && !evaluateEffectivePhysicalProof(m).hasValidPhysicalProof
       );
     }
     return minutes;
@@ -427,12 +432,13 @@ export default function AtasClient({
             {displayedMinutes.map((m) => {
               const isFinal = m.status === "FINALIZED";
               const isVoid = m.status === "VOIDED";
+              const isRestrictedConfidential = Boolean(m.restrictedConfidential);
               const ataNumStr = m.ataNumber ? String(m.ataNumber).padStart(3, "0") : null;
               const isReadyToQuickFinalize =
+                !isRestrictedConfidential &&
                 !isFinal &&
                 !isVoid &&
-                m.summary &&
-                m.summary.trim().length >= 10 &&
+                hasMinimumOfficialSummary(m.summary) &&
                 ((m.students && m.students.length > 0) || (m.participants && m.participants.length > 0));
 
               return (
@@ -457,7 +463,7 @@ export default function AtasClient({
                       )}
 
                       {/* Badge de Tipologia / Categoria */}
-                      {(() => {
+                      {!isRestrictedConfidential && (() => {
                         const cat = getCategoryConfig(m.category);
                         const CatIcon = cat.icon;
                         return (
@@ -478,31 +484,32 @@ export default function AtasClient({
                       )}
 
                       {/* Badge de Arquivamento Físico e Gov.br (apenas para atas lavradas) */}
-                      {isFinal && (
-                        <>
-                          {m.hasPhysicalScan || m.physicalSignedScanData ? (
-                            <span
-                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200"
-                              title={
-                                m.govBrVerified
-                                  ? `Autenticado via Gov.br (${m.govBrProtocol || "ITI"})`
-                                  : "Via física assinada digitalizada"
-                              }
-                            >
-                              <FileCheck2 className="w-3 h-3 text-emerald-600" />
-                              <span>{m.govBrVerified ? "Gov.br Anexo" : "Via Física Anexa"}</span>
+                      {!isRestrictedConfidential && isFinal && (() => {
+                        const physicalProof = evaluateEffectivePhysicalProof(m);
+                        return physicalProof.hasValidPhysicalProof && physicalProof.hasPhysicalArtifact ? (
+                          <span
+                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200"
+                            title={
+                              physicalProof.isValidGovBrVerified
+                                ? `Autenticado via Gov.br (${physicalProof.effectiveGovBrProtocol || "ITI"})`
+                                : "Via física assinada digitalizada"
+                            }
+                          >
+                            <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                            <span>
+                              {physicalProof.isValidGovBrVerified ? "Gov.br Anexo" : "Via Física Anexa"}
                             </span>
-                          ) : (
-                            <span
-                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200"
-                              title="Pendente de digitalização da folha assinada pelos participantes"
-                            >
-                              <Paperclip className="w-3 h-3 text-amber-600" />
-                              <span>Pendente de Anexo</span>
-                            </span>
-                          )}
-                        </>
-                      )}
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200"
+                            title="Pendente de digitalização da folha assinada pelos participantes"
+                          >
+                            <Paperclip className="w-3 h-3 text-amber-600" />
+                            <span>Pendente de Anexo</span>
+                          </span>
+                        );
+                      })()}
 
                       <span className="text-[11px] text-slate-400 flex items-center space-x-1">
                         <Calendar className="w-3 h-3" />
@@ -514,62 +521,73 @@ export default function AtasClient({
                       {m.subject}
                     </h3>
 
-                    {/* Alunos ou Docentes Vinculados */}
-                    {m.students && m.students.length > 0 ? (
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                        <span className="font-bold text-slate-500">Estudante(s):</span>
-                        {m.students.map((s: any) => (
-                          <Link
-                            key={s.studentId}
-                            href={`/alunos/${s.studentId}`}
-                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 font-semibold text-[11px] transition"
-                          >
-                            <span>{s.studentNameSnapshot}</span>
-                            {s.classNameSnapshot && (
-                              <span className="text-sky-600 text-[10px]">({s.classNameSnapshot})</span>
-                            )}
-                          </Link>
-                        ))}
-                      </div>
+                    {isRestrictedConfidential ? (
+                      <p className="text-xs text-rose-800 bg-rose-50/70 border border-rose-200 rounded-xl px-3 py-2">
+                        {m.summary}
+                      </p>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                        <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                          Orientação Docente
-                        </span>
-                        {m.participants
-                          ?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
-                          .map((p: any) => (
-                            <span
-                              key={p.id || p.name}
-                              className="px-2 py-0.5 rounded-lg bg-purple-50 text-purple-800 font-semibold text-[11px]"
-                            >
-                              {p.name}
+                      <>
+                        {/* Alunos ou Docentes Vinculados */}
+                        {m.students && m.students.length > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                            <span className="font-bold text-slate-500">Estudante(s):</span>
+                            {m.students.map((s: any) => (
+                              <Link
+                                key={s.studentId}
+                                href={`/alunos/${s.studentId}`}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-sky-50 text-sky-800 hover:bg-sky-100 font-semibold text-[11px] transition"
+                              >
+                                <span>{s.studentNameSnapshot}</span>
+                                {s.classNameSnapshot && (
+                                  <span className="text-sky-600 text-[10px]">({s.classNameSnapshot})</span>
+                                )}
+                              </Link>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                              Orientação Docente
                             </span>
-                          ))}
-                      </div>
-                    )}
+                            {m.participants
+                              ?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
+                              .map((p: any) => (
+                                <span
+                                  key={p.id || p.name}
+                                  className="px-2 py-0.5 rounded-lg bg-purple-50 text-purple-800 font-semibold text-[11px]"
+                                >
+                                  {p.name}
+                                </span>
+                              ))}
+                          </div>
+                        )}
 
-                    {/* Servidora e Participantes */}
-                    <p className="text-[11px] text-slate-500">
-                      Lavrado por: <strong>{m.authorName}</strong> • Presentes:{" "}
-                      {m.participants?.map((p: any) => p.name).join(", ") || "Nenhum participante listado"}
-                    </p>
+                        {/* Servidora e Participantes */}
+                        <p className="text-[11px] text-slate-500">
+                          Lavrado por: <strong>{m.authorName}</strong> • Presentes:{" "}
+                          {m.participants?.map((p: any) => p.name).join(", ") || "Nenhum participante listado"}
+                        </p>
+                      </>
+                    )}
                   </div>
 
                   {/* Ações */}
+                  {!isRestrictedConfidential && (
                   <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
-                    {isFinal && (
+                    {isFinal && (() => {
+                      const physicalProof = evaluateEffectivePhysicalProof(m);
+                      return (
                       <>
                         <button
                           type="button"
                           onClick={() => setScanningMinute(m)}
                           className={`p-2 rounded-xl border transition cursor-pointer ${
-                            m.hasPhysicalScan || m.physicalSignedScanData
+                            physicalProof.hasValidPhysicalProof && physicalProof.hasPhysicalArtifact
                               ? "border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
                               : "border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 text-slate-700 hover:text-indigo-700"
                           }`}
                           title={
-                            m.hasPhysicalScan || m.physicalSignedScanData
+                            physicalProof.hasValidPhysicalProof && physicalProof.hasPhysicalArtifact
                               ? "Visualizar ou substituir via física / Gov.br"
                               : "Digitalizar folha assinada ou anexar Gov.br"
                           }
@@ -607,7 +625,8 @@ export default function AtasClient({
                           <Printer className="w-4 h-4" />
                         </Link>
                       </>
-                    )}
+                      );
+                    })()}
 
                     {!isFinal && !isVoid ? (
                       <>
@@ -712,6 +731,7 @@ export default function AtasClient({
                       </>
                     )}
                   </div>
+                  )}
                 </div>
               );
             })}
@@ -877,21 +897,22 @@ export default function AtasClient({
           minute={scanningMinute}
           onClose={() => setScanningMinute(null)}
           onSuccess={(updated) => {
-            const hasScan = Boolean(
-              updated.hasPhysicalScan ||
-              updated.physicalSignedScanData ||
-              updated.physicalScanStorageKey
-            );
             setMinutes((prev) =>
-              prev.map((m) =>
-                m.id === updated.id
-                  ? {
-                      ...m,
-                      ...updated,
-                      hasPhysicalScan: hasScan,
-                    }
-                  : m
-              )
+              prev.map((m) => {
+                if (m.id !== updated.id) return m;
+                const merged = {
+                  ...m,
+                  ...updated,
+                  physicalProofHistory: updated.physicalProofHistory ?? m.physicalProofHistory,
+                };
+                const proof = evaluateEffectivePhysicalProof(merged);
+                return {
+                  ...merged,
+                  hasPhysicalScan: proof.hasValidPhysicalProof && proof.hasPhysicalArtifact,
+                  govBrVerified: proof.isValidGovBrVerified,
+                  govBrProtocol: proof.effectiveGovBrProtocol,
+                };
+              })
             );
             setScanningMinute(null);
           }}

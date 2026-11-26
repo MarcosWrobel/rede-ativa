@@ -35,8 +35,9 @@ vi.mock("@/lib/auth", () => ({
   auth: vi.fn(async () => mockSessionState.currentSession),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async (schoolId?: string) => {
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  const makeSchool = (schoolId?: string | null) => {
     const id = schoolId || mockSessionState.currentSession?.user?.schoolId || "escola-a";
     return {
       id,
@@ -44,8 +45,19 @@ vi.mock("@/lib/currentSchool", () => ({
       inepCode: id === "escola-a" ? "41000001" : "41000002",
       edition: id === "escola-b" ? "INSTITUCIONAL_ESSENCIAL" : "PILOTO_INTEGRADA",
     };
-  }),
-}));
+  };
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async (schoolId?: string) => makeSchool(schoolId)),
+    getAuthorizedCurrentSchool: vi.fn(async (_s: any, schoolId?: string | null) =>
+      makeSchool(schoolId)
+    ),
+    requireAuthorizedSchool: vi.fn(async (_s: any, schoolId?: string | null) => ({
+      ok: true as const,
+      school: makeSchool(schoolId),
+    })),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -346,20 +358,12 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
     expect(parsedDetails.contentHash).toBe(expectedHash);
   });
 
-  it("4. [LGPD/ECA] mascara nome do estudante impedindo vazamento para IA e desmascara no retorno", async () => {
+  it("4. [F04 LOCAL] classifica retorno WhatsApp 100% localmente mesmo com GEMINI_API_KEY presente no servidor", async () => {
     process.env.GEMINI_API_KEY = "test-fake-gemini-key";
-
-    // Resposta simulada do Gemini com o marcador de pseudo-anonimização
-    mockInteractionsCreate.mockResolvedValueOnce({
-      output_text: JSON.stringify({
-        formalSummary: "Responsável informou via WhatsApp que o estudante [ESTUDANTE_1] esteve internado com dengue.",
-        category: "SAUDE",
-      }),
-    });
 
     const studentRealName = "Lucas Gabriel Rocha da Silva";
     const guardianRealName = "Sônia Regina Rocha";
-    const rawReplyMessage = `Bom dia, sou a ${guardianRealName}. O ${studentRealName} estava com febre alta e foi diagnosticado com dengue ontem.`;
+    const rawReplyMessage = `Bom dia, sou a ${guardianRealName}. O ${studentRealName} estava com febre alta e consulta médica ontem.`;
 
     const req = new Request("http://localhost:3000/api/messages/reply", {
       method: "POST",
@@ -375,37 +379,19 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
     const res = await POST(req);
     expect(res.status).toBe(200);
 
-    // Verifica chamada ao Gemini
-    expect(mockInteractionsCreate).toHaveBeenCalledTimes(1);
-    const passedCall = mockInteractionsCreate.mock.calls[0][0];
+    // Garante zero chamadas ao provedor externo no fluxo de retorno do WhatsApp
+    expect(mockInteractionsCreate).not.toHaveBeenCalled();
+    expect(mockGenerateContent).not.toHaveBeenCalled();
 
-    // O nome real do menor e da responsável NÃO podem ter sido enviados à API do Gemini
-    expect(passedCall.input).not.toContain(studentRealName);
-    expect(passedCall.input).not.toContain(guardianRealName);
-    expect(passedCall.input).toContain("[ESTUDANTE_1]");
-    expect(passedCall.input).toContain("[RESPONSAVEL_1]");
-
-    // No entanto, o texto final gravado no prontuário deve ser restaurado via unmaskText
     const updated = mockMessageLogs["msg-escola-a"];
     expect(updated.replyCategory).toBe("SAUDE");
-    expect(updated.replyNotes).toContain(studentRealName);
-    expect(updated.replyNotes).not.toContain("[ESTUDANTE_1]");
+    expect(updated.replyNotes).toBeTruthy();
   });
 
-  it("5. [OCR MULTIMODAL] /api/ai/classify-reply aceita screenshotDataUrl sem rawReply e extrai texto + sintese via Gemini Vision", async () => {
+  it("5. [F04 POLÍTICA DE ANEXOS] /api/ai/classify-reply rejeita screenshotDataUrl (400) e classifica texto localmente", async () => {
     process.env.GEMINI_API_KEY = "test-fake-gemini-key";
 
-    mockGenerateContent.mockResolvedValueOnce({
-      text: JSON.stringify({
-        extractedRawReply: "Bom dia! Ele perdeu o ônibus escolar hoje devido à chuva forte.",
-        formalSummary: "Responsável informou que o estudante [ESTUDANTE_1] ausentou-se por falha no transporte escolar devido a chuva intensa.",
-        category: "TRANSPORTE",
-        requiresMedicalCertificate: false,
-        suggestedFollowUp: "Registrar ocorrência de transporte e acompanhar frequência.",
-      }),
-    });
-
-    const req = new Request("http://localhost:3000/api/ai/classify-reply", {
+    const imgReq = new Request("http://localhost:3000/api/ai/classify-reply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -416,17 +402,26 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
       }),
     });
 
-    const res = await classifyPost(req);
-    expect(res.status).toBe(200);
+    const imgRes = await classifyPost(imgReq);
+    expect(imgRes.status).toBe(400);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
 
-    const body = await res.json();
+    const textReq = new Request("http://localhost:3000/api/ai/classify-reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rawReply: "Bom dia! Ele perdeu o ônibus escolar hoje devido à chuva forte.",
+        studentName: "Lucas Gabriel Rocha da Silva",
+        reasonTitle: "Faltas Consecutivas",
+      }),
+    });
+    const textRes = await classifyPost(textReq);
+    expect(textRes.status).toBe(200);
+    const body = await textRes.json();
     expect(body.success).toBe(true);
-    expect(body.usedOcr).toBe(true);
-    expect(body.classification.extractedRawReply).toBe(
-      "Bom dia! Ele perdeu o ônibus escolar hoje devido à chuva forte."
-    );
+    expect(body.mode).toBe("LOCAL_ONLY");
     expect(body.classification.category).toBe("TRANSPORTE");
-    expect(body.classification.formalSummary).toContain("Lucas Gabriel Rocha da Silva");
+    expect(mockGenerateContent).not.toHaveBeenCalled();
   });
 
   it("6. [IDOR EM STATUS E MANAGE] bloqueia com 403 Forbidden tentativas de atualizar status ou retificar registro de outra escola", async () => {

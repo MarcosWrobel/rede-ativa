@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { classifyActionItemCategory } from "@/lib/actionClassifier";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
@@ -12,7 +12,13 @@ export async function GET(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
 
     const now = new Date();
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireSchoolAdmin } from "@/lib/permissions";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
 import {
@@ -11,10 +11,10 @@ import {
   messageManageDeleteSchema,
 } from "@/lib/schemas";
 
-// PUT: Editar campos de um registro do histórico (Restrito a ADMIN)
+// PUT: Editar campos de um registro do histórico (Restrito à Gestão Escolar da unidade ou SuperAdmin)
 export async function PUT(req: Request) {
   try {
-    const authCheck = await requireAdmin();
+    const authCheck = await requireSchoolAdmin();
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
@@ -49,7 +49,9 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
@@ -160,10 +162,10 @@ export async function PUT(req: Request) {
   }
 }
 
-// DELETE: Excluir um registro do histórico (Restrito a ADMIN)
+// DELETE: Excluir um registro do histórico (Restrito à Gestão Escolar da unidade ou SuperAdmin)
 export async function DELETE(req: Request) {
   try {
-    const authCheck = await requireAdmin();
+    const authCheck = await requireSchoolAdmin();
     if (!authCheck.ok) return authCheck.response;
 
     const { searchParams } = new URL(req.url);
@@ -186,7 +188,9 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },

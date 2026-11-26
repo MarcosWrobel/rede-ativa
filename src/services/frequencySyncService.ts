@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import type { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -59,11 +60,21 @@ export async function resolveExtensionOrSessionSyncContext(options: {
   let targetSchoolId: string | undefined = undefined;
 
   if (session?.user?.email && session.user.active !== false) {
+    const snapshot = await resolveServerUserAuthSnapshot(session);
+    if (!snapshot || snapshot.active === false) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Conta desativada ou acesso revogado no servidor." },
+          { status: 403, headers: corsHeaders }
+        ),
+      };
+    }
     authMethod = "SESSION";
-    userEmail = session.user.email;
-    userName = session.user.name || session.user.email.split("@")[0];
-    userId = session.user.id;
-    targetSchoolId = session.user.schoolId ?? undefined;
+    userEmail = snapshot.email;
+    userName = snapshot.name || snapshot.email.split("@")[0];
+    userId = snapshot.id;
+    targetSchoolId = snapshot.schoolId ?? undefined;
   } else {
     const tokenAuth = await authenticateExtensionSyncToken({
       req,
@@ -89,7 +100,6 @@ export async function resolveExtensionOrSessionSyncContext(options: {
       currentSchool = await authorizedResolver(session, targetSchoolId);
     } else if (
       (session?.user?.role || "").toUpperCase() === "SUPERADMIN" ||
-      Boolean(targetSchoolId) ||
       Boolean(
         session?.user?.schools?.some(
           (s) => s.active !== false && Boolean(s.schoolId || s.id)
@@ -101,7 +111,17 @@ export async function resolveExtensionOrSessionSyncContext(options: {
       currentSchool = await currentSchoolModule.getCurrentSchool(targetSchoolId);
     }
   } else {
-    currentSchool = await currentSchoolModule.getCurrentSchool(targetSchoolId);
+    let verifiedResolver: typeof currentSchoolModule.getSchoolContextByVerifiedId | undefined;
+    try {
+      verifiedResolver = currentSchoolModule.getSchoolContextByVerifiedId;
+    } catch {
+      verifiedResolver = undefined;
+    }
+    if (typeof verifiedResolver === "function") {
+      currentSchool = await verifiedResolver(targetSchoolId);
+    } else if (targetSchoolId) {
+      currentSchool = await currentSchoolModule.getCurrentSchool(targetSchoolId);
+    }
   }
 
   if (!currentSchool) {

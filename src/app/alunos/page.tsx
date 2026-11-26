@@ -1,20 +1,13 @@
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { checkIsAdmin } from "@/lib/roles";
 import { safeQueryList } from "@/lib/safePhase3Queries";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import AlunosClient from "./AlunosClient";
-import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function AlunosPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
 
   const now = new Date();
@@ -84,7 +77,7 @@ export default async function AlunosPage() {
     <AlunosClient
       initialStudents={enrichedStudents}
       classGroups={classGroups}
-      isAdmin={checkIsAdmin(session)}
+      isAdmin={ctx.isSchoolManager}
       isIntegrated={currentSchool.edition === "PILOTO_INTEGRADA"}
     />
   );

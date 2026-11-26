@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import {
   X,
   Camera,
@@ -13,6 +14,7 @@ import {
   Loader2,
   FileText,
   Image as ImageIcon,
+  Clock,
 } from "lucide-react";
 
 interface Props {
@@ -28,11 +30,32 @@ export default function PhysicalScanModal({
   minute,
   onSuccess,
 }: Props) {
+  const effectiveProof = useMemo(
+    () =>
+      evaluateEffectivePhysicalProof(
+        minute
+          ? {
+              ...minute,
+              hasPhysicalScan: Boolean(
+                minute.hasPhysicalScan ||
+                  minute.physicalSignedScanData === true ||
+                  (typeof minute.physicalSignedScanData === "string" &&
+                    minute.physicalSignedScanData.length > 0) ||
+                  minute.physicalScanStorageKey
+              ),
+            }
+          : null
+      ),
+    [minute]
+  );
+
   const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [fileType, setFileType] = useState<"image" | "pdf">("image");
-  const [isGovBr, setIsGovBr] = useState<boolean>(Boolean(minute?.govBrVerified));
-  const [govBrProtocol, setGovBrProtocol] = useState<string>(minute?.govBrProtocol || "");
+  const [isGovBr, setIsGovBr] = useState<boolean>(effectiveProof.isValidGovBrVerified);
+  const [govBrProtocol, setGovBrProtocol] = useState<string>(
+    effectiveProof.effectiveGovBrProtocol || ""
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +65,21 @@ export default function PhysicalScanModal({
   const triggerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const titleId = useId();
+
+  useEffect(() => {
+    setFileDataUrl(null);
+    setFileName("");
+    setFileType("image");
+    setError(null);
+    setIsGovBr(effectiveProof.isValidGovBrVerified);
+    setGovBrProtocol(effectiveProof.effectiveGovBrProtocol || "");
+  }, [
+    isOpen,
+    minute?.id,
+    minute?.contentRevision,
+    effectiveProof.isValidGovBrVerified,
+    effectiveProof.effectiveGovBrProtocol,
+  ]);
 
   useEffect(() => {
     let focusRaf = 0;
@@ -138,18 +176,17 @@ export default function PhysicalScanModal({
 
   if (!isOpen || !minute) return null;
 
-  const hasScan = Boolean(
-    minute.hasPhysicalScan ||
-    minute.physicalScanStorageKey ||
-    (typeof minute.physicalSignedScanData === "string" && minute.physicalSignedScanData.length > 0) ||
-    minute.physicalSignedScanData === true
-  );
+  const hasScan = effectiveProof.hasValidPhysicalProof && effectiveProof.hasPhysicalArtifact;
+  const isDraftMode = !minute.status || minute.status === "DRAFT";
   const currentScanUrl = `/api/atas/${minute.id}/physical-scan`;
   const isCurrentPdf =
     minute.physicalScanMimeType === "application/pdf" ||
     (typeof minute.physicalSignedScanData === "string" &&
       (minute.physicalSignedScanData.startsWith("data:application/pdf") ||
        minute.physicalSignedScanData.startsWith("%PDF")));
+  const historicalProofs = Array.isArray(minute.physicalProofHistory)
+    ? minute.physicalProofHistory
+    : [];
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -176,8 +213,14 @@ export default function PhysicalScanModal({
   };
 
   const handleSave = async () => {
-    if (!fileDataUrl && !hasScan) {
-      setError("Selecione ou fotografe a folha física da ata para anexar.");
+    if (isDraftMode && hasScan) {
+      setError(
+        "Já existe via física ou registro Gov.br vinculado a esta revisão no rascunho. Utilize 'Reabrir para edição' no editor antes de anexar nova prova."
+      );
+      return;
+    }
+    if (!fileDataUrl && (isDraftMode || !hasScan)) {
+      setError("Selecione ou fotografe uma nova via física assinada para vincular.");
       return;
     }
 
@@ -185,12 +228,16 @@ export default function PhysicalScanModal({
     setError(null);
 
     try {
-      const validExistingScan = typeof minute.physicalSignedScanData === "string" ? minute.physicalSignedScanData : null;
-      const payload = {
-        scanData: fileDataUrl || validExistingScan,
+      const payload: Record<string, unknown> = {
+        ...(fileDataUrl ? { scanData: fileDataUrl } : {}),
         govBrVerified: isGovBr,
         govBrProtocol: govBrProtocol.trim() || null,
       };
+      if (typeof minute.contentRevision === "number") {
+        payload.expectedRevision = minute.contentRevision;
+      } else if (isDraftMode) {
+        payload.expectedRevision = 1;
+      }
 
       const res = await fetch(`/api/atas/${minute.id}/physical-scan`, {
         method: "POST",
@@ -230,11 +277,17 @@ export default function PhysicalScanModal({
 
       onSuccess({
         ...minute,
+        hasPhysicalScan: false,
         physicalSignedScanData: null,
+        physicalScanStorageKey: null,
+        physicalScanSha256: null,
+        physicalScanRevision: null,
+        physicalScanSupersededAt: null,
         physicalScanUploadedAt: null,
         physicalScanUploadedBy: null,
         govBrVerified: false,
         govBrProtocol: null,
+        physicalProofHistory: historicalProofs,
       });
       onClose();
     } catch (err: any) {
@@ -364,16 +417,95 @@ export default function PhysicalScanModal({
                 <span className="text-[10.5px] text-slate-500">
                   Digitalizado por: <strong>{minute.physicalScanUploadedBy || "Equipe Escolar"}</strong>
                 </span>
-                <button
-                  type="button"
-                  onClick={handleRemove}
-                  disabled={loading}
-                  className="inline-flex items-center space-x-1 text-rose-600 hover:text-rose-700 font-bold hover:underline"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Remover / Substituir</span>
-                </button>
+                {minute.status === "DRAFT" && !minute.physicalScanSupersededAt ? (
+                  <span className="text-[10.5px] font-semibold text-amber-700">
+                    Para alterar no rascunho, use &ldquo;Reabrir para edição&rdquo; no editor (original preservado).
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRemove}
+                    disabled={loading}
+                    className="inline-flex items-center space-x-1 text-rose-600 hover:text-rose-700 font-bold hover:underline"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remover / Substituir</span>
+                  </button>
+                )}
               </div>
+            </div>
+          )}
+
+          {/* Histórico separado de vias físicas / Gov.br superados em reaberturas */}
+          {historicalProofs.length > 0 && (
+            <div className="p-3.5 rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-2 text-amber-900 dark:text-amber-200 font-bold">
+                  <Clock className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Vias físicas anteriores em guarda (histórico)</span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200">
+                  Não vale para a revisão {effectiveProof.currentRevision}
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                Arquivos anexados antes de reabertura permanecem preservados apenas como registro histórico e não validam a revisão atual.
+              </p>
+              <ul className="space-y-2">
+                {historicalProofs.map((item: any) => (
+                  <li
+                    key={item.id}
+                    className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5 font-bold text-slate-800 dark:text-slate-100">
+                        <span>
+                          {item.contentRevision
+                            ? `Revisão ${item.contentRevision}`
+                            : "Revisão anterior"}
+                        </span>
+                        <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                          {item.supersededByRevision
+                            ? `Substituída na revisão ${item.supersededByRevision}`
+                            : "Substituída em reabertura anterior"}
+                        </span>
+                        {item.govBrVerified && (
+                          <span className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                            Registro histórico Gov.br
+                            {item.govBrProtocol ? ` (${item.govBrProtocol})` : ""}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        Arquivada em{" "}
+                        {new Date(item.supersededAt).toLocaleDateString("pt-BR")}{" "}
+                        {new Date(item.supersededAt).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {item.uploadedBy ? ` • Por: ${item.uploadedBy}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <a
+                        href={`/api/atas/${minute.id}/physical-scan?historyId=${encodeURIComponent(item.id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-[11px]"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Visualizar</span>
+                      </a>
+                      <a
+                        href={`/api/atas/${minute.id}/physical-scan?historyId=${encodeURIComponent(item.id)}&download=1`}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-[11px]"
+                      >
+                        <span>Baixar</span>
+                      </a>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -501,7 +633,16 @@ export default function PhysicalScanModal({
           <button
             type="button"
             onClick={handleSave}
-            disabled={loading || (!fileDataUrl && isGovBr === Boolean(minute?.govBrVerified) && govBrProtocol === (minute?.govBrProtocol || ""))}
+            disabled={
+              loading ||
+              (isDraftMode
+                ? !fileDataUrl || hasScan
+                : !fileDataUrl &&
+                  (!hasScan ||
+                    (isGovBr === effectiveProof.isValidGovBrVerified &&
+                      govBrProtocol.trim() ===
+                        (effectiveProof.effectiveGovBrProtocol || ""))))
+            }
             className="inline-flex items-center space-x-2 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold shadow-sm transition"
           >
             {loading ? (

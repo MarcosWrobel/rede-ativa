@@ -107,6 +107,7 @@ export function assertNoDevAuthInProduction(
 export interface AuthSessionLike {
   user?: {
     id?: string;
+    dbId?: string;
     email?: string | null;
     name?: string | null;
     role?: string | null;
@@ -126,9 +127,11 @@ export interface AuthSessionLike {
     networks?: Array<{
       id?: string;
       networkId?: string;
+      role?: string;
+      active?: boolean;
       city?: string;
       type?: string;
-      network?: { city?: string; type?: string };
+      network?: { city?: string; type?: string; active?: boolean };
     }>;
   } | null;
 }
@@ -138,10 +141,12 @@ export interface TargetSchoolLike {
   networkId?: string | null;
   network?: string | null;
   city?: string | null;
+  active?: boolean;
 }
 
 /**
  * Valida se uma sessão pertence ao SuperAdmin da plataforma (Nível 1).
+ * Nunca concede alcance global ao papel legado "ADMIN".
  */
 export function checkIsSuperAdmin(session: AuthSessionLike | null | undefined): boolean {
   if (!session?.user?.email) return false;
@@ -151,8 +156,8 @@ export function checkIsSuperAdmin(session: AuthSessionLike | null | undefined): 
 }
 
 /**
- * Valida se uma sessão pertence a um perfil ADMIN ativo (Retrocompatibilidade).
- * Retorna true para SuperAdmin ou Gestor Escolar.
+ * Valida se uma sessão pertence a um perfil administrativo para fins de navegação/UI.
+ * Operações escolares críticas devem sempre chamar `requireSchoolAdmin(schoolId)`.
  */
 export function checkIsAdmin(session: AuthSessionLike | null | undefined): boolean {
   if (!session?.user?.email) return false;
@@ -177,19 +182,27 @@ export function checkIsSecretariat(
   if (checkIsSuperAdmin(session)) return true;
   if (!session?.user?.email || session.user.active === false) return false;
   const role = session.user.role;
-  if (role !== "GESTAO_SECRETARIA") return false;
+  const userNetworks = (session.user.networks || []).filter((n) => n.active !== false);
+  const hasSecretariatAuthority =
+    role === "GESTAO_SECRETARIA" ||
+    userNetworks.some((n) => (n.role || "").toUpperCase() === "GESTAO_SECRETARIA");
+  if (!hasSecretariatAuthority) return false;
 
   if (networkId) {
-    const userNetworks = session.user.networks || [];
     return userNetworks.some((n) => n.networkId === networkId || n.id === networkId);
   }
   return true;
 }
 
 /**
- * Valida se o usuário tem privilégio de Gestor na escola (Nível 3 ou superior).
- * Para GESTAO_SECRETARIA, exige vínculo efetivo da escola alvo com uma rede vinculada ao usuário
- * (por networkId ou escola MUNICIPAL no município de uma rede municipal vinculada).
+ * Valida se o usuário tem privilégio de Gestor na escola alvo (Nível 3 ou superior).
+ * Ordem estrita:
+ * 1. SuperAdmin ativo -> true
+ * 2. Conta ausente ou inativa -> false
+ * 3. Sem `schoolId`: verifica vínculo de gestão apenas para roteamento UI
+ * 4. Vínculo local ativo de gestão na escola -> true (sem encerrar antes de avaliar rede se for PEDAGOGA/inativo)
+ * 5. Vínculo ativo e independente de secretaria com a rede da escola alvo -> true
+ * 6. Sem fallback legado por `session.user.schoolId` -> false
  */
 export function checkIsSchoolManager(
   session: AuthSessionLike | null | undefined,
@@ -200,60 +213,55 @@ export function checkIsSchoolManager(
   if (!session?.user?.email || session.user.active === false) return false;
 
   const role = session.user.role;
+  const userSchools = session.user.schools || [];
 
-  // Se nenhum schoolId foi especificado, verifica se o usuário possui cargo de gestor escolar
+  // Rota/UI sem schoolId específico: exige cargo gestor em vínculo ativo (ou role se lista omitida no router)
   if (!schoolId) {
+    if (userSchools.length > 0) {
+      return userSchools.some(
+        (s) => s.active !== false && (s.role === "GESTOR_ESCOLAR" || s.role === "ADMIN")
+      );
+    }
     return role === "ADMIN" || role === "GESTOR_ESCOLAR";
   }
 
-  // Se schoolId foi especificado, valida se o usuário possui vínculo direto de gestão com esta escola específica
-  const userSchools = session.user.schools || [];
-  const schoolLink = userSchools.find((s) => s.schoolId === schoolId || s.id === schoolId);
-  if (schoolLink && schoolLink.active !== false) {
-    if (
-      schoolLink.role === "ADMIN" ||
-      schoolLink.role === "GESTOR_ESCOLAR" ||
-      schoolLink.role === "GESTAO_SECRETARIA"
-    ) {
-      return true;
-    }
-  }
-
-  // Para GESTAO_SECRETARIA, valida se a escola alvo pertence a uma rede vinculada ao usuário
-  if (role === "GESTAO_SECRETARIA") {
-    const userNetworks = session.user.networks || [];
-    if (userNetworks.length === 0) return false;
-
-    const allowedNetworkIds = userNetworks
-      .map((n) => n.networkId || n.id)
-      .filter((id): id is string => Boolean(id));
-    const allowedMunicipalCities = userNetworks
-      .filter((n) => (n.type || n.network?.type || "MUNICIPAL").toUpperCase() === "MUNICIPAL")
-      .map((n) => (n.city || n.network?.city || "").trim().toUpperCase())
-      .filter(Boolean);
-
-    const candidate = targetSchool || schoolLink;
-    if (!candidate) return false;
-
-    if (candidate.networkId && allowedNetworkIds.includes(candidate.networkId)) {
-      return true;
-    }
-
-    if (
-      candidate.network === "MUNICIPAL" &&
-      candidate.city &&
-      allowedMunicipalCities.includes(candidate.city.trim().toUpperCase())
-    ) {
-      return true;
-    }
-
+  if (targetSchool && targetSchool.active === false) {
     return false;
   }
 
-  // Vínculo pelo schoolId primário do usuário
-  if (session.user.schoolId === schoolId && (role === "ADMIN" || role === "GESTOR_ESCOLAR")) {
+  // 4. Verifica vínculo direto e ativo de gestão com a escola específica
+  const activeSchoolLink = userSchools.find(
+    (s) => (s.schoolId === schoolId || s.id === schoolId) && s.active !== false
+  );
+  if (
+    activeSchoolLink &&
+    (activeSchoolLink.role === "ADMIN" ||
+      activeSchoolLink.role === "GESTOR_ESCOLAR" ||
+      activeSchoolLink.role === "GESTAO_SECRETARIA")
+  ) {
     return true;
   }
 
+  // 5. Avalia vínculo ativo e independente de secretaria com a rede da escola (mesmo com UserSchool PEDAGOGA/inativo)
+  const activeNetworks = (session.user.networks || []).filter(
+    (n) => n.active !== false && n.network?.active !== false
+  );
+  const hasSecretariatScope =
+    activeNetworks.length > 0 &&
+    (role === "GESTAO_SECRETARIA" ||
+      activeNetworks.some((n) => (n.role || "").toUpperCase() === "GESTAO_SECRETARIA"));
+
+  if (hasSecretariatScope) {
+    const allowedNetworkIds = activeNetworks
+      .map((n) => n.networkId || n.id)
+      .filter((id): id is string => Boolean(id));
+
+    const candidate = targetSchool || activeSchoolLink;
+    if (!candidate || candidate.active === false || !candidate.networkId) return false;
+
+    return allowedNetworkIds.includes(candidate.networkId);
+  }
+
+  // 6. Sem fallback legado por session.user.schoolId
   return false;
 }

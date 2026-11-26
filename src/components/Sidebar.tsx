@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
+import { cleanupLegacyServiceWorkersAndCaches } from "@/lib/pwaCleanup";
 import { isBootstrapAdminEmail } from "@/lib/roles";
 import { 
   Send, 
@@ -98,6 +99,7 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
   const isSchoolManager =
     currentUser?.role === "GESTOR_ESCOLAR" ||
     currentUser?.role === "ADMIN" ||
+    isSecretariat ||
     isSuper;
   const isAdmin = isSchoolManager;
 
@@ -504,13 +506,18 @@ export default function Sidebar({ currentUser, currentSchool, mobileOpen, setMob
               </div>
 
               {(!collapsed || mobileOpen) && (
-                <Link
-                  href="/api/auth/signout"
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await cleanupLegacyServiceWorkersAndCaches().catch(() => {});
+                    window.location.href = "/api/auth/signout";
+                  }}
                   title="Sair"
+                  aria-label="Sair"
                   className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
                 >
                   <LogOut className="w-4 h-4" />
-                </Link>
+                </button>
               )}
             </div>
           ) : (

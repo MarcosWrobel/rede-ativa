@@ -1,9 +1,7 @@
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeQueryList } from "@/lib/safePhase3Queries";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import BuscaAtivaClient from "./BuscaAtivaClient";
-import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +10,9 @@ export default async function BuscaAtivaPage({
 }: {
   searchParams: Promise<{ studentId?: string; phone?: string; mode?: string; turmaId?: string }>;
 }) {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
 
   let sp: { studentId?: string; phone?: string; mode?: string; turmaId?: string } = {};

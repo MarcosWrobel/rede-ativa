@@ -1,18 +1,13 @@
-import { auth } from "@/lib/auth";
 import { compileWeeklyDigest } from "@/lib/weeklyDigest";
-import { getCurrentSchool } from "@/lib/currentSchool";
-import { redirect } from "next/navigation";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import BoletimClient from "./BoletimClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function BoletimPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const currentSchool = ctx.school;
 
   let initialDigest: any = null;
   try {
@@ -29,7 +24,7 @@ export default async function BoletimPage() {
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",
-        role: (session.user as any).role || "PEDAGOGA",
+        role: ctx.effectiveRole || "PEDAGOGA",
       }}
     />
   );

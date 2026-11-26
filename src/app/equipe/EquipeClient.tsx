@@ -26,6 +26,7 @@ interface TeamUser {
   email: string;
   role: string;
   active: boolean;
+  globalActive?: boolean;
   createdAt: string | Date;
   _count?: {
     messageLogs: number;
@@ -175,7 +176,11 @@ export default function EquipeClient({
       const res = await fetch("/api/users", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id, ...patch }),
+        body: JSON.stringify({
+          id: user.id,
+          scope: viewAll && isSuperAdmin ? "global" : "school",
+          ...patch,
+        }),
       });
 
       const data = await res.json();
@@ -477,15 +482,22 @@ export default function EquipeClient({
                         retornos
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {u.active ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                            Ativo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                            Revogado
-                          </span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {u.active ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              Ativo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                              Revogado
+                            </span>
+                          )}
+                          {!viewAll && u.globalActive === false && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              Conta global inativa
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {isProtected ? (

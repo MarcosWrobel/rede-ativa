@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { 
   Send, 
   History, 
@@ -25,12 +23,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
 
   let totalStudents = 0;

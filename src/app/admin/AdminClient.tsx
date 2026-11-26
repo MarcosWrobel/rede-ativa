@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 import {
   ShieldAlert,
   Building2,
@@ -147,6 +148,7 @@ export default function AdminClient({
         body: JSON.stringify({ schoolId }),
       });
       if (res.ok) {
+        await clearRedeAtivaCachesOnly().catch(() => {});
         window.location.href = "/gestao";
       } else {
         alert("Erro ao alternar para a instituição");

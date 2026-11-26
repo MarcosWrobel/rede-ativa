@@ -271,11 +271,20 @@ function resetDb() {
         schoolId: "escola-b",
         active: true,
       },
+      {
+        id: "user-gestor-leopoldina",
+        email: "gestor@leopoldina.pr.gov.br",
+        name: "Gestor Leopoldina",
+        role: "GESTOR_ESCOLAR",
+        schoolId: "default-leopoldina",
+        active: true,
+      },
     ],
     userSchools: [
       { userId: "user-gestor-a", schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true },
       { userId: "user-pedagoga-a", schoolId: "escola-a", role: "PEDAGOGA", active: true },
       { userId: "user-gestor-b", schoolId: "escola-b", role: "GESTOR_ESCOLAR", active: true },
+      { userId: "user-gestor-leopoldina", schoolId: "default-leopoldina", role: "GESTOR_ESCOLAR", active: true },
     ],
     auditLogs: [],
   };
@@ -537,7 +546,13 @@ const prismaMock: any = {
       if (!u) return null;
       return {
         ...u,
-        schools: db.userSchools.filter((us) => us.userId === u.id),
+        schools: db.userSchools
+          .filter((us) => us.userId === u.id)
+          .map((us) => ({
+            ...us,
+            school: db.schools.find((s) => s.id === us.schoolId) || null,
+          })),
+        networks: [],
       };
     }),
     update: vi.fn(async ({ where, data }: any) => {

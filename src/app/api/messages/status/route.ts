@@ -4,7 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageDeliveryStatusUpdateSchema } from "@/lib/schemas";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 async function handleStatusUpdate(req: Request) {
@@ -36,7 +36,9 @@ async function handleStatusUpdate(req: Request) {
       return NextResponse.json({ error: "Registro de envio não encontrado" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
     if (!assertTenantOwnership(existing.student.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },

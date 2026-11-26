@@ -62,6 +62,27 @@ vi.mock("@/lib/currentSchool", () => ({
       }
     );
   }),
+  getAuthorizedCurrentSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => {
+    const id = state.currentSchoolId || explicitSchoolId || "escola-a";
+    return (
+      state.schools.find((s) => s.id === id) || {
+        id,
+        name: `Escola ${id}`,
+        inepCode: id === "escola-a" ? "41000001" : "41000002",
+        edition: "INSTITUCIONAL_ESSENCIAL",
+      }
+    );
+  }),
+  requireAuthorizedSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => {
+    const id = state.currentSchoolId || explicitSchoolId || "escola-a";
+    const school = state.schools.find((s) => s.id === id) || {
+      id,
+      name: `Escola ${id}`,
+      inepCode: id === "escola-a" ? "41000001" : "41000002",
+      edition: "INSTITUCIONAL_ESSENCIAL",
+    };
+    return { ok: true, school };
+  }),
 }));
 
 vi.mock("@/lib/audit", () => ({
@@ -176,22 +197,29 @@ vi.mock("@/lib/prisma", () => {
       $transaction: vi.fn(async (fn: any) => fn(txMock)),
       user: {
         findUnique: vi.fn(async ({ where }: any) => {
-          return state.users.find((u) => u.id === where.id) || null;
+          const u = state.users.find(
+            (x) => (where?.id && x.id === where.id) || (where?.email && x.email === where.email)
+          );
+          if (!u) return null;
+          return {
+            ...u,
+            schools: (u.schools || []).map((link: any) => ({
+              ...link,
+              school: state.schools.find((s) => s.id === link.schoolId) || null,
+            })),
+            networks: u.networks || [],
+          };
         }),
         findMany: vi.fn(async ({ where, orderBy, take, select }: any) => {
           let list = state.users.filter((u) => {
             if (where?.active === true && u.active !== true) return false;
-            const targetSchool = where?.OR?.[0]?.schoolId;
+            const targetSchool =
+              where?.schools?.some?.schoolId || where?.OR?.[0]?.schoolId;
             if (targetSchool) {
-              const hasPrimary = u.schoolId === targetSchool;
               const hasActiveLink = (u.schools || []).some(
                 (s: any) => s.schoolId === targetSchool && s.active === true
               );
-              const hasInactiveLink = (u.schools || []).some(
-                (s: any) => s.schoolId === targetSchool && s.active === false
-              );
-              if (hasInactiveLink) return false;
-              if (!hasPrimary && !hasActiveLink) return false;
+              if (!hasActiveLink) return false;
             }
             return true;
           });
@@ -505,18 +533,21 @@ describe("API Fase 2 — GET /api/atas/participant-candidates e revalidação mu
 
   it("bloqueia usuários inativos, vínculos desativados, schoolId divergente e studentIds/minuteId de outra escola", async () => {
     state.session.user.id = "user-inativo-a";
+    state.session.user.email = "inativa@escola-a.pr.gov.br";
     const resInactive = await getParticipantCandidates(
       new Request("http://localhost:3000/api/atas/participant-candidates?part=staff")
     );
     expect(resInactive.status).toBe(403);
 
     state.session.user.id = "user-outro-vinculo-inativo";
+    state.session.user.email = "ex@escola-a.pr.gov.br";
     const resInactiveLink = await getParticipantCandidates(
       new Request("http://localhost:3000/api/atas/participant-candidates?part=staff")
     );
     expect(resInactiveLink.status).toBe(403);
 
     state.session.user.id = "user-pedagoga-a";
+    state.session.user.email = "pedagoga@escola-a.pr.gov.br";
     const resMismatchSchool = await getParticipantCandidates(
       new Request("http://localhost:3000/api/atas/participant-candidates?part=staff&schoolId=escola-b")
     );

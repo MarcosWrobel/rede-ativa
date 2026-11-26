@@ -2,9 +2,19 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool, ensureDefaultSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { generateVerificationCode, canAccessConfidentialMinute, stripParticipantSecrets } from "@/lib/ataCrypto";
+import {
+  PHYSICAL_PROOF_HISTORY_SELECT,
+  buildRestrictedConfidentialMinuteSummary,
+  canAccessConfidentialMinute,
+  filterAccessiblePhysicalProofHistory,
+  generateVerificationCode,
+  stripInternalStudentNameAliases,
+  stripParticipantSecrets,
+} from "@/lib/ataCrypto";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import { sanitizeMinutePayload, validateParticipantStudentLinks } from "@/services/ataParticipantService";
 import { getCurrentBrasiliaYear } from "@/services/ataFinalizationService";
 import { sanitizeKinshipForRole } from "@/lib/participantKinship";
@@ -84,7 +94,16 @@ export async function GET(req: Request) {
     const category = searchParams.get("category");
     const search = searchParams.get("q")?.trim();
 
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, school)
+      : authCheck.session;
 
     const where: Prisma.PedagogicalMinuteWhereInput = {
       schoolId: school.id,
@@ -140,6 +159,9 @@ export async function GET(req: Request) {
         authorRole: true,
         authorIp: true,
         finalizedAt: true,
+        contentRevision: true,
+        physicalScanRevision: true,
+        physicalScanSupersededAt: true,
         contentHash: true,
         verificationCode: true,
         pdfArchiveSha256: true,
@@ -192,6 +214,7 @@ export async function GET(req: Request) {
             witnessName: true,
             hasSignature: true,
             hasActiveSignLink: true,
+            signedRevision: true,
             biometricVerified: true,
             biometricDeviceType: true,
             biometricAuthTime: true,
@@ -208,6 +231,10 @@ export async function GET(req: Request) {
         },
         actionItems: {
           orderBy: { createdAt: "asc" },
+        },
+        physicalProofHistory: {
+          orderBy: { supersededAt: "desc" },
+          select: PHYSICAL_PROOF_HISTORY_SELECT,
         },
       },
     });
@@ -232,11 +259,11 @@ export async function GET(req: Request) {
     }
 
     const visibleMinutes = search
-      ? minutes.filter((m) => canAccessConfidentialMinute(m, authCheck.session))
+      ? minutes.filter((m) => canAccessConfidentialMinute(m, effectiveSession))
       : minutes;
 
     const responseMinutes = visibleMinutes.map((m) => {
-      const allowedConfidential = canAccessConfidentialMinute(m, authCheck.session);
+      const allowedConfidential = canAccessConfidentialMinute(m, effectiveSession);
       const safeParticipants = m.participants.map((p) => {
         const {
           signatureData,
@@ -257,33 +284,56 @@ export async function GET(req: Request) {
       });
 
       if (!allowedConfidential) {
-        return {
-          ...m,
-          subject: "Atendimento sob sigilo institucional",
-          rawNotes: null,
-          summary: "[CONTEÚDO SOB SIGILO INSTITUCIONAL — ACESSO RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
-          agreementsSummary: null,
-          students: [],
-          actionItems: [],
-          addendums: [],
-          physicalSignedScanData: null,
-          physicalScanStorageKey: null,
-          physicalScanSha256: null,
-          govBrProtocol: null,
-          hasPhysicalScan: false,
-          restrictedConfidential: true,
-          participants: [],
-        };
+        return buildRestrictedConfidentialMinuteSummary(m);
       }
 
-      const minuteWithScan = m as typeof m & { physicalSignedScanData?: string | null };
+      const minuteWithScan = m as typeof m & {
+        physicalSignedScanData?: string | null;
+        physicalProofHistory?: any[];
+      };
+      const effectiveProof = evaluateEffectivePhysicalProof(m);
+      const filteredHistory = filterAccessiblePhysicalProofHistory(
+        Array.isArray(minuteWithScan.physicalProofHistory)
+          ? minuteWithScan.physicalProofHistory
+          : [],
+        m.schoolId,
+        school.id,
+        effectiveSession
+      );
 
       return {
         ...m,
-        hasPhysicalScan: Boolean(m.hasPhysicalScan),
-        physicalSignedScanData: includeSignatures
-          ? minuteWithScan.physicalSignedScanData ?? null
+        students: stripInternalStudentNameAliases(m.students),
+        hasPhysicalScan:
+          effectiveProof.hasValidPhysicalProof && effectiveProof.hasPhysicalArtifact,
+        govBrVerified: effectiveProof.isValidGovBrVerified,
+        govBrProtocol: effectiveProof.effectiveGovBrProtocol,
+        physicalScanStorageKey: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanStorageKey ?? null
           : null,
+        physicalScanProvider: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanProvider ?? null
+          : null,
+        physicalScanMimeType: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanMimeType ?? null
+          : null,
+        physicalScanSizeBytes: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanSizeBytes ?? null
+          : null,
+        physicalScanSha256: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanSha256 ?? null
+          : null,
+        physicalScanUploadedAt: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanUploadedAt ?? null
+          : null,
+        physicalScanUploadedBy: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanUploadedBy ?? null
+          : null,
+        physicalSignedScanData:
+          includeSignatures && effectiveProof.hasValidPhysicalProof
+            ? minuteWithScan.physicalSignedScanData ?? null
+            : null,
+        physicalProofHistory: filteredHistory,
         participants: safeParticipants,
       };
     });
@@ -306,7 +356,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Dados inválidos" }, { status: 400 });
     }
 
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, school)
+      : authCheck.session;
     const ip = extractClientIp(req);
     const currentYear = getCurrentBrasiliaYear();
 
@@ -323,14 +382,7 @@ export async function POST(req: Request) {
       actionItems,
     } = parsed.data;
 
-    // Garante que a escola exista no banco de dados para satisfazer a chave estrangeira (FK)
-    let effectiveSchoolId = school.id;
-    if (effectiveSchoolId === "default-leopoldina") {
-      const ensured = await ensureDefaultSchool();
-      if (ensured) {
-        effectiveSchoolId = ensured.id;
-      }
-    }
+    const effectiveSchoolId = school.id;
 
     const uniqueStudentIds = Array.from(new Set(studentIds));
 
@@ -363,11 +415,22 @@ export async function POST(req: Request) {
 
     await validateParticipantStudentLinks(prisma, effectiveSchoolId, participants);
 
+    if ((participants || []).some((p) => Boolean(p.signatureData))) {
+      return NextResponse.json(
+        {
+          error:
+            "Salve e confira o rascunho antes de coletar assinaturas na revisão vigente.",
+        },
+        { status: 400 }
+      );
+    }
+
     const minute = await prisma.pedagogicalMinute.create({
       data: {
         schoolId: effectiveSchoolId,
         year: currentYear,
         status: "DRAFT", // Sempre inicia como rascunho sem consumir número
+        contentRevision: 1,
         category,
         isConfidential,
         attendedAt: attendedAt ? new Date(attendedAt) : new Date(),
@@ -378,7 +441,10 @@ export async function POST(req: Request) {
         authorId: authCheck.userId,
         authorName: authCheck.userName || "Equipe Pedagógica",
         authorEmail: authCheck.email,
-        authorRole: authCheck.role || "PEDAGOGA",
+        authorRole:
+          (effectiveSession?.user as { role?: string } | undefined)?.role ||
+          authCheck.role ||
+          "PEDAGOGA",
         authorIp: ip,
         students: {
           create: studentsDb.map((s) => ({
@@ -403,11 +469,13 @@ export async function POST(req: Request) {
             documentNumber: p.documentNumber || null,
             documentVerifiedByStaff: p.documentVerifiedByStaff,
             phone: p.phone || null,
-            signatureMode: p.signatureMode || "PENDING",
-            signatureData: p.signatureData || null,
-            signedAt: p.signatureData ? new Date() : null,
-            hasSignature: Boolean(p.signatureData),
+            signatureMode: p.signatureMode === "REFUSED" ? "REFUSED" : "PENDING",
+            signatureData: null,
+            signedAt: null,
+            hasSignature: false,
             hasActiveSignLink: false,
+            mobileSignRevision: null,
+            signedRevision: null,
             biometricVerified: false,
             biometricDeviceType: null,
             biometricAuthTime: null,
@@ -449,7 +517,16 @@ export async function POST(req: Request) {
       ipAddress: ip,
     });
 
-    return NextResponse.json({ success: true, minute: stripParticipantSecrets(minute) }, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        minute: stripParticipantSecrets({
+          ...minute,
+          students: stripInternalStudentNameAliases(minute.students),
+        }),
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     const msg = error?.message || "";
     if (msg.startsWith("FORBIDDEN:")) {

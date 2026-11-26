@@ -1,4 +1,4 @@
-import type { AtaParticipantDraft } from "./types";
+import type { AtaMinuteRecord, AtaParticipantDraft } from "./types";
 
 export type QrPollStatus =
   | "waiting"
@@ -36,6 +36,7 @@ export interface QrPollUiState {
 export interface QrPollCallbacks {
   onStateChange: (state: QrPollUiState) => void;
   onParticipantsSynced: (participants: AtaParticipantDraft[]) => void;
+  onMinuteSynced?: (minute: AtaMinuteRecord) => void;
   onCompletedClose: () => void;
   onSaved?: () => void;
 }
@@ -190,7 +191,7 @@ export function validatePollParticipantsContract(
 export function validateFullMinuteResponse(
   minuteId: string,
   data: any
-): { ok: true; participants: AtaParticipantDraft[] } | { ok: false } {
+): { ok: true; participants: AtaParticipantDraft[]; minute: AtaMinuteRecord } | { ok: false } {
   if (!data || typeof data !== "object") return { ok: false };
   if (data.success !== true && data.minute === undefined) return { ok: false };
   const minute = data.minute;
@@ -207,7 +208,11 @@ export function validateFullMinuteResponse(
     if (typeof p.hasSignature !== "boolean") return { ok: false };
   }
 
-  return { ok: true, participants: minute.participants as AtaParticipantDraft[] };
+  return {
+    ok: true,
+    participants: minute.participants as AtaParticipantDraft[],
+    minute: minute as AtaMinuteRecord,
+  };
 }
 
 export function createQrPollController(
@@ -338,6 +343,7 @@ export function createQrPollController(
           const validated = validateFullMinuteResponse(minuteId, result.data);
           if (validated.ok) {
             callbacks.onParticipantsSynced(validated.participants);
+            callbacks.onMinuteSynced?.(validated.minute);
 
             if (preserveConfirmation) {
               updateState({ isBusy: false });

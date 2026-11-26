@@ -127,7 +127,21 @@ vi.mock("@/lib/prisma", () => {
     },
     user: {
       findUnique: vi.fn(async ({ where }: any) => {
-        return hoisted.state.db.users.find((u) => u.id === where.id) || null;
+        const u = hoisted.state.db.users.find(
+          (x) => (where?.id && x.id === where.id) || (where?.email && x.email === where.email)
+        );
+        if (!u) return null;
+        return {
+          ...u,
+          schools: (u.schools || []).map((link: any) => ({
+            ...link,
+            school:
+              link.school ||
+              hoisted.state.db.schools.find((s) => s.id === link.schoolId) ||
+              null,
+          })),
+          networks: u.networks || [],
+        };
       }),
       update: vi.fn(async ({ where, data }: any) => {
         const target = hoisted.state.db.users.find((u) => u.id === where.id);
@@ -355,14 +369,58 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
       users: [
         {
           id: "usr-pedagoga-a",
+          name: "Pedagoga Ana",
           email: "ana@escola-a.pr.gov.br",
+          role: "PEDAGOGA",
+          schoolId: "escola-a",
+          active: true,
+          schools: [{ schoolId: "escola-a", role: "PEDAGOGA", active: true }],
+          networks: [],
           signingPinHash: null,
           pinAttempts: 0,
           pinLockedUntil: null,
         },
         {
           id: "usr-gestor-a",
+          name: "Diretor Carlos",
           email: "diretor@escola-a.pr.gov.br",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "escola-a",
+          active: true,
+          schools: [{ schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true }],
+          networks: [],
+          signingPinHash: null,
+          pinAttempts: 0,
+          pinLockedUntil: null,
+        },
+        {
+          id: "usr-sec-tibagi",
+          name: "Secretária Tibagi",
+          email: "semec@tibagi.pr.gov.br",
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+          active: true,
+          schools: [],
+          networks: [
+            {
+              networkId: "semec-tibagi",
+              active: true,
+              network: { id: "semec-tibagi", city: "Tibagi", type: "MUNICIPAL", active: true },
+            },
+          ],
+          signingPinHash: null,
+          pinAttempts: 0,
+          pinLockedUntil: null,
+        },
+        {
+          id: "usr-super",
+          name: "SuperAdmin",
+          email: "marcos.wrobel@escola.pr.gov.br",
+          role: "SUPERADMIN",
+          schoolId: null,
+          active: true,
+          schools: [],
+          networks: [],
           signingPinHash: null,
           pinAttempts: 0,
           pinLockedUntil: null,
@@ -476,6 +534,7 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
         schoolId: "escola-a",
         year: 2026,
         status: "DRAFT",
+        contentRevision: 1,
         category: "BUSCA_ATIVA_FALTAS",
         isConfidential: false,
         attendedAt: new Date("2026-11-05T14:00:00.000Z"),
@@ -499,24 +558,27 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
         name: "Mãe do Lucas",
         signatureMode: "MOBILE_QR",
         signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA",
+        hasSignature: true,
+        signedRevision: 1,
         biometricStrokeData: JSON.stringify([{ x: 10, y: 20, t: 100, p: 0.8 }]),
         signerUserAgent: "Mozilla/5.0 Android",
         signedAt: new Date("2026-11-05T14:05:00.000Z"),
       });
 
-      // 1. Salvamento de rascunho via PATCH NÃO apaga biometricStrokeData nem signerUserAgent
+      // 1. Tentativa de alteração via PATCH após assinatura é bloqueada (409) e NÃO apaga biometricStrokeData nem signerUserAgent
       const patchRes = await patchAta(
         new Request("http://localhost:3000/api/atas/ata-1", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            expectedRevision: 1,
             subject: "Reunião de Frequência Escolar",
             participants: [{ id: "mp-1", role: "RESPONSAVEL", name: "Mãe do Lucas", signatureMode: "MOBILE_QR" }],
           }),
         }),
         { params: Promise.resolve({ id: "ata-1" }) }
       );
-      expect(patchRes.status).toBe(200);
+      expect(patchRes.status).toBe(409);
       expect(hoisted.state.db.minuteParticipants[0].biometricStrokeData).toContain('"p":0.8');
       expect(hoisted.state.db.minuteParticipants[0].signerUserAgent).toBe("Mozilla/5.0 Android");
 
@@ -678,6 +740,7 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
       schoolId: "escola-a",
       year: 2026,
       status: "DRAFT",
+      contentRevision: 1,
       isConfidential: true,
       authorId: "usr-outro-autor",
       authorEmail: "outra.pedagoga@escola-a.pr.gov.br",
@@ -698,6 +761,8 @@ describe("Auditoria de Segurança Multi-Tenant & Conformidade Jurídico-Pericial
       name: "Pai do Lucas",
       mobileSignToken: "tok-unico-123",
       mobileSignExpiresAt: new Date(Date.now() + 600000),
+      mobileSignRevision: 1,
+      hasActiveSignLink: true,
       signedAt: null,
     });
     hoisted.state.db.actionItems.push({

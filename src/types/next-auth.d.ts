@@ -9,6 +9,7 @@ export interface SessionSchoolLink {
   inepCode?: string;
   city?: string;
   network?: string;
+  networkId?: string | null;
   logoUrl?: string | null;
   active?: boolean;
 }
@@ -17,6 +18,7 @@ export interface SessionNetworkLink {
   id?: string;
   networkId: string;
   role: string;
+  active?: boolean;
   name?: string;
   shortName?: string;
   city?: string;
@@ -24,6 +26,8 @@ export interface SessionNetworkLink {
   logoUrl?: string | null;
   network?: {
     city?: string;
+    type?: string;
+    active?: boolean;
   };
 }
 

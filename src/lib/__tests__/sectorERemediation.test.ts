@@ -29,19 +29,39 @@ vi.mock("next/link", () => ({
     React.createElement("a", { href, ...props }, children),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async (schoolId?: string) => ({
-    id: schoolId || "school-e-1",
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  const mockSchool = {
+    id: "school-e-1",
     inepCode: "41999222",
     name: "Escola Municipal Modelo",
     city: "Tibagi",
     state: "PR",
     nre: "SEMEC Tibagi",
     network: "MUNICIPAL",
-    edition: "INSTITUCIONAL_ESSENCIAL",
-  })),
-  isDefaultSchoolContext: vi.fn(() => false),
-}));
+    edition: "INSTITUCIONAL_ESSENCIAL" as const,
+  };
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async (schoolId?: string) => ({
+      ...mockSchool,
+      id: schoolId || mockSchool.id,
+    })),
+    getAuthorizedCurrentSchool: vi.fn(async (_session: any, schoolId?: string | null) => ({
+      ...mockSchool,
+      id: schoolId || mockSchool.id,
+    })),
+    requireAuthorizedSchool: vi.fn(async (_session: any, schoolId?: string | null) => ({
+      ok: true as const,
+      school: { ...mockSchool, id: schoolId || mockSchool.id },
+    })),
+    getSchoolContextByVerifiedId: vi.fn(async (schoolId?: string | null) => ({
+      ...mockSchool,
+      id: schoolId || mockSchool.id,
+    })),
+    isDefaultSchoolContext: vi.fn(() => false),
+  };
+});
 
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(async (entry: any) => {
@@ -186,17 +206,10 @@ describe("Remediação Setorial do Setor E e Camada Transversal (E1-E4, T1-T2)",
 
       const res = await replyPost(req);
       expect(res.status).toBe(200);
-      expect(hoisted.generatedContents.length).toBeGreaterThan(0);
-
-      const sentPrompt = hoisted.generatedContents[0];
-      expect(sentPrompt).not.toContain("LucasGabriel");
-      expect(sentPrompt).not.toContain("Maria Souza");
-      expect(sentPrompt).not.toContain("99888-7766");
-      expect(sentPrompt).not.toContain("1018613740");
-      expect(sentPrompt).toContain("[ESTUDANTE_1]");
-      expect(sentPrompt).toContain("[RESPONSAVEL_1]");
-      expect(sentPrompt).toContain("[TELEFONE_SIGILOSO]");
-      expect(sentPrompt).toContain("[CGM_SIGILOSO]");
+      const data = await res.json();
+      expect(data.mode).toBe("LOCAL_ONLY");
+      expect(data.updated.replyCategory).toBe("SAUDE");
+      expect(hoisted.generatedContents).toHaveLength(0);
     });
 
     it("POST /api/messages/send aplica enforceRateLimit e bloqueia excesso de disparos com HTTP 429", async () => {
@@ -458,8 +471,8 @@ describe("Remediação Setorial do Setor E e Camada Transversal (E1-E4, T1-T2)",
         path.resolve(process.cwd(), "src/components/PwaRegister.tsx"),
         "utf8"
       );
-      expect(pwaCode).not.toContain(">\n          LA\n");
-      expect(pwaCode).toContain("RA");
+      expect(pwaCode).not.toContain('.register("/sw.js")');
+      expect(pwaCode).toContain("cleanupLegacyServiceWorkersAndCaches");
     });
   });
 });

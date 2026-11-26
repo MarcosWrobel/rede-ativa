@@ -164,6 +164,7 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
         role: "PEDAGOGA",
         active: true,
         schoolId: "school-essencial-1",
+        schools: [{ schoolId: "school-essencial-1", role: "PEDAGOGA", active: true }],
       },
     };
     hoisted.schoolRecord = {
@@ -205,16 +206,7 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
       expect(masked).toContain("[DOCUMENTO_SIGILOSO]");
     });
 
-    it("POST /api/ai/generate-template mascara PII do prompt antes de enviar ao Gemini e sanitiza erro 400", async () => {
-      hoisted.generateContentImpl = async () => ({
-        text: JSON.stringify({
-          title: "AVISO",
-          prefixText: "{saudacao}\nPrezados",
-          suffixText: "Atenciosamente",
-          isAbsenceRelated: false,
-        }),
-      });
-
+    it("POST /api/ai/generate-template gera modelo local sem enviar dados ao Google Gemini mesmo com x-gemini-key", async () => {
       const req = new Request("http://localhost/api/ai/generate-template", {
         method: "POST",
         headers: {
@@ -222,49 +214,18 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
           "x-gemini-key": "AIzaFakeKey1234567890",
         },
         body: JSON.stringify({
-          prompt:
-            "Avisar responsável sobre CPF 123.456.789-00, fone (42) 99888-7766, email mae@teste.com e CGM 1018613740",
+          prompt: "Faltas consecutivas",
         }),
       });
 
       const res = await generateTemplatePost(req);
       expect(res.status).toBe(200);
-      expect(hoisted.generatedContents[0]).not.toContain("123.456.789-00");
-      expect(hoisted.generatedContents[0]).not.toContain("99888-7766");
-      expect(hoisted.generatedContents[0]).not.toContain("mae@teste.com");
-      expect(hoisted.generatedContents[0]).not.toContain("1018613740");
-      expect(hoisted.generatedContents[0]).toContain("[DOCUMENTO_SIGILOSO]");
-      expect(hoisted.generatedContents[0]).toContain("[TELEFONE_SIGILOSO]");
-      expect(hoisted.generatedContents[0]).toContain("[EMAIL_SIGILOSO]");
-      expect(hoisted.generatedContents[0]).toContain("[CGM_SIGILOSO]");
-
-      // Verifica sanitização de erro externo no HTTP 400
-      hoisted.aiThrowError = new Error("INTERNAL_GEMINI_UPSTREAM_HOST_SECRET_URL");
-      const errReq = new Request("http://localhost/api/ai/generate-template", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-key": "AIzaFakeKey1234567890",
-        },
-        body: JSON.stringify({ prompt: "Reunião de pais" }),
-      });
-      const errRes = await generateTemplatePost(errReq);
-      expect(errRes.status).toBe(400);
-      const errBody = await errRes.json();
-      expect(JSON.stringify(errBody)).not.toContain("INTERNAL_GEMINI_UPSTREAM_HOST_SECRET_URL");
+      const data = await res.json();
+      expect(data.mode).toBe("LOCAL_ONLY");
+      expect(hoisted.generatedContents).toHaveLength(0);
     });
 
-    it("POST /api/ai/classify-reply mascara reasonTitle antes de enviar ao Gemini", async () => {
-      hoisted.generateContentImpl = async () => ({
-        text: JSON.stringify({
-          extractedRawReply: "Vai retornar amanhã",
-          formalSummary: "Responsável informou retorno.",
-          category: "OUTROS",
-          requiresMedicalCertificate: false,
-          suggestedFollowUp: "Acompanhar frequência.",
-        }),
-      });
-
+    it("POST /api/ai/classify-reply classifica retorno localmente com ZERO envio ao provedor externo", async () => {
       const req = new Request("http://localhost/api/ai/classify-reply", {
         method: "POST",
         headers: {
@@ -272,7 +233,7 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
           "x-gemini-key": "AIzaFakeKey1234567890",
         },
         body: JSON.stringify({
-          rawReply: "Ela estava doente",
+          rawReply: "Ela estava doente e foi ao médico hoje",
           studentName: "Ana Clara Souza",
           guardianName: "Marcos Souza",
           reasonTitle: "Contato sobre Ana Clara Souza (42) 99123-4567 CGM 1018613740",
@@ -281,24 +242,31 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
 
       const res = await classifyReplyPost(req);
       expect(res.status).toBe(200);
-      expect(hoisted.generatedContents[0]).not.toContain("Ana Clara Souza");
-      expect(hoisted.generatedContents[0]).not.toContain("99123-4567");
-      expect(hoisted.generatedContents[0]).not.toContain("1018613740");
-      expect(hoisted.generatedContents[0]).toContain("[ESTUDANTE_1]");
-      expect(hoisted.generatedContents[0]).toContain("[TELEFONE_SIGILOSO]");
-      expect(hoisted.generatedContents[0]).toContain("[CGM_SIGILOSO]");
+      const data = await res.json();
+      expect(data.mode).toBe("LOCAL_ONLY");
+      expect(data.classification.category).toBe("SAUDE");
+      expect(hoisted.generatedContents).toHaveLength(0);
     });
 
-    it("GET/POST /api/ai/test-key e /api/ai/formalize-ata ocultam fragmentos de chave e não vazam erro bruto externo", async () => {
+    it("GET/POST /api/ai/test-key e /api/ai/formalize-ata ocultam credenciais de servidor e /formalize-ata pseudonimiza PII antes do Gemini", async () => {
       const prevKey = process.env.GEMINI_API_KEY;
+      const prevEnabled = process.env.AI_FORMALIZE_EXTERNAL_ENABLED;
+      const prevAllowed = process.env.AI_FORMALIZE_ALLOWED_SCHOOL_IDS;
       process.env.GEMINI_API_KEY = "AIzaSecretServerKeyValue12345";
+      process.env.AI_FORMALIZE_EXTERNAL_ENABLED = "true";
+      process.env.AI_FORMALIZE_ALLOWED_SCHOOL_IDS = "school-essencial-1";
+      hoisted.schoolRecord.settingsJson = JSON.stringify({
+        edition: "INSTITUCIONAL_ESSENCIAL",
+        aiExternalFormalizeEnabled: true,
+        aiExternalFormalizePolicyVersion: 2,
+      });
       try {
         const getRes = await testKeyGet();
         const getData = await getRes.json();
-        expect(getData).toEqual({ hasServerKey: true });
+        expect(getData.hasServerKey).toBe(true);
+        expect(getData.schoolAuthorized).toBe(true);
         expect(JSON.stringify(getData)).not.toContain("AIzaSecret");
 
-        hoisted.aiThrowError = new Error("RAW_UPSTREAM_LEAK_TOKEN_XYZ");
         const postRes = await testKeyPost(
           new Request("http://localhost/api/ai/test-key", {
             method: "POST",
@@ -306,17 +274,22 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
             body: JSON.stringify({}),
           })
         );
-        expect(postRes.status).toBe(400);
+        expect(postRes.status).toBe(200);
         const postData = await postRes.json();
-        expect(JSON.stringify(postData)).not.toContain("RAW_UPSTREAM_LEAK_TOKEN_XYZ");
+        expect(postData.schoolAuthorized).toBe(true);
         expect(JSON.stringify(postData)).not.toContain("AIzaSecret");
 
+        hoisted.aiThrowError = new Error("RAW_UPSTREAM_LEAK_TOKEN_XYZ");
         const formRes = await formalizeAtaPost(
           new Request("http://localhost/api/ai/formalize-ata", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              rawNotes: "Compareceu a mãe para alinhamento de frequência.",
+              isConfidential: false,
+              nonConfidentialConfirmed: true,
+              ataScope: "STUDENTS",
+              category: "ACOMPANHAMENTO_PEDAGOGICO",
+              rawNotes: "Compareceu a mãe Maria Pedro referente ao aluno João Pedro (42) 99888-7766.",
               studentNames: ["João Pedro"],
               guardianNames: ["Maria Pedro"],
             }),
@@ -326,9 +299,17 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
         const formData = await formRes.json();
         expect(formData.usedFallback).toBe(true);
         expect(formData.fallbackReason).not.toContain("RAW_UPSTREAM_LEAK_TOKEN_XYZ");
+        expect(hoisted.generatedContents.length).toBeGreaterThan(0);
+        expect(hoisted.generatedContents[0]).not.toContain("João Pedro");
+        expect(hoisted.generatedContents[0]).not.toContain("Maria Pedro");
+        expect(hoisted.generatedContents[0]).not.toContain("99888-7766");
       } finally {
         if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
         else process.env.GEMINI_API_KEY = prevKey;
+        if (prevEnabled === undefined) delete process.env.AI_FORMALIZE_EXTERNAL_ENABLED;
+        else process.env.AI_FORMALIZE_EXTERNAL_ENABLED = prevEnabled;
+        if (prevAllowed === undefined) delete process.env.AI_FORMALIZE_ALLOWED_SCHOOL_IDS;
+        else process.env.AI_FORMALIZE_ALLOWED_SCHOOL_IDS = prevAllowed;
       }
     });
   });
@@ -378,7 +359,7 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
       expect(manualData.atualizados).toBe(1);
     });
 
-    it("propaga educationNetwork.settingsJson em getCurrentSchool para resolver edição herdada da rede", async () => {
+    it("propaga educationNetwork.settingsJson em getSchoolContextByVerifiedId para resolver edição herdada da rede", async () => {
       hoisted.schoolRecord = {
         id: "school-inherited-1",
         inepCode: "41888222",
@@ -402,8 +383,9 @@ describe("Remediação Setorial do Setor D (D1 a D5)", () => {
         updatedAt: new Date("2026-11-18T10:00:00.000Z"),
       };
 
-      const resolved = await getCurrentSchool("school-inherited-1");
-      expect(resolved.edition).toBe("PILOTO_INTEGRADA");
+      const { getSchoolContextByVerifiedId } = await import("@/lib/currentSchool");
+      const resolved = await getSchoolContextByVerifiedId("school-inherited-1");
+      expect(resolved?.edition).toBe("PILOTO_INTEGRADA");
     });
   });
 

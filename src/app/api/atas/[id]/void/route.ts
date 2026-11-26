@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSchoolManager, checkIsSuperAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
@@ -35,7 +35,13 @@ export async function POST(
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
@@ -44,9 +50,23 @@ export async function POST(
     }
 
     // Princípio do Paralelismo das Formas: apenas Direção/Gestão Escolar ou SuperAdmin podem anular ata lavrada
+    const targetDescriptor =
+      minute.schoolId === currentSchool.id
+        ? {
+            id: currentSchool.id,
+            active: true,
+            networkId: currentSchool.networkId,
+            network: currentSchool.network,
+            city: currentSchool.city,
+          }
+        : null;
     const canVoid =
       checkIsSuperAdmin(authCheck.session) ||
-      checkIsSchoolManager(authCheck.session, minute.schoolId || currentSchool.id);
+      checkIsSchoolManager(
+        authCheck.session,
+        minute.schoolId || currentSchool.id,
+        targetDescriptor
+      );
     if (!canVoid) {
       return NextResponse.json(
         {

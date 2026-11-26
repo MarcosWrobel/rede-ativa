@@ -7,6 +7,7 @@ import {
   maskName,
   maskDocument,
   anonymizeOtherMinorsInText,
+  anonymizeParticipantsForDossier,
 } from "../ataCrypto";
 
 describe("ataCrypto - Integridade Criptográfica e Conformidade LGPD/ECA", () => {
@@ -120,5 +121,46 @@ describe("ataCrypto - Integridade Criptográfica e Conformidade LGPD/ECA", () =>
     expect(anonymized).toContain("Lucas Ferreira");
     expect(anonymized).not.toContain("Gabriel Souza");
     expect(anonymized).toContain("G. S. (outro estudante)");
+  });
+
+  it("anonymizeParticipantsForDossier preserva o estudante titular e anonimiza outros estudantes, renomeados e legados indetermináveis na lista Presentes", () => {
+    const linkedStudents = [
+      {
+        id: "stu-target",
+        name: "Ana Paula Oliveira",
+        aliases: ["Ana Oliveira Snapshot"],
+      },
+      {
+        id: "stu-other",
+        name: "Bruno Santos Atual",
+        aliases: ["Bruno Santos Antigo"],
+      },
+    ];
+
+    const result = anonymizeParticipantsForDossier(
+      [
+        { role: "ESTUDANTE", studentId: "stu-target", name: "Ana Paula Oliveira" },
+        { role: "ESTUDANTE", studentId: "stu-other", name: "Bruno Santos Antigo" },
+        { role: "ESTUDANTE", studentId: null, name: "Bruno Santos Antigo" },
+        { role: "ESTUDANTE", studentId: null, name: "Terceiro Sem Vínculo" },
+        { role: "ESTUDANTE", studentId: null, name: "Ana Oliveira Snapshot" },
+        { role: "RESPONSAVEL", studentId: null, name: "Maria Aparecida (Mãe)" },
+        { role: "RESPONSAVEL", studentId: null, name: "Responsável por Bruno Santos Atual" },
+        { role: "PROFESSOR", studentId: null, name: "Bruno Almeida (Docente)" },
+      ],
+      "stu-target",
+      linkedStudents
+    );
+
+    expect(result).toEqual([
+      "Ana Paula Oliveira",
+      "Outro estudante",
+      "Outro estudante",
+      "Outro estudante",
+      "Ana Oliveira Snapshot",
+      "Maria Aparecida (Mãe)",
+      "Responsável por Outro estudante",
+      "Bruno Almeida (Docente)",
+    ]);
   });
 });

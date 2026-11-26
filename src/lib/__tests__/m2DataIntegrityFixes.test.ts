@@ -179,8 +179,46 @@ vi.mock("@/lib/prisma", () => {
     user: {
       findUnique: vi.fn(async ({ where }: any) => {
         const pinHash = await hashPin("8391");
+        const sUser = (mockState as any)?.session?.user;
+        const userId = where?.id || sUser?.id || "usr-gestor-a";
+        const schoolId = sUser?.schoolId ?? "escola-a";
+        const role = sUser?.role || "GESTOR_ESCOLAR";
         return {
-          id: where?.id || "usr-gestor-a",
+          id: userId,
+          email: where?.email || sUser?.email || "gestor@escola-a.pr.gov.br",
+          name: sUser?.name || "Gestor Teste",
+          role,
+          schoolId,
+          active: sUser?.active ?? true,
+          schools: Array.isArray(sUser?.schools)
+            ? sUser.schools.map((sc: any) => ({
+                ...sc,
+                active: sc.active ?? true,
+                school: sc.school || {
+                  id: sc.schoolId,
+                  name: "Escola Teste",
+                  inepCode: "41000001",
+                  active: true,
+                  edition: "INSTITUCIONAL_ESSENCIAL",
+                },
+              }))
+            : schoolId
+              ? [
+                  {
+                    schoolId,
+                    role,
+                    active: true,
+                    school: {
+                      id: schoolId,
+                      name: "Escola Teste",
+                      inepCode: "41000001",
+                      active: true,
+                      edition: "INSTITUCIONAL_ESSENCIAL",
+                    },
+                  },
+                ]
+              : [],
+          networks: Array.isArray(sUser?.networks) ? sUser.networks : [],
           signingPinHash: pinHash,
           pinAttempts: 0,
           pinLockedUntil: null,

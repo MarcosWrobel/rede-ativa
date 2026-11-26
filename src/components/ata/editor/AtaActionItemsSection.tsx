@@ -5,6 +5,7 @@ import type { AtaActionItemDraft } from "./types";
 
 export interface AtaActionItemsSectionProps {
   actionItems: AtaActionItemDraft[];
+  disabled?: boolean;
   onAdd: () => void;
   onUpdate: (index: number, patch: Partial<AtaActionItemDraft>) => void;
   onRemove: (index: number) => void;
@@ -19,6 +20,7 @@ export interface AtaActionItemsSectionProps {
  */
 export default function AtaActionItemsSection({
   actionItems,
+  disabled = false,
   onAdd,
   onUpdate,
   onRemove,
@@ -34,16 +36,17 @@ export default function AtaActionItemsSection({
         </h4>
         <button
           type="button"
+          disabled={disabled}
           onClick={onAdd}
           aria-label="Novo Encaminhamento e prazo"
-          className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs"
+          className="text-sky-600 hover:text-sky-700 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <UserPlus aria-hidden="true" className="w-3.5 h-3.5" />
           <span>Novo Encaminhamento</span>
         </button>
       </div>
 
-      {pendingSuggestions && pendingSuggestions.length > 0 && (
+      {!disabled && pendingSuggestions && pendingSuggestions.length > 0 && (
         <div
           role="status"
           className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-950 space-y-2"
@@ -86,17 +89,19 @@ export default function AtaActionItemsSection({
             >
               <input
                 type="text"
+                disabled={disabled}
                 aria-label={`Descrição do encaminhamento ${idx + 1}`}
                 placeholder="Descrição da ação pactuada..."
                 value={act.description}
                 onChange={(e) => onUpdate(idx, { description: e.target.value })}
-                className="flex-1 min-w-[160px] p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
+                className="flex-1 min-w-[160px] p-1.5 border border-slate-300 rounded-lg bg-white text-xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
               />
               <select
+                disabled={disabled}
                 aria-label={`Responsável pelo encaminhamento ${idx + 1}`}
                 value={act.responsible}
                 onChange={(e) => onUpdate(idx, { responsible: e.target.value })}
-                className="p-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-xs"
+                className="p-1.5 border border-slate-300 rounded-lg bg-white font-semibold text-xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
               >
                 <option value="FAMILIA">Família</option>
                 <option value="ESTUDANTE">Estudante</option>
@@ -107,10 +112,11 @@ export default function AtaActionItemsSection({
               <div className="flex flex-col items-end">
                 <input
                   type="date"
+                  disabled={disabled}
                   aria-label={`Prazo do encaminhamento ${idx + 1}`}
                   value={act.dueDate}
                   onChange={(e) => onUpdate(idx, { dueDate: e.target.value })}
-                  className="p-1.5 border border-slate-300 rounded-lg bg-white text-xs"
+                  className="p-1.5 border border-slate-300 rounded-lg bg-white text-xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                 />
                 {!act.dueDate && (
                   <span className="text-[10px] text-slate-500 font-medium mt-0.5">
@@ -120,9 +126,10 @@ export default function AtaActionItemsSection({
               </div>
               <button
                 type="button"
+                disabled={disabled}
                 onClick={() => onRemove(idx)}
                 aria-label={`Remover encaminhamento ${idx + 1}`}
-                className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <Trash2 aria-hidden="true" className="w-4 h-4" />
               </button>

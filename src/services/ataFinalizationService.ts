@@ -2,6 +2,8 @@ import {
   computeMinuteHash,
   generateVerificationCode,
   canAccessConfidentialMinute,
+  retainNecessaryPreviousStudentNames,
+  stripInternalStudentNameAliases,
   stripParticipantSecrets,
   type MinuteCanonicalPayload,
 } from "@/lib/ataCrypto";
@@ -14,6 +16,12 @@ import {
   acquireMinuteWriteLock,
   acquireSchoolYearSeqLock,
 } from "@/lib/minuteLock";
+import {
+  evaluateMinuteRevisionLock,
+  hasFinalizationContentConflicts,
+  hasMinimumOfficialSummary,
+  OFFICIAL_SUMMARY_REQUIRED_FOR_FINALIZATION_ERROR,
+} from "@/lib/ataRevision";
 
 const BRASILIA_TIMEZONE = "America/Sao_Paulo";
 
@@ -196,6 +204,8 @@ export function buildCanonicalMinutePayload(params: {
 }
 
 export interface FinalizeMinutePayloadInput {
+  expectedRevision?: number;
+  attendedAt?: string;
   studentIds?: unknown;
   participants?: IncomingMinuteParticipant[];
   actionItems?: Array<{
@@ -307,10 +317,52 @@ export async function executeMinuteFinalization(
             );
           }
 
+          if (rawBody && typeof rawBody === "object" && Array.isArray(rawBody.participants)) {
+            await validateParticipantStudentLinks(tx, minute.schoolId, rawBody.participants);
+          }
+
+          const lockState = evaluateMinuteRevisionLock(minute);
+          if (lockState.hasLegacyUnprovableProof) {
+            throw new Error(
+              "CONFLICT:Esta ata possui assinatura anterior sem vínculo de revisão comprovado. Utilize 'Reabrir para edição' para invalidar as coletas antigas e coletar novamente antes de lavrar."
+            );
+          }
+
+          if (
+            rawBody &&
+            typeof rawBody === "object" &&
+            rawBody.expectedRevision !== undefined &&
+            Number(rawBody.expectedRevision) !== lockState.currentRevision
+          ) {
+            throw new Error(
+              "CONFLICT:A revisão desta ata foi atualizada em outra aba ou sessão. Recarregue e confira a revisão vigente antes de lavrar."
+            );
+          }
+
           // Lock transacional exclusivo por tenant e ano (Lei 14.063/2020)
           await acquireSchoolYearSeqLock(tx, minute.schoolId, currentYear);
 
-          if (rawBody && typeof rawBody === "object") {
+          if (lockState.isLockedBySignature) {
+            if (hasFinalizationContentConflicts(minute, rawBody as Record<string, any> | null)) {
+              throw new Error(
+                "CONFLICT:Esta ata já possui assinatura registrada na revisão atual e não pode ter o conteúdo alterado na lavratura. Utilize 'Reabrir para edição' para modificar o documento."
+              );
+            }
+
+            await validateParticipantStudentLinks(tx, minute.schoolId, minute.participants || []);
+
+            if (typeof tx.pedagogicalMinuteParticipant?.updateMany === "function") {
+              await tx.pedagogicalMinuteParticipant.updateMany({
+                where: { minuteId },
+                data: {
+                  mobileSignToken: null,
+                  mobileSignExpiresAt: null,
+                  mobileSignRevision: null,
+                  hasActiveSignLink: false,
+                },
+              });
+            }
+          } else if (rawBody && typeof rawBody === "object") {
             if (Array.isArray(rawBody.studentIds)) {
               const uniqueStudentIds: string[] = Array.from(new Set(rawBody.studentIds.map(String)));
               if (uniqueStudentIds.length > 0) {
@@ -323,15 +375,35 @@ export async function executeMinuteFinalization(
                     "VALIDATION:Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular."
                   );
                 }
+                const finalizeTexts = [
+                  typeof rawBody.subject === "string" && rawBody.subject.trim().length >= 2
+                    ? rawBody.subject.trim()
+                    : minute.subject,
+                  typeof rawBody.summary === "string" ? rawBody.summary : minute.summary,
+                  rawBody.agreementsSummary !== undefined
+                    ? rawBody.agreementsSummary
+                    : minute.agreementsSummary,
+                ];
                 await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId } });
                 await tx.pedagogicalMinuteStudent.createMany({
-                  data: studentsDb.map((s: any) => ({
-                    minuteId,
-                    studentId: s.id,
-                    studentNameSnapshot: s.name,
-                    classNameSnapshot: s.classGroup?.name || null,
-                    cgmSnapshot: s.cgm || null,
-                  })),
+                  data: studentsDb.map((s: any) => {
+                    const prevLink = (minute.students || []).find(
+                      (es: any) => es.studentId === s.id
+                    );
+                    return {
+                      minuteId,
+                      studentId: s.id,
+                      studentNameSnapshot: s.name,
+                      previousNameSnapshots: retainNecessaryPreviousStudentNames(
+                        prevLink?.previousNameSnapshots,
+                        prevLink?.studentNameSnapshot,
+                        s.name,
+                        finalizeTexts
+                      ),
+                      classNameSnapshot: s.classGroup?.name || null,
+                      cgmSnapshot: s.cgm || null,
+                    };
+                  }),
                 });
               } else {
                 await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId } });
@@ -355,6 +427,17 @@ export async function executeMinuteFinalization(
               }
             } else {
               await validateParticipantStudentLinks(tx, minute.schoolId, minute.participants || []);
+              if (typeof tx.pedagogicalMinuteParticipant?.updateMany === "function") {
+                await tx.pedagogicalMinuteParticipant.updateMany({
+                  where: { minuteId },
+                  data: {
+                    mobileSignToken: null,
+                    mobileSignExpiresAt: null,
+                    mobileSignRevision: null,
+                    hasActiveSignLink: false,
+                  },
+                });
+              }
             }
 
             if (Array.isArray(rawBody.actionItems)) {
@@ -397,6 +480,16 @@ export async function executeMinuteFinalization(
                     : minute.agreementsSummary,
               },
             });
+          } else if (typeof tx.pedagogicalMinuteParticipant?.updateMany === "function") {
+            await tx.pedagogicalMinuteParticipant.updateMany({
+              where: { minuteId },
+              data: {
+                mobileSignToken: null,
+                mobileSignExpiresAt: null,
+                mobileSignRevision: null,
+                hasActiveSignLink: false,
+              },
+            });
           }
 
           const refreshedMinute = await tx.pedagogicalMinute.findUnique({
@@ -412,9 +505,9 @@ export async function executeMinuteFinalization(
             throw new Error("NOT_FOUND:Ata pedagógica não encontrada");
           }
 
-          if (!refreshedMinute.summary || refreshedMinute.summary.trim().length < 10) {
+          if (!hasMinimumOfficialSummary(refreshedMinute.summary)) {
             throw new Error(
-              "VALIDATION:O texto formal da ata deve ser preenchido (mínimo de 10 caracteres) antes da lavratura oficial."
+              `VALIDATION:${OFFICIAL_SUMMARY_REQUIRED_FOR_FINALIZATION_ERROR}`
             );
           }
 
@@ -496,8 +589,19 @@ export async function executeMinuteFinalization(
     throw lastTxError || new Error("Não foi possível concluir a transação de lavratura.");
   }
 
+  const sanitizedMinute =
+    Array.isArray(finalized?.students) &&
+    finalized.students.some(
+      (s: any) => s && typeof s === "object" && Object.prototype.hasOwnProperty.call(s, "previousNameSnapshots")
+    )
+      ? {
+          ...finalized,
+          students: stripInternalStudentNameAliases(finalized.students),
+        }
+      : finalized;
+
   return {
-    minute: stripParticipantSecrets(finalized),
+    minute: stripParticipantSecrets(sanitizedMinute),
     alreadyFinalized: isAlreadyFinalized,
   };
 }

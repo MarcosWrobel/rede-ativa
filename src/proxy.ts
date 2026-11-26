@@ -2,7 +2,12 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authConfig } from "@/lib/auth.config";
-import { checkIsAdmin, checkIsSuperAdmin } from "@/lib/roles";
+import {
+  checkIsAdmin,
+  checkIsSecretariat,
+  checkIsSchoolManager,
+  checkIsSuperAdmin,
+} from "@/lib/roles";
 import {
   PUBLIC_PATHS,
   PUBLIC_PREFIXES,
@@ -65,9 +70,16 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  // 4. Restringe páginas administrativas (/auditoria, /equipe, /configuracoes) ao perfil ADMIN
+  // 4. Restringe páginas administrativas (/auditoria, /equipe, /configuracoes) ao gestor da escola ativa
   if (ADMIN_PAGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-    if (!checkIsAdmin(session)) {
+    const activeSchoolCookie = req.cookies.get("active_school_id")?.value?.trim();
+    const hasAdminAccess =
+      checkIsSuperAdmin(session) ||
+      checkIsSecretariat(session) ||
+      (activeSchoolCookie
+        ? checkIsSchoolManager(session, activeSchoolCookie)
+        : checkIsSchoolManager(session) || checkIsAdmin(session));
+    if (!hasAdminAccess) {
       return NextResponse.redirect(new URL("/busca-ativa", req.url));
     }
   }
@@ -79,6 +91,6 @@ export default proxy;
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\..*|logo.*\\.svg|extensao-rede-ativa\\.zip|extensao-leopoldina\\.zip|manifest\\.json|icon-.*\\.png).*)",
+    "/((?!_next/static|_next/image|sw\\.js|favicon\\..*|logo.*\\.svg|extensao-rede-ativa\\.zip|extensao-leopoldina\\.zip|manifest\\.json|icon-.*\\.png).*)",
   ],
 };

@@ -1,8 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { notFound, redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
-import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import { notFound } from "next/navigation";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import {
+  buildRestrictedConfidentialMinuteSummary,
+  canAccessConfidentialMinute,
+  stripInternalStudentNameAliases,
+} from "@/lib/ataCrypto";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import LivroAnualClient from "./LivroAnualClient";
 
 interface Props {
@@ -14,12 +18,9 @@ export default async function LivroAnualPage({ params }: Props) {
   const year = parseInt(ano, 10);
   if (isNaN(year)) notFound();
 
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const school = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const school = ctx.school;
 
   const isDefaultSchoolContext =
     school.id === "default-leopoldina" || school.inepCode === "41042730";
@@ -60,6 +61,10 @@ export default async function LivroAnualPage({ params }: Props) {
         authorEmail: true,
         authorRole: true,
         finalizedAt: true,
+        contentRevision: true,
+        physicalScanRevision: true,
+        physicalScanSupersededAt: true,
+        hasPhysicalScan: true,
         contentHash: true,
         verificationCode: true,
         pdfArchiveSha256: true,
@@ -77,7 +82,16 @@ export default async function LivroAnualPage({ params }: Props) {
         extemporaneousReason: true,
         createdAt: true,
         updatedAt: true,
-        students: true,
+        students: {
+          select: {
+            id: true,
+            minuteId: true,
+            studentId: true,
+            studentNameSnapshot: true,
+            classNameSnapshot: true,
+            cgmSnapshot: true,
+          },
+        },
         participants: {
           select: {
             id: true,
@@ -109,20 +123,29 @@ export default async function LivroAnualPage({ params }: Props) {
 
   const safeMinutes = minutes.map((m: any) => {
     if (!canAccessConfidentialMinute(m, session)) {
-      return {
-        ...m,
-        subject: "Atendimento sob sigilo institucional",
-        rawNotes: null,
-        summary: "[REGISTRO SOB SIGILO INSTITUCIONAL — ACESSO INTEGRAL RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
-        agreementsSummary: null,
-        students: [],
-        participants: [],
-        actionItems: [],
-        addendums: [],
-        restrictedConfidential: true,
-      };
+      return buildRestrictedConfidentialMinuteSummary(m, {
+        summary:
+          "[REGISTRO SOB SIGILO INSTITUCIONAL — ACESSO INTEGRAL RESTRITO À DIREÇÃO ESCOLAR E AO SERVIDOR AUTOR]",
+      });
     }
-    return m;
+    const effectiveProof = evaluateEffectivePhysicalProof(m);
+    return {
+      ...m,
+      students: stripInternalStudentNameAliases(m.students),
+      hasPhysicalScan:
+        effectiveProof.hasValidPhysicalProof && effectiveProof.hasPhysicalArtifact,
+      govBrVerified: effectiveProof.isValidGovBrVerified,
+      govBrProtocol: effectiveProof.effectiveGovBrProtocol,
+      physicalScanStorageKey: effectiveProof.hasValidPhysicalProof
+        ? m.physicalScanStorageKey ?? null
+        : null,
+      physicalScanSha256: effectiveProof.hasValidPhysicalProof
+        ? m.physicalScanSha256 ?? null
+        : null,
+      physicalScanUploadedAt: effectiveProof.hasValidPhysicalProof
+        ? m.physicalScanUploadedAt ?? null
+        : null,
+    };
   });
 
   return <LivroAnualClient school={school} year={year} minutes={safeMinutes} />;

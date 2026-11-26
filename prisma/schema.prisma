@@ -358,7 +358,10 @@ model PedagogicalMinute {
   authorIp              String?
   finalizedAt           DateTime?
   
-  // Integridade e Validação Jurídica
+  // Integridade, Revisão de Assinaturas e Validação Jurídica
+  contentRevision          Int                         @default(1) // Revisão vigente do conteúdo para vínculo de assinaturas
+  physicalScanRevision     Int?                        // Revisão vinculada à prova física / Gov.br no rascunho
+  physicalScanSupersededAt DateTime?                   // Timestamp da reabertura preservando a guarda do original anterior
   contentHash           String?                        // SHA-256 canônico gerado no momento da lavratura
   verificationCode      String?                        @unique // Código curto aleatório não sequencial para o QR Code público
   pdfArchiveSha256      String?                        // Último SHA-256 emitido da certidão arquivística PDF/A-1b (ISO 19005-1)
@@ -392,25 +395,55 @@ model PedagogicalMinute {
   participants          PedagogicalMinuteParticipant[]
   addendums             PedagogicalMinuteAddendum[]
   actionItems           PedagogicalActionItem[]
+  physicalProofHistory  PedagogicalMinutePhysicalProofHistory[]
 
   @@unique([schoolId, year, ataNumber])
   @@index([schoolId, year, status])
   @@index([schoolId, attendedAt(sort: Desc)])
 }
 
-model PedagogicalMinuteStudent {
-  id                  String            @id @default(cuid())
-  minuteId            String
-  minute              PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
-  studentId           String
-  student             Student           @relation(fields: [studentId], references: [id], onDelete: Restrict)
-  
-  // Snapshot imutável no momento da vinculação
-  studentNameSnapshot String
-  classNameSnapshot   String?
-  cgmSnapshot         String?
+model PedagogicalMinutePhysicalProofHistory {
+  id                   String            @id @default(cuid())
+  minuteId             String
+  schoolId             String
+  contentRevision      Int?
+  originIsConfidential Boolean?
+  originAuthorId       String?
+  originAuthorEmail    String?
+  scanStorageKey       String?
+  scanProvider         String?
+  scanMimeType         String?
+  scanSizeBytes        Int?
+  scanSha256           String?
+  scanFallbackData     String?           @db.Text
+  uploadedAt           DateTime?
+  uploadedBy           String?
+  govBrVerified        Boolean           @default(false)
+  govBrProtocol        String?
+  supersededAt         DateTime          @default(now())
+  supersededByRevision Int?
+  supersededByEmail    String?
+  createdAt            DateTime          @default(now())
+  minute               PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
 
-  createdAt           DateTime          @default(now())
+  @@index([minuteId, supersededAt])
+  @@index([schoolId, minuteId])
+}
+
+model PedagogicalMinuteStudent {
+  id                    String            @id @default(cuid())
+  minuteId              String
+  minute                PedagogicalMinute @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  studentId             String
+  student               Student           @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  
+  // Snapshot no momento da vinculação e eventuais grafias anteriores citadas no texto
+  studentNameSnapshot   String
+  previousNameSnapshots String[]          @default([])
+  classNameSnapshot     String?
+  cgmSnapshot           String?
+
+  createdAt             DateTime          @default(now())
 
   @@unique([minuteId, studentId])
   @@index([studentId, createdAt(sort: Desc)])
@@ -443,6 +476,8 @@ model PedagogicalMinuteParticipant {
   
   mobileSignToken         String?           @unique // Token temporário para assinar pelo celular via QR Code / Link
   mobileSignExpiresAt     DateTime?
+  mobileSignRevision      Int?              // Revisão do conteúdo para a qual este link de assinatura foi emitido
+  signedRevision          Int?              // Revisão do conteúdo efetivamente apresentada e assinada pelo participante
   hasSignature            Boolean           @default(false) // Flag persistida na escrita (N4 - evita heurística)
   hasActiveSignLink       Boolean           @default(false) // Flag persistida na escrita (N3 - evita trafegar mobileSignToken)
   biometricVerified       Boolean           @default(false) // Validação biométrica local do aparelho (WebAuthn/FIDO2)

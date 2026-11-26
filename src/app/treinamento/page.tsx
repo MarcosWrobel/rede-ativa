@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getAuthorizedCurrentSchool } from "@/lib/currentSchool";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
-import { checkIsSuperAdmin } from "@/lib/roles";
+import { buildSessionFromSnapshot, isSnapshotSuperAdmin, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import TreinamentoClient from "./TreinamentoClient";
 
 export const dynamic = "force-dynamic";
@@ -20,15 +20,27 @@ export default async function TreinamentoPage() {
     redirect("/login");
   }
 
-  const currentSchool = await getCurrentSchool();
-  const schoolEdition = currentSchool.edition ?? resolveSchoolEdition(currentSchool);
-  const isSuperAdmin = checkIsSuperAdmin(session);
+  const snapshot = await resolveServerUserAuthSnapshot(session);
+  if (!snapshot || snapshot.active === false) {
+    redirect("/login?error=AccountInactive");
+  }
+
+  const freshSession = buildSessionFromSnapshot(session, snapshot);
+  const currentSchool = await getAuthorizedCurrentSchool(
+    freshSession,
+    freshSession?.user?.schoolId,
+    snapshot
+  );
+  const schoolEdition = currentSchool
+    ? currentSchool.edition ?? resolveSchoolEdition(currentSchool)
+    : "INSTITUCIONAL_ESSENCIAL";
+  const isSuperAdmin = isSnapshotSuperAdmin(snapshot);
 
   return (
     <TreinamentoClient
       schoolEdition={schoolEdition}
       isSuperAdmin={isSuperAdmin}
-      schoolName={currentSchool.name}
+      schoolName={currentSchool?.name || "Rede Ativa"}
     />
   );
 }

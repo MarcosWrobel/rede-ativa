@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
+import { buildSessionFromSnapshot, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import OnboardingClient from "./OnboardingClient";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,14 @@ export default async function OnboardingPage() {
     redirect("/login");
   }
 
-  const isSuper = checkIsSuperAdmin(session);
-  const isSecretariat = checkIsSecretariat(session);
+  const snapshot = await resolveServerUserAuthSnapshot(session);
+  if (!snapshot || snapshot.active === false) {
+    redirect("/login?error=AccountInactive");
+  }
+
+  const freshSession = buildSessionFromSnapshot(session, snapshot);
+  const isSuper = checkIsSuperAdmin(freshSession);
+  const isSecretariat = checkIsSecretariat(freshSession);
 
   // Apenas SuperAdmin ou Gestão de Secretaria de Educação podem provisionar novas escolas no SaaS
   if (!isSuper && !isSecretariat) {

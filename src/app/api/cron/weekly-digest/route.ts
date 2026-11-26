@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
+import { requireAuthorizedSchool, getSchoolContextByVerifiedId } from "@/lib/currentSchool";
 import { safeCompareStrings } from "@/lib/syncToken";
 import { compileWeeklyDigest } from "@/lib/weeklyDigest";
 
@@ -32,7 +34,15 @@ async function handleDigest(req: NextRequest) {
       if (!authCheck.ok) {
         return authCheck.response;
       }
-      sessionSchoolId = authCheck.schoolId;
+      const schoolRes = await requireAuthorizedSchool(
+        authCheck.session,
+        authCheck.schoolId,
+        authCheck.snapshot
+      );
+      if (!schoolRes.ok) {
+        return schoolRes.response;
+      }
+      sessionSchoolId = schoolRes.school.id;
       authUser = {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -40,16 +50,68 @@ async function handleDigest(req: NextRequest) {
       };
     }
 
-    // Suporte a targetSchoolId via query param (apenas se CRON autorizado) ou schoolId da sessão (H-07)
-    const urlSchoolId = req.nextUrl.searchParams.get("schoolId") || undefined;
-    const targetSchoolId = isCronAuthorized ? (urlSchoolId || undefined) : sessionSchoolId;
+    const urlSchoolId = req.nextUrl.searchParams.get("schoolId")?.trim() || undefined;
+
+    if (isCronAuthorized && !urlSchoolId) {
+      const activeSchools = await prisma.school.findMany({
+        where: { active: true },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (activeSchools.length === 0) {
+        return NextResponse.json(
+          { error: "Nenhuma instituição de ensino ativa disponível para processar boletim." },
+          { status: 400 }
+        );
+      }
+
+      const digests = [];
+      for (const s of activeSchools) {
+        const payload = await compileWeeklyDigest(s.id);
+        await logAudit({
+          action: "GENERATE_WEEKLY_DIGEST",
+          entityType: "LowAttendance",
+          schoolId: s.id,
+          details: {
+            totalStudents: payload.kpis.totalStudents,
+            criticalCount: payload.kpis.criticalCount,
+            criticalOverdue: payload.kpis.criticalWithoutRecentContactCount,
+            sentLast7Days: payload.kpis.sentLast7Days,
+            source: "CRON_JOB",
+          },
+          user: authUser,
+          req,
+        });
+        digests.push(payload);
+      }
+
+      if (digests.length === 1) {
+        return NextResponse.json(digests[0], { status: 200 });
+      }
+      return NextResponse.json(
+        { ...digests[0], totalSchools: digests.length, digests },
+        { status: 200 }
+      );
+    }
+
+    const targetSchoolId = isCronAuthorized ? urlSchoolId! : sessionSchoolId!;
+    if (isCronAuthorized) {
+      const verifiedSchool = await getSchoolContextByVerifiedId(targetSchoolId);
+      if (!verifiedSchool) {
+        return NextResponse.json(
+          { error: "Instituição de ensino não encontrada ou inativa." },
+          { status: 404 }
+        );
+      }
+    }
 
     const payload = await compileWeeklyDigest(targetSchoolId);
 
     await logAudit({
       action: "GENERATE_WEEKLY_DIGEST",
       entityType: "LowAttendance",
-      schoolId: targetSchoolId || null,
+      schoolId: targetSchoolId,
       details: {
         totalStudents: payload.kpis.totalStudents,
         criticalCount: payload.kpis.criticalCount,

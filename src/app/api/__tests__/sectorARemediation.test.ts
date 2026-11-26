@@ -50,6 +50,8 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/currentSchool", () => ({
   getCurrentSchool: vi.fn(async () => hoisted.currentSchool),
+  getAuthorizedCurrentSchool: vi.fn(async () => hoisted.currentSchool),
+  requireAuthorizedSchool: vi.fn(async () => ({ ok: true, school: hoisted.currentSchool })),
   invalidateSchoolCache: vi.fn(),
 }));
 
@@ -164,6 +166,18 @@ describe("Remediação Cirúrgica Setor A — RBAC, Multi-Tenant e Borda", () =>
           active: true,
           settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }),
         },
+        {
+          id: "school-a",
+          inepCode: "41000001",
+          name: "Escola Municipal Alpha",
+          city: "Castro",
+          state: "PR",
+          nre: "SEMEC Castro",
+          network: "MUNICIPAL",
+          networkId: "semec-castro",
+          active: true,
+          settingsJson: null,
+        },
       ],
       users: [
         {
@@ -174,10 +188,52 @@ describe("Remediação Cirúrgica Setor A — RBAC, Multi-Tenant e Borda", () =>
           schoolId: "school-other",
           active: true,
         },
+        {
+          id: "usr-sec-castro",
+          email: "sec@castro.pr.gov.br",
+          name: "Secretária Castro",
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+          active: true,
+        },
+        {
+          id: "usr-super",
+          email: "marcos.wrobel@escola.pr.gov.br",
+          name: "SuperAdmin",
+          role: "SUPERADMIN",
+          schoolId: null,
+          active: true,
+        },
+        {
+          id: "usr-sec-sem-rede",
+          email: "semrede@municipio.pr.gov.br",
+          name: "Secretária Sem Rede",
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+          active: true,
+        },
+        {
+          id: "usr-gestor-castro",
+          email: "diretor@castro.pr.gov.br",
+          name: "Diretor Castro",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "school-castro-mun",
+          active: true,
+        },
+        {
+          id: "usr-gestor-a",
+          email: "diretor@school-a.pr.gov.br",
+          name: "Diretor Escola A",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "school-a",
+          active: true,
+        },
       ],
       userSchools: [
         { userId: "usr-multi", schoolId: "school-other", role: "GESTOR_ESCOLAR", active: true },
         { userId: "usr-multi", schoolId: "school-a", role: "PEDAGOGA", active: true },
+        { userId: "usr-gestor-castro", schoolId: "school-castro-mun", role: "GESTOR_ESCOLAR", active: true },
+        { userId: "usr-gestor-a", schoolId: "school-a", role: "GESTOR_ESCOLAR", active: true },
       ],
       userNetworks: [
         {
@@ -196,7 +252,13 @@ describe("Remediação Cirúrgica Setor A — RBAC, Multi-Tenant e Borda", () =>
       if (!u) return null;
       return {
         ...u,
-        schools: hoisted.db.userSchools.filter((us) => us.userId === u.id),
+        schools: hoisted.db.userSchools
+          .filter((us) => us.userId === u.id)
+          .map((us) => ({
+            ...us,
+            school: hoisted.db.schools.find((s) => s.id === us.schoolId) || null,
+          })),
+        networks: hoisted.db.userNetworks.filter((un) => un.userId === u.id && un.active),
         _count: { messageLogs: 0, repliedLogs: 0 },
       };
     });
@@ -333,7 +395,7 @@ describe("Remediação Cirúrgica Setor A — RBAC, Multi-Tenant e Borda", () =>
     const res = await secretariaMetricsGet(new Request("http://localhost/api/secretaria/metrics"));
     expect(res.status).toBe(403);
     const data = await res.json();
-    expect(data.error).toBe("Nenhuma rede municipal vinculada ao seu perfil.");
+    expect(data.error).toBe("Acesso restrito à Gestão da Secretaria de Educação.");
   });
 
   it("4. Bloqueia autoelevação de edição e metadados em POST /api/schools e PUT /api/schools/[id]", async () => {

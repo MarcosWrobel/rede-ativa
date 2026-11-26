@@ -159,30 +159,29 @@ function createAwsSigV4Headers(params: {
  * Driver S3 / Cloudflare R2 nativo
  */
 class S3ObjectStorageDriver {
-  private endpoint: string;
-  private bucket: string;
-  private accessKeyId: string;
-  private secretAccessKey: string;
-  private region: string;
-
-  constructor() {
-    this.endpoint = (process.env.S3_ENDPOINT || "https://s3.amazonaws.com").replace(/\/$/, "");
-    this.bucket = process.env.S3_BUCKET || "";
-    this.accessKeyId = process.env.S3_ACCESS_KEY_ID || "";
-    this.secretAccessKey = process.env.S3_SECRET_ACCESS_KEY || "";
-    this.region = process.env.S3_REGION || "auto";
+  private getConfig() {
+    return {
+      endpoint: (process.env.S3_ENDPOINT || "https://s3.amazonaws.com").replace(/\/$/, ""),
+      bucket: process.env.S3_BUCKET || "",
+      accessKeyId: process.env.S3_ACCESS_KEY_ID || "",
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || "",
+      region: process.env.S3_REGION || "auto",
+    };
   }
 
   isConfigured(): boolean {
-    return Boolean(this.bucket && this.accessKeyId && this.secretAccessKey);
+    const cfg = this.getConfig();
+    return Boolean(cfg.bucket && cfg.accessKeyId && cfg.secretAccessKey);
   }
 
   private getUrl(key: string): URL {
+    const cfg = this.getConfig();
     const cleanKey = key.replace(/^\//, "");
-    return new URL(`${this.endpoint}/${this.bucket}/${cleanKey}`);
+    return new URL(`${cfg.endpoint}/${cfg.bucket}/${cleanKey}`);
   }
 
   async put(key: string, buffer: Buffer, mimeType: string): Promise<void> {
+    const cfg = this.getConfig();
     const url = this.getUrl(key);
     const bodySha256 = crypto.createHash("sha256").update(buffer).digest("hex");
 
@@ -191,9 +190,9 @@ class S3ObjectStorageDriver {
       url,
       bodySha256,
       contentType: mimeType,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-      region: this.region,
+      accessKeyId: cfg.accessKeyId,
+      secretAccessKey: cfg.secretAccessKey,
+      region: cfg.region,
       service: "s3",
     });
 
@@ -210,6 +209,7 @@ class S3ObjectStorageDriver {
   }
 
   async get(key: string): Promise<Buffer> {
+    const cfg = this.getConfig();
     const url = this.getUrl(key);
     const bodySha256 = crypto.createHash("sha256").update("").digest("hex");
 
@@ -217,9 +217,9 @@ class S3ObjectStorageDriver {
       method: "GET",
       url,
       bodySha256,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-      region: this.region,
+      accessKeyId: cfg.accessKeyId,
+      secretAccessKey: cfg.secretAccessKey,
+      region: cfg.region,
       service: "s3",
     });
 
@@ -237,6 +237,7 @@ class S3ObjectStorageDriver {
   }
 
   async delete(key: string): Promise<void> {
+    const cfg = this.getConfig();
     const url = this.getUrl(key);
     const bodySha256 = crypto.createHash("sha256").update("").digest("hex");
 
@@ -244,9 +245,9 @@ class S3ObjectStorageDriver {
       method: "DELETE",
       url,
       bodySha256,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-      region: this.region,
+      accessKeyId: cfg.accessKeyId,
+      secretAccessKey: cfg.secretAccessKey,
+      region: cfg.region,
       service: "s3",
     });
 
@@ -261,21 +262,21 @@ class S3ObjectStorageDriver {
  * Driver Vercel Blob REST
  */
 class VercelBlobDriver {
-  private token: string;
-
-  constructor() {
-    this.token = process.env.BLOB_READ_WRITE_TOKEN || "";
+  private getToken(): string {
+    return process.env.BLOB_READ_WRITE_TOKEN || "";
   }
 
   isConfigured(): boolean {
-    return Boolean(this.token && this.token.length > 20);
+    const token = this.getToken();
+    return Boolean(token && token.length > 20);
   }
 
   async put(pathname: string, buffer: Buffer, mimeType: string): Promise<{ url: string }> {
+    const token = this.getToken();
     const res = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(pathname)}`, {
       method: "PUT",
       headers: {
-        authorization: `Bearer ${this.token}`,
+        authorization: `Bearer ${token}`,
         "x-api-version": "7",
         "content-type": mimeType,
       },
@@ -291,12 +292,13 @@ class VercelBlobDriver {
   }
 
   async get(urlOrPath: string): Promise<Buffer> {
+    const token = this.getToken();
     const targetUrl = urlOrPath.startsWith("http")
       ? urlOrPath
       : `https://blob.vercel-storage.com/${encodeURIComponent(urlOrPath)}`;
 
     const res = await fetch(targetUrl, {
-      headers: { authorization: `Bearer ${this.token}` },
+      headers: { authorization: `Bearer ${token}` },
     });
 
     if (!res.ok) {
@@ -308,10 +310,11 @@ class VercelBlobDriver {
   }
 
   async delete(urlOrPath: string): Promise<void> {
+    const token = this.getToken();
     await fetch("https://blob.vercel-storage.com/delete", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${this.token}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({ urls: [urlOrPath] }),

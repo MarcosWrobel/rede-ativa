@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Building2, ChevronDown, Check, Plus, Settings, Landmark, ShieldCheck } from "lucide-react";
+import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 
 interface SchoolOption {
   schoolId: string;
@@ -63,6 +64,8 @@ export default function SchoolSelector({
         setLoading(false);
         return;
       }
+
+      await clearRedeAtivaCachesOnly().catch(() => {});
 
       // Recarrega a página para que todos os Server Components e APIs assumam o novo contexto
       window.location.reload();

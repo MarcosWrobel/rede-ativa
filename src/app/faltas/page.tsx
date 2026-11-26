@@ -1,20 +1,14 @@
-import { auth } from "@/lib/auth";
-import { checkIsAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { safeQueryList } from "@/lib/safePhase3Queries";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import FaltasClient from "./FaltasClient";
-import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function FaltasPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
 
   // Contabiliza tanto comunicados vinculados a modelos marcados como "Relacionado a Faltas" (isAbsenceRelated)
@@ -238,7 +232,7 @@ export default async function FaltasPage() {
       currentUser={{
         name: session.user.name || "Equipe Pedagógica",
         email: session.user.email || "",
-        isAdmin: checkIsAdmin(session),
+        isAdmin: ctx.isSchoolManager,
       }}
     />
   );

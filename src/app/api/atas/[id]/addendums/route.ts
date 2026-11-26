@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { computeAddendumHash, canAccessConfidentialMinute } from "@/lib/ataCrypto";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
 import { checkRateLimit, resetRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
@@ -55,7 +55,13 @@ export async function POST(
     if (!preCheckMinute) {
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
     }
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     if (!assertTenantOwnership(preCheckMinute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
     }
@@ -130,7 +136,6 @@ export async function POST(
         throw new Error("Ata pedagógica não encontrada");
       }
 
-      const currentSchool = await getCurrentSchool(authCheck.schoolId);
       if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
         throw new Error("Acesso negado a registro de outra instituição de ensino.");
       }

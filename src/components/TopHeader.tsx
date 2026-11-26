@@ -86,7 +86,7 @@ export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: 
         <SchoolSelector
           currentSchool={currentSchool}
           userSchools={currentUser?.schools}
-          isAdmin={currentUser?.role === "ADMIN"}
+          isAdmin={currentUser?.role === "SUPERADMIN"}
         />
 
         <ThemeToggle />

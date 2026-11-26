@@ -1,8 +1,5 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { checkIsAdmin, checkIsSuperAdmin } from "@/lib/roles";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import EquipeClient from "./EquipeClient";
 
 export const dynamic = "force-dynamic";
@@ -16,17 +13,10 @@ export default async function EquipePage({
 }: {
   searchParams?: Promise<{ view?: string }>;
 }) {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  if (!checkIsAdmin(session)) {
-    redirect("/busca-ativa");
-  }
-
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
-  const isSuper = checkIsSuperAdmin(session);
+  const ctx = await resolveAuthorizedPageContext({ requireManager: true });
+  const session = ctx.session;
+  const currentSchool = ctx.school;
+  const isSuper = ctx.isSuperAdmin;
 
   let viewAll = false;
   try {
@@ -43,15 +33,20 @@ export default async function EquipePage({
   const whereClause: any = viewAll
     ? {}
     : {
-        OR: [
-          { schoolId: currentSchool.id },
-          { schools: { some: { schoolId: currentSchool.id, active: true } } },
-        ],
+        schools: { some: { schoolId: currentSchool.id } },
       };
 
   const users = await prisma.user.findMany({
     where: whereClause,
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      active: true,
+      schoolId: true,
+      createdAt: true,
+      updatedAt: true,
       _count: {
         select: {
           messageLogs: true,
@@ -66,15 +61,16 @@ export default async function EquipePage({
     orderBy: [{ active: "desc" }, { role: "asc" }, { name: "asc" }],
   });
 
-  // Mapeia o role efetivo na escola ativa para cada usuário
+  // Mapeia o role efetivo na escola ativa para cada usuário (ou estado global no catálogo viewAll)
   const formattedUsers = users.map((u) => {
-    const schoolLink = u.schools.find((s) => s.schoolId === currentSchool.id);
+    const schoolLink = viewAll ? undefined : u.schools.find((s) => s.schoolId === currentSchool.id);
     return {
       id: u.id,
       name: u.name,
       email: u.email,
-      role: schoolLink?.role || u.role,
-      active: schoolLink ? schoolLink.active : u.active,
+      role: viewAll ? u.role : (schoolLink?.role || u.role),
+      active: viewAll ? Boolean(u.active) : (schoolLink ? Boolean(schoolLink.active) : Boolean(u.active)),
+      globalActive: Boolean(u.active),
       createdAt: u.createdAt,
       _count: u._count,
     };

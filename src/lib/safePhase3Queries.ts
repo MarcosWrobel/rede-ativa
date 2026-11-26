@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { withNeonWakeRetry } from "./neonWakeRetry";
+import { evaluateEffectivePhysicalProof } from "./ataRevision";
 
 /**
  * Executa consultas das tabelas pedagógicas da Fase 3 com retry de wake-up do Neon
@@ -77,6 +78,9 @@ export async function loadStudent360Bundle(studentId: string) {
           authorEmail: true,
           authorRole: true,
           finalizedAt: true,
+          contentRevision: true,
+          physicalScanRevision: true,
+          physicalScanSupersededAt: true,
           contentHash: true,
           verificationCode: true,
           pdfArchiveSha256: true,
@@ -99,7 +103,18 @@ export async function loadStudent360Bundle(studentId: string) {
           extemporaneousReason: true,
           createdAt: true,
           updatedAt: true,
-          students: true,
+          students: {
+            select: {
+              id: true,
+              minuteId: true,
+              studentId: true,
+              studentNameSnapshot: true,
+              classNameSnapshot: true,
+              cgmSnapshot: true,
+              previousNameSnapshots: true,
+              student: { select: { name: true } },
+            },
+          },
           participants: {
             select: {
               id: true,
@@ -176,9 +191,8 @@ export async function loadStudent360Bundle(studentId: string) {
   // Garante que atas vinculadas no prontuário/dossiê pertençam estritamente ao mesmo tenant do estudante
   const scopedMinutes = minutes
     .filter((m: any) => !student.schoolId || !m.schoolId || m.schoolId === student.schoolId)
-    .map((m: any) => ({
-      ...m,
-      hasPhysicalScan:
+    .map((m: any) => {
+      const inferredLegacyArtifact =
         typeof m.hasPhysicalScan === "boolean"
           ? m.hasPhysicalScan
           : Boolean(
@@ -188,9 +202,35 @@ export async function loadStudent360Bundle(studentId: string) {
                 m.physicalScanUploadedAt ||
                 m.physicalScanSizeBytes ||
                 m.physicalScanMimeType
-            ),
-      physicalSignedScanData: null,
-    }));
+            );
+      const effectiveProof = evaluateEffectivePhysicalProof({
+        ...m,
+        // Preserva compatibilidade com mocks ou registros pré-versionamento sem campo status
+        status: m.status || "FINALIZED",
+        hasPhysicalScan: inferredLegacyArtifact,
+      });
+
+      return {
+        ...m,
+        hasPhysicalScan:
+          effectiveProof.hasValidPhysicalProof && effectiveProof.hasPhysicalArtifact,
+        govBrVerified: effectiveProof.isValidGovBrVerified,
+        govBrProtocol: effectiveProof.effectiveGovBrProtocol,
+        physicalScanStorageKey: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanStorageKey ?? null
+          : null,
+        physicalScanSha256: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanSha256 ?? null
+          : null,
+        physicalScanUploadedAt: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanUploadedAt ?? null
+          : null,
+        physicalScanUploadedBy: effectiveProof.hasValidPhysicalProof
+          ? m.physicalScanUploadedBy ?? null
+          : null,
+        physicalSignedScanData: null,
+      };
+    });
 
   const scopedCouncilCards = councilCards.filter(
     (c: any) =>

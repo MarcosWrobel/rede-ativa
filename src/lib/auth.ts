@@ -40,7 +40,7 @@ if (isDevAuthEnabled) {
         if (!existing && !isRootAdmin) {
           throw new Error("E-mail não autorizado na equipe da escola.");
         }
-        if (existing && !existing.active && !isRootAdmin) {
+        if (existing && !existing.active) {
           throw new Error("Conta desativada.");
         }
 
@@ -51,7 +51,7 @@ if (isDevAuthEnabled) {
               email,
               name: email.split("@")[0].replace(".", " ").toUpperCase(),
               role: isRootAdmin ? "SUPERADMIN" : "PEDAGOGA",
-              active: isRootAdmin ? true : false,
+              active: isRootAdmin,
             },
           }));
 
@@ -60,7 +60,7 @@ if (isDevAuthEnabled) {
           name: user.name,
           email: user.email,
           role: resolveTokenRole({ isRootAdmin, dbRole: user.role }),
-          active: isRootAdmin ? true : user.active,
+          active: user.active !== false,
         };
       },
     })
@@ -105,19 +105,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return "/login?error=NotAuthorizedTeam";
         }
 
-        if (!isRootAdmin && !existingUser && isSeedPrDomain) {
+        if (!existingUser) {
           console.warn(`[AUTH] Login negado para conta fora da equipe autorizada: ${email}`);
-          await logAudit({
-            action: "LOGIN_DENIED",
-            entityType: "User",
-            schoolId: null,
-            details: { reason: "FORA_DA_LISTA_AUTORIZADA", email },
-            user: { name: user.name || email.split("@")[0], email },
-          });
-          return "/login?error=NotAuthorizedTeam";
+          if (!isRootAdmin) {
+            await logAudit({
+              action: "LOGIN_DENIED",
+              entityType: "User",
+              schoolId: null,
+              details: {
+                reason: isSeedPrDomain ? "FORA_DA_LISTA_AUTORIZADA" : "CONTA_NAO_AUTORIZADA_NA_PLATAFORMA",
+                email,
+              },
+              user: { name: user.name || email.split("@")[0], email },
+            });
+            return "/login?error=NotAuthorizedTeam";
+          }
         }
 
-        if (!isRootAdmin && existingUser && !existingUser.active) {
+        if (existingUser && !existingUser.active) {
           console.warn(`[AUTH] Login negado para conta desativada: ${email}`);
           await logAudit({
             action: "LOGIN_DENIED",
@@ -140,7 +145,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           update: {
             name: user.name || existingUser?.name || email.split("@")[0],
             image: user.image ?? existingUser?.image,
-            ...(isRootAdmin ? { role: "SUPERADMIN", active: true } : {}),
+            ...(isRootAdmin && existingUser?.active !== false ? { role: "SUPERADMIN" } : {}),
           },
           create: {
             email,
@@ -153,7 +158,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         user.dbId = dbUser.id;
         user.role = resolveTokenRole({ isRootAdmin, dbRole: dbUser.role });
-        user.active = isRootAdmin ? true : dbUser.active;
+        user.active = dbUser.active !== false;
         user.schoolId = dbUser.schoolId;
 
         await logAudit({
@@ -201,7 +206,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           inepCode: s.inepCode || "",
           city: s.city || "",
           network: s.network || "ESTADUAL",
+          networkId: s.networkId ?? null,
           logoUrl: sanitizeJwtLogoUrl(s.logoUrl),
+          active: s.active !== false,
         }));
       }
       if (Array.isArray(token.userNetworks)) {
@@ -213,23 +220,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           city: n.city || "",
           type: n.type || "MUNICIPAL",
           logoUrl: sanitizeJwtLogoUrl(n.logoUrl),
+          active: n.active !== false,
         }));
       }
 
-      // Trata requisição explícita de alternância de instituição ativa
-      if (trigger === "update" && session?.activeSchoolId) {
-        const targetSchoolId = String(session.activeSchoolId);
-        const userSchools = (token.userSchools as SessionSchoolLink[]) || [];
-        const hasAccess = isRootAdmin || userSchools.some((s) => s.schoolId === targetSchoolId);
-        if (hasAccess) {
-          token.schoolId = targetSchoolId;
-          const activeLink = userSchools.find((s) => s.schoolId === targetSchoolId);
-          if (activeLink && !isRootAdmin) {
-            token.role = activeLink.role || "PEDAGOGA";
-          }
-        }
-        return token;
-      }
+      const requestedSchoolFromUpdate =
+        trigger === "update" && session?.activeSchoolId
+          ? String(session.activeSchoolId).trim()
+          : null;
 
       if (user) {
         token.userId = user.dbId || user.id;
@@ -237,13 +235,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           isRootAdmin,
           dbRole: user.role,
         });
-        token.active = isRootAdmin ? true : user.active !== false;
-        token.schoolId = user.schoolId;
-        token.checkedAt = Date.now();
+        token.active = user.active !== false;
+        token.schoolId = user.schoolId ?? null;
+        token.checkedAt = 0; // Força carregamento completo dos vínculos no banco
       }
 
       const lastChecked = Number(token.checkedAt || 0);
-      const needsRefresh = !token.userId || !token.userSchools || Date.now() - lastChecked > SESSION_REVALIDATE_MS;
+      const needsRefresh =
+        trigger === "update" ||
+        !token.userId ||
+        !token.userSchools ||
+        Date.now() - lastChecked > SESSION_REVALIDATE_MS;
 
       if (email && needsRefresh) {
         try {
@@ -256,7 +258,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               name: true,
               schoolId: true,
               schools: {
-                where: { active: true },
+                where: {
+                  active: true,
+                  school: { active: true },
+                },
                 include: {
                   school: {
                     select: {
@@ -265,13 +270,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                       inepCode: true,
                       city: true,
                       network: true,
+                      networkId: true,
+                      active: true,
                       updatedAt: true,
                     },
                   },
                 },
               },
               networks: {
-                where: { active: true },
+                where: {
+                  active: true,
+                  network: { active: true },
+                },
                 include: {
                   network: {
                     select: {
@@ -280,59 +290,109 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                       shortName: true,
                       city: true,
                       type: true,
+                      active: true,
                     },
                   },
                 },
               },
             },
           });
-          if (dbUser) {
+          if (dbUser && dbUser.active !== false) {
             token.userId = dbUser.id;
             token.name = dbUser.name;
-            token.active = isRootAdmin ? true : dbUser.active;
+            token.active = true;
 
-            const mappedSchools: SessionSchoolLink[] = dbUser.schools.map((s) => ({
-              schoolId: s.schoolId,
-              role: s.role,
-              name: s.school.name,
-              inepCode: s.school.inepCode,
-              city: s.school.city,
-              network: s.school.network || "ESTADUAL",
-              logoUrl: `/api/schools/${s.schoolId}/logo?v=${s.school.updatedAt ? new Date(s.school.updatedAt).getTime() : 1}`,
-            }));
+            const mappedSchools: SessionSchoolLink[] = dbUser.schools
+              .filter((s) => s.active !== false && s.school?.active !== false)
+              .map((s) => ({
+                schoolId: s.schoolId,
+                role: s.role === "ADMIN" ? "GESTOR_ESCOLAR" : s.role,
+                name: s.school.name,
+                inepCode: s.school.inepCode,
+                city: s.school.city,
+                network: s.school.network || "ESTADUAL",
+                networkId: s.school.networkId ?? null,
+                logoUrl: `/api/schools/${s.schoolId}/logo?v=${s.school.updatedAt ? new Date(s.school.updatedAt).getTime() : 1}`,
+                active: true,
+              }));
             token.userSchools = mappedSchools;
 
-            const mappedNetworks: SessionNetworkLink[] = (dbUser.networks || []).map((n) => ({
-              networkId: n.networkId,
-              role: n.role,
-              name: n.network.name,
-              shortName: n.network.shortName,
-              city: n.network.city,
-              type: n.network.type,
-              logoUrl: null,
-            }));
+            const mappedNetworks: SessionNetworkLink[] = (dbUser.networks || [])
+              .filter((n) => n.active !== false && n.network?.active !== false)
+              .map((n) => ({
+                networkId: n.networkId,
+                role: n.role,
+                name: n.network.name,
+                shortName: n.network.shortName,
+                city: n.network.city,
+                type: n.network.type,
+                logoUrl: null,
+              }));
             token.userNetworks = mappedNetworks;
 
-            // Se o usuário ainda não tiver um schoolId ativo selecionado ou se o atual não pertencer à lista
-            const currentSelected = (token.schoolId as string) || dbUser.schoolId;
-            const validSelected =
-              isRootAdmin || mappedSchools.some((s) => s.schoolId === currentSelected)
-                ? currentSelected
-                : mappedSchools[0]?.schoolId || dbUser.schoolId;
+            const candidateSchoolId =
+              requestedSchoolFromUpdate ||
+              (dbUser.schoolId ? String(dbUser.schoolId).trim() : null) ||
+              (token.schoolId ? String(token.schoolId).trim() : null);
+
+            let validSelected: string | null = null;
+            if (candidateSchoolId) {
+              if (mappedSchools.some((s) => s.schoolId === candidateSchoolId)) {
+                validSelected = candidateSchoolId;
+              } else if (isRootAdmin || dbUser.role === "SUPERADMIN") {
+                const activeCandidate = await prisma.school.findFirst({
+                  where: { id: candidateSchoolId, active: true },
+                  select: { id: true },
+                });
+                if (activeCandidate) validSelected = activeCandidate.id;
+              } else if (mappedNetworks.length > 0) {
+                const candidateSchool = await prisma.school.findFirst({
+                  where: { id: candidateSchoolId, active: true },
+                  select: { id: true, networkId: true },
+                });
+                if (candidateSchool?.networkId) {
+                  const allowedIds = mappedNetworks.map((n) => n.networkId);
+                  if (allowedIds.includes(candidateSchool.networkId)) {
+                    validSelected = candidateSchool.id;
+                  }
+                }
+              }
+            }
+
+            if (!validSelected) {
+              validSelected = mappedSchools[0]?.schoolId || null;
+            }
 
             token.schoolId = validSelected;
             const activeSchoolInfo = mappedSchools.find((s) => s.schoolId === validSelected);
-            token.role = resolveTokenRole({
-              isRootAdmin,
-              activeSchoolRole: activeSchoolInfo?.role,
-              dbRole: dbUser.role,
-            });
-          } else if (!isRootAdmin) {
+            const hasSecNet = mappedNetworks.some(
+              (n) => !n.role || n.role === "GESTAO_SECRETARIA"
+            );
+
+            if (isRootAdmin || dbUser.role === "SUPERADMIN") {
+              token.role = "SUPERADMIN";
+            } else if (
+              activeSchoolInfo?.role === "GESTOR_ESCOLAR" ||
+              activeSchoolInfo?.role === "GESTAO_SECRETARIA"
+            ) {
+              token.role = activeSchoolInfo.role;
+            } else if (hasSecNet) {
+              token.role = "GESTAO_SECRETARIA";
+            } else if (activeSchoolInfo) {
+              token.role = activeSchoolInfo.role;
+            } else {
+              token.role = "PEDAGOGA";
+            }
+          } else {
             token.active = false;
+            token.schoolId = null;
+            token.userSchools = [];
+            token.userNetworks = [];
+            token.role = "PEDAGOGA";
           }
           token.checkedAt = Date.now();
         } catch (err) {
-          console.error("[AUTH] Falha leve ao revalidar JWT:", err);
+          console.error("[AUTH] Falha ao revalidar JWT no banco (sem renovar checkedAt):", err);
         }
       }
 

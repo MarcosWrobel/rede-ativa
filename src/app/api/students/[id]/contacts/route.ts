@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { logAudit } from "@/lib/audit";
 import {
   formatZodError,
@@ -24,7 +24,13 @@ export async function POST(
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     const student = await prisma.student.findUnique({ where: { id: studentId } });
     if (!student || student.schoolId !== currentSchool.id) {
       return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
@@ -112,7 +118,13 @@ export async function PUT(
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     const { contactId, name, kinship, phone, isPrimary, whatsappValid, notes } = parsed.data;
 
     const existing = await prisma.studentContact.findFirst({
@@ -199,7 +211,13 @@ export async function DELETE(
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     const { id: studentId } = await context.params;
     const { searchParams } = new URL(req.url);
     const contactId = searchParams.get("contactId");

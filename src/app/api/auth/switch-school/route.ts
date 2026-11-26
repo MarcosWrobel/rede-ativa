@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAuth, isBootstrapAdminEmail } from "@/lib/permissions";
+import { requireAuth } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import {
+  canSnapshotAccessSchool,
+  resolveEffectiveRoleForSchool,
+  resolveServerUserAuthSnapshot,
+} from "@/lib/serverAuthContext";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +31,7 @@ export async function POST(req: Request) {
 
     const schoolId = (parsed.data.schoolId || parsed.data.targetSchoolId)!.trim();
 
-    // 1. Verifica se a escola existe e está ativa
+    // 1. Verifica se a escola existe e está ativa no banco (nunca usa fallback sintético em memória)
     let targetSchool = await prisma.school.findUnique({
       where: { id: schoolId },
       select: { id: true, name: true, inepCode: true, city: true, network: true, networkId: true, active: true },
@@ -34,81 +39,43 @@ export async function POST(req: Request) {
 
     if (!targetSchool && (schoolId === "default-leopoldina" || schoolId === "41042730")) {
       targetSchool = await prisma.school.findFirst({
-        where: { inepCode: "41042730" },
+        where: { inepCode: "41042730", active: true },
         select: { id: true, name: true, inepCode: true, city: true, network: true, networkId: true, active: true },
       });
     }
 
-    if (!targetSchool && schoolId === "default-leopoldina") {
-      targetSchool = {
-        id: "default-leopoldina",
-        name: "Colégio Estadual Leopoldina B. Pedroso",
-        inepCode: "41042730",
-        city: "Ponta Grossa",
-        network: "ESTADUAL",
-        networkId: null,
-        active: true,
-      };
-    }
-
-    if (!targetSchool || !targetSchool.active) {
+    if (!targetSchool || targetSchool.active === false) {
       return NextResponse.json({ error: "Instituição escolar não encontrada ou inativa." }, { status: 404 });
     }
 
-    // 2. Valida se o usuário tem vínculo com essa escola (ou se é SuperAdmin ou Gestão da Secretaria)
-    const isSuper = isBootstrapAdminEmail(authCheck.email) || authCheck.role === "SUPERADMIN";
-    const isSecretariat = authCheck.role === "GESTAO_SECRETARIA";
+    // 2. Valida vínculo vigente no servidor para a escola destino
+    const snapshot =
+      authCheck.snapshot ?? (await resolveServerUserAuthSnapshot(authCheck.session));
 
-    if (!isSuper) {
-      let isAuthorized = false;
+    const isAuthorized = canSnapshotAccessSchool(snapshot, {
+      id: targetSchool.id,
+      networkId: targetSchool.networkId,
+      network: targetSchool.network,
+      city: targetSchool.city,
+      active: targetSchool.active,
+    });
 
-      // Se for gestor da secretaria, verifica se a escola pertence à sua rede ou município (rede MUNICIPAL)
-      if (isSecretariat && authCheck.userId) {
-        const userNetworks = await prisma.userNetwork.findMany({
-          where: { userId: authCheck.userId, active: true },
-          include: { network: true },
-        });
-        const userNetworkIds = userNetworks.map((un) => un.networkId);
-        const municipalNetworkCities = userNetworks
-          .filter((un) => (un.network.type || "MUNICIPAL").toUpperCase() === "MUNICIPAL")
-          .map((un) => un.network.city.trim().toUpperCase())
-          .filter(Boolean);
-
-        const matchesNetworkId =
-          Boolean(targetSchool.networkId) && userNetworkIds.includes(targetSchool.networkId!);
-        const matchesMunicipalCity =
-          targetSchool.network === "MUNICIPAL" &&
-          Boolean(targetSchool.city) &&
-          municipalNetworkCities.includes(targetSchool.city.trim().toUpperCase());
-
-        if (matchesNetworkId || matchesMunicipalCity) {
-          isAuthorized = true;
-        }
-      }
-
-      if (!isAuthorized && authCheck.userId) {
-        const membership = await prisma.userSchool.findUnique({
-          where: {
-            userId_schoolId: {
-              userId: authCheck.userId,
-              schoolId: targetSchool.id,
-            },
-          },
-        });
-        if (membership && membership.active) {
-          isAuthorized = true;
-        }
-      }
-
-      if (!isAuthorized) {
-        return NextResponse.json(
-          { error: "Você não possui vínculo autorizado com esta instituição de ensino." },
-          { status: 403 }
-        );
-      }
+    if (!isAuthorized) {
+      return NextResponse.json(
+        { error: "Você não possui vínculo autorizado com esta instituição de ensino." },
+        { status: 403 }
+      );
     }
 
-    // 3. Atualiza o schoolId padrão no perfil do usuário no banco com o ID canônico resolvido
+    const effectiveRole = resolveEffectiveRoleForSchool(snapshot, {
+      id: targetSchool.id,
+      networkId: targetSchool.networkId,
+      network: targetSchool.network,
+      city: targetSchool.city,
+      active: targetSchool.active,
+    });
+
+    // 3. Atualiza a preferência selecionada no perfil do usuário no banco com o ID canônico resolvido
     if (authCheck.userId || authCheck.email) {
       try {
         await prisma.user.updateMany({
@@ -135,6 +102,7 @@ export async function POST(req: Request) {
           switchedTo: targetSchool.name,
           inepCode: targetSchool.inepCode,
           network: targetSchool.network,
+          effectiveRole,
         },
         user: {
           id: authCheck.userId,
@@ -147,16 +115,24 @@ export async function POST(req: Request) {
       console.warn("[POST /api/auth/switch-school] Aviso ao registrar auditoria de troca de escola:", auditErr);
     }
 
-    const response = NextResponse.json({
-      success: true,
-      activeSchool: {
-        id: targetSchool.id,
-        name: targetSchool.name,
-        inepCode: targetSchool.inepCode,
-        city: targetSchool.city,
-        network: targetSchool.network || "ESTADUAL",
+    const response = NextResponse.json(
+      {
+        success: true,
+        effectiveRole,
+        activeSchool: {
+          id: targetSchool.id,
+          name: targetSchool.name,
+          inepCode: targetSchool.inepCode,
+          city: targetSchool.city,
+          network: targetSchool.network || "ESTADUAL",
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
 
     response.cookies.set("active_school_id", targetSchool.id, {
       path: "/",

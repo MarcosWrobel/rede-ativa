@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,13 @@ export async function DELETE(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await params;
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
 
     const justification = await prisma.absenceJustification.findUnique({
       where: { id },

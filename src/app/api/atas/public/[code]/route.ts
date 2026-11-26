@@ -7,6 +7,7 @@ import {
   verifyMinuteIntegrity,
   verifyAddendumChain,
 } from "@/lib/ataCrypto";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import { enforceRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +88,7 @@ export async function GET(
 
     const addendumChain = verifyAddendumChain(minute.contentHash, minute.addendums || []);
     const isAuthentic = minuteHashValid && addendumChain.isValid;
+    const effectivePhysicalProof = evaluateEffectivePhysicalProof(minute);
 
     // Retorna APENAS dados institucionais e metadados criptográficos mascarados (LGPD-safe)
     // O texto da ata e dados sensíveis de menores NUNCA são expostos na internet pública!
@@ -101,8 +103,8 @@ export async function GET(
       status: minute.status,
       category: minute.category,
       isExtemporaneous: Boolean(minute.isExtemporaneous),
-      govBrVerified: Boolean(minute.govBrVerified),
-      govBrProtocol: minute.govBrProtocol || null,
+      govBrVerified: effectivePhysicalProof.isValidGovBrVerified,
+      govBrProtocol: effectivePhysicalProof.effectiveGovBrProtocol,
       attendedAt: minute.attendedAt,
       finalizedAt: minute.finalizedAt,
       authorName: maskName(minute.authorName),

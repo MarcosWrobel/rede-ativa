@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import AtasClient from "./AtasClient";
 
 export const metadata = {
@@ -13,12 +11,9 @@ export default async function AtasPage({
 }: {
   searchParams?: Promise<{ studentId?: string; create?: string; category?: string }>;
 }) {
-  const authCheck = await requireAuth();
-  if (!authCheck.ok) {
-    redirect("/login");
-  }
-  const isAdmin = authCheck.role === "ADMIN";
-  const school = await getCurrentSchool(authCheck.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const isAdmin = ctx.isSchoolManager;
+  const school = ctx.school;
 
   let sp: { studentId?: string; create?: string; category?: string } = {};
   try {

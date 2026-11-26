@@ -26,13 +26,22 @@ vi.mock("@/lib/permissions", () => ({
   })),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async () => ({
+vi.mock("@/lib/currentSchool", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/currentSchool")>();
+  const getMockSchool = () => ({
     id: SCHOOL_ID,
     name: "Escola Sintética Concorrência",
     inepCode: "99999991",
-  })),
-}));
+    edition: "PILOTO_INTEGRADA",
+    externalAiEnabled: false,
+  });
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async () => getMockSchool()),
+    getAuthorizedCurrentSchool: vi.fn(async () => getMockSchool()),
+    requireAuthorizedSchool: vi.fn(async () => ({ ok: true, school: getMockSchool() })),
+  };
+});
 
 vi.mock("@/lib/signingPin", () => ({
   verifyServerSigningPin: vi.fn(async () => ({ ok: true })),
@@ -197,6 +206,7 @@ describe.skipIf(!hasIsolatedDb)(
                 name: "Responsável Ordem A",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],
@@ -216,6 +226,7 @@ describe.skipIf(!hasIsolatedDb)(
                 signatureMode: "MOBILE_QR",
                 signatureData: "data:image/png;base64,MOBILE_A",
                 hasSignature: true,
+                signedRevision: 1,
                 signedAt: new Date(),
                 mobileSignToken: null,
                 hasActiveSignLink: false,
@@ -260,6 +271,7 @@ describe.skipIf(!hasIsolatedDb)(
                 name: "Responsável Ordem B",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],
@@ -324,6 +336,7 @@ describe.skipIf(!hasIsolatedDb)(
                 expectedEmail: "docente.sintetico@escola.pr.gov.br",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],
@@ -342,6 +355,7 @@ describe.skipIf(!hasIsolatedDb)(
               data: {
                 signatureMode: "ESCOLA_OAUTH",
                 hasSignature: true,
+                signedRevision: 1,
                 signedAt: new Date(),
                 verifiedEmail: "docente.sintetico@escola.pr.gov.br",
                 verifiedGoogleSub: "sub-sintetico-1",
@@ -402,6 +416,7 @@ describe.skipIf(!hasIsolatedDb)(
                 expectedEmail: "docente.sintetico@escola.pr.gov.br",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],
@@ -465,6 +480,7 @@ describe.skipIf(!hasIsolatedDb)(
                 name: "Responsável Lavratura A",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],
@@ -484,6 +500,7 @@ describe.skipIf(!hasIsolatedDb)(
                 signatureMode: "MOBILE_QR",
                 signatureData: "data:image/png;base64,MOBILE_FIN_A",
                 hasSignature: true,
+                signedRevision: 1,
                 signedAt: new Date(),
                 mobileSignToken: null,
                 hasActiveSignLink: false,
@@ -563,6 +580,7 @@ describe.skipIf(!hasIsolatedDb)(
                 name: "Responsável Lavratura B",
                 mobileSignToken: token,
                 mobileSignExpiresAt: new Date(Date.now() + 600_000),
+                mobileSignRevision: 1,
                 hasActiveSignLink: true,
               },
             ],

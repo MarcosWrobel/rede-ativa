@@ -258,9 +258,9 @@ describe("Otimizações de Egress, Cache & Operações no Neon PostgreSQL", () =
     });
   });
 
-  describe("getCurrentSchool & PUT /api/schools/[id] sem trafegar logoUrl Base64", () => {
-    it("getCurrentSchool omite logoUrl e syncTokenHash do select Prisma e retorna URL proxy", async () => {
-      hoisted.schoolFindFirst.mockResolvedValueOnce({
+  describe("getSchoolContextByVerifiedId & PUT /api/schools/[id] sem trafegar logoUrl Base64", () => {
+    it("getSchoolContextByVerifiedId omite logoUrl e syncTokenHash do select Prisma e retorna URL proxy", async () => {
+      hoisted.schoolFindUnique.mockResolvedValueOnce({
         id: "school-leopoldina",
         inepCode: "41042730",
         name: "Colégio Estadual Leopoldina B. Pedroso",
@@ -276,14 +276,15 @@ describe("Otimizações de Egress, Cache & Operações no Neon PostgreSQL", () =
         updatedAt: new Date("2026-11-10T10:00:00.000Z"),
       });
 
-      const school = await getCurrentSchool();
+      const { getSchoolContextByVerifiedId } = await import("@/lib/currentSchool");
+      const school = await getSchoolContextByVerifiedId("school-leopoldina");
 
-      expect(hoisted.schoolFindFirst).toHaveBeenCalledTimes(1);
-      const queryArgs = (hoisted.schoolFindFirst.mock.calls as any[])[0][0];
+      expect(hoisted.schoolFindUnique).toHaveBeenCalledTimes(1);
+      const queryArgs = (hoisted.schoolFindUnique.mock.calls as any[])[0][0];
       expect(queryArgs.select).toBeDefined();
       expect(queryArgs.select.logoUrl).toBeUndefined();
       expect(queryArgs.select.syncTokenHash).toBeUndefined();
-      expect(school.logoUrl).toMatch(/^\/api\/schools\/school-leopoldina\/logo\?v=\d+$/);
+      expect(school?.logoUrl).toMatch(/^\/api\/schools\/school-leopoldina\/logo\?v=\d+$/);
     });
 
     it("PUT /api/schools/[id] preserva o brasão no banco ao receber o caminho proxy de volta", async () => {

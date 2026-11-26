@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { formatZodError, frequenciaSyncSchema } from "@/lib/schemas";
 import { executePowerBiFrequencySync } from "@/services/frequencySyncService";
 
@@ -28,7 +28,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: formatZodError(parsedBody.error) }, { status: 400 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
 
     const result = await executePowerBiFrequencySync({
       alunos: parsedBody.data.alunos,

@@ -20,8 +20,27 @@ vi.mock("@/lib/auth", () => ({
   auth: () => mockAuth(),
 }));
 
+vi.mock("@/lib/serverAuthContext", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/serverAuthContext")>("@/lib/serverAuthContext");
+  return {
+    ...actual,
+    resolveServerUserAuthSnapshot: vi.fn(async (session: any) => ({
+      id: "usr-1",
+      email: session?.user?.email || "pedagoga@escola.pr.gov.br",
+      name: "Pedagoga",
+      role: session?.user?.role || "PEDAGOGA",
+      active: session?.user?.active !== false,
+      schoolId: "school-mun-1",
+      schools: [{ schoolId: "school-mun-1", role: "PEDAGOGA", active: true, school: { id: "school-mun-1", inepCode: "41000001", name: "Escola Municipal Exemplo", city: "Tibagi", network: "MUNICIPAL", networkId: null, active: true } }],
+      networks: [],
+      source: "database",
+    })),
+  };
+});
+
 vi.mock("@/lib/currentSchool", () => ({
   getCurrentSchool: () => mockGetCurrentSchool(),
+  getAuthorizedCurrentSchool: () => mockGetCurrentSchool(),
 }));
 
 import TreinamentoPage from "../page";

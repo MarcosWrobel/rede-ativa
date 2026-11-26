@@ -10,6 +10,7 @@ import {
 } from "@/lib/ataCrypto";
 import { formatParticipantRoleLabel } from "@/lib/participantKinship";
 import { checkRateLimit, hashIp, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 
 interface Props {
   params: Promise<{ code: string }>;
@@ -79,6 +80,7 @@ export default async function ValidarAtaPage({ params }: Props) {
 
   const isVoid = minute.status === "VOIDED";
   const numStr = minute.ataNumber ? String(minute.ataNumber).padStart(3, "0") : "S/N";
+  const effectivePhysicalProof = evaluateEffectivePhysicalProof(minute);
 
   let minuteHashValid = false;
   if (minute.contentHash && minute.ataNumber) {
@@ -237,10 +239,12 @@ export default async function ValidarAtaPage({ params }: Props) {
             <p className="font-mono text-[10px] text-slate-600 bg-slate-100 p-2.5 rounded-xl break-all">
               {minute.contentHash}
             </p>
-            {minute.govBrVerified && (
+            {effectivePhysicalProof.isValidGovBrVerified && (
               <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
                 ✓ Assinatura Gov.br verificada
-                {minute.govBrProtocol ? ` • Protocolo: ${minute.govBrProtocol}` : ""}
+                {effectivePhysicalProof.effectiveGovBrProtocol
+                  ? ` • Protocolo: ${effectivePhysicalProof.effectiveGovBrProtocol}`
+                  : ""}
               </p>
             )}
           </div>

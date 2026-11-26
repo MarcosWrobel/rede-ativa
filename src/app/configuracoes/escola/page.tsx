@@ -1,7 +1,4 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
-import { checkIsAdmin } from "@/lib/roles";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { prisma } from "@/lib/prisma";
 import EscolaSettingsClient from "./EscolaSettingsClient";
 
@@ -12,22 +9,8 @@ export const metadata = {
 };
 
 export default async function EscolaSettingsPage() {
-  const session = await auth();
-  const sessionUser = session?.user as any;
-
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  // Ensure Admin or School Manager permission (4-tier RBAC)
-  if (!checkIsAdmin(session)) {
-    redirect("/");
-  }
-
-  const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
-  if (!currentSchool) {
-    redirect("/");
-  }
+  const ctx = await resolveAuthorizedPageContext({ requireManager: true });
+  const currentSchool = ctx.school;
 
   // Check if school has active sync token
   const schoolRecord = await prisma.school.findFirst({

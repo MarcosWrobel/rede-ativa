@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { z } from "zod";
 import { justificationTypeEnum } from "@/lib/schemas";
@@ -34,7 +34,13 @@ export async function GET(req: Request) {
     const classGroupId = searchParams.get("classGroupId");
     const limit = Math.min(Number(searchParams.get("limit") || 100), 200);
 
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
 
     const now = new Date();
     // Início do dia de hoje no fuso de Brasília
@@ -139,7 +145,13 @@ export async function POST(req: Request) {
     }
 
     const { studentId, type, startDate, endDate, cidCode, notes } = parsed.data;
-    const school = await getCurrentSchool(authCheck.session?.user?.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const school = schoolRes.school;
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },

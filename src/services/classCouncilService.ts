@@ -103,30 +103,19 @@ export function canMutateSchoolCouncil(
   if (!schoolId || !schoolId.trim()) return false;
   if (checkIsSuperAdmin(session)) return true;
 
-  const role = (session.user.role || "").toUpperCase();
   const userSchools = session.user.schools || [];
-
-  if (role === "GESTAO_SECRETARIA") {
-    return userSchools.some(
-      (s) =>
-        (s.id === schoolId || s.schoolId === schoolId) &&
-        s.active !== false &&
-        (s.role === "ADMIN" || s.role === "GESTOR_ESCOLAR" || s.role === "PEDAGOGA")
-    );
-  }
-
-  if (role !== "PEDAGOGA" && role !== "GESTOR_ESCOLAR" && role !== "ADMIN") {
+  const activeSchoolLink = userSchools.find(
+    (s) => (s.id === schoolId || s.schoolId === schoolId) && s.active !== false
+  );
+  if (!activeSchoolLink) {
     return false;
   }
 
-  if (session.user.schoolId && session.user.schoolId === schoolId) {
-    return true;
-  }
-
+  const effectiveLocalRole = (activeSchoolLink.role || "").toUpperCase();
   if (
-    userSchools.some(
-      (s) => (s.id === schoolId || s.schoolId === schoolId) && s.active !== false
-    )
+    effectiveLocalRole === "PEDAGOGA" ||
+    effectiveLocalRole === "GESTOR_ESCOLAR" ||
+    effectiveLocalRole === "ADMIN"
   ) {
     return true;
   }
@@ -136,7 +125,7 @@ export function canMutateSchoolCouncil(
 
 /**
  * Resolve estritamente a escola autorizada para a sessão autenticada no Conselho de Classe
- * sem fallback silencioso para a Escola Piloto Fundadora (INEP 41042730).
+ * sem fallback silencioso para a primeira escola ativa ou Escola Piloto Fundadora (INEP 41042730).
  */
 export async function resolveAuthorizedSchoolForCouncil(
   session: AuthSessionLike | null | undefined,
@@ -148,18 +137,8 @@ export async function resolveAuthorizedSchoolForCouncil(
 
   const isSuper = checkIsSuperAdmin(session);
   const role = (session.user.role || "").toUpperCase();
-  const sessionSchoolId = session.user.schoolId ? String(session.user.schoolId).trim() : null;
   const userSchools = session.user.schools || [];
   const userNetworks = session.user.networks || [];
-
-  const hasExplicitSchool =
-    Boolean(sessionSchoolId) ||
-    userSchools.some((s) => s.active !== false && Boolean((s.schoolId || s.id || "").trim()));
-  const hasNetworkScope = role === "GESTAO_SECRETARIA" && userNetworks.length > 0;
-
-  if (!isSuper && !hasExplicitSchool && !hasNetworkScope) {
-    return null;
-  }
 
   let authorizedResolver: typeof currentSchoolModule.getAuthorizedCurrentSchool | undefined;
   try {
@@ -172,16 +151,30 @@ export async function resolveAuthorizedSchoolForCouncil(
     return authorizedResolver(session, explicitSchoolId);
   }
 
-  // Fallback exclusivo para mocks parciais de testes que expõem apenas getCurrentSchool
+  const hasExplicitActiveLink = userSchools.some(
+    (s) => s.active !== false && Boolean((s.schoolId || s.id || "").trim())
+  );
+  const hasNetworkScope = role === "GESTAO_SECRETARIA" && userNetworks.length > 0;
+  if (!isSuper && !hasExplicitActiveLink && !hasNetworkScope) {
+    return null;
+  }
+
+  // Fallback exclusivo em testes unitários que mockam parcialmente `@/lib/currentSchool`
+  if (typeof currentSchoolModule.getCurrentSchool !== "function") {
+    return null;
+  }
   const school = await currentSchoolModule.getCurrentSchool(explicitSchoolId);
   if (!school) return null;
-  if (isSuper || hasNetworkScope) return school;
+  const hasNetworkMatch =
+    hasNetworkScope &&
+    Boolean(school.networkId) &&
+    userNetworks.some((n) => n.active !== false && n.networkId === school.networkId);
 
-  const hasDirectMatch =
-    sessionSchoolId === school.id ||
-    userSchools.some(
-      (s) => s.active !== false && (s.schoolId === school.id || s.id === school.id)
-    );
+  if (isSuper || hasNetworkMatch) return school;
+
+  const hasDirectMatch = userSchools.some(
+    (s) => s.active !== false && (s.schoolId === school.id || s.id === school.id)
+  );
   return hasDirectMatch ? school : null;
 }
 

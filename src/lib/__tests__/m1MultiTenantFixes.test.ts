@@ -179,6 +179,7 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           state: "PR",
           nre: "SEMEC Tibagi",
           network: "MUNICIPAL",
+          networkId: "semec-tibagi",
           active: true,
         },
         {
@@ -316,7 +317,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           id: "usr-gestor-a",
           email: "gestor@escola-a.pr.gov.br",
           role: "GESTOR_ESCOLAR",
+          active: true,
           schoolId: "escola-a",
+          schools: [{ schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true }],
         },
       };
 
@@ -335,7 +338,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           id: "usr-gestor-b",
           email: "gestor@escola-b.pr.gov.br",
           role: "GESTOR_ESCOLAR",
+          active: true,
           schoolId: "escola-b",
+          schools: [{ schoolId: "escola-b", role: "GESTOR_ESCOLAR", active: true }],
         },
       };
 
@@ -397,7 +402,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           id: "usr-gestor-a",
           email: "gestor@escola-a.pr.gov.br",
           role: "GESTOR_ESCOLAR",
+          active: true,
           schoolId: "escola-a",
+          schools: [{ schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true }],
         },
       };
 
@@ -433,7 +440,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           id: "usr-gestor-a",
           email: "gestor@escola-a.pr.gov.br",
           role: "GESTOR_ESCOLAR",
+          active: true,
           schoolId: "escola-a",
+          schools: [{ schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true }],
         },
       };
 
@@ -463,7 +472,9 @@ describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
           id: "usr-gestor-a",
           email: "gestor@escola-a.pr.gov.br",
           role: "GESTOR_ESCOLAR",
+          active: true,
           schoolId: "escola-a",
+          schools: [{ schoolId: "escola-a", role: "GESTOR_ESCOLAR", active: true }],
         },
       };
 

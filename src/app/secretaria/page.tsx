@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { checkIsAdmin, checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
+import { checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
+import { buildSessionFromSnapshot, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import { generatePredictiveRecommendations } from "@/lib/predictiveAnalytics";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import SecretariaClient from "./SecretariaClient";
@@ -23,30 +24,57 @@ export default async function SecretariaPage({ searchParams }: Props) {
     redirect("/login");
   }
 
-  const isSuper = checkIsSuperAdmin(session);
-  const isSec = checkIsSecretariat(session);
+  const snapshot = await resolveServerUserAuthSnapshot(session);
+  if (!snapshot || snapshot.active === false) {
+    redirect("/login?error=AccountInactive");
+  }
+
+  const freshSession = buildSessionFromSnapshot(session, snapshot);
+  const isSuper = checkIsSuperAdmin(freshSession);
+  const isSec = checkIsSecretariat(freshSession);
 
   if (!isSuper && !isSec) {
     redirect("/");
   }
 
-  const userNetworks = ((session.user as any)?.networks as any[]) || [];
-  let allowedCities = userNetworks
-    .map((n: any) => (n.city || n.network?.city || "").trim())
-    .filter(Boolean);
+  const activeSnapshotNetworks = snapshot.networks.filter(
+    (n) =>
+      n.active !== false &&
+      n.network?.active !== false &&
+      (!n.role || n.role.toUpperCase() === "GESTAO_SECRETARIA")
+  );
+  let resolvedNetworks = activeSnapshotNetworks.map((n) => ({
+    networkId: n.networkId,
+    city: (n.network?.city || "").trim(),
+  }));
 
-  if (!isSuper && allowedCities.length === 0 && (session.user as any)?.id) {
+  if (!isSuper && resolvedNetworks.length === 0 && snapshot.id) {
     const dbNetworks = await prisma.userNetwork.findMany({
-      where: { userId: (session.user as any).id, active: true },
+      where: { userId: snapshot.id, active: true },
       include: { network: true },
     });
-    allowedCities = dbNetworks
-      .map((un: any) => (un.network?.city || "").trim())
-      .filter(Boolean);
+    resolvedNetworks = dbNetworks
+      .filter(
+        (un: any) =>
+          un.active !== false &&
+          un.network?.active !== false &&
+          (!un.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA")
+      )
+      .map((un: any) => ({
+        networkId: String(un.networkId).trim(),
+        city: String(un.network?.city || "").trim(),
+      }));
   }
 
-  // Sem rede municipal vinculada: renderiza estado vazio seguro sem fallback hardcoded
-  if (!isSuper && allowedCities.length === 0) {
+  const allowedNetworkIds = Array.from(
+    new Set(resolvedNetworks.map((n) => n.networkId).filter(Boolean))
+  );
+  const allowedCities = Array.from(
+    new Set(resolvedNetworks.map((n) => n.city).filter(Boolean))
+  );
+
+  // Sem rede municipal vinculada por networkId ativo: renderiza estado vazio seguro sem fallback
+  if (!isSuper && allowedNetworkIds.length === 0) {
     return (
       <SecretariaClient
         city="Nenhuma rede vinculada"
@@ -77,14 +105,12 @@ export default async function SecretariaPage({ searchParams }: Props) {
 
   const requestedCity = resolvedSearchParams.city?.trim();
 
-  // Buscar cidades disponíveis na rede municipal (restrito às redes autorizadas se não for SuperAdmin)
+  // Buscar cidades disponíveis na rede municipal (restrito estritamente aos networkIds autorizados para não-SuperAdmin)
   const availableMunicipalCities = await prisma.school.findMany({
     where: {
       active: true,
       network: "MUNICIPAL",
-      ...(!isSuper
-        ? { OR: allowedCities.map((c) => ({ city: { equals: c, mode: "insensitive" as const } })) }
-        : {}),
+      ...(!isSuper ? { networkId: { in: allowedNetworkIds } } : {}),
     },
     select: { city: true },
     distinct: ["city"],
@@ -93,7 +119,14 @@ export default async function SecretariaPage({ searchParams }: Props) {
   const availableCities = Array.from(new Set(availableMunicipalCities.map((c) => c.city).filter(Boolean)));
 
   let defaultCity = requestedCity || allowedCities[0] || availableCities[0] || "";
-  if (!isSuper) {
+  if (!isSuper && availableCities.length > 0) {
+    const matchesAllowed = availableCities.some(
+      (c) => c.toLowerCase() === defaultCity.toLowerCase()
+    );
+    if (!matchesAllowed) {
+      defaultCity = availableCities[0];
+    }
+  } else if (!isSuper && allowedCities.length > 0) {
     const matchesAllowed = allowedCities.some(
       (c) => c.toLowerCase() === defaultCity.toLowerCase()
     );
@@ -106,7 +139,7 @@ export default async function SecretariaPage({ searchParams }: Props) {
     availableCities.unshift(defaultCity);
   }
 
-  if (!defaultCity) {
+  if (!defaultCity && isSuper) {
     return (
       <SecretariaClient
         city="Nenhuma rede cadastrada"
@@ -139,6 +172,7 @@ export default async function SecretariaPage({ searchParams }: Props) {
     where: {
       active: true,
       network: "MUNICIPAL",
+      ...(!isSuper ? { networkId: { in: allowedNetworkIds } } : {}),
       ...(defaultCity ? { city: { equals: defaultCity, mode: "insensitive" } } : {}),
     },
     select: {

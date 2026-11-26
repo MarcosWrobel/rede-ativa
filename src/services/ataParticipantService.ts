@@ -46,6 +46,8 @@ export interface ExistingMinuteParticipant {
   clientTimestampIso?: string | null;
   mobileSignToken?: string | null;
   mobileSignExpiresAt?: Date | string | null;
+  mobileSignRevision?: number | null;
+  signedRevision?: number | null;
   hasActiveSignLink?: boolean;
   biometricVerified?: boolean;
   biometricDeviceType?: string | null;
@@ -79,6 +81,8 @@ export interface MergedMinuteParticipantRecord {
   clientTimestampIso: string | null;
   mobileSignToken: string | null;
   mobileSignExpiresAt: Date | null;
+  mobileSignRevision: number | null;
+  signedRevision: number | null;
   hasSignature: boolean;
   hasActiveSignLink: boolean;
   biometricVerified: boolean;
@@ -298,6 +302,21 @@ export function mergeParticipantSignatures(
       Boolean(sigData || verifiedEmail || shouldClear || isRefused || identityChanged);
     const finalMobileSignToken = shouldBurnToken ? null : (match?.mobileSignToken || null);
     const finalMobileSignExpiresAt = shouldBurnToken ? null : toNullableDate(match?.mobileSignExpiresAt);
+    const finalMobileSignRevision =
+      shouldBurnToken || !finalMobileSignToken
+        ? null
+        : typeof match?.mobileSignRevision === "number"
+          ? match.mobileSignRevision
+          : null;
+    const hasCollectedSig = Boolean(sigData || verifiedEmail);
+    const finalSignedRevision =
+      shouldClear || isRefused || !hasCollectedSig
+        ? null
+        : matchHasSigned
+          ? typeof match?.signedRevision === "number"
+            ? match.signedRevision
+            : null
+          : null;
 
     return {
       ...(match?.id ? { id: match.id } : {}),
@@ -322,7 +341,9 @@ export function mergeParticipantSignatures(
         shouldClear || isRefused ? null : (match?.clientTimestampIso || p.clientTimestampIso || null),
       mobileSignToken: finalMobileSignToken,
       mobileSignExpiresAt: finalMobileSignExpiresAt,
-      hasSignature: Boolean(sigData || verifiedEmail),
+      mobileSignRevision: finalMobileSignRevision,
+      signedRevision: finalSignedRevision,
+      hasSignature: hasCollectedSig,
       hasActiveSignLink: Boolean(finalMobileSignToken),
       biometricVerified: bioVerified,
       biometricDeviceType: bioDevice,

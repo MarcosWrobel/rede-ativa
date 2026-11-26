@@ -64,6 +64,7 @@ export interface AtaParticipantDraft {
   biometricAuthTime?: string | Date | null;
   hasSignature?: boolean;
   hasActiveSignLink?: boolean;
+  signedRevision?: number | null;
   clearSignature?: boolean;
   refusalReason?: string | null;
   witnessName?: string | null;
@@ -116,12 +117,32 @@ export interface AtaMinuteStudentSnapshot {
   cgmSnapshot?: string | null;
 }
 
+export interface AtaPhysicalProofHistoryItem {
+  id: string;
+  contentRevision?: number | null;
+  originIsConfidential?: boolean | null;
+  scanProvider?: string | null;
+  scanMimeType?: string | null;
+  scanSizeBytes?: number | null;
+  scanSha256?: string | null;
+  uploadedAt?: string | Date | null;
+  uploadedBy?: string | null;
+  govBrVerified?: boolean;
+  govBrProtocol?: string | null;
+  supersededAt: string | Date;
+  supersededByRevision?: number | null;
+  supersededByEmail?: string | null;
+}
+
 export interface AtaMinuteRecord {
   id: string;
   schoolId?: string;
   ataNumber?: number | null;
   year?: number;
   status?: string;
+  contentRevision?: number;
+  physicalScanRevision?: number | null;
+  physicalScanSupersededAt?: string | Date | null;
   category?: string;
   isConfidential?: boolean;
   attendedAt: string | Date;
@@ -150,6 +171,7 @@ export interface AtaMinuteRecord {
   participants?: AtaParticipantDraft[];
   actionItems?: AtaActionItemRecord[];
   addendums?: AtaAddendumRecord[];
+  physicalProofHistory?: AtaPhysicalProofHistoryItem[];
 }
 
 export interface SpeechRecognitionAlternativeLike {

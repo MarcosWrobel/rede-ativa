@@ -8,7 +8,11 @@ import {
   JUSTIFICATION_TYPE_LABELS,
   parseEnrollmentDetailMetrics,
 } from "@/lib/pedagogicalClassifier";
-import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
+import {
+  anonymizeOtherMinorsInText,
+  anonymizeParticipantsForDossier,
+  buildStudentMaskingEntries,
+} from "@/lib/ataCrypto";
 import {
   REPLY_CATEGORY_LABELS,
   type ReplyCategory,
@@ -452,21 +456,52 @@ export default function DossieClient({
                   const rawSummary = min.summary || "";
                   const rawSubject = min.subject || "";
                   const rawAgreements = min.agreementsSummary || "";
-                  const linkedStudents = min.students?.map((s: any) => ({
-                    id: s.studentId,
-                    name: s.studentNameSnapshot,
-                  })) || [];
+                  const hasPreMaskedServerText =
+                    typeof min.maskedSummary === "string" &&
+                    typeof min.maskedSubject === "string";
+                  const linkedStudents = hasPreMaskedServerText
+                    ? []
+                    : buildStudentMaskingEntries(min.students);
 
                   const displaySummary = anonymizeOtherMinors
-                    ? anonymizeOtherMinorsInText(rawSummary, student.id, linkedStudents)
+                    ? hasPreMaskedServerText
+                      ? min.maskedSummary
+                      : anonymizeOtherMinorsInText(rawSummary, student.id, linkedStudents)
                     : rawSummary;
                   const displaySubject = anonymizeOtherMinors
-                    ? anonymizeOtherMinorsInText(rawSubject, student.id, linkedStudents)
+                    ? hasPreMaskedServerText
+                      ? min.maskedSubject
+                      : anonymizeOtherMinorsInText(rawSubject, student.id, linkedStudents)
                     : rawSubject;
                   const displayAgreements =
                     anonymizeOtherMinors && rawAgreements
-                      ? anonymizeOtherMinorsInText(rawAgreements, student.id, linkedStudents)
+                      ? typeof min.maskedAgreementsSummary === "string"
+                        ? min.maskedAgreementsSummary
+                        : anonymizeOtherMinorsInText(rawAgreements, student.id, linkedStudents)
                       : rawAgreements;
+                  const fullParticipantNames = Array.isArray(min.participants)
+                    ? min.participants
+                        .map((p: any) => (typeof p?.name === "string" ? p.name.trim() : ""))
+                        .filter(Boolean)
+                    : [];
+                  const displayParticipantNames = anonymizeOtherMinors
+                    ? Array.isArray(min.maskedParticipantNames)
+                      ? min.maskedParticipantNames
+                      : anonymizeParticipantsForDossier(
+                          min.participants || [],
+                          student.id,
+                          linkedStudents.length > 0
+                            ? linkedStudents
+                            : buildStudentMaskingEntries([
+                                ...(min.students || []),
+                                {
+                                  studentId: student.id,
+                                  studentNameSnapshot: student.name,
+                                  student: { name: student.name },
+                                },
+                              ])
+                        )
+                    : fullParticipantNames;
 
                   return (
                     <div
@@ -484,7 +519,11 @@ export default function DossieClient({
 
                       <div>
                         <strong>Servidora:</strong> {min.authorName} ({min.authorRole}) • <strong>Presentes:</strong>{" "}
-                        {min.participants?.map((p: any) => p.name).join(", ") || "Conforme ata"}
+                        <span data-testid="dossie-minute-presentes">
+                          {displayParticipantNames.length > 0
+                            ? displayParticipantNames.join(", ")
+                            : "Conforme ata"}
+                        </span>
                       </div>
 
                       <div className="leading-relaxed whitespace-pre-line text-slate-800">

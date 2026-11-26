@@ -1,11 +1,74 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { GoogleGenAI } from "@google/genai";
-import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { hasDisallowedAttachmentPayload, recordAiOperationalEvent } from "@/lib/aiPolicy";
 import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 
-export const maxDuration = 60;
+export const maxDuration = 30;
 export const dynamic = "force-dynamic";
+
+function buildLocalTemplateSuggestion(rawPrompt: string): {
+  title: string;
+  prefixText: string;
+  suffixText: string;
+  isAbsenceRelated: boolean;
+} {
+  const normalized = rawPrompt
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const isAbsenceRelated =
+    /(?:falta|ausencia|infrequenc|evasao|frequenc|atestado|justificativa)/.test(normalized);
+
+  if (/boletim|nota|recuperacao|avaliacao/.test(normalized)) {
+    return {
+      title: "ENTREGA DE BOLETINS E ACOMPANHAMENTO",
+      prefixText:
+        "{saudacao}\nPrezados responsáveis, informamos que está aberto o acompanhamento pedagógico referente ao desempenho escolar de",
+      suffixText:
+        "Solicitamos o comparecimento à equipe pedagógica no horário de atendimento da escola para alinhamento conjunto.\n\nAtenciosamente,\nEquipe Pedagógica",
+      isAbsenceRelated: false,
+    };
+  }
+
+  if (/reuniao|conselho|convocacao|comparecimento/.test(normalized)) {
+    return {
+      title: "CONVOCAÇÃO PARA ATENDIMENTO ESCOLAR",
+      prefixText:
+        "{saudacao}\nPrezados responsáveis, convidamos para atendimento presencial na escola referente ao estudante",
+      suffixText:
+        "Sua participação é fundamental para o acompanhamento pedagógico. Caso não seja possível no horário informado, responda esta mensagem para agendamento.\n\nAtenciosamente,\nEquipe Pedagógica",
+      isAbsenceRelated,
+    };
+  }
+
+  if (isAbsenceRelated) {
+    return {
+      title: "ACOMPANHAMENTO DE FREQUÊNCIA ESCOLAR",
+      prefixText:
+        "{saudacao}\nPrezados responsáveis, registramos faltas recentes que requerem acompanhamento referentes ao estudante",
+      suffixText:
+        "Pedimos que informem o motivo da ausência e apresentem justificativa ou atestado na secretaria escolar quando aplicável.\n\nAtenciosamente,\nEquipe Pedagógica",
+      isAbsenceRelated: true,
+    };
+  }
+
+  const conciseHeadline = rawPrompt
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48)
+    .toUpperCase();
+
+  return {
+    title: conciseHeadline || "COMUNICADO PEDAGÓGICO",
+    prefixText:
+      "{saudacao}\nPrezados responsáveis, entramos em contato com a família referente ao estudante",
+    suffixText:
+      `Comunicamos assunto importante relacionado a: ${rawPrompt.trim()}. Permanecemos à disposição para esclarecimentos no atendimento escolar.\n\nAtenciosamente,\nEquipe Pedagógica`,
+    isAbsenceRelated: false,
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -16,9 +79,23 @@ export async function POST(req: Request) {
     const rlCheck = await enforceRateLimit(rateLimitKey, RATE_LIMIT_POLICIES.AI_ENDPOINT);
     if (!rlCheck.ok) return rlCheck.response;
 
-    const body = await req.json();
-    const prompt = body?.prompt;
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
 
+    const body = await req.json();
+
+    if (hasDisallowedAttachmentPayload(body)) {
+      return NextResponse.json(
+        { error: "O envio de imagens ou anexos está indisponível neste fluxo." },
+        { status: 400 }
+      );
+    }
+
+    const prompt = body?.prompt;
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return NextResponse.json(
         { error: "Por favor, descreva o objetivo da mensagem que deseja gerar." },
@@ -26,183 +103,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // Prioriza chave oficial da Vercel (GEMINI_API_KEY) e usa header apenas como fallback
-    const envKey = (
-      process.env.GEMINI_API_KEY ||
-      process.env.GOOGLE_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY
-    )?.replace(/^["']|["']$/g, "").trim();
+    const template = buildLocalTemplateSuggestion(prompt.trim());
 
-    const headerKey = req.headers.get("x-gemini-key")?.replace(/^["']|["']$/g, "").trim();
-
-    const apiKey =
-      (envKey && envKey.length > 10 ? envKey : null) ||
-      (headerKey && headerKey.length > 10 ? headerKey : null);
-
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          error: "Chave GEMINI_API_KEY não configurada na Vercel nem no painel.",
-          missingApiKey: true,
-          helpUrl: "https://aistudio.google.com/app/apikey",
-        },
-        { status: 400 }
-      );
-    }
-
-    const cleanApiKey = apiKey.replace(/^["']|["']$/g, "").trim();
-    const ai = new GoogleGenAI({ apiKey: cleanApiKey });
-    const pseudonymizer = createAiPseudonymizer();
-    const maskedPrompt = pseudonymizer.maskText(prompt.trim());
-
-    const systemInstruction = `Você é um assistente pedagógico oficial da plataforma Rede Ativa para instituições escolares.
-Sua missão é transformar a solicitação da pedagoga em um modelo padronizado e acolhedor de mensagem institucional para envio via WhatsApp aos pais ou responsáveis.
-
-Regras obrigatórias:
-1. "title": Título curto e objetivo em MAIÚSCULAS (ex: "ENTREGA DE BOLETINS", "SOLICITAÇÃO DE ATESTADO", "CONVOCAÇÃO DE RESPONSÁVEL").
-2. "prefixText": Texto que vem antes da identificação do aluno. DEVE OBRIGATORIAMENTE começar com a tag "{saudacao}" (que o sistema converte automaticamente em Bom dia!, Boa tarde! ou Boa noite!). Exemplo: "{saudacao}\\nPrezados responsáveis, informamos que o(a) aluno(a)"
-3. "suffixText": Texto que vem depois da identificação do aluno. Texto polido, acolhedor e convidando à parceria da família, finalizando com:
-"Atenciosamente,\\nEquipe Pedagógica"
-4. "isAbsenceRelated": booleano (true apenas se o assunto for faltas/infrequência/ausência; false para notas, reuniões, convocações, uniforme ou avisos gerais).
-
-Responda OBRIGATORIAMENTE em JSON válido com as seguintes propriedades:
-{
-  "title": string,
-  "prefixText": string,
-  "suffixText": string,
-  "isAbsenceRelated": boolean
-}`;
-
-    let responseText: string | null = null;
-    let lastErrorMsg = "";
-
-    // Modelos vigentes na API do Google (2026).
-    // gemini-3.5-flash é o modelo principal confirmado como ativo e funcional.
-    const modelsToTry = [
-      "gemini-3.5-flash",
-      "gemini-flash-latest",
-      "gemini-3.5-flash-lite",
-      "gemini-3.8-flash",
-    ];
-
-    // 1. Tentativa via models.generateContent com timeout de 15s por modelo
-    for (const model of modelsToTry) {
-      try {
-        const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), 15000);
-
-        const response = await ai.models.generateContent({
-          model,
-          contents: `Crie um modelo de mensagem institucional escolar para WhatsApp sobre o seguinte assunto: "${maskedPrompt}". Responda estritamente em JSON com as chaves "title", "prefixText", "suffixText", "isAbsenceRelated".`,
-          config: {
-            systemInstruction,
-            responseMimeType: "application/json",
-            temperature: 0.2,
-            thinkingConfig: {
-              thinkingLevel: "low" as any,
-            },
-            abortSignal: abortController.signal,
-          },
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response?.text) {
-          responseText = response.text;
-          break;
-        }
-      } catch (err: any) {
-        lastErrorMsg = err?.message || String(err);
-        if (err?.body) {
-          try {
-            const parsed = JSON.parse(err.body);
-            const detail = Array.isArray(parsed)
-              ? parsed[0]?.error?.message
-              : parsed?.error?.message;
-            if (detail) lastErrorMsg = detail;
-          } catch (parseError) {
-            console.debug("[AI Template JSON Parse Error]", parseError);
-          }
-        }
-
-        // Se a chave API for comprovadamente inválida, interrompe sem testar outros modelos
-        if (lastErrorMsg.toLowerCase().includes("api key not valid") || lastErrorMsg.includes("403 Forbidden")) {
-          break;
-        }
-
-        console.warn(`[GEMINI generateContent] Modelo ${model} falhou: ${lastErrorMsg}. Tentando próximo...`);
-      }
-    }
-
-    // 2. Se generateContent não respondeu, tentar via Interactions API com gemini-3.5-flash-lite
-    if (!responseText && !lastErrorMsg.toLowerCase().includes("api key not valid")) {
-      try {
-        const interaction = await ai.interactions.create(
-          {
-            model: "gemini-3.5-flash-lite",
-            input: `Crie um modelo de mensagem institucional para: "${maskedPrompt}". Responda estritamente em JSON.`,
-            system_instruction: systemInstruction,
-          },
-          {
-            retries: { strategy: "none" },
-            timeout_ms: 15000,
-          }
-        );
-
-        if (interaction?.output_text) {
-          responseText = interaction.output_text;
-        }
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        console.warn("[GEMINI Interactions] Falhou:", msg);
-        if (!lastErrorMsg) lastErrorMsg = msg;
-      }
-    }
-
-    if (!responseText) {
-      const lowerErr = lastErrorMsg.toLowerCase();
-      const isKeyError =
-        lowerErr.includes("api key not valid") ||
-        lowerErr.includes("403 forbidden") ||
-        lowerErr.includes("permission_denied");
-      const safeErrorMsg = isKeyError
-        ? "Chave da API Gemini inválida ou sem autorização para este serviço."
-        : lowerErr.includes("429") || lowerErr.includes("resource_exhausted")
-        ? "Limite temporário de requisições da API de IA atingido. Tente novamente em instantes."
-        : "Serviço de IA indisponível temporariamente. Tente novamente em instantes.";
-      return NextResponse.json(
-        {
-          error: safeErrorMsg,
-          missingApiKey: isKeyError,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Limpar delimitadores markdown caso existam
-    const cleaned = responseText
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```$/i, "")
-      .trim();
-
-    const parsed = JSON.parse(cleaned);
+    await recordAiOperationalEvent({
+      schoolId: schoolRes.school.id,
+      route: "/api/ai/generate-template",
+      mode: "LOCAL_ONLY",
+      reason: "local_template_generation",
+      status: "SUCCESS",
+      user: { id: authCheck.userId, name: authCheck.userName, email: authCheck.email },
+      req,
+    });
 
     return NextResponse.json({
       success: true,
-      template: {
-        title: String(parsed.title || "NOVO MODELO").toUpperCase().trim(),
-        prefixText: String(
-          parsed.prefixText || "{saudacao}\nPrezados responsáveis, informamos que o(a) aluno(a)"
-        ).trim(),
-        suffixText: String(
-          parsed.suffixText || "Atenciosamente,\nEquipe Pedagógica"
-        ).trim(),
-        isAbsenceRelated: Boolean(parsed.isAbsenceRelated),
-      },
+      usedFallback: true,
+      mode: "LOCAL_ONLY",
+      template,
     });
-  } catch (error: any) {
-    console.error("Erro geral na rota de IA:", error);
+  } catch {
     return NextResponse.json(
       { error: "Erro interno ao processar modelo com IA." },
       { status: 500 }

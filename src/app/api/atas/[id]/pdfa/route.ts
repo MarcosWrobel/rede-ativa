@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSchoolManager, checkIsSuperAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { generateAtaPdfA1b } from "@/lib/ataPdfArchive";
@@ -40,7 +40,13 @@ export async function GET(
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
@@ -62,9 +68,24 @@ export async function GET(
       const isAuthor =
         minute.authorId === authCheck.userId ||
         minute.authorEmail?.toLowerCase() === authCheck.email?.toLowerCase();
+      const targetDescriptor =
+        minute.school ||
+        (minute.schoolId === currentSchool.id
+          ? {
+              id: currentSchool.id,
+              active: true,
+              networkId: currentSchool.networkId,
+              network: currentSchool.network,
+              city: currentSchool.city,
+            }
+          : null);
       const isManager =
         checkIsSuperAdmin(authCheck.session) ||
-        checkIsSchoolManager(authCheck.session, minute.schoolId || currentSchool.id);
+        checkIsSchoolManager(
+          authCheck.session,
+          minute.schoolId || currentSchool.id,
+          targetDescriptor
+        );
 
       if (!isAuthor && !isManager) {
         return NextResponse.json(

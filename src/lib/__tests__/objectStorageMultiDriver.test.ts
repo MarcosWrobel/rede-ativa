@@ -14,7 +14,9 @@ const mockSession = {
     name: "Natiele Pacheco",
     email: "natiele.pacheco@escola.pr.gov.br",
     role: "PEDAGOGA",
+    active: true,
     schoolId: "school-leopoldina",
+    schools: [{ schoolId: "school-leopoldina", role: "PEDAGOGA", active: true }],
   },
 };
 
@@ -37,10 +39,50 @@ vi.mock("@/lib/currentSchool", () => ({
     id: schoolId || "school-leopoldina",
     name: "Colégio Estadual Leopoldina B. Pedroso",
     inepCode: "41042730",
+    edition: "PILOTO_INTEGRADA",
+  })),
+  getAuthorizedCurrentSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => ({
+    id: explicitSchoolId || "school-leopoldina",
+    name: "Colégio Estadual Leopoldina B. Pedroso",
+    inepCode: "41042730",
+    edition: "PILOTO_INTEGRADA",
+  })),
+  requireAuthorizedSchool: vi.fn(async (_session?: any, explicitSchoolId?: string | null) => ({
+    ok: true,
+    school: {
+      id: explicitSchoolId || "school-leopoldina",
+      name: "Colégio Estadual Leopoldina B. Pedroso",
+      inepCode: "41042730",
+      edition: "PILOTO_INTEGRADA",
+    },
   })),
 }));
 
 describe("STORAGE-01: Object Storage Multi-Driver & Custódia de Scans Físicos", () => {
+  beforeEach(() => {
+    vi.spyOn(prisma.user, "findUnique").mockResolvedValue({
+      id: "usr_pedagoga_1",
+      email: "natiele.pacheco@escola.pr.gov.br",
+      name: "Natiele Pacheco",
+      role: "PEDAGOGA",
+      active: true,
+      schoolId: "school-leopoldina",
+      schools: [
+        {
+          schoolId: "school-leopoldina",
+          role: "PEDAGOGA",
+          active: true,
+          school: {
+            id: "school-leopoldina",
+            name: "Colégio Estadual Leopoldina B. Pedroso",
+            inepCode: "41042730",
+            edition: "PILOTO_INTEGRADA",
+          },
+        },
+      ],
+      networks: [],
+    } as any);
+  });
   // Amostra válida de PDF: %PDF-1.4 ... %%EOF
   const validPdfBase64 = "data:application/pdf;base64,JVBERi0xLjQKJcTl8uXrp/Og0MTGCjQgMCBvYmoKPDwgL0xlbmd0aCA1IDAgUiAvRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeAEr5AIAAZAAnQplbmRzdHJlYW0KZW5kb2JqCg==";
   // Amostra válida de PNG de 1x1 pixel

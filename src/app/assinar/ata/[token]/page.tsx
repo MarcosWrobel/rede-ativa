@@ -1,7 +1,15 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
+import {
+  anonymizeOtherMinorsInText,
+  buildStudentMaskingEntries,
+} from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
+import {
+  evaluateMinuteRevisionLock,
+  hasMinimumOfficialSummary,
+  OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR,
+} from "@/lib/ataRevision";
 import { checkRateLimit, hashIp, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import MobileSignClient from "./MobileSignClient";
 
@@ -41,7 +49,25 @@ export default async function AssinarAtaPage({ params }: Props) {
       minute: {
         include: {
           school: true,
-          students: true,
+          students: {
+            select: {
+              studentId: true,
+              studentNameSnapshot: true,
+              previousNameSnapshots: true,
+              student: { select: { name: true } },
+            },
+          },
+          participants: {
+            select: {
+              id: true,
+              signatureMode: true,
+              hasSignature: true,
+              verifiedEmail: true,
+              signedAt: true,
+              biometricVerified: true,
+              signedRevision: true,
+            },
+          },
         },
       },
     },
@@ -86,12 +112,41 @@ export default async function AssinarAtaPage({ params }: Props) {
     );
   }
 
+  const lockState = evaluateMinuteRevisionLock(participant.minute);
+  if (
+    lockState.hasLegacyUnprovableProof ||
+    participant.mobileSignRevision === null ||
+    participant.mobileSignRevision === undefined ||
+    participant.mobileSignRevision !== lockState.currentRevision
+  ) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-amber-200 shadow-sm text-center space-y-3">
+          <h1 className="text-lg font-black text-slate-900">Link Desatualizado ou Substituído</h1>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            O conteúdo desta ata foi alterado ou reaberto após a emissão deste link. Solicite um novo link atualizado à equipe escolar para conferir a versão vigente antes de assinar.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasMinimumOfficialSummary(participant.minute.summary)) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-amber-200 shadow-sm text-center space-y-3">
+          <h1 className="text-lg font-black text-slate-900">Texto oficial pendente de conclusão</h1>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            {OFFICIAL_SUMMARY_REQUIRED_FOR_LINK_SIGN_ERROR}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Proteção ECA Arts. 17 e 143: quando a ata envolve múltiplos menores e o link pertence a responsável/estudante,
   // anonimiza os nomes dos outros menores co-envolvidos antes de enviar ao dispositivo móvel não autenticado.
-  const linkedStudents = ((participant.minute as any).students || []).map((s: any) => ({
-    id: s.studentId,
-    name: s.studentNameSnapshot || "",
-  }));
+  const linkedStudents = buildStudentMaskingEntries((participant.minute as any).students || []);
   const shouldAnonymizeOthers =
     linkedStudents.length > 1 &&
     (participant.role === "RESPONSAVEL" ||
@@ -119,6 +174,7 @@ export default async function AssinarAtaPage({ params }: Props) {
       subject={safeSubject}
       summary={safeSummary}
       agreementsSummary={safeAgreements}
+      minuteRevision={lockState.currentRevision}
       googleClientId={process.env.GOOGLE_CLIENT_ID || ""}
     />
   );

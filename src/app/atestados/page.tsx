@@ -1,16 +1,12 @@
-import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import AtestadosClient from "./AtestadosClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function AtestadosPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-
-  const school = await getCurrentSchool((session.user as any)?.schoolId);
+  const ctx = await resolveAuthorizedPageContext();
+  const school = ctx.school;
   const now = new Date();
   const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
   const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);

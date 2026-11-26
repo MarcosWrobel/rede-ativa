@@ -23,6 +23,7 @@ interface Props {
   subject: string;
   summary?: string;
   agreementsSummary?: string | null;
+  minuteRevision?: number;
   googleClientId?: string;
 }
 
@@ -41,11 +42,13 @@ export default function MobileSignClient({
   subject,
   summary,
   agreementsSummary,
+  minuteRevision,
   googleClientId,
 }: Props) {
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [biometricStrokeData, setBiometricStrokeData] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [linkSupersededNotice, setLinkSupersededNotice] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [successMode, setSuccessMode] = useState<string>("CANVAS");
   const [verifiedEmailSuccess, setVerifiedEmailSuccess] = useState<string | null>(null);
@@ -165,11 +168,25 @@ export default function MobileSignClient({
         body: JSON.stringify({
           googleIdToken: credential,
           dryRun: true,
+          ...(typeof minuteRevision === "number" ? { expectedRevision: minuteRevision } : {}),
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
+        if (
+          res.status === 404 ||
+          res.status === 409 ||
+          data?.code === "REVISION_SUPERSEDED" ||
+          data?.code === "LINK_REVOKED_OR_SUPERSEDED" ||
+          data?.code === "LEGACY_SIGNATURE_REQUIRES_REOPEN" ||
+          data?.code === "OFFICIAL_SUMMARY_REQUIRED"
+        ) {
+          setLinkSupersededNotice(
+            data?.error ||
+              "Esta ata foi atualizada ou ainda requer conclusão do texto oficial. Solicite um novo link à equipe escolar."
+          );
+        }
         throw new Error(data.error || "Conta Google não aceita.");
       }
 
@@ -274,6 +291,9 @@ export default function MobileSignClient({
         payload.biometricDeviceType = biometricDeviceType;
       }
       payload.clientTimestampIso = new Date().toISOString();
+      if (typeof minuteRevision === "number") {
+        payload.expectedRevision = minuteRevision;
+      }
 
       const res = await fetch(`/api/atas/sign-token/${token}`, {
         method: "POST",
@@ -282,7 +302,22 @@ export default function MobileSignClient({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao salvar assinatura");
+      if (!res.ok) {
+        if (
+          res.status === 404 ||
+          res.status === 409 ||
+          data?.code === "REVISION_SUPERSEDED" ||
+          data?.code === "LINK_REVOKED_OR_SUPERSEDED" ||
+          data?.code === "LEGACY_SIGNATURE_REQUIRES_REOPEN" ||
+          data?.code === "OFFICIAL_SUMMARY_REQUIRED"
+        ) {
+          setLinkSupersededNotice(
+            data?.error ||
+              "O conteúdo desta ata foi atualizado ou reaberto. Solicite um novo link atualizado à equipe escolar."
+          );
+        }
+        throw new Error(data.error || "Erro ao salvar assinatura");
+      }
 
       setSuccessMode(data.mode || (preferEscolaAuth ? "ESCOLA_OAUTH" : "MOBILE_QR"));
       setVerifiedEmailSuccess(data.verifiedEmail || googleVerifiedAccount?.email || null);
@@ -293,6 +328,20 @@ export default function MobileSignClient({
       setSubmitting(false);
     }
   };
+
+  if (linkSupersededNotice) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-amber-200 shadow-sm text-center space-y-4">
+          <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <h1 className="text-lg font-black text-slate-900">Solicite um Novo Link à Equipe Escolar</h1>
+          <p className="text-xs text-slate-600 leading-relaxed">{linkSupersededNotice}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -516,7 +565,9 @@ export default function MobileSignClient({
               </label>
               <SignatureCanvas
                 signerName={participantName}
-                onSave={(dataUrl, strokeData) => {
+                showConfirmButton={false}
+                isSubmitting={submitting}
+                onStrokeChange={(dataUrl, strokeData) => {
                   setSignatureData(dataUrl);
                   setBiometricStrokeData(strokeData || null);
                 }}

@@ -32,9 +32,17 @@ vi.mock("@/lib/audit", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async () => ({ id: "school-1", inep: "12345678", name: "Escola 1" })),
-}));
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  const school = { id: "school-1", inepCode: "12345678", name: "Escola 1" };
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async () => school),
+    getAuthorizedCurrentSchool: vi.fn(async () => school),
+    requireAuthorizedSchool: vi.fn(async () => ({ ok: true as const, school })),
+    getSchoolContextByVerifiedId: vi.fn(async () => school),
+  };
+});
 
 vi.mock("@/lib/tenantGuard", () => ({
   assertTenantOwnership: vi.fn(() => true),

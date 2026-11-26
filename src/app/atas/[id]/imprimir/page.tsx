@@ -1,10 +1,14 @@
 import { prisma } from "@/lib/prisma";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { generateVerificationCode, canAccessConfidentialMinute } from "@/lib/ataCrypto";
+import {
+  generateVerificationCode,
+  canAccessConfidentialMinute,
+  stripInternalStudentNameAliases,
+} from "@/lib/ataCrypto";
+import { evaluateEffectivePhysicalProof } from "@/lib/ataRevision";
 import { generateQrCodeSvg, getAtaValidationUrl, getRequestOrigin } from "@/lib/qrCode";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import PrintPageClient from "./PrintPageClient";
@@ -27,6 +31,10 @@ const PRINT_MINUTE_SELECT = {
   authorEmail: true,
   authorRole: true,
   finalizedAt: true,
+  contentRevision: true,
+  physicalScanRevision: true,
+  physicalScanSupersededAt: true,
+  hasPhysicalScan: true,
   contentHash: true,
   verificationCode: true,
   pdfArchiveSha256: true,
@@ -59,7 +67,16 @@ const PRINT_MINUTE_SELECT = {
       updatedAt: true,
     },
   },
-  students: true,
+  students: {
+    select: {
+      id: true,
+      minuteId: true,
+      studentId: true,
+      studentNameSnapshot: true,
+      classNameSnapshot: true,
+      cgmSnapshot: true,
+    },
+  },
   participants: {
     select: {
       id: true,
@@ -96,10 +113,8 @@ interface Props {
 export default async function AtaPrintPage({ params }: Props) {
   const { id } = await params;
 
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
+  const ctx = await resolveAuthorizedPageContext();
+  const session = ctx.session;
 
   let minute: any = await prisma.pedagogicalMinute.findUnique({
     where: { id },
@@ -110,7 +125,7 @@ export default async function AtaPrintPage({ params }: Props) {
     notFound();
   }
 
-  const currentSchool = await getCurrentSchool((session.user as any)?.schoolId);
+  const currentSchool = ctx.school;
 
   // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
   const isOwner = assertTenantOwnership(minute.schoolId, currentSchool.id, session);
@@ -148,6 +163,25 @@ export default async function AtaPrintPage({ params }: Props) {
       },
     };
   }
+
+  const effectiveProof = evaluateEffectivePhysicalProof(minute);
+  minute = {
+    ...minute,
+    students: stripInternalStudentNameAliases(minute.students),
+    hasPhysicalScan:
+      effectiveProof.hasValidPhysicalProof && effectiveProof.hasPhysicalArtifact,
+    govBrVerified: effectiveProof.isValidGovBrVerified,
+    govBrProtocol: effectiveProof.effectiveGovBrProtocol,
+    physicalScanStorageKey: effectiveProof.hasValidPhysicalProof
+      ? minute.physicalScanStorageKey ?? null
+      : null,
+    physicalScanSha256: effectiveProof.hasValidPhysicalProof
+      ? minute.physicalScanSha256 ?? null
+      : null,
+    physicalScanUploadedAt: effectiveProof.hasValidPhysicalProof
+      ? minute.physicalScanUploadedAt ?? null
+      : null,
+  };
 
   const reqHeaders = await headers();
   const origin = getRequestOrigin(reqHeaders);

@@ -10,9 +10,15 @@ vi.mock("@/lib/auth", () => ({
   auth: (...args: any[]) => mockAuth(...args),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: (...args: any[]) => mockGetCurrentSchool(...args),
-}));
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  return {
+    ...actual,
+    getCurrentSchool: (...args: any[]) => mockGetCurrentSchool(...args),
+    getAuthorizedCurrentSchool: vi.fn(async (_s: any, id?: string | null) => mockGetCurrentSchool(id)),
+    getSchoolContextByVerifiedId: vi.fn(async (id?: string | null) => mockGetCurrentSchool(id)),
+  };
+});
 
 vi.mock("@/lib/extensionSyncAuth", () => ({
   authenticateExtensionSyncToken: (...args: any[]) =>

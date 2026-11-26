@@ -69,6 +69,8 @@ vi.mock("@/lib/currentSchool", async () => {
   return {
     ...actual,
     getCurrentSchool: vi.fn(async () => hoisted.currentSchool),
+    getAuthorizedCurrentSchool: vi.fn(async () => hoisted.currentSchool),
+    requireAuthorizedSchool: vi.fn(async () => ({ ok: true, school: hoisted.currentSchool })),
     ensureDefaultSchool: vi.fn(async () => hoisted.currentSchool),
   };
 });
@@ -232,6 +234,24 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
     };
 
     hoisted.checkRateLimit.mockResolvedValue({ success: true, retryAfterSeconds: 0 });
+    hoisted.userFindUnique.mockImplementation(async ({ where }: any) => {
+      const u = hoisted.db.users.find(
+        (x) => (where?.id && x.id === where.id) || (where?.email && x.email === where.email)
+      );
+      if (!u) return null;
+      return {
+        ...u,
+        schools: [
+          {
+            schoolId: hoisted.currentSchool.id,
+            role: hoisted.session?.user?.role || u.role,
+            active: true,
+            school: hoisted.currentSchool,
+          },
+        ],
+        networks: [],
+      };
+    });
     hoisted.classGroupFindMany.mockImplementation(async () => hoisted.db.classGroups);
     hoisted.templateFindMany.mockResolvedValue([]);
     hoisted.templateFindUnique.mockResolvedValue(null);

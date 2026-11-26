@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
-import { generateVerificationCode, canAccessConfidentialMinute, stripParticipantSecrets } from "@/lib/ataCrypto";
+import {
+  PHYSICAL_PROOF_HISTORY_SELECT,
+  canAccessConfidentialMinute,
+  filterAccessiblePhysicalProofHistory,
+  generateVerificationCode,
+  retainNecessaryPreviousStudentNames,
+  stripInternalStudentNameAliases,
+  stripParticipantSecrets,
+} from "@/lib/ataCrypto";
 import { isSignTokenExpired } from "@/lib/signTokenExpiry";
 import {
   mergeParticipantSignatures,
@@ -12,6 +20,12 @@ import {
   validateParticipantStudentLinks,
 } from "@/services/ataParticipantService";
 import { acquireMinuteWriteLock } from "@/lib/minuteLock";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
+import {
+  evaluateEffectivePhysicalProof,
+  evaluateMinuteRevisionLock,
+  hasEffectiveMinuteDraftChanges,
+} from "@/lib/ataRevision";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +33,7 @@ export const dynamic = "force-dynamic";
 const PNG_DATA_URL_MAX_CHARS = 700_000;
 
 const updateMinuteDraftSchema = z.object({
+  expectedRevision: z.number().int().min(1).optional(),
   category: z.string().optional(),
   isConfidential: z.boolean().optional(),
   attendedAt: z.string().optional(),
@@ -99,7 +114,16 @@ export async function GET(
           id: true,
           schoolId: true,
           status: true,
+          contentRevision: true,
+          updatedAt: true,
+          hasPhysicalScan: true,
+          physicalScanStorageKey: true,
+          physicalScanRevision: true,
+          physicalScanSupersededAt: true,
+          govBrVerified: true,
+          govBrProtocol: true,
           isConfidential: true,
+          authorId: true,
           authorEmail: true,
           participants: {
             select: {
@@ -108,6 +132,7 @@ export async function GET(
               signatureMode: true,
               hasSignature: true,
               hasActiveSignLink: true,
+              signedRevision: true,
               verifiedEmail: true,
               mobileSignExpiresAt: true,
             },
@@ -119,15 +144,24 @@ export async function GET(
         return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
       }
 
-      const currentSchool = await getCurrentSchool(authCheck.schoolId);
-      if (!assertTenantOwnership(pollMinute.schoolId, currentSchool.id, authCheck.session)) {
+      const schoolRes = await requireAuthorizedSchool(
+        authCheck.session,
+        authCheck.schoolId,
+        authCheck.snapshot
+      );
+      if (!schoolRes.ok) return schoolRes.response;
+      const currentSchool = schoolRes.school;
+      const effectiveSession = authCheck.snapshot
+        ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+        : authCheck.session;
+      if (!assertTenantOwnership(pollMinute.schoolId, currentSchool.id, effectiveSession)) {
         return NextResponse.json(
           { error: "Acesso negado a registro de outra instituição de ensino." },
           { status: 403 }
         );
       }
 
-      if (!canAccessConfidentialMinute(pollMinute, authCheck.session)) {
+      if (!canAccessConfidentialMinute(pollMinute, effectiveSession)) {
         return NextResponse.json(
           { error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor." },
           { status: 403 }
@@ -135,17 +169,28 @@ export async function GET(
       }
 
       const nowMs = Date.now();
+      const pollProofState = evaluateEffectivePhysicalProof(pollMinute);
       return NextResponse.json({
         success: true,
         poll: true,
         minuteId: pollMinute.id,
         status: pollMinute.status,
+        contentRevision: pollMinute.contentRevision ?? 1,
+        updatedAt: pollMinute.updatedAt ? new Date(pollMinute.updatedAt).toISOString() : null,
+        hasPhysicalScan:
+          pollProofState.hasValidPhysicalProof && pollProofState.hasPhysicalArtifact,
+        hasPhysicalProof: pollProofState.hasValidPhysicalProof,
+        physicalScanRevision: pollMinute.physicalScanRevision ?? null,
+        physicalScanSupersededAt: pollMinute.physicalScanSupersededAt ?? null,
+        govBrVerified: pollProofState.isValidGovBrVerified,
+        govBrProtocol: pollProofState.effectiveGovBrProtocol,
         participants: (pollMinute.participants || []).map((p) => ({
           participantId: p.id,
           role: p.role,
           signatureMode: p.signatureMode,
           hasSignature: Boolean(p.hasSignature),
           hasActiveSignLink: Boolean(p.hasActiveSignLink),
+          signedRevision: p.signedRevision ?? null,
           institutionalVerificationComplete: Boolean(p.verifiedEmail),
           linkExpired: Boolean(
             p.hasActiveSignLink && isSignTokenExpired(p.mobileSignExpiresAt, nowMs)
@@ -179,15 +224,24 @@ export async function GET(
       return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+      : authCheck.session;
+    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canAccessConfidentialMinute(minute, authCheck.session)) {
+    if (!canAccessConfidentialMinute(minute, effectiveSession)) {
       return NextResponse.json(
         { error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor." },
         { status: 403 }
@@ -208,11 +262,39 @@ export async function GET(
       }
     }
 
+    const rawPhysicalProofHistory =
+      typeof (prisma as any).pedagogicalMinutePhysicalProofHistory?.findMany === "function"
+        ? await (prisma as any).pedagogicalMinutePhysicalProofHistory.findMany({
+            where: { minuteId: id },
+            orderBy: { supersededAt: "desc" },
+            select: PHYSICAL_PROOF_HISTORY_SELECT,
+          })
+        : [];
+    const physicalProofHistory = filterAccessiblePhysicalProofHistory(
+      rawPhysicalProofHistory,
+      minute.schoolId,
+      currentSchool.id,
+      effectiveSession
+    );
+
+    const proofState = evaluateEffectivePhysicalProof({ ...minute, physicalProofHistory });
     const safeMinute = {
       ...minute,
-      hasPhysicalScan: Boolean(minute.hasPhysicalScan),
+      students: stripInternalStudentNameAliases(minute.students),
+      hasPhysicalScan: proofState.hasValidPhysicalProof && proofState.hasPhysicalArtifact,
+      govBrVerified: proofState.isValidGovBrVerified,
+      govBrProtocol: proofState.effectiveGovBrProtocol,
+      physicalSignedScanData: proofState.hasValidPhysicalProof ? minute.physicalSignedScanData : null,
+      physicalScanStorageKey: proofState.hasValidPhysicalProof ? minute.physicalScanStorageKey : null,
+      physicalScanProvider: proofState.hasValidPhysicalProof ? minute.physicalScanProvider : null,
+      physicalScanMimeType: proofState.hasValidPhysicalProof ? minute.physicalScanMimeType : null,
+      physicalScanSizeBytes: proofState.hasValidPhysicalProof ? minute.physicalScanSizeBytes : null,
+      physicalScanSha256: proofState.hasValidPhysicalProof ? minute.physicalScanSha256 : null,
+      physicalScanUploadedAt: proofState.hasValidPhysicalProof ? minute.physicalScanUploadedAt : null,
+      physicalScanUploadedBy: proofState.hasValidPhysicalProof ? minute.physicalScanUploadedBy : null,
+      physicalProofHistory,
       participants: (minute.participants || []).map(
-        ({ mobileSignToken, mobileSignExpiresAt, ...rest }: any) => ({
+        ({ mobileSignToken, mobileSignExpiresAt, mobileSignRevision, ...rest }: any) => ({
           ...rest,
           hasSignature: Boolean(rest.hasSignature),
           hasActiveSignLink: Boolean(rest.hasActiveSignLink),
@@ -245,15 +327,25 @@ export async function PATCH(
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+      : authCheck.session;
+
+    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, effectiveSession)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canAccessConfidentialMinute(existing, authCheck.session)) {
+    if (!canAccessConfidentialMinute(existing, effectiveSession)) {
       return NextResponse.json(
         { error: "Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor." },
         { status: 403 }
@@ -300,18 +392,22 @@ export async function PATCH(
 
       const lockedMinute = await tx.pedagogicalMinute.findUnique({
         where: { id },
-        include: { participants: true },
+        include: {
+          students: true,
+          participants: true,
+          actionItems: true,
+        },
       });
 
       if (!lockedMinute) {
         throw new Error("NOT_FOUND:Ata não encontrada");
       }
 
-      if (!assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, authCheck.session)) {
+      if (!assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, effectiveSession)) {
         throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
       }
 
-      if (!canAccessConfidentialMinute(lockedMinute, authCheck.session)) {
+      if (!canAccessConfidentialMinute(lockedMinute, effectiveSession)) {
         throw new Error(
           "FORBIDDEN:Esta ata possui sigilo reforçado restrito à Direção Escolar e ao servidor autor."
         );
@@ -323,12 +419,56 @@ export async function PATCH(
         );
       }
 
-      // Se informou studentIds, valida e atualiza vínculos garantindo isolamento multi-tenant
+      if (data.participants) {
+        await validateParticipantStudentLinks(tx, lockedMinute.schoolId, data.participants);
+      }
+
+      const lockState = evaluateMinuteRevisionLock(lockedMinute);
+      if (lockState.isLockedBySignature) {
+        throw new Error(
+          lockState.hasLegacyUnprovableProof
+            ? "CONFLICT:Esta ata possui assinatura anterior sem comprovação de revisão e está bloqueada. Utilize 'Reabrir para edição' para invalidar as coletas antigas e coletar novamente."
+            : "CONFLICT:Esta ata já possui assinatura registrada na revisão atual e está travada para edição. Utilize 'Reabrir para edição' caso precise alterar o conteúdo."
+        );
+      }
+
+      if (data.expectedRevision !== undefined && data.expectedRevision !== lockState.currentRevision) {
+        throw new Error(
+          "CONFLICT:O rascunho desta ata foi atualizado para uma nova revisão em outra aba ou sessão. Recarregue antes de editar."
+        );
+      }
+
+      if (
+        (data.participants || []).some((p) =>
+          Boolean(p.signatureData || p.verifiedEmail || p.biometricVerified)
+        )
+      ) {
+        throw new Error(
+          "CONFLICT:Coletas de assinatura devem ser confirmadas diretamente na revisão conferida via assinatura em tela ou link de assinatura."
+        );
+      }
+
+      let nextStudentSnapshots:
+        | Array<{
+            minuteId: string;
+            studentId: string;
+            studentNameSnapshot: string;
+            previousNameSnapshots: string[];
+            classNameSnapshot: string | null;
+            cgmSnapshot: string | null;
+          }>
+        | undefined;
+
+      const effectiveTexts = [
+        data.subject !== undefined ? data.subject : lockedMinute.subject,
+        data.summary !== undefined ? data.summary : lockedMinute.summary,
+        data.agreementsSummary !== undefined ? data.agreementsSummary : lockedMinute.agreementsSummary,
+      ];
+
       if (data.studentIds !== undefined) {
         const uniqueStudentIds = Array.from(new Set(data.studentIds));
 
         if (uniqueStudentIds.length === 0) {
-          // Se ficou com 0 estudantes, verifica se a ata terá ao menos 1 participante
           const participantsCount =
             data.participants !== undefined
               ? data.participants.length
@@ -341,8 +481,7 @@ export async function PATCH(
               "VALIDATION:A ata deve possuir ao menos um estudante vinculado ou participante docente/servidor registrado."
             );
           }
-
-          await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+          nextStudentSnapshots = [];
         } else {
           const studentsDb = await tx.student.findMany({
             where: { id: { in: uniqueStudentIds }, schoolId: lockedMinute.schoolId },
@@ -355,31 +494,113 @@ export async function PATCH(
             );
           }
 
-          await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
-          await tx.pedagogicalMinuteStudent.createMany({
-            data: studentsDb.map((s) => ({
+          nextStudentSnapshots = studentsDb.map((s) => {
+            const prevLink = (lockedMinute.students || []).find(
+              (es: any) => es.studentId === s.id
+            ) as
+              | {
+                  studentNameSnapshot?: string | null;
+                  previousNameSnapshots?: string[] | null;
+                }
+              | undefined;
+            return {
               minuteId: id,
               studentId: s.id,
               studentNameSnapshot: s.name,
+              previousNameSnapshots: retainNecessaryPreviousStudentNames(
+                prevLink?.previousNameSnapshots,
+                prevLink?.studentNameSnapshot,
+                s.name,
+                effectiveTexts
+              ),
               classNameSnapshot: s.classGroup?.name || null,
               cgmSnapshot: s.cgm || null,
-            })),
+            };
           });
         }
       }
 
-      // Se informou participants, preserva id, mobileSignToken e assinaturas mobile recém-coletadas
+      const existingParticipants = data.participants
+        ? tx.pedagogicalMinuteParticipant?.findMany
+          ? await tx.pedagogicalMinuteParticipant.findMany({
+              where: { minuteId: id },
+              orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            })
+          : lockedMinute.participants || []
+        : lockedMinute.participants || [];
+
+      let previewParticipants: ReturnType<typeof mergeParticipantSignatures> | undefined;
       if (data.participants) {
-        const existingParticipants = tx.pedagogicalMinuteParticipant?.findMany
-          ? await tx.pedagogicalMinuteParticipant.findMany({ where: { minuteId: id } })
-          : lockedMinute.participants || [];
-
-        await validateParticipantStudentLinks(tx, lockedMinute.schoolId, data.participants);
-
-        const participantsToCreate = mergeParticipantSignatures(
+        previewParticipants = mergeParticipantSignatures(
           data.participants,
           existingParticipants,
           { clearMobileTokens: false, minuteId: id }
+        );
+        await validateParticipantStudentLinks(tx, lockedMinute.schoolId, previewParticipants);
+      }
+
+      const nextActionItems = data.actionItems
+        ? data.actionItems.map((a) => ({
+            minuteId: id,
+            description: a.description,
+            responsible: a.responsible,
+            dueDate: a.dueDate ? new Date(a.dueDate) : null,
+            status: a.status || "PENDING",
+          }))
+        : undefined;
+
+      const existingForDiff = {
+        ...lockedMinute,
+        participants: existingParticipants,
+      };
+      const effectiveChanged = hasEffectiveMinuteDraftChanges(existingForDiff, {
+        ...data,
+        nextStudentSnapshots,
+        nextMergedParticipants: previewParticipants,
+        nextActionItems,
+      });
+
+      const rawPhysicalProofHistory =
+        typeof (tx as any).pedagogicalMinutePhysicalProofHistory?.findMany === "function"
+          ? await (tx as any).pedagogicalMinutePhysicalProofHistory.findMany({
+              where: { minuteId: id },
+              orderBy: { supersededAt: "desc" },
+              select: PHYSICAL_PROOF_HISTORY_SELECT,
+            })
+          : [];
+      const physicalProofHistory = filterAccessiblePhysicalProofHistory(
+        rawPhysicalProofHistory,
+        lockedMinute.schoolId,
+        currentSchool.id,
+        effectiveSession
+      );
+
+      if (!effectiveChanged) {
+        return {
+          effectiveChanged: false as const,
+          minute: {
+            ...lockedMinute,
+            physicalProofHistory,
+          },
+        };
+      }
+
+      const nextRevision = lockState.currentRevision + 1;
+
+      if (nextStudentSnapshots !== undefined) {
+        await tx.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: id } });
+        if (nextStudentSnapshots.length > 0) {
+          await tx.pedagogicalMinuteStudent.createMany({
+            data: nextStudentSnapshots,
+          });
+        }
+      }
+
+      if (data.participants) {
+        const participantsToCreate = mergeParticipantSignatures(
+          data.participants,
+          existingParticipants,
+          { clearMobileTokens: true, minuteId: id }
         );
 
         await validateParticipantStudentLinks(tx, lockedMinute.schoolId, participantsToCreate);
@@ -390,60 +611,108 @@ export async function PATCH(
             data: participantsToCreate,
           });
         }
+      } else if (typeof tx.pedagogicalMinuteParticipant?.updateMany === "function") {
+        await tx.pedagogicalMinuteParticipant.updateMany({
+          where: { minuteId: id },
+          data: {
+            mobileSignToken: null,
+            mobileSignExpiresAt: null,
+            mobileSignRevision: null,
+            hasActiveSignLink: false,
+          },
+        });
       }
 
-      // Se informou actionItems, atualiza
-      if (data.actionItems) {
+      if (nextActionItems !== undefined) {
         await tx.pedagogicalActionItem.deleteMany({ where: { minuteId: id } });
-        if (data.actionItems.length > 0) {
+        if (nextActionItems.length > 0) {
           await tx.pedagogicalActionItem.createMany({
-            data: data.actionItems.map((a) => ({
-              minuteId: id,
-              description: a.description,
-              responsible: a.responsible,
-              dueDate: a.dueDate ? new Date(a.dueDate) : null,
-              status: a.status || "PENDING",
-            })),
+            data: nextActionItems,
           });
         }
       }
 
-          return await tx.pedagogicalMinute.update({
-            where: { id },
-            data: {
-              category: data.category,
-              isConfidential: data.isConfidential,
-              attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
-              subject: data.subject,
-              rawNotes: data.rawNotes,
-              summary: data.summary,
-              agreementsSummary: data.agreementsSummary,
-            },
-            include: {
-              students: true,
-              participants: true,
-              actionItems: true,
-            },
-          });
+      const savedMinute = await tx.pedagogicalMinute.update({
+        where: { id },
+        data: {
+          category: data.category,
+          isConfidential: data.isConfidential,
+          attendedAt: data.attendedAt ? new Date(data.attendedAt) : undefined,
+          subject: data.subject,
+          rawNotes: data.rawNotes,
+          summary: data.summary,
+          agreementsSummary: data.agreementsSummary,
+          contentRevision: nextRevision,
+        },
+        include: {
+          students: true,
+          participants: true,
+          actionItems: true,
+        },
+      });
+
+      return {
+        effectiveChanged: true as const,
+        minute: {
+          ...savedMinute,
+          physicalProofHistory,
+        },
+      };
         },
         { maxWait: 5000, timeout: 10000 }
       );
 
-    await logAudit({
-      action: "UPDATE_ATA_DRAFT",
-      entityType: "PedagogicalMinute",
-      entityId: id,
-      schoolId: existing.schoolId,
-      details: `Rascunho de ata atualizado: ${updated.subject}`,
-      user: {
-        id: authCheck.userId,
-        name: authCheck.userName,
-        email: authCheck.email,
-      },
-      ipAddress: ip,
+    if (updated.effectiveChanged) {
+      await logAudit({
+        action: "UPDATE_ATA_DRAFT",
+        entityType: "PedagogicalMinute",
+        entityId: id,
+        schoolId: existing.schoolId,
+        details: `Rascunho de ata atualizado: ${updated.minute.subject}`,
+        user: {
+          id: authCheck.userId,
+          name: authCheck.userName,
+          email: authCheck.email,
+        },
+        ipAddress: ip,
+      });
+    }
+
+      const updatedProofState = evaluateEffectivePhysicalProof(updated.minute);
+    const sanitizedUpdated = stripParticipantSecrets({
+      ...updated.minute,
+      students: stripInternalStudentNameAliases(updated.minute.students),
+      hasPhysicalScan:
+        updatedProofState.hasValidPhysicalProof && updatedProofState.hasPhysicalArtifact,
+      govBrVerified: updatedProofState.isValidGovBrVerified,
+      govBrProtocol: updatedProofState.effectiveGovBrProtocol,
+      physicalSignedScanData: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalSignedScanData
+        : null,
+      physicalScanStorageKey: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanStorageKey
+        : null,
+      physicalScanProvider: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanProvider
+        : null,
+      physicalScanMimeType: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanMimeType
+        : null,
+      physicalScanSizeBytes: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanSizeBytes
+        : null,
+      physicalScanSha256: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanSha256
+        : null,
+      physicalScanUploadedAt: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanUploadedAt
+        : null,
+      physicalScanUploadedBy: updatedProofState.hasValidPhysicalProof
+        ? updated.minute.physicalScanUploadedBy
+        : null,
     });
 
-    return NextResponse.json({ success: true, minute: stripParticipantSecrets(updated) });
+    return NextResponse.json({ success: true, minute: sanitizedUpdated });
   } catch (error: any) {
     const msg = error?.message || "";
     if (msg.startsWith("NOT_FOUND:")) {
@@ -480,7 +749,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
     if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },

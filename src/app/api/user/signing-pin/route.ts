@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { validatePinFormat, hashPin, verifyPin } from "@/lib/signingPin";
-import { getCurrentSchool } from "@/lib/currentSchool";
+import { getAuthorizedCurrentSchool } from "@/lib/currentSchool";
 import { verifyEscolaGoogleIdToken } from "@/lib/escolaGoogleVerify";
 import { z } from "zod";
 
@@ -86,8 +86,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
 
-    const currentSchool = await getCurrentSchool(authCheck.schoolId);
-    const auditSchoolId = currentSchool?.id || authCheck.schoolId || user.schoolId || null;
+    const currentSchool = await getAuthorizedCurrentSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    const auditSchoolId = currentSchool?.id || null;
 
     // 1. Ação SETUP (primeiro cadastro do PIN)
     if (parsed.data.action === "setup") {

@@ -410,6 +410,7 @@ describe("Organizador e Mapa de Sala do Conselho de Classe", () => {
         role: "PEDAGOGA",
         schoolId: "school-a",
         active: true,
+        schools: [{ schoolId: "school-a", role: "PEDAGOGA", active: true }],
       },
     };
   });
@@ -563,6 +564,8 @@ describe("Organizador e Mapa de Sala do Conselho de Classe", () => {
 
     // Perfil GESTAO_SECRETARIA recebe 403 Forbidden
     hoisted.session.user.role = "GESTAO_SECRETARIA";
+    hoisted.session.user.schools = [];
+    hoisted.session.user.networks = [{ networkId: "net-a", active: true }];
     const readOnlyRes = await patchBoardRoute(
       new Request("http://localhost/api/conselho-classe/board-8b", {
         method: "PATCH",

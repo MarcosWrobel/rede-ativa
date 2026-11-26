@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import AtaDialog from "./AtaDialog";
 import SignatureCanvas from "./SignatureCanvas";
 import AtaQrCode from "./AtaQrCode";
@@ -8,9 +8,15 @@ import SigningPinModal from "./SigningPinModal";
 import PhysicalScanModal from "./PhysicalScanModal";
 import { calculateBusinessDaysDiff } from "@/lib/signingPin";
 import { formatParticipantRoleLabel } from "@/lib/participantKinship";
+import {
+  evaluateEffectivePhysicalProof,
+  evaluateMinuteRevisionLock,
+  getOfficialSummaryRemainingChars,
+  hasMinimumOfficialSummary,
+  OFFICIAL_SUMMARY_REQUIRED_FOR_COLLECTION_ERROR,
+} from "@/lib/ataRevision";
 import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import { dispatchWhatsAppToBrowser } from "@/lib/clientDispatcher";
-import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
 import {
   Sparkles,
   Mic,
@@ -35,7 +41,6 @@ import {
   RotateCcw,
   ExternalLink,
   Copy,
-  Key,
   Send,
   Clock,
   Download,
@@ -87,6 +92,93 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+function formatIsoToDatetimeLocal(value: string): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function datetimeLocalToIso(value: string): string {
+  if (!value) return new Date().toISOString();
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+type PersistedMinuteSnapshot = {
+  contentRevision: number;
+  subject: string;
+  category: string;
+  isConfidential: boolean;
+  attendedAt: string;
+  rawNotes: string;
+  summary: string;
+  agreementsSummary: string;
+  studentNames: string[];
+  participantsCount: number;
+  actionItemsCount: number;
+};
+
+function extractPersistedMinuteSnapshot(minute: AtaMinuteRecord): PersistedMinuteSnapshot {
+  return {
+    contentRevision:
+      typeof minute.contentRevision === "number" && minute.contentRevision >= 1
+        ? minute.contentRevision
+        : 1,
+    subject: minute.subject || "",
+    category: minute.category || "ACOMPANHAMENTO_PEDAGOGICO",
+    isConfidential: Boolean(minute.isConfidential),
+    attendedAt: minute.attendedAt
+      ? typeof minute.attendedAt === "string"
+        ? minute.attendedAt
+        : new Date(minute.attendedAt).toISOString()
+      : "",
+    rawNotes: minute.rawNotes || "",
+    summary: minute.summary || "",
+    agreementsSummary: minute.agreementsSummary || "",
+    studentNames: (minute.students || [])
+      .map((s) => s.studentNameSnapshot)
+      .filter((name): name is string => Boolean(name)),
+    participantsCount: Array.isArray(minute.participants) ? minute.participants.length : 0,
+    actionItemsCount: Array.isArray(minute.actionItems) ? minute.actionItems.length : 0,
+  };
+}
+
+function buildPollFingerprint(minute: {
+  status?: string | null;
+  contentRevision?: number | null;
+  updatedAt?: string | Date | null;
+  hasPhysicalScan?: boolean | null;
+  govBrVerified?: boolean | null;
+  participants?: Array<{
+    id?: string | null;
+    participantId?: string | null;
+    signatureMode?: string | null;
+    hasSignature?: boolean | null;
+    hasActiveSignLink?: boolean | null;
+    signedRevision?: number | null;
+  }> | null;
+}): string {
+  const parts = (minute.participants || []).map((p) =>
+    [
+      p.participantId || p.id || "",
+      p.signatureMode || "",
+      p.hasSignature ? "1" : "0",
+      p.hasActiveSignLink ? "1" : "0",
+      p.signedRevision ?? "",
+    ].join(":")
+  );
+  return [
+    minute.status || "DRAFT",
+    minute.contentRevision ?? 1,
+    minute.updatedAt ? new Date(minute.updatedAt).toISOString() : "",
+    minute.hasPhysicalScan ? "1" : "0",
+    minute.govBrVerified ? "1" : "0",
+    parts.join("|"),
+  ].join("#");
+}
+
 const CATEGORIES = [
   { id: "ORIENTACAO_DOCENTE", label: "Orientação Pedagógica / Docente" },
   { id: "ACOMPANHAMENTO_PEDAGOGICO", label: "Acompanhamento Pedagógico / Rendimento" },
@@ -107,14 +199,30 @@ export default function AtaEditorModal({
   isAdmin = false,
   activeSchoolId = null,
 }: AtaEditorModalProps) {
-  const [step, setStep] = useState<1 | 2>(1);
+  const isDocentInitial = existingMinute
+    ? existingMinute.category === "ORIENTACAO_DOCENTE" ||
+      (!existingMinute.students?.length &&
+        Boolean(existingMinute.participants?.some((p) => p.role === "PROFESSOR")))
+    : false;
+
+  const [step, setStep] = useState<1 | 2>(() => {
+    if (existingMinute) {
+      return (existingMinute.students?.length ?? 0) > 0 || isDocentInitial ? 2 : 1;
+    }
+    return preSelectedStudentId ? 2 : 1;
+  });
 
   // Filtros de Pesquisa de Alunos (Passo 1)
   const [studentSearch, setStudentSearch] = useState("");
   const [selectedTurmaFilter, setSelectedTurmaFilter] = useState("TODAS");
   const [step1Error, setStep1Error] = useState<string | null>(null);
 
-  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>(() => {
+    if (existingMinute?.students) {
+      return existingMinute.students.map((s) => s.studentId);
+    }
+    return preSelectedStudentId ? [preSelectedStudentId] : [];
+  });
   const [attendedAt, setAttendedAt] = useState<string>(() => {
     if (existingMinute?.attendedAt) {
       return typeof existingMinute.attendedAt === "string"
@@ -123,8 +231,10 @@ export default function AtaEditorModal({
     }
     return new Date().toISOString();
   });
-  const [category, setCategory] = useState("ACOMPANHAMENTO_PEDAGOGICO");
-  const [ataScope, setAtaScope] = useState<"STUDENTS" | "TEACHERS">("STUDENTS");
+  const [category, setCategory] = useState(() => existingMinute?.category || "ACOMPANHAMENTO_PEDAGOGICO");
+  const [ataScope, setAtaScope] = useState<"STUDENTS" | "TEACHERS">(() =>
+    isDocentInitial ? "TEACHERS" : "STUDENTS"
+  );
   const [newTeacherName, setNewTeacherName] = useState("");
   const [newTeacherEmail, setNewTeacherEmail] = useState("");
   const [newTeacherSubject, setNewTeacherSubject] = useState("");
@@ -141,13 +251,66 @@ export default function AtaEditorModal({
   const activeSchoolIdRef = useRef<string | null>(activeSchoolId ?? null);
   const activeContactsKeyRef = useRef<string>("");
   const autoSuggestInitializedRef = useRef(false);
-  const [isConfidential, setIsConfidential] = useState(false);
-  const [subject, setSubject] = useState("Atendimento Pedagógico e Alinhamento de Frequência");
-  const [rawNotes, setRawNotes] = useState("");
-  const [summary, setSummary] = useState("");
-  const [agreementsSummary, setAgreementsSummary] = useState("");
-  const [participants, setParticipants] = useState<AtaParticipantDraft[]>([]);
-  const [actionItems, setActionItems] = useState<AtaActionItemDraft[]>([]);
+  const [isConfidential, setIsConfidential] = useState(Boolean(existingMinute?.isConfidential));
+  const [nonConfidentialConfirmed, setNonConfidentialConfirmed] = useState(false);
+  const [subject, setSubject] = useState(
+    existingMinute?.subject || "Atendimento Pedagógico e Alinhamento de Frequência"
+  );
+  const [rawNotes, setRawNotes] = useState(existingMinute?.rawNotes || "");
+  const [summary, setSummary] = useState(existingMinute?.summary || "");
+  const [agreementsSummary, setAgreementsSummary] = useState(existingMinute?.agreementsSummary || "");
+  const [participants, setParticipants] = useState<AtaParticipantDraft[]>(() =>
+    existingMinute?.participants
+      ? existingMinute.participants.map((p, i) =>
+          ensureParticipantClientKey({ ...p, originState: "PERSISTED" }, i)
+        )
+      : []
+  );
+  const [actionItems, setActionItems] = useState<AtaActionItemDraft[]>(() =>
+    existingMinute?.actionItems
+      ? existingMinute.actionItems.map((a) => ({
+          id: a.id,
+          description: a.description,
+          responsible: a.responsible,
+          dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : "",
+          status: a.status || "PENDING",
+        }))
+      : []
+  );
+  const [contentRevision, setContentRevision] = useState<number>(
+    typeof existingMinute?.contentRevision === "number" && existingMinute.contentRevision >= 1
+      ? existingMinute.contentRevision
+      : 1
+  );
+  const [physicalProofMeta, setPhysicalProofMeta] = useState<{
+    physicalScanRevision?: number | null;
+    physicalScanSupersededAt?: string | Date | null;
+    hasPhysicalScan?: boolean;
+    physicalSignedScanData?: string | null;
+    physicalScanStorageKey?: string | null;
+    govBrVerified?: boolean;
+    govBrProtocol?: string | null;
+  }>(() => ({
+    physicalScanRevision: existingMinute?.physicalScanRevision ?? null,
+    physicalScanSupersededAt: existingMinute?.physicalScanSupersededAt ?? null,
+    hasPhysicalScan: Boolean(existingMinute?.hasPhysicalScan),
+    physicalSignedScanData: existingMinute?.physicalSignedScanData ?? null,
+    physicalScanStorageKey: existingMinute?.physicalScanStorageKey ?? null,
+    govBrVerified: Boolean(existingMinute?.govBrVerified),
+    govBrProtocol: existingMinute?.govBrProtocol ?? null,
+  }));
+  const [physicalProofHistory, setPhysicalProofHistory] = useState<
+    AtaMinuteRecord["physicalProofHistory"]
+  >(() => existingMinute?.physicalProofHistory || []);
+  const [persistedSnapshot, setPersistedSnapshot] = useState<PersistedMinuteSnapshot | null>(() =>
+    existingMinute ? extractPersistedMinuteSnapshot(existingMinute) : null
+  );
+  const [reviewedRevision, setReviewedRevision] = useState<number | null>(null);
+  const [hasPendingLocalEdit, setHasPendingLocalEdit] = useState(false);
+  const [savingScreenSigIndex, setSavingScreenSigIndex] = useState<number | null>(null);
+  const [reopenConfirmRevision, setReopenConfirmRevision] = useState<number | null>(null);
+  const [isReopening, setIsReopening] = useState(false);
+  const [reopenFeedbackMsg, setReopenFeedbackMsg] = useState<string | null>(null);
   const actionItemsRef = useRef<AtaActionItemDraft[]>(actionItems);
   actionItemsRef.current = actionItems;
   const [pendingSuggestedActions, setPendingSuggestedActions] = useState<AtaActionItemDraft[] | null>(null);
@@ -160,16 +323,17 @@ export default function AtaEditorModal({
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSuccessMsg, setAiSuccessMsg] = useState<{ type: "success" | "warning"; text: string } | null>(null);
-  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [hasServerKey, setHasServerKey] = useState(false);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [isTestingApiKey, setIsTestingApiKey] = useState(false);
-  const [keyTestStatus, setKeyTestStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingFinal, setSavingFinal] = useState(false);
   const [draftSavedMsg, setDraftSavedMsg] = useState<string | null>(null);
-  const [activeSignParticipantIndex, setActiveSignParticipantIndex] = useState<number | null>(null);
+  const [activeSignTarget, setActiveSignTarget] = useState<{
+    index: number;
+    participantId: string;
+    revision: number;
+  } | null>(null);
+  const screenSigInFlightRef = useRef(false);
   const [activeRefusalIndex, setActiveRefusalIndex] = useState<number | null>(null);
   const [refusalDraftReason, setRefusalDraftReason] = useState("");
   const [refusalDraftWitness, setRefusalDraftWitness] = useState("Equipe Pedagógica");
@@ -190,7 +354,7 @@ export default function AtaEditorModal({
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [signDurationOption, setSignDurationOption] = useState<number>(20); // 20 min ou 1440 (24h)
   const [finalizedAta, setFinalizedAta] = useState<AtaMinuteRecord | null>(null);
-  const [minuteId, setMinuteId] = useState<string | null>(null);
+  const [minuteId, setMinuteId] = useState<string | null>(existingMinute?.id || null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
   const editorOpenIdRef = useRef(0);
@@ -201,9 +365,71 @@ export default function AtaEditorModal({
     isOpen: false,
     participantId: null,
   });
+  const syncInFlightRef = useRef(false);
+  const lastPollFingerprintRef = useRef<string>(
+    existingMinute ? buildPollFingerprint(existingMinute as any) : ""
+  );
+  const syncChannelRef = useRef<BroadcastChannel | null>(null);
+  const hasPendingLocalEditRef = useRef(hasPendingLocalEdit);
+  hasPendingLocalEditRef.current = hasPendingLocalEdit;
+  const contentRevisionRef = useRef(contentRevision);
+  contentRevisionRef.current = contentRevision;
+  const reopenConfirmRevisionRef = useRef<number | null>(reopenConfirmRevision);
+  reopenConfirmRevisionRef.current = reopenConfirmRevision;
+
+  const revisionLockState = useMemo(
+    () =>
+      evaluateMinuteRevisionLock({
+        status: existingMinute?.status === "FINALIZED" || existingMinute?.status === "VOIDED" ? existingMinute.status : "DRAFT",
+        contentRevision,
+        participants,
+        ...physicalProofMeta,
+      }),
+    [existingMinute?.status, contentRevision, participants, physicalProofMeta]
+  );
+
+  const isContentLocked = revisionLockState.isLockedBySignature;
+  const activePersistedId = minuteId || existingMinute?.id || null;
+  const displayedReviewRevision = persistedSnapshot?.contentRevision ?? null;
+  const persistedHasMinimumSummary = hasMinimumOfficialSummary(persistedSnapshot?.summary);
+  const localHasMinimumSummary = hasMinimumOfficialSummary(summary);
+  const hasActiveLinkOnIncompleteSummary = Boolean(
+    activePersistedId && !persistedHasMinimumSummary && revisionLockState.activeLinksCount > 0
+  );
+  const remainingSummaryChars = getOfficialSummaryRemainingChars(
+    hasPendingLocalEdit ? summary : persistedSnapshot?.summary
+  );
+  const isCurrentRevisionConfirmed = Boolean(
+    activePersistedId &&
+      persistedSnapshot &&
+      displayedReviewRevision === contentRevision &&
+      persistedHasMinimumSummary &&
+      !hasPendingLocalEdit &&
+      !isHydratingMinute &&
+      !hydrationError &&
+      !revisionLockState.hasLegacyUnprovableProof &&
+      (reviewedRevision === displayedReviewRevision ||
+        (isContentLocked && revisionLockState.validSignedCount > 0))
+  );
+
+  const broadcastMinuteSync = useCallback((targetId: string | null | undefined, reason: string) => {
+    if (!targetId || typeof BroadcastChannel === "undefined") return;
+    try {
+      const ch = syncChannelRef.current || new BroadcastChannel("redeativa-ata-sync");
+      syncChannelRef.current = ch;
+      ch.postMessage({ minuteId: targetId, reason, ts: Date.now() });
+    } catch {
+      // Sem impacto em ambientes sem suporte a BroadcastChannel
+    }
+  }, []);
 
   const markLocalEdit = () => {
     localRevisionRef.current += 1;
+    setHasPendingLocalEdit(true);
+    setReviewedRevision(null);
+    setActiveSignTarget(null);
+    setDraftSavedMsg(null);
+    setReopenFeedbackMsg(null);
   };
 
   // Estados de Conformidade Jurídica (PIN de Fé Pública e Lavratura Extemporânea)
@@ -227,62 +453,212 @@ export default function AtaEditorModal({
   const [postFinalizeMsg, setPostFinalizeMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
-  // Carrega chave Gemini salva no navegador e checa chave no servidor
+  // Consulta elegibilidade institucional de assistência na formalização no servidor
   useEffect(() => {
-    try {
-      const saved = getStoredPreference("gemini_api_key");
-      if (saved) setGeminiApiKey(saved);
-    } catch (e) {}
-
     fetch("/api/ai/test-key")
       .then((res) => res.json())
       .then((data) => {
-        if (data?.hasServerKey) setHasServerKey(true);
+        setHasServerKey(Boolean(data?.schoolAuthorized ?? data?.hasServerKey));
       })
       .catch(() => {});
   }, []);
 
-  const handleSaveGeminiKey = (val: string) => {
-    setGeminiApiKey(val);
-    try {
-      setStoredPreference("gemini_api_key", val.trim());
-    } catch (e) {}
-  };
+  const applyHydratedDraftMinute = useCallback(
+    (
+      hydrated: AtaMinuteRecord,
+      options: { preserveLocalEdits?: boolean; preserveReviewedRevision?: boolean } = {}
+    ) => {
+      if (hydrated.status === "FINALIZED" || hydrated.status === "VOIDED") {
+        setQrModalInfo(null);
+        setActiveSignTarget(null);
+        setActiveRefusalIndex(null);
+        setReopenConfirmRevision(null);
+        setReviewedRevision(null);
+        setViewMinuteData(hydrated);
+        setMinuteId(hydrated.id);
+        setPhysicalProofHistory(hydrated.physicalProofHistory || []);
+        lastPollFingerprintRef.current = buildPollFingerprint(hydrated as any);
+        return;
+      }
 
-  const handleTestGeminiKey = async () => {
-    setIsTestingApiKey(true);
-    setKeyTestStatus(null);
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (geminiApiKey && geminiApiKey.trim().length > 10) {
-        headers["x-gemini-key"] = geminiApiKey.trim();
-      }
-      const res = await fetch("/api/ai/test-key", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ apiKey: geminiApiKey }),
+      const nextRev =
+        typeof hydrated.contentRevision === "number" && hydrated.contentRevision >= 1
+          ? hydrated.contentRevision
+          : 1;
+      const revChanged = nextRev !== contentRevisionRef.current;
+
+      setMinuteId(hydrated.id);
+      setContentRevision(nextRev);
+      setPhysicalProofMeta({
+        physicalScanRevision: hydrated.physicalScanRevision ?? null,
+        physicalScanSupersededAt: hydrated.physicalScanSupersededAt ?? null,
+        hasPhysicalScan: Boolean(hydrated.hasPhysicalScan),
+        physicalSignedScanData: hydrated.physicalSignedScanData ?? null,
+        physicalScanStorageKey: hydrated.physicalScanStorageKey ?? null,
+        govBrVerified: Boolean(hydrated.govBrVerified),
+        govBrProtocol: hydrated.govBrProtocol ?? null,
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setKeyTestStatus({
-          ok: true,
-          msg: `✨ Chave ativa! Modelo: ${data.respondingModel} (${data.durationMs}ms)`,
-        });
-      } else {
-        setKeyTestStatus({
-          ok: false,
-          msg: data.error || "Chave inválida ou sem resposta do Google Gemini.",
+      if (Array.isArray(hydrated.physicalProofHistory)) {
+        setPhysicalProofHistory(hydrated.physicalProofHistory);
+      }
+      setPersistedSnapshot(extractPersistedMinuteSnapshot(hydrated));
+      lastPollFingerprintRef.current = buildPollFingerprint(hydrated as any);
+
+      const syncedLock = evaluateMinuteRevisionLock(hydrated);
+      if (syncedLock.isLockedBySignature) {
+        setActiveRefusalIndex(null);
+      }
+
+      if (revChanged) {
+        setQrModalInfo(null);
+        qrPanelContextRef.current = { isOpen: false, participantId: null };
+        setReopenConfirmRevision(null);
+        setActiveSignTarget(null);
+        setActiveRefusalIndex(null);
+      } else if (hydrated.participants) {
+        setActiveSignTarget((currentTarget) => {
+          if (!currentTarget) return null;
+          const syncedPart = hydrated.participants?.find(
+            (p) => p.id && p.id === currentTarget.participantId
+          );
+          if (syncedPart && getParticipantSignatureSummary(syncedPart).hasPersistedSignature) {
+            return null;
+          }
+          return currentTarget;
         });
       }
-    } catch (err: unknown) {
-      setKeyTestStatus({
-        ok: false,
-        msg: getErrorMessage(err, "Erro ao conectar com o serviço do Google Gemini."),
-      });
-    } finally {
-      setIsTestingApiKey(false);
-    }
-  };
+
+      if (!options.preserveReviewedRevision || revChanged) {
+        setReviewedRevision(null);
+      }
+
+      if (!options.preserveLocalEdits) {
+        setAttendedAt(
+          hydrated.attendedAt
+            ? typeof hydrated.attendedAt === "string"
+              ? hydrated.attendedAt
+              : new Date(hydrated.attendedAt).toISOString()
+            : new Date().toISOString()
+        );
+        setHasPendingLocalEdit(false);
+        setSelectedStudentIds(hydrated.students ? hydrated.students.map((s) => s.studentId) : []);
+        setCategory(hydrated.category || "ACOMPANHAMENTO_PEDAGOGICO");
+        setIsConfidential(Boolean(hydrated.isConfidential));
+        setSubject(hydrated.subject || "Atendimento Pedagógico e Alinhamento de Frequência");
+        setRawNotes(hydrated.rawNotes || "");
+        setSummary(hydrated.summary || "");
+        setAgreementsSummary(hydrated.agreementsSummary || "");
+        setExtemporaneousReason(hydrated.extemporaneousReason || "");
+        setActionItems(
+          hydrated.actionItems
+            ? hydrated.actionItems.map((a) => ({
+                id: a.id,
+                description: a.description,
+                responsible: a.responsible,
+                dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : "",
+                status: a.status || "PENDING",
+              }))
+            : []
+        );
+      }
+
+      if (hydrated.participants) {
+        setParticipants((prev) =>
+          prev.length > 0
+            ? reconcileSavedParticipantsWithPersistedState(prev, hydrated.participants)
+            : (hydrated.participants || []).map((p, i) =>
+                ensureParticipantClientKey({ ...p, originState: "PERSISTED" }, i)
+              )
+        );
+      }
+      autoSuggestInitializedRef.current = true;
+    },
+    []
+  );
+
+  const syncMinuteFromServer = useCallback(
+    async (
+      targetId: string | null | undefined,
+      options: { forceFull?: boolean; notice?: string } = {}
+    ) => {
+      if (!targetId || syncInFlightRef.current || !isOpen) return;
+      const openIdAtStart = editorOpenIdRef.current;
+      syncInFlightRef.current = true;
+      try {
+        let shouldFetchFull = Boolean(options.forceFull);
+
+        if (!shouldFetchFull) {
+          const pollRes = await fetch(`/api/atas/${targetId}?poll=1`, { cache: "no-store" });
+          if (!pollRes.ok || openIdAtStart !== editorOpenIdRef.current) return;
+          const pollData = (await pollRes.json().catch(() => null)) as {
+            status?: string;
+            contentRevision?: number;
+            updatedAt?: string | null;
+            hasPhysicalScan?: boolean;
+            govBrVerified?: boolean;
+            participants?: Array<{
+              participantId: string;
+              signatureMode?: string;
+              hasSignature?: boolean;
+              hasActiveSignLink?: boolean;
+              signedRevision?: number | null;
+            }>;
+          } | null;
+          if (!pollData) return;
+
+          const fingerprint = buildPollFingerprint(pollData as any);
+          if (fingerprint === lastPollFingerprintRef.current) {
+            return;
+          }
+          shouldFetchFull = true;
+        }
+
+        if (!shouldFetchFull) return;
+
+        const fullRes = await fetch(`/api/atas/${targetId}`, { cache: "no-store" });
+        if (!fullRes.ok || openIdAtStart !== editorOpenIdRef.current) return;
+        const fullData = (await fullRes.json().catch(() => null)) as {
+          minute?: AtaMinuteRecord;
+        } | null;
+        if (!fullData?.minute || openIdAtStart !== editorOpenIdRef.current) return;
+
+        const hydrated = fullData.minute;
+        const remoteLockState = evaluateMinuteRevisionLock(hydrated);
+        const remoteRev =
+          typeof hydrated.contentRevision === "number" && hydrated.contentRevision >= 1
+            ? hydrated.contentRevision
+            : 1;
+        const revOrStatusChanged =
+          remoteRev !== contentRevisionRef.current ||
+          hydrated.status === "FINALIZED" ||
+          hydrated.status === "VOIDED" ||
+          remoteLockState.isLockedBySignature;
+
+        const preserveLocalEdits = hasPendingLocalEditRef.current && !revOrStatusChanged;
+        applyHydratedDraftMinute(hydrated, {
+          preserveLocalEdits,
+          preserveReviewedRevision: !revOrStatusChanged && !hasPendingLocalEditRef.current,
+        });
+
+        if (options.notice) {
+          setFinalizeError(options.notice);
+        } else if (remoteLockState.isLockedBySignature) {
+          setDraftSavedMsg(
+            "Ata sincronizada com assinatura registrada na revisão vigente. Edição bloqueada."
+          );
+        }
+
+        if (revOrStatusChanged) {
+          onSaved();
+        }
+      } catch {
+        // Ignora falha transitória de rede durante sincronização em segundo plano
+      } finally {
+        syncInFlightRef.current = false;
+      }
+    },
+    [applyHydratedDraftMinute, isOpen, onSaved]
+  );
 
   // Inicializa / reseta o modal sempre que abrir ou trocar de ata
   useEffect(() => {
@@ -310,23 +686,55 @@ export default function AtaEditorModal({
     setDraftSavedMsg(null);
     setHydrationError(null);
     setQrModalInfo(null);
-    setActiveSignParticipantIndex(null);
+    setActiveSignTarget(null);
     setActiveRefusalIndex(null);
     setFinalizedAta(null);
     setAddendumText("");
     setShowVoidForm(false);
     setVoidReason("");
     setPostFinalizeMsg(null);
+    setNonConfidentialConfirmed(false);
+    setHasPendingLocalEdit(false);
+    setReviewedRevision(null);
+    setReopenConfirmRevision(null);
+    setReopenFeedbackMsg(null);
 
     if (existingMinute) {
       if (existingMinute.status === "FINALIZED" || existingMinute.status === "VOIDED") {
         setViewMinuteData(existingMinute);
         setMinuteId(existingMinute.id);
+        setPhysicalProofHistory(existingMinute.physicalProofHistory || []);
+        setPersistedSnapshot(extractPersistedMinuteSnapshot(existingMinute));
+        lastPollFingerprintRef.current = buildPollFingerprint(existingMinute as any);
         return;
       }
 
       setViewMinuteData(null);
       setMinuteId(existingMinute.id || null);
+      setContentRevision(
+        typeof existingMinute.contentRevision === "number" && existingMinute.contentRevision >= 1
+          ? existingMinute.contentRevision
+          : 1
+      );
+      setPhysicalProofMeta({
+        physicalScanRevision: existingMinute.physicalScanRevision ?? null,
+        physicalScanSupersededAt: existingMinute.physicalScanSupersededAt ?? null,
+        hasPhysicalScan: Boolean(existingMinute.hasPhysicalScan),
+        physicalSignedScanData: existingMinute.physicalSignedScanData ?? null,
+        physicalScanStorageKey: existingMinute.physicalScanStorageKey ?? null,
+        govBrVerified: Boolean(existingMinute.govBrVerified),
+        govBrProtocol: existingMinute.govBrProtocol ?? null,
+      });
+      setPhysicalProofHistory(existingMinute.physicalProofHistory || []);
+      setPersistedSnapshot(extractPersistedMinuteSnapshot(existingMinute));
+      lastPollFingerprintRef.current = buildPollFingerprint(existingMinute as any);
+      setAttendedAt(
+        existingMinute.attendedAt
+          ? typeof existingMinute.attendedAt === "string"
+            ? existingMinute.attendedAt
+            : new Date(existingMinute.attendedAt).toISOString()
+          : new Date().toISOString()
+      );
       setSelectedStudentIds(
         existingMinute.students ? existingMinute.students.map((s) => s.studentId) : []
       );
@@ -364,12 +772,20 @@ export default function AtaEditorModal({
     } else {
       setViewMinuteData(null);
       setMinuteId(null);
+      setContentRevision(1);
+      setPhysicalProofMeta({});
+      setPhysicalProofHistory([]);
+      setPersistedSnapshot(null);
+      setReviewedRevision(null);
+      lastPollFingerprintRef.current = "";
+      setAttendedAt(new Date().toISOString());
       setAtaScope("STUDENTS");
       setNewTeacherName("");
       setNewTeacherEmail("");
       setNewTeacherSubject("");
       setCategory("ACOMPANHAMENTO_PEDAGOGICO");
       setIsConfidential(false);
+      setNonConfidentialConfirmed(false);
       setSubject("Atendimento Pedagógico e Alinhamento de Frequência");
       setRawNotes("");
       setSummary("");
@@ -426,38 +842,7 @@ export default function AtaEditorModal({
         }
 
         const hydrated = data.minute;
-        if (hydrated.status === "FINALIZED" || hydrated.status === "VOIDED") {
-          setViewMinuteData(hydrated);
-          setMinuteId(hydrated.id);
-          return;
-        }
-
-        setMinuteId(hydrated.id);
-        setSelectedStudentIds(hydrated.students ? hydrated.students.map((s) => s.studentId) : []);
-        setCategory(hydrated.category || "ACOMPANHAMENTO_PEDAGOGICO");
-        setIsConfidential(Boolean(hydrated.isConfidential));
-        setSubject(hydrated.subject || "Atendimento Pedagógico e Alinhamento de Frequência");
-        setRawNotes(hydrated.rawNotes || "");
-        setSummary(hydrated.summary || "");
-        setAgreementsSummary(hydrated.agreementsSummary || "");
-        setParticipants(
-          (hydrated.participants || []).map((p, i) =>
-            ensureParticipantClientKey({ ...p, originState: "PERSISTED" }, i)
-          )
-        );
-        autoSuggestInitializedRef.current = true;
-        setExtemporaneousReason(hydrated.extemporaneousReason || "");
-        setActionItems(
-          hydrated.actionItems
-            ? hydrated.actionItems.map((a) => ({
-                id: a.id,
-                description: a.description,
-                responsible: a.responsible,
-                dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : "",
-                status: a.status || "PENDING",
-              }))
-            : []
-        );
+        applyHydratedDraftMinute(hydrated);
       })
       .catch((err: unknown) => {
         if (!active || controller.signal.aborted || openIdAtStart !== editorOpenIdRef.current) {
@@ -476,7 +861,84 @@ export default function AtaEditorModal({
       active = false;
       controller.abort();
     };
-  }, [isOpen, existingMinute?.id, hydrationRetryKey]);
+  }, [isOpen, existingMinute?.id, hydrationRetryKey, applyHydratedDraftMinute]);
+
+  // Sincronização multi-aba contínua quando o modal está aberto em rascunho persistido (mesmo com QR fechado)
+  const isQrPanelOpen = Boolean(qrModalInfo);
+  useEffect(() => {
+    const syncTargetId = minuteId || existingMinute?.id || null;
+    if (!isOpen || !syncTargetId || viewMinuteData || finalizedAta) {
+      return;
+    }
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void syncMinuteFromServer(syncTargetId);
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleVisibilityOrFocus);
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    }
+
+    let channel: BroadcastChannel | null = null;
+    const handleBroadcast = (event: MessageEvent) => {
+      const payload = event?.data as { minuteId?: string } | null;
+      if (payload?.minuteId === syncTargetId) {
+        void syncMinuteFromServer(syncTargetId, { forceFull: true });
+      }
+    };
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        channel = new BroadcastChannel("redeativa-ata-sync");
+        syncChannelRef.current = channel;
+        channel.addEventListener("message", handleBroadcast);
+      } catch {
+        channel = null;
+      }
+    }
+
+    const intervalId =
+      !isQrPanelOpen && typeof window !== "undefined"
+        ? window.setInterval(() => {
+            if (typeof document !== "undefined" && document.hidden) return;
+            void syncMinuteFromServer(syncTargetId);
+          }, 3000)
+        : null;
+
+    return () => {
+      if (intervalId !== null && typeof window !== "undefined") {
+        window.clearInterval(intervalId);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      }
+      if (channel) {
+        channel.removeEventListener("message", handleBroadcast);
+        try {
+          channel.close();
+        } catch {
+          // ignore
+        }
+        if (syncChannelRef.current === channel) {
+          syncChannelRef.current = null;
+        }
+      }
+    };
+  }, [
+    isOpen,
+    minuteId,
+    existingMinute?.id,
+    viewMinuteData,
+    finalizedAta,
+    isQrPanelOpen,
+    syncMinuteFromServer,
+  ]);
 
   // Atualiza referência síncrona do painel QR e contador informativo de validade
   useEffect(() => {
@@ -761,6 +1223,8 @@ export default function AtaEditorModal({
 
   // Toggle de seleção do aluno (remove apenas sugestões intocadas do aluno desmarcado)
   const handleToggleStudent = (student: AtaStudentOption) => {
+    if (isContentLocked) return;
+    markLocalEdit();
     setStep1Error(null);
     const isSelected = selectedStudentIds.includes(student.id);
     const nextIds = isSelected
@@ -775,11 +1239,13 @@ export default function AtaEditorModal({
 
   // Adição inline de professor orientado (Etapa 1)
   const handleAddTeacherParticipant = () => {
+    if (isContentLocked) return;
     const cleanName = newTeacherName.trim();
     if (!cleanName) {
       setStep1Error("Informe o nome completo do(a) professor(a).");
       return;
     }
+    markLocalEdit();
     setStep1Error(null);
     const cleanEmail = newTeacherEmail.trim().toLowerCase();
     const cleanSubject = newTeacherSubject.trim();
@@ -811,6 +1277,8 @@ export default function AtaEditorModal({
   };
 
   const handleRemoveTeacherParticipant = (indexToRemove: number) => {
+    if (isContentLocked) return;
+    markLocalEdit();
     setParticipants((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
@@ -831,7 +1299,35 @@ export default function AtaEditorModal({
     minuteId,
     qrModalInfo,
     onParticipantsSynced: (newParts) => {
-      setParticipants(newParts);
+      setParticipants((prev) => reconcileSavedParticipantsWithPersistedState(prev, newParts));
+    },
+    onMinuteSynced: (syncedMinute) => {
+      if (syncedMinute.status === "FINALIZED" || syncedMinute.status === "VOIDED") {
+        applyHydratedDraftMinute(syncedMinute);
+        broadcastMinuteSync(syncedMinute.id, "qr-finalized");
+        return;
+      }
+      if (typeof syncedMinute.contentRevision === "number" && syncedMinute.contentRevision >= 1) {
+        setContentRevision(syncedMinute.contentRevision);
+      }
+      setPhysicalProofMeta({
+        physicalScanRevision: syncedMinute.physicalScanRevision ?? null,
+        physicalScanSupersededAt: syncedMinute.physicalScanSupersededAt ?? null,
+        hasPhysicalScan: Boolean(syncedMinute.hasPhysicalScan),
+        physicalSignedScanData: syncedMinute.physicalSignedScanData ?? null,
+        physicalScanStorageKey: syncedMinute.physicalScanStorageKey ?? null,
+        govBrVerified: Boolean(syncedMinute.govBrVerified),
+        govBrProtocol: syncedMinute.govBrProtocol ?? null,
+      });
+      if (Array.isArray(syncedMinute.physicalProofHistory)) {
+        setPhysicalProofHistory(syncedMinute.physicalProofHistory);
+      }
+      if (syncedMinute.subject !== undefined) {
+        setPersistedSnapshot(extractPersistedMinuteSnapshot(syncedMinute));
+      }
+      lastPollFingerprintRef.current = buildPollFingerprint(syncedMinute as any);
+      setHasPendingLocalEdit(false);
+      broadcastMinuteSync(syncedMinute.id, "qr-synced");
     },
     onCompletedClose: () => {
       closeQrPanel();
@@ -841,6 +1337,7 @@ export default function AtaEditorModal({
 
   // Ditado por voz nativo pt-BR
   const toggleSpeechRecognition = () => {
+    if (isContentLocked) return;
     setAiError(null);
     if (isListening) {
       setIsListening(false);
@@ -866,6 +1363,8 @@ export default function AtaEditorModal({
       recognition.onend = () => setIsListening(false);
       recognition.onerror = () => setIsListening(false);
       recognition.onresult = (event: SpeechRecognitionResultEvent) => {
+        if (isContentLocked) return;
+        markLocalEdit();
         let transcript = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           transcript += event.results[i][0].transcript + " ";
@@ -881,6 +1380,12 @@ export default function AtaEditorModal({
 
   // Formalização e Revisão com Diretrizes NRE/SEED-PR
   const handleFormalizeWithAi = async () => {
+    if (isContentLocked) {
+      setAiError(
+        "Esta ata já possui assinatura registrada na revisão atual. Utilize 'Reabrir para edição' se precisar alterar o conteúdo."
+      );
+      return;
+    }
     setAiError(null);
     setAiSuccessMsg(null);
     const hasNotes = Boolean(rawNotes && rawNotes.trim().length >= 3);
@@ -905,20 +1410,18 @@ export default function AtaEditorModal({
         .map((p) => p.name)
         .filter(Boolean);
 
-      const savedKey =
-        geminiApiKey.trim() ||
-        (typeof window !== "undefined" ? getStoredPreference("gemini_api_key")?.trim() : "") ||
-        "";
-
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (savedKey && savedKey.length > 10) {
-        headers["x-gemini-key"] = savedKey;
-      }
 
       const res = await fetch("/api/ai/formalize-ata", {
         method: "POST",
         headers,
         body: JSON.stringify({
+          minuteId: minuteId || existingMinute?.id || undefined,
+          isConfidential,
+          nonConfidentialConfirmed,
+          ataScope,
+          studentIds: selectedStudentIds,
+          subject: subject.trim() || undefined,
           rawNotes: rawNotes.trim(),
           existingSummary: summary.trim(),
           category,
@@ -926,7 +1429,6 @@ export default function AtaEditorModal({
           guardianNames,
           teacherNames,
           attendedAt: attendedAt || new Date().toISOString(),
-          apiKey: savedKey || undefined,
         }),
       });
 
@@ -943,6 +1445,8 @@ export default function AtaEditorModal({
       if (!res.ok) throw new Error(data?.error || "Erro ao revisar minuta");
 
       if (data.result) {
+        if (isContentLocked) return;
+        markLocalEdit();
         if (data.result.formalSubject) setSubject(data.result.formalSubject);
         if (data.result.formalSummary) setSummary(data.result.formalSummary);
         if (data.result.agreementsSummary) setAgreementsSummary(data.result.agreementsSummary);
@@ -987,30 +1491,18 @@ export default function AtaEditorModal({
         }
 
         if (data.usedFallback) {
-          const reason = data.fallbackReason || "";
-          const isDemandSpike =
-            reason.includes("503") ||
-            reason.includes("alta demanda") ||
-            reason.includes("high demand") ||
-            reason.includes("UNAVAILABLE");
-
-          const guidance = isDemandSpike
-            ? "Os servidores da Google estão com pico de demanda temporário. A minuta foi estruturada pelo modelo padrão institucional. Você pode clicar em 'Formalizar & Revisar' novamente em instantes."
-            : hasServerKey || geminiApiKey || savedKey
-              ? "Minuta estruturada pelo modelo padrão institucional."
-              : "Minuta estruturada pelo modelo padrão local. Para correção ortográfica, sintaxe e redação pedagógica por IA, configure sua chave do Google Gemini no botão 'Configurar Chave IA' acima.";
+          const guidance =
+            data.fallbackReason ||
+            "Minuta gerada localmente para revisão da equipe antes da confirmação.";
 
           setAiSuccessMsg({
             type: "warning",
-            text: `${reason} ${guidance}`.trim(),
+            text: guidance,
           });
-          if (!savedKey && !hasServerKey && !isDemandSpike) {
-            setShowKeyModal(true);
-          }
         } else {
           setAiSuccessMsg({
             type: "success",
-            text: "Texto formalizado e revisado com sucesso pelo Google Gemini segundo as normas do NRE/SEED-PR.",
+            text: "Minuta revisada e estruturada. Confira os dados e o texto antes de confirmar a ata.",
           });
           setTimeout(() => setAiSuccessMsg(null), 5000);
         }
@@ -1050,12 +1542,14 @@ export default function AtaEditorModal({
       }));
 
     return {
+      expectedRevision: contentRevision,
       category,
       isConfidential,
+      attendedAt: attendedAt || new Date().toISOString(),
       subject: cleanSubject,
-      rawNotes,
+      rawNotes: rawNotes.length > 0 ? rawNotes : null,
       summary,
-      agreementsSummary,
+      agreementsSummary: agreementsSummary.length > 0 ? agreementsSummary : null,
       studentIds: selectedStudentIds,
       participants: cleanParticipants,
       actionItems: cleanActions,
@@ -1078,16 +1572,39 @@ export default function AtaEditorModal({
 
     const data = (await res.json()) as { error?: string; minute?: AtaMinuteRecord };
     if (!res.ok) {
+      if (res.status === 409 && targetId) {
+        void syncMinuteFromServer(targetId, { forceFull: true, notice: data.error });
+      }
       throw new Error(data.error || "Erro ao salvar rascunho da ata.");
     }
 
     if (data.minute?.id) {
       setMinuteId(data.minute.id);
+      if (typeof data.minute.contentRevision === "number" && data.minute.contentRevision >= 1) {
+        setContentRevision(data.minute.contentRevision);
+      }
+      setPhysicalProofMeta({
+        physicalScanRevision: data.minute.physicalScanRevision ?? null,
+        physicalScanSupersededAt: data.minute.physicalScanSupersededAt ?? null,
+        hasPhysicalScan: Boolean(data.minute.hasPhysicalScan),
+        physicalSignedScanData: data.minute.physicalSignedScanData ?? null,
+        physicalScanStorageKey: data.minute.physicalScanStorageKey ?? null,
+        govBrVerified: Boolean(data.minute.govBrVerified),
+        govBrProtocol: data.minute.govBrProtocol ?? null,
+      });
+      if (Array.isArray(data.minute.physicalProofHistory)) {
+        setPhysicalProofHistory(data.minute.physicalProofHistory);
+      }
+      setPersistedSnapshot(extractPersistedMinuteSnapshot(data.minute));
+      lastPollFingerprintRef.current = buildPollFingerprint(data.minute as any);
+      setHasPendingLocalEdit(false);
+      setReviewedRevision(null);
       if (data.minute.participants) {
         setParticipants((prev) =>
           reconcileSavedParticipantsWithPersistedState(prev, data.minute!.participants)
         );
       }
+      broadcastMinuteSync(data.minute.id, "draft-saved");
     }
 
     return data.minute;
@@ -1095,7 +1612,7 @@ export default function AtaEditorModal({
 
   // Botão "Salvar Rascunho"
   const handleSaveDraft = async () => {
-    if (isHydratingMinute || hydrationError) return null;
+    if (isHydratingMinute || hydrationError || isContentLocked) return null;
     const hasPart = participants.length > 0;
     if (selectedStudentIds.length === 0 && !hasPart) {
       setStep(1);
@@ -1108,9 +1625,11 @@ export default function AtaEditorModal({
     setDraftSavedMsg(null);
     try {
       const saved = await saveDraftInternal();
-      setDraftSavedMsg("Rascunho salvo com sucesso!");
+      setDraftSavedMsg(
+        `Rascunho salvo na revisão ${saved?.contentRevision ?? contentRevision}. Confira os dados persistidos antes de coletar assinaturas.`
+      );
       onSaved();
-      setTimeout(() => setDraftSavedMsg(null), 4000);
+      setTimeout(() => setDraftSavedMsg(null), 5000);
       return saved;
     } catch (err: unknown) {
       setFinalizeError(getErrorMessage(err, "Erro ao salvar rascunho."));
@@ -1128,9 +1647,15 @@ export default function AtaEditorModal({
     return calculateBusinessDaysDiff(d, new Date()) > 5;
   }, [attendedAt, existingMinute]);
 
-  // Botão "Lavrar Ata Oficial (Imutável)" — com validação de PIN de Fé Pública e Extemporaneidade
+  // Botão "Lavrar Ata" — envia apenas confirmação por PIN e justificativa extemporânea quando já houver assinatura
   const handleFinalize = async (overridePin?: string) => {
     if (isHydratingMinute || hydrationError) return;
+    if (revisionLockState.hasLegacyUnprovableProof) {
+      setFinalizeError(
+        "Esta ata possui assinatura anterior sem comprovação de revisão. Utilize 'Reabrir para edição' e faça a recoleta antes de lavrar."
+      );
+      return;
+    }
     setFinalizeError(null);
     setDraftSavedMsg(null);
 
@@ -1141,14 +1666,14 @@ export default function AtaEditorModal({
       return;
     }
 
-    if (!summary || summary.trim().length < 10) {
+    if (!hasMinimumOfficialSummary(summary)) {
       if (rawNotes && rawNotes.trim().length >= 10) {
         setFinalizeError(
-          'O campo "Texto Formal da Ata" está vazio. Clique em "Formalizar com IA" acima para gerar o texto oficial a partir das suas notas rápidas, ou digite o texto formal diretamente.'
+          'O campo "Texto Oficial da Ata" está vazio. Clique em "Formalizar & Revisar" acima para estruturar a minuta a partir das anotações, ou redija o texto diretamente.'
         );
       } else {
         setFinalizeError(
-          "É necessário preencher o Texto Formal da Ata (mínimo de 10 caracteres) antes da lavratura oficial."
+          "É necessário preencher o Texto Oficial da Ata (mínimo de 10 caracteres) antes de lavrar."
         );
       }
       return;
@@ -1157,12 +1682,11 @@ export default function AtaEditorModal({
     // Validação de lavratura extemporânea (> 5 dias úteis)
     if (isExtemporaneousMeeting && (!extemporaneousReason || extemporaneousReason.trim().length < 5)) {
       setFinalizeError(
-        "Esta reunião ocorreu há mais de 5 dias úteis. Preencha a Justificativa da Lavratura Extemporânea no formulário antes de lavrar."
+        "Este atendimento ocorreu há mais de 5 dias úteis. Preencha a justificativa de registro extemporâneo antes de lavrar."
       );
       return;
     }
 
-    // Se o PIN ainda não foi informado nesta submissão, abre o modal de validação de fé pública
     if (!overridePin) {
       setShowPinModal(true);
       return;
@@ -1171,22 +1695,33 @@ export default function AtaEditorModal({
     setSavingFinal(true);
     try {
       let targetId = minuteId || existingMinute?.id;
+      let targetRevision = contentRevision;
 
-      // Se a ata ainda não foi criada no banco, cria o rascunho inicial primeiro
+      // Quando não há assinatura travando o rascunho e ainda não existe ID, cria o rascunho inicial primeiro
       if (!targetId) {
         const created = await saveDraftInternal();
         if (!created?.id) {
           throw new Error("Não foi possível registrar os dados iniciais da ata.");
         }
         targetId = created.id;
+        if (typeof created.contentRevision === "number") {
+          targetRevision = created.contentRevision;
+        }
       }
 
-      // Envia o payload atualizado direto para o endpoint atômico de lavratura oficial com o PIN
-      const payload = {
-        ...buildSanitizedPayload(),
-        signingPin: overridePin,
-        extemporaneousReason: extemporaneousReason.trim() || undefined,
-      };
+      // Quando já houver assinatura válida na revisão, não reenvia nem altera o conteúdo assinado
+      const payload = isContentLocked
+        ? {
+            signingPin: overridePin,
+            expectedRevision: targetRevision,
+            extemporaneousReason: extemporaneousReason.trim() || undefined,
+          }
+        : {
+            ...buildSanitizedPayload(),
+            expectedRevision: targetRevision,
+            signingPin: overridePin,
+            extemporaneousReason: extemporaneousReason.trim() || undefined,
+          };
       const res = await fetch(`/api/atas/${targetId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1200,30 +1735,46 @@ export default function AtaEditorModal({
           setShowPinModal(true);
           return;
         }
-        throw new Error(data.error || "Erro ao lavrar ata oficial no servidor.");
+        if (res.status === 409 && targetId) {
+          void syncMinuteFromServer(targetId, { forceFull: true, notice: data.error });
+        }
+        throw new Error(data.error || "Erro ao confirmar ata no servidor.");
       }
 
       if (!data.minute) {
-        throw new Error("Resposta inválida do servidor ao lavrar ata oficial.");
+        throw new Error("Resposta inválida do servidor ao confirmar ata.");
       }
 
-      setFinalizedAta(data.minute);
+      const finalizedWithHistory: AtaMinuteRecord = {
+        ...data.minute,
+        physicalProofHistory: data.minute.physicalProofHistory ?? physicalProofHistory,
+      };
+      lastPollFingerprintRef.current = buildPollFingerprint(finalizedWithHistory as any);
+      setActiveSignTarget(null);
+      broadcastMinuteSync(targetId, "finalize");
+      setFinalizedAta(finalizedWithHistory);
       onSaved();
     } catch (err: unknown) {
       console.error("[handleFinalize] Erro:", err);
-      setFinalizeError(getErrorMessage(err, "Erro inesperado ao lavrar ata."));
+      setFinalizeError(getErrorMessage(err, "Erro inesperado ao confirmar ata."));
     } finally {
       setSavingFinal(false);
     }
   };
 
-  // Gerar QR Code ou Link remoto para participante assinar
+  // Gerar QR Code ou Link remoto para participante assinar na revisão conferida
   const handleGenerateMobileSign = async (
     index: number,
     durationMinutes = signDurationOption,
     expectedOpenParticipantId?: string
   ) => {
     if (isHydratingMinute || hydrationError || qrGenerationInFlightRef.current) return;
+    if (revisionLockState.hasLegacyUnprovableProof) {
+      setFinalizeError(
+        "Esta ata possui assinatura anterior sem comprovação de revisão. Utilize 'Reabrir para edição' antes de emitir novos links."
+      );
+      return;
+    }
 
     setFinalizeError(null);
     const currentLocal = participants[index];
@@ -1238,19 +1789,32 @@ export default function AtaEditorModal({
       return;
     }
 
+    if (!persistedHasMinimumSummary) {
+      setFinalizeError(OFFICIAL_SUMMARY_REQUIRED_FOR_COLLECTION_ERROR);
+      return;
+    }
+
+    if (!isCurrentRevisionConfirmed) {
+      setFinalizeError(
+        hasPendingLocalEdit || !(minuteId || existingMinute?.id)
+          ? "Salve o rascunho e confirme a conferência da revisão antes de emitir o link de assinatura."
+          : `Confirme a conferência da Revisão ${contentRevision} antes de emitir o link de assinatura.`
+      );
+      return;
+    }
+
     qrGenerationInFlightRef.current = true;
     const reqSeq = ++qrRequestSeqRef.current;
     const openIdAtStart = editorOpenIdRef.current;
     const isRenewal = Boolean(expectedOpenParticipantId);
 
     setIsGeneratingQr(true);
-    setSaving(true);
     try {
-      // Sempre sincroniza o rascunho para garantir que o participante exista no banco
-      const saved = await saveDraftInternal();
-      if (!saved || reqSeq !== qrRequestSeqRef.current || openIdAtStart !== editorOpenIdRef.current) {
-        return;
-      }
+      const targetMinuteId = minuteId || existingMinute?.id || null;
+      const targetPartId = currentLocal.id || null;
+      const targetPartName = currentLocal.name;
+      const expectedRevision = contentRevision;
+
       if (
         isRenewal &&
         (!qrPanelContextRef.current.isOpen ||
@@ -1259,20 +1823,17 @@ export default function AtaEditorModal({
         return;
       }
 
-      const part =
-        saved.participants?.find((p) => currentLocal.id && p.id === currentLocal.id) ||
-        saved.participants?.[index] ||
-        saved.participants?.find((p) => p.name === currentLocal?.name);
-      if (!part?.id) {
-        throw new Error("Informe o nome do participante antes de gerar o link de assinatura.");
+      if (!targetMinuteId || !targetPartId) {
+        throw new Error("Salve o rascunho e confirme a conferência da revisão antes de emitir o link.");
       }
 
-      const res = await fetch(`/api/atas/${saved.id}/sign-token`, {
+      const res = await fetch(`/api/atas/${targetMinuteId}/sign-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          participantId: part.id,
+          participantId: targetPartId,
           expiresInMinutes: durationMinutes,
+          expectedRevision,
         }),
       });
       const data = (await res.json()) as {
@@ -1280,8 +1841,15 @@ export default function AtaEditorModal({
         signUrl: string;
         expiresAt?: string;
         expiresInMinutes?: number;
+        contentRevision?: number;
+        participantName?: string;
       };
-      if (!res.ok) throw new Error(data.error || "Falha ao gerar token de assinatura");
+      if (!res.ok) {
+        if (res.status === 409) {
+          void syncMinuteFromServer(targetMinuteId, { forceFull: true, notice: data.error });
+        }
+        throw new Error(data.error || "Falha ao gerar link de assinatura");
+      }
 
       if (reqSeq !== qrRequestSeqRef.current || openIdAtStart !== editorOpenIdRef.current) {
         return;
@@ -1294,16 +1862,20 @@ export default function AtaEditorModal({
         return;
       }
 
-      setMinuteId(saved.id);
+      setMinuteId(targetMinuteId);
+      if (typeof data.contentRevision === "number" && data.contentRevision >= 1) {
+        setContentRevision(data.contentRevision);
+      }
       setParticipants((prev) =>
         prev.map((item) =>
-          item.id === part.id ? { ...item, hasActiveSignLink: true } : item
+          item.id === targetPartId ? { ...item, hasActiveSignLink: true } : item
         )
       );
+      broadcastMinuteSync(targetMinuteId, "sign-token");
       const nextInfo = {
-        participantId: part.id,
+        participantId: targetPartId,
         url: data.signUrl,
-        name: part.name,
+        name: data.participantName || targetPartName,
         expiresInMinutes: data.expiresInMinutes || durationMinutes,
         expiresAt: data.expiresAt || null,
         participantRole: currentLocal?.role || "PARTICIPANTE",
@@ -1323,8 +1895,172 @@ export default function AtaEditorModal({
       if (reqSeq === qrRequestSeqRef.current) {
         qrGenerationInFlightRef.current = false;
         setIsGeneratingQr(false);
-        setSaving(false);
       }
+    }
+  };
+
+  // Assinatura em tela com persistência imediata vinculada à revisão conferida
+  const handleScreenSignatureConfirm = async (
+    index: number,
+    dataUrl: string,
+    strokeData?: string,
+    capturedRevision?: number,
+    capturedParticipantId?: string
+  ) => {
+    if (
+      isHydratingMinute ||
+      hydrationError ||
+      savingScreenSigIndex !== null ||
+      screenSigInFlightRef.current
+    ) {
+      return;
+    }
+    if (revisionLockState.hasLegacyUnprovableProof) {
+      setFinalizeError(
+        "Esta ata possui assinatura anterior sem comprovação de revisão. Utilize 'Reabrir para edição' antes de coletar novas assinaturas."
+      );
+      return;
+    }
+
+    const currentLocal = participants[index];
+    if (!currentLocal?.name?.trim()) {
+      setFinalizeError("Informe o nome do participante antes de confirmar a assinatura.");
+      return;
+    }
+
+    const expectedRevision = capturedRevision ?? activeSignTarget?.revision ?? contentRevision;
+    const expectedParticipantId = capturedParticipantId ?? activeSignTarget?.participantId ?? currentLocal.id;
+
+    if (
+      !persistedHasMinimumSummary ||
+      !isCurrentRevisionConfirmed ||
+      hasPendingLocalEdit ||
+      !persistedSnapshot ||
+      persistedSnapshot.contentRevision !== expectedRevision ||
+      expectedRevision !== contentRevision ||
+      currentLocal.id !== expectedParticipantId
+    ) {
+      setActiveSignTarget(null);
+      setFinalizeError(
+        !persistedHasMinimumSummary
+          ? OFFICIAL_SUMMARY_REQUIRED_FOR_COLLECTION_ERROR
+          : hasPendingLocalEdit || !(minuteId || existingMinute?.id)
+            ? "Salve o rascunho e confirme a conferência da revisão antes de registrar a assinatura em tela."
+            : `Confirme a conferência da Revisão ${contentRevision} antes de coletar a assinatura em tela.`
+      );
+      return;
+    }
+
+    screenSigInFlightRef.current = true;
+    setFinalizeError(null);
+    setSavingScreenSigIndex(index);
+    try {
+      const targetMinuteId = minuteId || existingMinute?.id || null;
+      const targetPartId = expectedParticipantId || null;
+
+      if (!targetMinuteId || !targetPartId) {
+        throw new Error("Salve o rascunho e confirme a conferência da revisão antes de assinar em tela.");
+      }
+
+      const res = await fetch(`/api/atas/${targetMinuteId}/sign-screen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          participantId: targetPartId,
+          expectedRevision,
+          signatureData: dataUrl,
+          biometricStrokeData: strokeData || null,
+          clientTimestampIso: new Date().toISOString(),
+        }),
+      });
+
+      const data = (await res.json()) as {
+        error?: string;
+        contentRevision?: number;
+        minute?: AtaMinuteRecord;
+      };
+      if (!res.ok || !data.minute) {
+        if (res.status === 409) {
+          void syncMinuteFromServer(targetMinuteId, { forceFull: true, notice: data.error });
+        }
+        throw new Error(data.error || "Não foi possível gravar a assinatura em tela.");
+      }
+
+      const updatedMinute: AtaMinuteRecord = {
+        ...data.minute,
+        physicalProofHistory: data.minute.physicalProofHistory ?? physicalProofHistory,
+      };
+      applyHydratedDraftMinute(updatedMinute, { preserveReviewedRevision: true });
+      setActiveSignTarget(null);
+      setDraftSavedMsg("Assinatura em tela registrada na revisão vigente. O conteúdo da ata foi travado para edição.");
+      broadcastMinuteSync(targetMinuteId, "sign-screen");
+      onSaved();
+    } catch (err: unknown) {
+      setFinalizeError(getErrorMessage(err, "Erro ao registrar assinatura em tela."));
+    } finally {
+      screenSigInFlightRef.current = false;
+      setSavingScreenSigIndex(null);
+    }
+  };
+
+  // Reabertura explícita autorizada: invalida todas as assinaturas/links e avança revisão no servidor
+  const handleReopenForEditing = async () => {
+    const targetId = minuteId || existingMinute?.id;
+    const confirmedRevision = reopenConfirmRevisionRef.current;
+    if (!targetId || isReopening || confirmedRevision === null) return;
+
+    setIsReopening(true);
+    setFinalizeError(null);
+    setReopenFeedbackMsg(null);
+    try {
+      const res = await fetch(`/api/atas/${targetId}/reopen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmReopen: true,
+          expectedRevision: confirmedRevision,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        error?: string;
+        invalidatedRevision?: number;
+        contentRevision?: number;
+        minute?: AtaMinuteRecord;
+      };
+
+      if (!res.ok || !data.minute) {
+        if (res.status === 409) {
+          setReopenConfirmRevision(null);
+          await syncMinuteFromServer(targetId, { forceFull: true });
+        }
+        throw new Error(data.error || "Não foi possível reabrir a ata para edição.");
+      }
+
+      closeQrPanel();
+      setActiveSignTarget(null);
+      setActiveRefusalIndex(null);
+      setSignatureResetNotices({});
+      setSignatureResetErrors({});
+      setReopenConfirmRevision(null);
+      setReviewedRevision(null);
+
+      applyHydratedDraftMinute(data.minute);
+      const nextRev =
+        typeof data.contentRevision === "number" && data.contentRevision >= 1
+          ? data.contentRevision
+          : typeof data.minute.contentRevision === "number"
+            ? data.minute.contentRevision
+            : confirmedRevision + 1;
+      setReopenFeedbackMsg(
+        `Edição liberada na revisão ${nextRev}. Todas as assinaturas e links da revisão anterior (${data.invalidatedRevision ?? confirmedRevision}) foram invalidados.`
+      );
+      broadcastMinuteSync(data.minute.id, "reopen");
+      onSaved();
+    } catch (err: unknown) {
+      setFinalizeError(getErrorMessage(err, "Erro ao reabrir a ata para edição."));
+    } finally {
+      setIsReopening(false);
     }
   };
 
@@ -1399,6 +2135,7 @@ export default function AtaEditorModal({
             : cleared;
         })
       );
+      broadcastMinuteSync(activeMinuteId, "cancel-qr");
       onSaved();
     } catch {
       setFinalizeError(
@@ -1411,7 +2148,7 @@ export default function AtaEditorModal({
 
   // Remoção explícita de assinatura/recusa com confirmação obrigatória no servidor antes de liberar identidade
   const handleResetParticipantSignature = async (index: number) => {
-    if (resettingSigIndex !== null || cancelingQrIndex !== null) return;
+    if (isContentLocked || resettingSigIndex !== null || cancelingQrIndex !== null) return;
     const target = participants[index];
     if (!target) return;
 
@@ -1452,8 +2189,8 @@ export default function AtaEditorModal({
       if (target.id && qrModalInfo?.participantId === target.id) {
         closeQrPanel();
       }
-      if (activeSignParticipantIndex === index) {
-        setActiveSignParticipantIndex(null);
+      if (activeSignTarget?.index === index) {
+        setActiveSignTarget(null);
       }
       setParticipants((prev) => reconcileSavedParticipantsWithPersistedState(prev, result.participants));
 
@@ -1480,6 +2217,8 @@ export default function AtaEditorModal({
 
   // Atalho de 1 clique: Incluir Estudante(s) selecionados como participante(s) da ata
   const handleAddSelectedStudentsAsParticipants = () => {
+    if (isContentLocked) return;
+    markLocalEdit();
     const loadedMap = new Map(loadedStudentsWithContacts.map((s) => [s.id, s]));
     const selected = availableStudents
       .filter((s) => selectedStudentIds.includes(s.id))
@@ -2162,23 +2901,32 @@ export default function AtaEditorModal({
                 <Download className="w-4 h-4 text-emerald-600" />
                 <span>Baixar PDF</span>
               </a>
-              <button
-                type="button"
-                onClick={() => setIsScanModalOpen(true)}
-                className={`inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border font-bold transition cursor-pointer ${
-                  viewMinuteData.hasPhysicalScan || viewMinuteData.physicalSignedScanData
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                    : "border-slate-300 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700"
-                }`}
-                title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
-              >
-                <Camera className="w-4 h-4 text-indigo-600" />
-                <span>
-                  {viewMinuteData.hasPhysicalScan || viewMinuteData.physicalSignedScanData
-                    ? "Via Física Anexa"
-                    : "Digitalizar Folha"}
-                </span>
-              </button>
+              {(() => {
+                const viewProof = evaluateEffectivePhysicalProof(viewMinuteData);
+                const hasCurrentViewScan =
+                  viewProof.hasValidPhysicalProof && viewProof.hasPhysicalArtifact;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setIsScanModalOpen(true)}
+                    className={`inline-flex items-center space-x-1.5 px-4 py-2.5 rounded-xl border font-bold transition cursor-pointer ${
+                      hasCurrentViewScan
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                        : "border-slate-300 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700"
+                    }`}
+                    title="Anexar ou visualizar foto da via física assinada ou documento Gov.br"
+                  >
+                    <Camera className="w-4 h-4 text-indigo-600" />
+                    <span>
+                      {hasCurrentViewScan
+                        ? "Via Física Anexa"
+                        : viewProof.historicalCount > 0
+                        ? `Digitalizar Folha (${viewProof.historicalCount} histórico)`
+                        : "Digitalizar Folha"}
+                    </span>
+                  </button>
+                );
+              })()}
               {viewMinuteData.verificationCode && (
                 <a
                   href={`/validar/ata/${viewMinuteData.verificationCode}`}
@@ -2226,18 +2974,22 @@ export default function AtaEditorModal({
             minute={viewMinuteData}
             onClose={() => setIsScanModalOpen(false)}
             onSuccess={(updated: AtaMinuteRecord) => {
-              const hasScan = Boolean(
-                updated.physicalSignedScanData || updated.physicalScanStorageKey
-              );
-              setViewMinuteData((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      ...updated,
-                      hasPhysicalScan: hasScan,
-                    }
-                  : prev
-              );
+              setViewMinuteData((prev) => {
+                if (!prev) return prev;
+                const merged = {
+                  ...prev,
+                  ...updated,
+                  physicalProofHistory: updated.physicalProofHistory ?? prev.physicalProofHistory,
+                };
+                const proof = evaluateEffectivePhysicalProof(merged);
+                return {
+                  ...merged,
+                  hasPhysicalScan: proof.hasValidPhysicalProof && proof.hasPhysicalArtifact,
+                  govBrVerified: proof.isValidGovBrVerified,
+                  govBrProtocol: proof.effectiveGovBrProtocol,
+                };
+              });
+              broadcastMinuteSync(viewMinuteData.id, "physical-scan");
               setIsScanModalOpen(false);
             }}
           />
@@ -2344,6 +3096,132 @@ export default function AtaEditorModal({
           </div>
         )}
 
+        {/* Faixa de Revisão, Trava após Primeira Assinatura e Reabertura Autorizada */}
+        {!isHydratingMinute && !hydrationError && (
+          <div
+            className={`p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+              revisionLockState.hasLegacyUnprovableProof
+                ? "bg-amber-50 border-amber-300 text-amber-950"
+                : isContentLocked
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                  : "bg-slate-50 border-slate-200 text-slate-700"
+            }`}
+          >
+            <div className="space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2 font-extrabold">
+                {isContentLocked ? (
+                  <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                ) : (
+                  <FileCheck2 className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                )}
+                <span>Revisão {contentRevision}</span>
+                {revisionLockState.hasLegacyUnprovableProof ? (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-200 text-amber-950 text-[10px] font-bold">
+                    Assinatura anterior sem vínculo de revisão
+                  </span>
+                ) : isContentLocked ? (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-200 text-emerald-950 text-[10px] font-bold">
+                    Conteúdo travado após assinatura
+                  </span>
+                ) : hasPendingLocalEdit ? (
+                  <span className="px-2 py-0.5 rounded-md bg-sky-100 text-sky-900 text-[10px] font-bold">
+                    Alterações pendentes — salve e confira antes de coletar
+                  </span>
+                ) : activePersistedId && !persistedHasMinimumSummary ? (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                    Texto oficial pendente (mínimo 10 caracteres)
+                  </span>
+                ) : isCurrentRevisionConfirmed ? (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                    Revisão {contentRevision} conferida para coleta
+                  </span>
+                ) : activePersistedId ? (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                    Aguardando conferência da revisão {contentRevision}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-200 text-slate-800 text-[10px] font-bold">
+                    Novo rascunho não salvo
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] opacity-90">
+                {revisionLockState.hasLegacyUnprovableProof
+                  ? "Este rascunho contém assinatura anterior sem registro de revisão. Reabra para edição para invalidar as coletas antigas e coletar novamente antes de lavrar."
+                  : isContentLocked
+                    ? "Os campos da ata estão bloqueados enquanto houver assinatura ou documento vinculado nesta revisão. Os demais participantes podem receber links para assinar esta mesma revisão."
+                    : hasPendingLocalEdit || !activePersistedId
+                      ? localHasMinimumSummary
+                        ? "Salve o rascunho para persistir a revisão e, em seguida, confirme a conferência antes de coletar assinaturas."
+                        : `Faltam ${remainingSummaryChars} caractere(s) no Texto Oficial da Ata (mínimo de 10 após espaços). Você pode salvar o rascunho mesmo incompleto e completar antes da coleta.`
+                      : !persistedHasMinimumSummary
+                        ? `Faltam ${remainingSummaryChars} caractere(s) no Texto Oficial da Ata salvo para liberar conferência e coleta de assinaturas.`
+                        : isCurrentRevisionConfirmed
+                          ? `Revisão ${contentRevision} conferida. A coleta de assinaturas em tela ou via link está liberada.`
+                          : "Confira os dados persistidos abaixo e clique em Confirmar conferência para liberar assinaturas."}
+              </p>
+            </div>
+
+            {isContentLocked && (minuteId || existingMinute?.id) && (
+              <button
+                type="button"
+                disabled={isReopening || savingFinal}
+                onClick={() => setReopenConfirmRevision(contentRevision)}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-amber-50 border border-amber-300 text-amber-900 font-extrabold text-xs transition flex items-center space-x-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reabrir para edição</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {reopenFeedbackMsg && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 text-xs font-semibold flex items-center space-x-2"
+          >
+            <RotateCcw className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>{reopenFeedbackMsg}</span>
+          </div>
+        )}
+
+        {reopenConfirmRevision !== null && (
+          <div
+            role="dialog"
+            aria-label="Confirmar reabertura da ata para edição"
+            className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 space-y-3 shadow-sm"
+          >
+            <div className="space-y-1">
+              <p className="font-black text-sm">
+                Reabrir ata para edição na próxima revisão?
+              </p>
+              <p className="text-xs leading-relaxed text-amber-900">
+                Ao confirmar, todas as assinaturas coletadas e links ativos da revisão {reopenConfirmRevision} serão invalidados, o registro passará para a revisão {reopenConfirmRevision + 1} com registro em auditoria, e eventuais arquivos de via física já anexados serão mantidos em guarda histórica separada.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isReopening}
+                onClick={() => setReopenConfirmRevision(null)}
+                className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold text-xs cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isReopening}
+                onClick={() => void handleReopenForEditing()}
+                className="px-4 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-extrabold text-xs cursor-pointer disabled:opacity-50"
+              >
+                {isReopening ? "Reabrindo..." : "Confirmar reabertura"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ============================================================== */}
         {/* ETAPA 1: SELEÇÃO AMPLA E BUSCA DE ALUNOS + PAUTA E CATEGORIA   */}
         {/* ============================================================== */}
@@ -2360,14 +3238,17 @@ export default function AtaEditorModal({
             <div className="bg-slate-100 p-1 rounded-2xl flex items-center border border-slate-200">
               <button
                 type="button"
+                disabled={isContentLocked}
                 onClick={() => {
+                  if (isContentLocked) return;
+                  markLocalEdit();
                   setAtaScope("STUDENTS");
                   if (category === "ORIENTACAO_DOCENTE") {
                     setCategory("ACOMPANHAMENTO_PEDAGOGICO");
                     setSubject("Atendimento Pedagógico e Alinhamento de Frequência");
                   }
                 }}
-                className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 transition cursor-pointer ${
+                className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                   ataScope === "STUDENTS"
                     ? "bg-white text-slate-900 shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
@@ -2382,14 +3263,17 @@ export default function AtaEditorModal({
 
               <button
                 type="button"
+                disabled={isContentLocked}
                 onClick={() => {
+                  if (isContentLocked) return;
+                  markLocalEdit();
                   setAtaScope("TEACHERS");
                   setCategory("ORIENTACAO_DOCENTE");
                   if (subject === "Atendimento Pedagógico e Alinhamento de Frequência") {
                     setSubject("Orientação Pedagógica / Alinhamento Docente");
                   }
                 }}
-                className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 transition cursor-pointer ${
+                className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                   ataScope === "TEACHERS"
                     ? "bg-indigo-600 text-white shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
@@ -2420,12 +3304,30 @@ export default function AtaEditorModal({
                     <input
                       type="text"
                       value={subject}
+                      disabled={isContentLocked}
                       onChange={(e) => {
                         markLocalEdit();
                         setSubject(e.target.value);
                       }}
                       placeholder="Ex.: Comparecimento da família para alinhamento pedagógico e faltas"
-                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm focus:outline-sky-500 shadow-2xs"
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm focus:outline-sky-500 shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="ata-editor-attended-at" className="font-bold text-slate-700 block text-xs">
+                      Data e Horário do Atendimento:
+                    </label>
+                    <input
+                      id="ata-editor-attended-at"
+                      type="datetime-local"
+                      value={formatIsoToDatetimeLocal(attendedAt)}
+                      disabled={isContentLocked}
+                      onChange={(e) => {
+                        markLocalEdit();
+                        setAttendedAt(datetimeLocalToIso(e.target.value));
+                      }}
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                     />
                   </div>
 
@@ -2435,8 +3337,12 @@ export default function AtaEditorModal({
                     </label>
                     <select
                       value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm shadow-2xs"
+                      disabled={isContentLocked}
+                      onChange={(e) => {
+                        markLocalEdit();
+                        setCategory(e.target.value);
+                      }}
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 text-sm shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                     >
                       {CATEGORIES.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -2451,8 +3357,17 @@ export default function AtaEditorModal({
                       <input
                         type="checkbox"
                         checked={isConfidential}
-                        onChange={(e) => setIsConfidential(e.target.checked)}
-                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                        disabled={isContentLocked}
+                        onChange={(e) => {
+                          if (isContentLocked) return;
+                          markLocalEdit();
+                          const checked = e.target.checked;
+                          setIsConfidential(checked);
+                          if (checked) {
+                            setNonConfidentialConfirmed(false);
+                          }
+                        }}
+                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                       <span className="font-bold text-rose-800 text-xs flex items-center space-x-1.5">
                         <Lock className="w-3.5 h-3.5 text-rose-600" />
@@ -2500,8 +3415,9 @@ export default function AtaEditorModal({
                               </div>
                               <button
                                 type="button"
+                                disabled={isContentLocked}
                                 onClick={() => handleRemoveTeacherParticipant(idx)}
-                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition cursor-pointer"
+                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 title="Remover docente"
                               >
                                 <X className="w-4 h-4" />
@@ -2523,6 +3439,7 @@ export default function AtaEditorModal({
                           </label>
                           <select
                             aria-label="Selecionar servidor cadastrado na unidade"
+                            disabled={isContentLocked}
                             onChange={(e) => {
                               const found = staffCandidates.find((t) => t.id === e.target.value);
                               if (found) {
@@ -2531,7 +3448,7 @@ export default function AtaEditorModal({
                               }
                             }}
                             defaultValue=""
-                            className="w-full p-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                            className="w-full p-1.5 text-xs border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                           >
                             <option value="" disabled>Selecionar servidor da equipe...</option>
                             {staffCandidates.map((t) => (
@@ -2551,31 +3468,35 @@ export default function AtaEditorModal({
                       <div className="space-y-1.5">
                         <input
                           type="text"
+                          disabled={isContentLocked}
                           placeholder="Nome completo do docente..."
                           value={newTeacherName}
                           onChange={(e) => setNewTeacherName(e.target.value)}
-                          className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold text-slate-800"
+                          className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold text-slate-800 disabled:bg-slate-100 disabled:cursor-not-allowed"
                         />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                           <input
                             type="email"
+                            disabled={isContentLocked}
                             placeholder="Email @escola.pr.gov.br"
                             value={newTeacherEmail}
                             onChange={(e) => setNewTeacherEmail(e.target.value)}
-                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs text-slate-800"
+                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs text-slate-800 disabled:bg-slate-100 disabled:cursor-not-allowed"
                           />
                           <input
                             type="text"
+                            disabled={isContentLocked}
                             placeholder="Disciplina / Função (opcional)"
                             value={newTeacherSubject}
                             onChange={(e) => setNewTeacherSubject(e.target.value)}
-                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs text-slate-800"
+                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs text-slate-800 disabled:bg-slate-100 disabled:cursor-not-allowed"
                           />
                         </div>
                         <button
                           type="button"
+                          disabled={isContentLocked}
                           onClick={handleAddTeacherParticipant}
-                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs transition cursor-pointer flex items-center justify-center space-x-1.5"
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs transition cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <UserPlus className="w-3.5 h-3.5" />
                           <span>Inserir Docente</span>
@@ -2670,8 +3591,9 @@ export default function AtaEditorModal({
                               </div>
                               <button
                                 type="button"
+                                disabled={isContentLocked}
                                 onClick={() => handleToggleStudent(s)}
-                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition cursor-pointer"
+                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 title="Remover estudante"
                               >
                                 <X className="w-4 h-4" />
@@ -2768,8 +3690,12 @@ export default function AtaEditorModal({
                       return (
                         <div
                           key={s.id}
-                          onClick={() => handleToggleStudent(s)}
-                          className={`p-3.5 flex items-center justify-between cursor-pointer transition select-none ${
+                          onClick={() => {
+                            if (!isContentLocked) handleToggleStudent(s);
+                          }}
+                          className={`p-3.5 flex items-center justify-between transition select-none ${
+                            isContentLocked ? "opacity-60 cursor-not-allowed " : "cursor-pointer "
+                          }${
                             isSelected
                               ? "bg-sky-50/90 border-l-4 border-l-sky-600"
                               : "hover:bg-slate-50/80 text-slate-700"
@@ -2929,8 +3855,9 @@ export default function AtaEditorModal({
                     <div className="flex items-center space-x-2">
                       <button
                         type="button"
+                        disabled={isContentLocked}
                         onClick={toggleSpeechRecognition}
-                        className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold transition shadow-2xs cursor-pointer text-xs ${
+                        className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold transition shadow-2xs cursor-pointer text-xs disabled:opacity-40 disabled:cursor-not-allowed ${
                           isListening
                             ? "bg-rose-600 text-white animate-pulse"
                             : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -2944,90 +3871,30 @@ export default function AtaEditorModal({
                         <span>{isListening ? "Gravando voz..." : "Ditado por Voz"}</span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setShowKeyModal(!showKeyModal)}
-                        className={`inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-2xs cursor-pointer ${
+                      <span
+                        className={`inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl border text-xs font-semibold ${
                           hasServerKey
-                            ? "bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
-                            : geminiApiKey
-                            ? "bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100"
-                            : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : "bg-slate-50 border-slate-200 text-slate-600"
                         }`}
-                        title="Status e configuração da IA Google Gemini"
+                        title="Política de processamento da instituição"
                       >
-                        <Key className="w-3.5 h-3.5" />
+                        <Sparkles className="w-3.5 h-3.5" />
                         <span>
-                          {hasServerKey
-                            ? "IA Ativa (Servidor)"
-                            : geminiApiKey
-                            ? "Chave IA Ativa"
-                            : "Configurar IA"}
+                          {hasServerKey ? "Revisão assistida ativa" : "Gerador local"}
                         </span>
-                      </button>
+                      </span>
 
                       <button
                         type="button"
                         onClick={handleFormalizeWithAi}
-                        disabled={isAiLoading}
-                        className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer text-xs"
+                        disabled={isAiLoading || isContentLocked}
+                        className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-xs"
                       >
                         <span>{isAiLoading ? "Revisando..." : "Formalizar & Revisar"}</span>
                       </button>
                     </div>
                   </div>
-
-                  {showKeyModal && (
-                    <div className="p-3 bg-white border border-sky-300 rounded-xl space-y-2 shadow-sm text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-extrabold text-slate-800 flex items-center space-x-1.5">
-                          <Key className="w-3.5 h-3.5 text-sky-600" />
-                          <span>Chave da API Google Gemini</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowKeyModal(false)}
-                          className="text-slate-400 hover:text-slate-700 font-bold cursor-pointer"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      {hasServerKey ? (
-                        <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[11px] font-medium flex items-center space-x-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>
-                            A chave da API Gemini está configurada nas variáveis de ambiente do servidor (Vercel/.env) e ativa para toda a equipe. Não é necessário preencher nada abaixo.
-                          </span>
-                        </div>
-                      ) : (
-                        <p className="text-[11px] text-slate-500">
-                          Informe sua chave do Google Gemini (gratuita em <code>aistudio.google.com</code>). Ela é salva no seu navegador e utilizada para corrigir erros ortográficos, concordância e sintaxe na formalização da ata.
-                        </p>
-                      )}
-                      <div className="flex gap-2">
-                        <input
-                          type="password"
-                          value={geminiApiKey}
-                          onChange={(e) => handleSaveGeminiKey(e.target.value)}
-                          placeholder="Cole sua chave AIzaSy..."
-                          className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleTestGeminiKey}
-                          disabled={isTestingApiKey || !geminiApiKey}
-                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50 cursor-pointer"
-                        >
-                          {isTestingApiKey ? "Testando..." : "Testar"}
-                        </button>
-                      </div>
-                      {keyTestStatus && (
-                        <p className={`text-[11px] font-bold ${keyTestStatus.ok ? "text-emerald-700" : "text-rose-600"}`}>
-                          {keyTestStatus.msg}
-                        </p>
-                      )}
-                    </div>
-                  )}
 
                   {aiSuccessMsg && (
                     <div
@@ -3045,15 +3912,6 @@ export default function AtaEditorModal({
                         )}
                         <span className="font-semibold">{aiSuccessMsg.text}</span>
                       </div>
-                      {aiSuccessMsg.type === "warning" && (
-                        <button
-                          type="button"
-                          onClick={() => setShowKeyModal(true)}
-                          className="px-2 py-0.5 bg-amber-700 text-white font-bold rounded-lg text-[10px] hover:bg-amber-800 shrink-0 cursor-pointer"
-                        >
-                          Configurar Chave
-                        </button>
-                      )}
                     </div>
                   )}
 
@@ -3064,15 +3922,30 @@ export default function AtaEditorModal({
                     </div>
                   )}
 
+                  {hasServerKey && !minuteId && !existingMinute?.id && !isConfidential && (
+                    <label className="flex items-start gap-2 p-2.5 rounded-xl bg-white/90 border border-sky-200 text-[11px] text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={nonConfidentialConfirmed}
+                        onChange={(e) => setNonConfidentialConfirmed(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                      />
+                      <span>
+                        Confirmo que esta minuta nova não contém conteúdo sigiloso (necessário para revisão externa; sem marcar, usa o gerador local).
+                      </span>
+                    </label>
+                  )}
+
                   <textarea
                     rows={3}
                     value={rawNotes}
+                    disabled={isContentLocked}
                     onChange={(e) => {
                       markLocalEdit();
                       setRawNotes(e.target.value);
                     }}
                     placeholder="Anotações dos fatos para redação da ata..."
-                    className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs"
+                    className="w-full p-2.5 border border-sky-200 rounded-xl bg-white text-slate-700 placeholder:text-slate-400 focus:outline-sky-500 text-xs shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -3090,6 +3963,7 @@ export default function AtaEditorModal({
                     id="ata-editor-summary"
                     rows={9}
                     value={summary}
+                    disabled={isContentLocked}
                     aria-invalid={Boolean(finalizeError && summary.trim().length < 10)}
                     onChange={(e) => {
                       markLocalEdit();
@@ -3097,7 +3971,7 @@ export default function AtaEditorModal({
                       if (finalizeError) setFinalizeError(null);
                     }}
                     placeholder="Redija o texto oficial da ata ou formalize a partir das anotações..."
-                    className={`w-full p-3.5 border rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs ${
+                    className={`w-full p-3.5 border rounded-2xl bg-white text-slate-800 leading-relaxed font-serif text-sm focus:outline-slate-900 shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed ${
                       finalizeError && summary.trim().length < 10
                         ? "border-rose-400"
                         : "border-slate-300"
@@ -3113,12 +3987,13 @@ export default function AtaEditorModal({
                   <input
                     type="text"
                     value={agreementsSummary}
+                    disabled={isContentLocked}
                     onChange={(e) => {
                       markLocalEdit();
                       setAgreementsSummary(e.target.value);
                     }}
                     placeholder="Ex.: Responsável apresentará atestado e estudante realizará compensação pedagógica."
-                    className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 text-xs shadow-2xs"
+                    className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 text-xs shadow-2xs disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -3127,9 +4002,10 @@ export default function AtaEditorModal({
               <div className="lg:col-span-6 space-y-4 mt-4 lg:mt-0">
                 <AtaActionItemsSection
                   actionItems={actionItems}
+                  disabled={isContentLocked}
                   pendingSuggestions={pendingSuggestedActions}
                   onAcceptPendingSuggestions={() => {
-                    if (!pendingSuggestedActions) return;
+                    if (isContentLocked || !pendingSuggestedActions) return;
                     markLocalEdit();
                     setActionItems(pendingSuggestedActions);
                     setPendingSuggestedActions(null);
@@ -3138,6 +4014,7 @@ export default function AtaEditorModal({
                     setPendingSuggestedActions(null);
                   }}
                   onAdd={() => {
+                    if (isContentLocked) return;
                     markLocalEdit();
                     setActionItems((prev) => [
                       ...prev,
@@ -3145,16 +4022,191 @@ export default function AtaEditorModal({
                     ]);
                   }}
                   onUpdate={(index, patch) => {
+                    if (isContentLocked) return;
                     markLocalEdit();
                     setActionItems((prev) =>
                       prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item))
                     );
                   }}
                   onRemove={(index) => {
+                    if (isContentLocked) return;
                     markLocalEdit();
                     setActionItems((prev) => prev.filter((_, i) => i !== index));
                   }}
                 />
+
+                {/* Conferência Explícita da Revisão Persistida */}
+                <div
+                  className={`p-3.5 rounded-2xl border space-y-2.5 text-xs ${
+                    isContentLocked
+                      ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                      : isCurrentRevisionConfirmed
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-950"
+                        : "bg-amber-50/70 border-amber-200 text-amber-950"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2 font-extrabold">
+                      <ShieldCheck className="w-4 h-4 shrink-0" />
+                      <span>Conferência da Revisão {contentRevision}</span>
+                    </div>
+                    {isContentLocked ? (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                        Travada após assinatura
+                      </span>
+                    ) : isCurrentRevisionConfirmed ? (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                        Revisão {contentRevision} conferida
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                        Coleta bloqueada até conferir
+                      </span>
+                    )}
+                  </div>
+
+                  {persistedSnapshot ? (
+                    <div
+                      className="p-3 rounded-xl bg-white/95 border border-slate-200/80 space-y-2 text-[11px] text-slate-700"
+                      data-testid="review-persisted-snapshot"
+                    >
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 block">
+                          Assunto da revisão {persistedSnapshot.contentRevision}
+                        </span>
+                        <p
+                          className="font-bold text-slate-900 whitespace-pre-wrap break-words"
+                          data-testid="review-persisted-subject"
+                        >
+                          {persistedSnapshot.subject || "Sem assunto"}
+                        </p>
+                      </div>
+
+                      {persistedSnapshot.studentNames.length > 0 && (
+                        <p className="text-slate-700 whitespace-pre-wrap break-words">
+                          <strong>Estudantes gravados:</strong>{" "}
+                          {persistedSnapshot.studentNames.join(", ")}
+                        </p>
+                      )}
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 block">
+                          Texto oficial completo desta revisão
+                        </span>
+                        <div
+                          data-testid="review-persisted-summary"
+                          className="max-h-56 overflow-y-auto p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 text-slate-800 whitespace-pre-wrap break-words leading-relaxed"
+                        >
+                          {persistedSnapshot.summary && persistedSnapshot.summary.trim().length > 0
+                            ? persistedSnapshot.summary
+                            : "Nenhum texto oficial salvo ainda nesta revisão."}
+                        </div>
+                      </div>
+
+                      {persistedSnapshot.rawNotes && persistedSnapshot.rawNotes.trim().length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-sky-700 block">
+                            Notas brutas (apoio interno — não substituem o texto oficial)
+                          </span>
+                          <div
+                            data-testid="review-persisted-raw-notes"
+                            className="max-h-36 overflow-y-auto p-2.5 rounded-lg bg-sky-50/70 border border-sky-200/80 text-slate-700 whitespace-pre-wrap break-words leading-relaxed"
+                          >
+                            {persistedSnapshot.rawNotes}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 block">
+                          Combinados e prazos desta revisão
+                        </span>
+                        <div
+                          data-testid="review-persisted-agreements"
+                          className="max-h-40 overflow-y-auto p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 text-slate-800 whitespace-pre-wrap break-words leading-relaxed"
+                        >
+                          {persistedSnapshot.agreementsSummary
+                            ? persistedSnapshot.agreementsSummary
+                            : "Nenhum combinado registrado nesta revisão."}
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-slate-500">
+                        Revisão salva: {persistedSnapshot.contentRevision} •{" "}
+                        {persistedSnapshot.participantsCount} participante(s) •{" "}
+                        {persistedSnapshot.actionItemsCount} encaminhamento(s)
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px]">
+                      Nenhuma revisão salva no banco ainda. Salve o rascunho antes de conferir.
+                    </p>
+                  )}
+
+                  {hasActiveLinkOnIncompleteSummary && (
+                    <div
+                      role="alert"
+                      data-testid="incomplete-summary-active-link-warning"
+                      className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-[11px] font-semibold"
+                    >
+                      Há link de assinatura emitido para esta revisão sem Texto Oficial suficiente (mínimo de 10 caracteres). Complete o Texto Oficial, salve o rascunho, confirme a conferência da nova revisão e emita um novo link antes de coletar a assinatura.
+                    </div>
+                  )}
+
+                  {isContentLocked ? (
+                    <p className="text-[11px]">
+                      Esta revisão já recebeu assinatura registrada e está travada para edições. Participantes restantes podem assinar esta mesma revisão.
+                    </p>
+                  ) : hasPendingLocalEdit || !activePersistedId ? (
+                    <p className="text-[11px] font-semibold">
+                      {localHasMinimumSummary
+                        ? 'Existem alterações ainda não salvas. Clique em "Salvar Rascunho" para gravar uma nova revisão e depois confirme a conferência.'
+                        : `Para liberar a coleta, preencha o Texto Oficial da Ata com pelo menos 10 caracteres (faltam ${remainingSummaryChars} caractere(s)) e clique em "Salvar Rascunho".`}
+                    </p>
+                  ) : !persistedHasMinimumSummary ? (
+                    <p className="text-[11px] font-semibold text-amber-900">
+                      Faltam {remainingSummaryChars} caractere(s) no Texto Oficial da Ata salvo (mínimo de 10 caracteres sem espaços nas extremidades) para liberar a conferência e a coleta de assinaturas.
+                      {persistedSnapshot?.rawNotes?.trim()
+                        ? ' As notas brutas servem apenas como apoio: clique em "Formalizar & Revisar" ou redija o Texto Oficial e salve o rascunho.'
+                        : ""}
+                    </p>
+                  ) : !isCurrentRevisionConfirmed ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                      <p className="text-[11px]">
+                        Confirme que a íntegra acima (assunto, texto oficial e combinados) corresponde ao que será apresentado ao signatário antes de liberar QR ou assinatura em tela.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={
+                          saving ||
+                          isHydratingMinute ||
+                          Boolean(hydrationError) ||
+                          !persistedHasMinimumSummary ||
+                          displayedReviewRevision === null ||
+                          displayedReviewRevision !== contentRevision
+                        }
+                        onClick={() => {
+                          if (displayedReviewRevision === null || !persistedHasMinimumSummary) return;
+                          setFinalizeError(null);
+                          setReviewedRevision(displayedReviewRevision);
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        Confirmar conferência da Revisão {displayedReviewRevision ?? contentRevision}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] font-semibold text-emerald-800">
+                      Conferência confirmada para a Revisão {contentRevision}. Escolha o participante abaixo para assinar na tela ou emitir QR Celular.
+                    </p>
+                  )}
+
+                  {physicalProofHistory && physicalProofHistory.length > 0 && (
+                    <p className="text-[10.5px] font-semibold text-amber-900 bg-amber-100/70 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Esta ata possui {physicalProofHistory.length} via(s) física(s) anterior(es) preservada(s) em histórico (sem validade nesta revisão).
+                    </p>
+                  )}
+                </div>
 
                 {/* Participantes & Coleta de Assinatura */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
@@ -3168,8 +4220,9 @@ export default function AtaEditorModal({
                       {selectedStudentIds.length > 0 && (
                         <button
                           type="button"
+                          disabled={isContentLocked}
                           onClick={handleAddSelectedStudentsAsParticipants}
-                          className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs transition"
+                          className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center space-x-1 cursor-pointer text-xs px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs transition disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Adiciona automaticamente os estudantes selecionados para assinarem a ata"
                         >
                           <UserPlus className="w-3.5 h-3.5" />
@@ -3178,7 +4231,9 @@ export default function AtaEditorModal({
                       )}
                       <button
                         type="button"
+                        disabled={isContentLocked}
                         onClick={() => {
+                          if (isContentLocked) return;
                           markLocalEdit();
                           setParticipants((prev) => {
                             const blankRow = ensureParticipantClientKey(
@@ -3224,6 +4279,7 @@ export default function AtaEditorModal({
                       const isLockedBySignature = isParticipantSignatureLocked(p);
                       const isQrActive = isParticipantQrActive(p, qrModalInfo?.participantId);
                       const isIdentityDisabled =
+                        isContentLocked ||
                         isLockedBySignature ||
                         isQrActive ||
                         cancelingQrIndex === idx ||
@@ -3382,6 +4438,7 @@ export default function AtaEditorModal({
                               aria-label={`Papel do participante ${idx + 1}`}
                               value={p.role}
                               disabled={
+                                isContentLocked ||
                                 isLockedBySignature ||
                                 cancelingQrIndex === idx ||
                                 resettingSigIndex === idx
@@ -3517,7 +4574,9 @@ export default function AtaEditorModal({
                               aria-label={`Telefone de contato do participante ${idx + 1}`}
                               placeholder="Telefone de contato (opcional)"
                               value={p.phone || ""}
+                              disabled={isContentLocked}
                               onChange={(e) => {
+                                if (isContentLocked) return;
                                 markLocalEdit();
                                 const nextPhone = e.target.value;
                                 setParticipants((prev) =>
@@ -3528,7 +4587,7 @@ export default function AtaEditorModal({
                                   )
                                 );
                               }}
-                              className="w-full p-1.5 border border-slate-200 rounded-lg bg-slate-50/70 text-xs"
+                              className="w-full p-1.5 border border-slate-200 rounded-lg bg-slate-50/70 text-xs disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -3542,8 +4601,8 @@ export default function AtaEditorModal({
                             }`}
                           >
                             {p.signatureMode === "REFUSED"
-                              ? 'Identidade e função bloqueadas após registro de recusa. Para alterar esses dados, use "Cancelar recusa".'
-                              : 'Identidade e função bloqueadas após assinatura. Para alterar esses dados, use "Refazer assinatura".'}
+                              ? 'Identidade e função bloqueadas após registro de recusa.'
+                              : 'Assinatura vinculada a esta revisão. Para editar a ata ou refazer coletas, utilize "Reabrir para edição".'}
                           </p>
                         )}
 
@@ -3612,7 +4671,7 @@ export default function AtaEditorModal({
                               const sig = getParticipantSignatureSummary(p);
                               if (sig.hasPersistedSignature) {
                                 return (
-                                  <div className="flex items-center space-x-1.5">
+                                  <div className="flex flex-wrap items-center gap-1.5">
                                     <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
                                       <CheckCircle2 className="w-3.5 h-3.5" />
                                       <span>
@@ -3620,21 +4679,11 @@ export default function AtaEditorModal({
                                           ? `✓ @escola (${p.verifiedEmail})`
                                           : p.biometricVerified
                                           ? "✓ Assinado com Biometria"
-                                          : "✓ Assinado Digitalmente"}
+                                          : typeof p.signedRevision === "number"
+                                          ? `✓ Assinado (Rev. ${p.signedRevision})`
+                                          : "✓ Assinado sem vínculo de revisão"}
                                       </span>
                                     </span>
-                                    <button
-                                      type="button"
-                                      disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
-                                      onClick={() => void handleResetParticipantSignature(idx)}
-                                      className="p-1 text-slate-500 hover:text-slate-800 rounded cursor-pointer flex items-center space-x-1 text-[11px] font-semibold disabled:opacity-50"
-                                      title="Refazer assinatura"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5" />
-                                      <span>
-                                        {resettingSigIndex === idx ? "Removendo..." : "Refazer assinatura"}
-                                      </span>
-                                    </button>
                                   </div>
                                 );
                               }
@@ -3645,19 +4694,21 @@ export default function AtaEditorModal({
                                       <AlertCircle className="w-3.5 h-3.5" />
                                       <span>Recusou-se a assinar</span>
                                     </span>
-                                    <button
-                                      type="button"
-                                      disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
-                                      onClick={() => void handleResetParticipantSignature(idx)}
-                                      className="p-1 text-slate-500 hover:text-slate-800 rounded cursor-pointer flex items-center space-x-1 text-[11px] font-semibold disabled:opacity-50"
-                                      title="Cancelar recusa"
-                                      aria-label="Cancelar recusa"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5" />
-                                      <span>
-                                        {resettingSigIndex === idx ? "Cancelando..." : "Cancelar recusa"}
-                                      </span>
-                                    </button>
+                                    {!isContentLocked && (
+                                      <button
+                                        type="button"
+                                        disabled={resettingSigIndex !== null || cancelingQrIndex !== null}
+                                        onClick={() => void handleResetParticipantSignature(idx)}
+                                        className="p-1 text-slate-500 hover:text-slate-800 rounded cursor-pointer flex items-center space-x-1 text-[11px] font-semibold disabled:opacity-50"
+                                        title="Cancelar recusa"
+                                        aria-label="Cancelar recusa"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        <span>
+                                          {resettingSigIndex === idx ? "Cancelando..." : "Cancelar recusa"}
+                                        </span>
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               }
@@ -3665,15 +4716,36 @@ export default function AtaEditorModal({
                               <>
                                 <button
                                   type="button"
+                                  disabled={
+                                    saving ||
+                                    isHydratingMinute ||
+                                    savingScreenSigIndex !== null ||
+                                    revisionLockState.hasLegacyUnprovableProof ||
+                                    !isCurrentRevisionConfirmed ||
+                                    !p.id
+                                  }
+                                  title={
+                                    !persistedHasMinimumSummary
+                                      ? OFFICIAL_SUMMARY_REQUIRED_FOR_COLLECTION_ERROR
+                                      : !isCurrentRevisionConfirmed
+                                        ? "Salve o rascunho e confirme a conferência da revisão antes de assinar na tela"
+                                        : "Assinar presencialmente na tela do dispositivo"
+                                  }
                                   onClick={() => {
+                                    if (!isCurrentRevisionConfirmed || !p.id || !persistedSnapshot) return;
                                     setActiveRefusalIndex(null);
-                                    setActiveSignParticipantIndex(
-                                      activeSignParticipantIndex === idx ? null : idx
+                                    setFinalizeError(null);
+                                    const participantId = p.id;
+                                    const targetRev = persistedSnapshot.contentRevision;
+                                    setActiveSignTarget((prev) =>
+                                      prev?.index === idx && prev.participantId === participantId
+                                        ? null
+                                        : { index: idx, participantId, revision: targetRev }
                                     );
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                  Assinar na Tela
+                                  {savingScreenSigIndex === idx ? "Salvando..." : "Assinar na Tela"}
                                 </button>
                                 <button
                                   type="button"
@@ -3683,22 +4755,34 @@ export default function AtaEditorModal({
                                     isGeneratingQr ||
                                     isHydratingMinute ||
                                     cancelingQrIndex !== null ||
-                                    resettingSigIndex !== null
+                                    resettingSigIndex !== null ||
+                                    revisionLockState.hasLegacyUnprovableProof ||
+                                    !isCurrentRevisionConfirmed ||
+                                    !p.id
                                   }
-                                  className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                                  title={
+                                    !persistedHasMinimumSummary
+                                      ? OFFICIAL_SUMMARY_REQUIRED_FOR_COLLECTION_ERROR
+                                      : !isCurrentRevisionConfirmed
+                                        ? "Salve o rascunho e confirme a conferência da revisão antes de emitir QR Celular"
+                                        : "Gerar link e QR Code para assinatura no celular"
+                                  }
+                                  className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs transition flex items-center space-x-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   <QrCode className="w-3.5 h-3.5" />
                                   <span>QR Celular (Biometria)</span>
                                 </button>
                                 <button
                                   type="button"
+                                  disabled={isContentLocked}
                                   onClick={() => {
-                                    setActiveSignParticipantIndex(null);
+                                    if (isContentLocked) return;
+                                    setActiveSignTarget(null);
                                     setRefusalDraftReason(p.refusalReason || "");
                                     setRefusalDraftWitness(p.witnessName || "Equipe Pedagógica");
                                     setActiveRefusalIndex(activeRefusalIndex === idx ? null : idx);
                                   }}
-                                  className="px-2 py-1 rounded-lg border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs transition cursor-pointer"
+                                  className="px-2 py-1 rounded-lg border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   Recusa
                                 </button>
@@ -3776,33 +4860,33 @@ export default function AtaEditorModal({
                           </div>
                         )}
 
-                        {/* Canvas de Assinatura em tela */}
-                        {activeSignParticipantIndex === idx && !getParticipantSignatureSummary(p).hasPersistedSignature && (
+                        {/* Canvas de Assinatura em tela vinculado à revisão conferida */}
+                        {activeSignTarget?.index === idx &&
+                          Boolean(p.id && activeSignTarget.participantId === p.id) &&
+                          activeSignTarget.revision === contentRevision &&
+                          isCurrentRevisionConfirmed &&
+                          !getParticipantSignatureSummary(p).hasPersistedSignature && (
                           <div className="pt-2">
                             <SignatureCanvas
+                              key={`${p.id}-rev-${activeSignTarget.revision}`}
                               signerName={p.name || "Participante"}
-                              onSave={(dataUrl, strokeData) => {
-                                const copy = [...participants];
-                                copy[idx] = {
-                                  ...copy[idx],
-                                  signatureData: dataUrl,
-                                  biometricStrokeData: strokeData || null,
-                                  clientTimestampIso: new Date().toISOString(),
-                                  signatureMode: "SCREEN_CANVAS",
-                                  clearSignature: false,
-                                };
-                                setParticipants(copy);
-                                setActiveSignParticipantIndex(null);
+                              revisionLabel={`Revisão ${activeSignTarget.revision}`}
+                              isSubmitting={savingScreenSigIndex === idx}
+                              onCancel={() => {
+                                setActiveSignTarget(null);
+                                setFinalizeError(null);
                               }}
+                              onSave={(dataUrl, strokeData) =>
+                                handleScreenSignatureConfirm(
+                                  idx,
+                                  dataUrl,
+                                  strokeData,
+                                  activeSignTarget.revision,
+                                  activeSignTarget.participantId
+                                )
+                              }
                               onClear={() => {
-                                const copy = [...participants];
-                                copy[idx] = {
-                                  ...copy[idx],
-                                  signatureData: null,
-                                  biometricStrokeData: null,
-                                  signatureMode: "PENDING",
-                                };
-                                setParticipants(copy);
+                                setFinalizeError(null);
                               }}
                             />
                           </div>
@@ -4061,23 +5145,41 @@ export default function AtaEditorModal({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
-                <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-slate-200 bg-slate-50">
+                {!isContentLocked ? (
+                  <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-slate-200 bg-slate-50">
+                    <button
+                      type="button"
+                      onClick={handleSaveDraft}
+                      disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
+                      className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer shadow-2xs"
+                    >
+                      {saving ? "Salvando minuta..." : "Salvar Rascunho"}
+                    </button>
+                  </div>
+                ) : (minuteId || existingMinute?.id) ? (
                   <button
                     type="button"
-                    onClick={handleSaveDraft}
-                    disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
-                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs transition disabled:opacity-50 cursor-pointer shadow-2xs"
+                    disabled={isReopening || savingFinal}
+                    onClick={() => setReopenConfirmRevision(contentRevision)}
+                    className="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
                   >
-                    {saving ? "Salvando minuta..." : "Salvar Rascunho"}
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reabrir para edição</span>
                   </button>
-                </div>
+                ) : null}
 
                 <div className="flex items-center gap-2 p-1.5 rounded-2xl border border-emerald-200 bg-emerald-50/60">
                   <button
                     type="button"
                     onClick={() => handleFinalize()}
-                    disabled={saving || savingFinal || isHydratingMinute || Boolean(hydrationError)}
-                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
+                    disabled={
+                      saving ||
+                      savingFinal ||
+                      isHydratingMinute ||
+                      Boolean(hydrationError) ||
+                      revisionLockState.hasLegacyUnprovableProof
+                    }
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 cursor-pointer"
                   >
                     <FileCheck2 className="w-4 h-4 text-emerald-100" />
                     <span>{savingFinal ? "Confirmando..." : "Lavrar Ata"}</span>

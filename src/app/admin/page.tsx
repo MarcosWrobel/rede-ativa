@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { checkIsSuperAdmin } from "@/lib/roles";
+import { isSnapshotSuperAdmin, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import { prisma } from "@/lib/prisma";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
@@ -18,7 +18,12 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
-  const isSuper = checkIsSuperAdmin(session);
+  const snapshot = await resolveServerUserAuthSnapshot(session);
+  if (!snapshot || snapshot.active === false) {
+    redirect("/login?error=AccountInactive");
+  }
+
+  const isSuper = isSnapshotSuperAdmin(snapshot);
   if (!isSuper) {
     redirect("/");
   }

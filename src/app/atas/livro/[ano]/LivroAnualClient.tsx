@@ -301,9 +301,16 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
                   </td>
                   <td className="py-2">{new Date(m.attendedAt).toLocaleDateString("pt-BR")}</td>
                   <td className="py-2 font-medium">
-                    {m.students?.length > 0
-                      ? m.students.map((s: any) => s.studentNameSnapshot).join(", ")
-                      : m.participants?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR").map((p: any) => p.name).join(", ") || "Orientação Docente"}
+                    {m.restrictedConfidential ? (
+                      <span className="italic text-slate-400">Acesso restrito</span>
+                    ) : m.students?.length > 0 ? (
+                      m.students.map((s: any) => s.studentNameSnapshot).join(", ")
+                    ) : (
+                      m.participants
+                        ?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
+                        .map((p: any) => p.name)
+                        .join(", ") || "Orientação Docente"
+                    )}
                   </td>
                   <td className="py-2 text-slate-700">{m.subject}</td>
                   <td className="py-2">
@@ -333,32 +340,50 @@ export default function LivroAnualClient({ school, year, minutes }: Props) {
               </div>
 
               <p className="font-sans text-xs font-bold text-slate-800">
-                Pauta: {m.subject} • {m.students?.length > 0 ? `Estudantes: ${m.students.map((s: any) => s.studentNameSnapshot).join(", ")}` : `Docentes/Servidores: ${m.participants?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR").map((p: any) => p.name).join(", ") || "Equipe Escolar"}`}
+                Pauta: {m.subject}
+                {m.restrictedConfidential ? (
+                  ""
+                ) : (
+                  <>
+                    {" "}
+                    •{" "}
+                    {m.students?.length > 0
+                      ? `Estudantes: ${m.students.map((s: any) => s.studentNameSnapshot).join(", ")}`
+                      : `Docentes/Servidores: ${
+                          m.participants
+                            ?.filter((p: any) => p.role === "PROFESSOR" || p.role === "EQUIPE_ESCOLAR")
+                            .map((p: any) => p.name)
+                            .join(", ") || "Equipe Escolar"
+                        }`}
+                  </>
+                )}
               </p>
 
               <p className="text-sm leading-relaxed whitespace-pre-line text-justify">
                 {m.summary}
               </p>
 
-              {m.agreementsSummary && (
+              {!m.restrictedConfidential && m.agreementsSummary && (
                 <div className="font-sans text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <strong className="block font-bold">Encaminhamentos e combinados:</strong>
                   <p className="mt-0.5">{m.agreementsSummary}</p>
                 </div>
               )}
 
-              <div className="font-sans text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 pt-2">
-                <span>
-                  Lavrada por: <strong>{m.authorName}</strong>
-                  {m.finalizedAt && (
-                    <>
-                      {" "}em {new Date(m.finalizedAt).toLocaleDateString("pt-BR")} às{" "}
-                      {new Date(m.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                    </>
-                  )}
-                </span>
-                <span className="font-mono text-[9px]">Hash: {m.contentHash?.slice(0, 24)}...</span>
-              </div>
+              {!m.restrictedConfidential && (
+                <div className="font-sans text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <span>
+                    Lavrada por: <strong>{m.authorName}</strong>
+                    {m.finalizedAt && (
+                      <>
+                        {" "}em {new Date(m.finalizedAt).toLocaleDateString("pt-BR")} às{" "}
+                        {new Date(m.finalizedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                      </>
+                    )}
+                  </span>
+                  <span className="font-mono text-[9px]">Hash: {m.contentHash?.slice(0, 24)}...</span>
+                </div>
+              )}
             </div>
           ))}
         </div>

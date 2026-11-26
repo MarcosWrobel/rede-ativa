@@ -1,7 +1,4 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getCurrentSchool } from "@/lib/currentSchool";
-import { checkIsSchoolManager, checkIsAdmin } from "@/lib/roles";
+import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { prisma } from "@/lib/prisma";
 import GestaoClient from "./GestaoClient";
 
@@ -12,21 +9,10 @@ export const metadata = {
 };
 
 export default async function GestaoPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const sessionUser = session.user as any;
-  const currentSchool = await getCurrentSchool(sessionUser?.schoolId);
+  const ctx = await resolveAuthorizedPageContext({ requireManager: true });
+  const session = ctx.session;
+  const currentSchool = ctx.school;
   const schoolId = currentSchool.id;
-
-  const isAuthorized =
-    checkIsAdmin(session) || checkIsSchoolManager(session, schoolId);
-
-  if (!isAuthorized) {
-    redirect("/busca-ativa");
-  }
 
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
@@ -142,7 +128,7 @@ export default async function GestaoPage() {
       currentUser={{
         name: session.user.name || "Gestor Escolar",
         email: session.user.email || "",
-        role: sessionUser?.role || "GESTOR_ESCOLAR",
+        role: ctx.effectiveRole || "GESTOR_ESCOLAR",
       }}
     />
   );

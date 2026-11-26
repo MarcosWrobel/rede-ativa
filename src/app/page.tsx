@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { checkIsSuperAdmin, checkIsSecretariat, checkIsSchoolManager } from "@/lib/roles";
+import { buildSessionFromSnapshot, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import ImpactoClient from "./impacto/ImpactoClient";
 
 export const dynamic = "force-dynamic";
@@ -22,15 +23,20 @@ export const metadata: Metadata = {
 export default async function RootDispatcherPage() {
   const session = await auth();
 
-  // 1. Usuárias autenticadas são despachadas imediatamente para seus painéis de atuação
+  // 1. Usuárias autenticadas são validadas no banco antes do despacho para seus painéis
   if (session?.user && (session.user as any)?.active !== false) {
-    if (checkIsSuperAdmin(session)) {
+    const snapshot = await resolveServerUserAuthSnapshot(session);
+    if (!snapshot || snapshot.active === false) {
+      redirect("/login?error=AccountInactive");
+    }
+    const freshSession = buildSessionFromSnapshot(session, snapshot);
+    if (checkIsSuperAdmin(freshSession)) {
       redirect("/admin");
     }
-    if (checkIsSecretariat(session)) {
+    if (checkIsSecretariat(freshSession)) {
       redirect("/secretaria");
     }
-    if (checkIsSchoolManager(session)) {
+    if (checkIsSchoolManager(freshSession)) {
       redirect("/gestao");
     }
     redirect("/busca-ativa");

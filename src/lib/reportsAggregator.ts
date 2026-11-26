@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { getCurrentSchool } from "./currentSchool";
+import { getSchoolContextByVerifiedId, UnauthorizedSchoolError } from "./currentSchool";
 import { REPLY_CATEGORY_LABELS, type ReplyCategory } from "./whatsappProvider";
 
 export interface ReportsFilterParams {
@@ -28,7 +28,10 @@ export interface ReportsSummary {
 
 export async function getReportsSummary(params: ReportsFilterParams = {}): Promise<ReportsSummary> {
   const { segment = "TODOS", dateFrom, dateTo, schoolId } = params;
-  const currentSchool = await getCurrentSchool(schoolId);
+  const currentSchool = await getSchoolContextByVerifiedId(schoolId);
+  if (!currentSchool) {
+    throw new UnauthorizedSchoolError();
+  }
   const andFilters: any[] = [
     { student: { schoolId: currentSchool.id } }
   ];

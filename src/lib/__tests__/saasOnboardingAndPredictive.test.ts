@@ -46,7 +46,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, requireAuth, checkIsSuperAdmin, checkIsSecretariat } from "@/lib/permissions";
+import { requireSecretariat, requireAuth, checkIsSuperAdmin, checkIsSecretariat } from "@/lib/permissions";
 import { POST as createSchoolPost } from "@/app/api/schools/route";
 import { GET as secretariaMetricsGet } from "@/app/api/secretaria/metrics/route";
 
@@ -57,9 +57,10 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
 
   describe("SAAS-06: Proteção da Escola Piloto Leopoldina & Criação de Escolas", () => {
     it("deve rejeitar categoricamente tentativa de criar escola com o INEP 41042730 da escola piloto", async () => {
-      vi.mocked(requireAdmin).mockResolvedValueOnce({
+      vi.mocked(checkIsSuperAdmin).mockReturnValueOnce(true);
+      vi.mocked(requireSecretariat).mockResolvedValueOnce({
         ok: true,
-        session: { user: { role: "SUPERADMIN" } },
+        session: { user: { role: "SUPERADMIN", email: "admin@escola.pr.gov.br", active: true } },
         userId: "super-1",
         userName: "Super Admin",
         email: "admin@escola.pr.gov.br",
@@ -86,14 +87,23 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
     });
 
     it("deve permitir criar nova escola municipal com settingsJson e starter pack", async () => {
-      vi.mocked(requireAdmin).mockResolvedValueOnce({
+      vi.mocked(requireSecretariat).mockResolvedValueOnce({
         ok: true,
-        session: { user: { role: "ADMIN" } },
+        session: {
+          user: {
+            role: "GESTAO_SECRETARIA",
+            email: "gestor@tibagi.pr.gov.br",
+            active: true,
+            networks: [{ networkId: "semec-tibagi", city: "Tibagi" }],
+          },
+        },
         userId: "admin-1",
         userName: "Gestor Municipal",
         email: "gestor@tibagi.pr.gov.br",
-        role: "ADMIN",
+        role: "GESTAO_SECRETARIA",
       } as any);
+      vi.mocked(checkIsSuperAdmin).mockReturnValueOnce(true);
+      vi.mocked(checkIsSecretariat).mockReturnValueOnce(false);
 
       vi.mocked(prisma.school.findUnique).mockResolvedValueOnce(null);
       vi.mocked(prisma.educationNetwork.upsert).mockResolvedValueOnce({
@@ -143,6 +153,8 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
             settingsJson: JSON.stringify({
               district: "Sede Urbana",
               edition: "INSTITUCIONAL_ESSENCIAL",
+              aiExternalFormalizeEnabled: false,
+              aiExternalFormalizePolicyVersion: 2,
             }),
           }),
         })

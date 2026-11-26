@@ -63,10 +63,16 @@ vi.mock("@/lib/audit", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: vi.fn(async () => hoisted.state.db.schools[0]),
-  ensureDefaultSchool: vi.fn(async () => hoisted.state.db.schools[0]),
-}));
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  return {
+    ...actual,
+    getCurrentSchool: vi.fn(async () => hoisted.state.db.schools[0]),
+    getAuthorizedCurrentSchool: vi.fn(async () => hoisted.state.db.schools[0]),
+    requireAuthorizedSchool: vi.fn(async () => ({ ok: true as const, school: hoisted.state.db.schools[0] })),
+    ensureDefaultSchool: vi.fn(async () => hoisted.state.db.schools[0]),
+  };
+});
 
 vi.mock("@/lib/tenantGuard", () => ({
   assertTenantOwnership: vi.fn(() => true),
@@ -311,6 +317,7 @@ describe("Atas de Orientação Docente / Equipe Escolar (ORIENTACAO_DOCENTE)", (
       schoolId: "school-1",
       year: 2026,
       status: "DRAFT",
+      contentRevision: 1,
       category: "ORIENTACAO_DOCENTE",
       attendedAt: new Date(),
       subject: "Alinhamento Pedagógico e Plano de Aula",
@@ -328,9 +335,19 @@ describe("Atas de Orientação Docente / Equipe Escolar (ORIENTACAO_DOCENTE)", (
           expectedEmail: "mariana.lima@escola.pr.gov.br",
           signatureMode: "SCREEN_CANVAS",
           signatureData: "data:image/png;base64,assinatura_docente",
+          hasSignature: true,
+          signedRevision: 1,
         },
       ],
-      actionItems: [],
+      actionItems: [
+        {
+          id: "act-doc-1",
+          description: "Registrar notas pendentes do 3º trimestre no RCO",
+          responsible: "DOCENTE",
+          dueDate: new Date("2026-11-20T00:00:00.000Z"),
+          status: "PENDING",
+        },
+      ],
     };
     hoisted.state.db.minutes.push(draftMinute);
 
@@ -339,14 +356,8 @@ describe("Atas de Orientação Docente / Equipe Escolar (ORIENTACAO_DOCENTE)", (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         signingPin: "8391",
+        expectedRevision: 1,
         summary: draftMinute.summary,
-        actionItems: [
-          {
-            description: "Registrar notas pendentes do 3º trimestre no RCO",
-            responsible: "DOCENTE",
-            dueDate: "2026-11-20",
-          },
-        ],
       }),
     });
 
@@ -529,6 +540,7 @@ describe("Atas de Orientação Docente / Equipe Escolar (ORIENTACAO_DOCENTE)", (
       body: JSON.stringify({
         participantId: teacherPart.id,
         expiresInMinutes: 20,
+        expectedRevision: 1,
       }),
     });
 

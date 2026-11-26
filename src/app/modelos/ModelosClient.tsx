@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { 
   FileText, 
   Plus, 
@@ -19,11 +19,9 @@ import {
   Loader2,
   ExternalLink,
   ChevronDown,
-  ChevronUp,
-  Key
+  ChevronUp
 } from "lucide-react";
 import { formatMessage, SchoolShift } from "@/lib/messageFormatter";
-import { getStoredPreference, setStoredPreference } from "@/lib/storageKeys";
 
 interface Props {
   initialTemplates: any[];
@@ -51,60 +49,6 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiSuccess, setAiSuccess] = useState("");
-  const [missingApiKey, setMissingApiKey] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState("");
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [isTestingKey, setIsTestingKey] = useState(false);
-  const [testKeyResult, setTestKeyResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  useEffect(() => {
-    try {
-      const saved = getStoredPreference("gemini_api_key");
-      if (saved) setCustomApiKey(saved);
-    } catch (e) {}
-  }, []);
-
-  const handleSaveCustomKey = (key: string) => {
-    setCustomApiKey(key);
-    try {
-      setStoredPreference("gemini_api_key", key.trim());
-    } catch (e) {}
-  };
-
-  const handleTestKey = async () => {
-    setIsTestingKey(true);
-    setTestKeyResult(null);
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (customApiKey && customApiKey.trim().length > 10) {
-        headers["x-gemini-key"] = customApiKey.trim();
-      }
-      const res = await fetch("/api/ai/test-key", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ apiKey: customApiKey }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setTestKeyResult({
-          ok: true,
-          message: `✨ ${data.message} Modelo: ${data.respondingModel} respondeu em ${data.durationMs}ms (Origem: ${data.source.replace(/_/g, " ")}, chave ${data.maskedKey})`,
-        });
-      } else {
-        setTestKeyResult({
-          ok: false,
-          message: data.error || "Falha ao validar chave com o Google.",
-        });
-      }
-    } catch (err: any) {
-      setTestKeyResult({
-        ok: false,
-        message: err.message || "Erro ao conectar com servidor de teste.",
-      });
-    } finally {
-      setIsTestingKey(false);
-    }
-  };
 
   const openCreateModal = () => {
     setEditingTemplate(null);
@@ -117,7 +61,6 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setAiPrompt("");
     setAiError("");
     setAiSuccess("");
-    setMissingApiKey(false);
     setIsAiCardOpen(true);
     setLastFocusedField("prefix");
     setIsModalOpen(true);
@@ -134,7 +77,6 @@ export default function ModelosClient({ initialTemplates }: Props) {
     setAiPrompt("");
     setAiError("");
     setAiSuccess("");
-    setMissingApiKey(false);
     setIsAiCardOpen(false);
     setLastFocusedField("prefix");
     setIsModalOpen(true);
@@ -151,23 +93,19 @@ export default function ModelosClient({ initialTemplates }: Props) {
   const handleGenerateWithAI = async (promptToUse?: string) => {
     const text = (promptToUse || aiPrompt).trim();
     if (!text) {
-      setAiError("Por favor, digite uma descrição para a IA gerar o modelo.");
+      setAiError("Por favor, digite uma descrição para gerar a sugestão de modelo.");
       return;
     }
 
     setIsGeneratingAI(true);
     setAiError("");
     setAiSuccess("");
-    setMissingApiKey(false);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s timeout max
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (customApiKey && customApiKey.trim().length > 10) {
-        headers["x-gemini-key"] = customApiKey.trim();
-      }
 
       const res = await fetch("/api/ai/generate-template", {
         method: "POST",
@@ -187,11 +125,7 @@ export default function ModelosClient({ initialTemplates }: Props) {
       }
 
       if (!res.ok) {
-        if (data.missingApiKey) {
-          setMissingApiKey(true);
-          setShowKeyInput(true);
-        }
-        throw new Error(data.error || "Erro ao gerar modelo com IA");
+        throw new Error(data.error || "Erro ao gerar modelo de mensagem");
       }
 
       if (data.template) {
@@ -199,13 +133,13 @@ export default function ModelosClient({ initialTemplates }: Props) {
         setFormPrefix(data.template.prefixText);
         setFormSuffix(data.template.suffixText);
         setFormIsAbsence(Boolean(data.template.isAbsenceRelated));
-        setAiSuccess("✨ Modelo preenchido automaticamente com IA! Revise os campos abaixo.");
+        setAiSuccess("Sugestão de modelo preenchida localmente. Revise os campos abaixo.");
       }
     } catch (err: any) {
       if (err.name === "AbortError") {
-        setAiError("A requisição demorou para responder. Verifique sua chave ou tente novamente.");
+        setAiError("A solicitação excedeu o tempo limite. Tente novamente.");
       } else {
-        setAiError(err.message || "Erro de conexão com o serviço de IA.");
+        setAiError(err.message || "Erro de conexão ao gerar sugestão de modelo.");
       }
     } finally {
       setIsGeneratingAI(false);
@@ -466,72 +400,6 @@ export default function ModelosClient({ initialTemplates }: Props) {
                             </button>
                           ))}
                         </div>
-
-                        {/* Chave de API opcional */}
-                        <div className="pt-1 border-t border-indigo-100 flex items-center justify-between text-[10px]">
-                          <button
-                            type="button"
-                            onClick={() => setShowKeyInput(!showKeyInput)}
-                            className="text-indigo-700 hover:text-indigo-900 font-bold inline-flex items-center space-x-1"
-                          >
-                            <Key className="w-3 h-3" />
-                            <span>{showKeyInput ? "Ocultar configuração da Chave" : "Configurar / Colar Chave Gemini"}</span>
-                          </button>
-                          {customApiKey && (
-                            <span className="text-emerald-700 font-semibold flex items-center">
-                              <Check className="w-3 h-3 mr-0.5 text-emerald-600" /> Chave ativa
-                            </span>
-                          )}
-                        </div>
-
-                        {showKeyInput && (
-                          <div className="p-2 bg-white border border-indigo-200 rounded-lg space-y-1.5">
-                            <div className="flex gap-1.5">
-                              <input
-                                type="password"
-                                value={customApiKey}
-                                onChange={(e) => handleSaveCustomKey(e.target.value)}
-                                placeholder="Cole sua chave AIzaSy..."
-                                className="flex-1 p-1.5 border border-slate-300 rounded text-xs font-mono"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSaveCustomKey(customApiKey)}
-                                className="px-2.5 py-1 bg-slate-800 text-white rounded text-[10px] font-bold hover:bg-slate-900"
-                              >
-                                Salvar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleTestKey}
-                                disabled={isTestingKey}
-                                className="px-2.5 py-1 bg-indigo-600 text-white rounded text-[10px] font-bold hover:bg-indigo-700 flex items-center space-x-1 disabled:opacity-50"
-                              >
-                                {isTestingKey ? (
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <span>Testar</span>
-                                )}
-                              </button>
-                            </div>
-                            {testKeyResult && (
-                              <div
-                                className={`p-1.5 rounded text-[11px] border flex items-start space-x-1.5 ${
-                                  testKeyResult.ok
-                                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                    : "bg-rose-50 border-rose-200 text-rose-800"
-                                }`}
-                              >
-                                {testKeyResult.ok ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                                ) : (
-                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5" />
-                                )}
-                                <span className="leading-snug">{testKeyResult.message}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
 
                         {/* Feedback Messages */}
                         {aiSuccess && (
