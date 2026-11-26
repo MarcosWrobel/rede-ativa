@@ -3346,6 +3346,22 @@ describe.skipIf(!SHOULD_RUN)(
             schoolId: "school-essencial",
             active: true,
           },
+          {
+            id: "sync-professor-a",
+            email: "prof.sync@redeativa.local",
+            name: "Professor Sync Alpha",
+            role: "PROFESSOR",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "sync-inactive-a",
+            email: "inativo.sync@redeativa.local",
+            name: "Inativo Sync Alpha",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: false,
+          },
         ],
       });
       await prisma.userSchool.createMany({
@@ -3361,6 +3377,20 @@ describe.skipIf(!SHOULD_RUN)(
             id: "us-sync-ess",
             userId: "sync-essencial-user",
             schoolId: "school-essencial",
+            role: "PEDAGOGA",
+            active: true,
+          },
+          {
+            id: "us-sync-prof-a",
+            userId: "sync-professor-a",
+            schoolId: "school-alpha",
+            role: "PROFESSOR",
+            active: true,
+          },
+          {
+            id: "us-sync-inact-a",
+            userId: "sync-inactive-a",
+            schoolId: "school-alpha",
             role: "PEDAGOGA",
             active: true,
           },
@@ -3439,6 +3469,50 @@ describe.skipIf(!SHOULD_RUN)(
           })
         );
         expect(rEssencial.status).toBe(403);
+
+        // Sessão com vínculo ativo em school-alpha, mas papel PROFESSOR sem permissão -> 403 e zero escritas
+        withTenantSpy.mockClear();
+        testAuthState.pendingSessionUser = {
+          id: "sync-professor-a",
+          email: "prof.sync@redeativa.local",
+          active: true,
+        };
+        const rProfFreq = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alunos: [{ nome: "Joao Pedro Sync", mediaGeral: "70%" }] }),
+          })
+        );
+        expect(rProfFreq.status).toBe(403);
+        const rProfSerp = await serpSyncHandler(
+          new Request("http://127.0.0.1/api/serp/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fichas: [{ nome: "Joao Pedro Sync", status: "EM_ACOMPANHAMENTO" }] }),
+          })
+        );
+        expect(rProfSerp.status).toBe(403);
+        expect(withTenantSpy).not.toHaveBeenCalled();
+
+        // Precedência: sessão inativa com token válido simultâneo -> 403 (não faz fallback para token)
+        testAuthState.pendingSessionUser = {
+          id: "sync-inactive-a",
+          email: "inativo.sync@redeativa.local",
+          active: false,
+        };
+        const rInactiveWithToken = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenAlpha}`,
+            },
+            body: JSON.stringify({ alunos: [{ nome: "Joao Pedro Sync", mediaGeral: "70%" }] }),
+          })
+        );
+        expect(rInactiveWithToken.status).toBe(403);
+        expect(withTenantSpy).not.toHaveBeenCalled();
 
         // 2. Token por escola com schoolId conflitante na query -> opera exclusivamente em school-alpha
         //    Inclui CGM de school-beta ("999000111") e de estudante inativo ("888000999") -> ambos bloqueados sem erro 500
@@ -3709,9 +3783,10 @@ describe.skipIf(!SHOULD_RUN)(
         withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
           return defaultWithTenant(client, schoolId, async (tx) => {
             const origExec = tx.$executeRaw.bind(tx);
+            const origQuery = tx.$queryRaw.bind(tx);
             const wrappedTx = new Proxy(tx, {
               get(target, prop, receiver) {
-                if (prop === "$executeRaw") {
+                if (prop === "$executeRaw" || prop === "$queryRaw") {
                   return async (strings: TemplateStringsArray, ...values: any[]) => {
                     const sqlText = strings.join(" ");
                     if (sqlText.includes('"LowAttendanceRecord"')) {
@@ -3720,7 +3795,9 @@ describe.skipIf(!SHOULD_RUN)(
                         throw new Error("Simulated batch 2 failure");
                       }
                     }
-                    return (origExec as any)(strings, ...values);
+                    return prop === "$queryRaw"
+                      ? (origQuery as any)(strings, ...values)
+                      : (origExec as any)(strings, ...values);
                   };
                 }
                 return Reflect.get(target, prop, receiver);
@@ -3752,6 +3829,164 @@ describe.skipIf(!SHOULD_RUN)(
           await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-lote-251" } })
         ).toBeNull();
         expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 6. Contagens baseadas nas linhas efetivamente persistidas quando estudante perde elegibilidade antes da escrita
+        await prisma.student.createMany({
+          data: [
+            {
+              id: "stu-alpha-keep-count",
+              name: "Elegivel Mantido",
+              cgm: "440000111",
+              phone: "41999994411",
+              schoolId: "school-alpha",
+              classGroupId: "cg-alpha-sync",
+              active: true,
+              age: 14,
+            },
+            {
+              id: "stu-alpha-drop-count",
+              name: "Perde Elegibilidade",
+              cgm: "440000222",
+              phone: "41999994422",
+              schoolId: "school-alpha",
+              classGroupId: "cg-alpha-sync",
+              active: true,
+              age: 14,
+            },
+          ],
+        });
+
+        // 6.1 Power BI sync: stu-alpha-drop-count (40%, idade 18) é movido para school-beta após a leitura inicial
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+        const baseTenantImpl = withTenantSpy.getMockImplementation()!;
+        let movedDropFreq = false;
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return baseTenantImpl(client, schoolId, async (tx) => {
+            const res = await fn(tx);
+            if (!movedDropFreq) {
+              movedDropFreq = true;
+              await client.student.update({
+                where: { id: "stu-alpha-drop-count" },
+                data: { schoolId: "school-beta", classGroupId: "cg-beta-sync" },
+              });
+            }
+            return res;
+          });
+        });
+
+        vi.mocked(logAudit).mockClear();
+        const rCountFreq = await frequenciaSyncHandler(
+          new Request("http://127.0.0.1/api/frequencia/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              alunos: [
+                { cgm: "440000111", nome: "Elegivel Mantido", mediaGeral: "82%", idade: 16 },
+                { cgm: "440000222", nome: "Perde Elegibilidade", mediaGeral: "40%", idade: 18 },
+              ],
+            }),
+          })
+        );
+        expect(rCountFreq.status).toBe(200);
+        const countFreqJson = await rCountFreq.json();
+        expect(countFreqJson).toMatchObject({
+          sucesso: true,
+          totalRecebido: 2,
+          atualizados: 1,
+          emRiscoCount: 0,
+          estudantesEnriquecidos: 1,
+        });
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "UPDATE_LOW_ATTENDANCE",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              atualizados: 1,
+              emRiscoCount: 0,
+              estudantesEnriquecidos: 1,
+            }),
+          })
+        );
+        expect(
+          await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-alpha-drop-count" } })
+        ).toBeNull();
+        expect((await prisma.student.findUnique({ where: { id: "stu-alpha-drop-count" } }))?.age).toBe(14);
+        expect((await prisma.student.findUnique({ where: { id: "stu-alpha-keep-count" } }))?.age).toBe(16);
+
+        // 6.2 SERP sync: move outro estudante para school-beta antes da escrita -> conselhoTutelarCount e atualizados refletem apenas persistidos
+        await prisma.student.update({
+          where: { id: "stu-alpha-drop-count" },
+          data: { schoolId: "school-alpha", classGroupId: "cg-alpha-sync" },
+        });
+        let movedDropSerp = false;
+        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
+          return baseTenantImpl(client, schoolId, async (tx) => {
+            const res = await fn(tx);
+            if (!movedDropSerp) {
+              movedDropSerp = true;
+              await client.student.update({
+                where: { id: "stu-alpha-drop-count" },
+                data: { schoolId: "school-beta", classGroupId: "cg-beta-sync" },
+              });
+            }
+            return res;
+          });
+        });
+
+        vi.mocked(logAudit).mockClear();
+        const rCountSerp = await serpSyncHandler(
+          new Request("http://127.0.0.1/api/serp/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fichas: [
+                {
+                  cgm: "440000111",
+                  nome: "Elegivel Mantido",
+                  numeroFicha: "SERP-KEEP",
+                  status: "EM_ACOMPANHAMENTO",
+                },
+                {
+                  cgm: "440000222",
+                  nome: "Perde Elegibilidade",
+                  numeroFicha: "SERP-DROP",
+                  status: "CONSELHO_TUTELAR",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rCountSerp.status).toBe(200);
+        const countSerpJson = await rCountSerp.json();
+        expect(countSerpJson).toMatchObject({
+          sucesso: true,
+          totalRecebido: 2,
+          atualizados: 1,
+          conselhoTutelarCount: 0,
+        });
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "UPDATE_LOW_ATTENDANCE",
+            entityType: "SerpSync",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              atualizados: 1,
+              conselhoTutelarCount: 0,
+            }),
+          })
+        );
+        expect(
+          await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-alpha-drop-count" } })
+        ).toBeNull();
       } finally {
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = null;

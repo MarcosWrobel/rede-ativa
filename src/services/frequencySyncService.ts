@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import { resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
+import {
+  resolveEffectiveRoleForSchool,
+  resolveServerUserAuthSnapshot,
+} from "@/lib/serverAuthContext";
+import { isAllowedMessagingRole } from "@/lib/roles";
 import type { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -61,7 +65,17 @@ export async function resolveExtensionOrSessionSyncContext(options: {
   let targetSchoolId: string | undefined = undefined;
   let sessionSnapshot: Awaited<ReturnType<typeof resolveServerUserAuthSnapshot>> = null;
 
-  if (session?.user?.email && session.user.active !== false) {
+  if (session?.user?.email) {
+    if (session.user.active === false) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Conta desativada. Contate a administração da escola." },
+          { status: 403, headers: corsHeaders }
+        ),
+      };
+    }
+
     sessionSnapshot = await resolveServerUserAuthSnapshot(session);
     if (!sessionSnapshot || sessionSnapshot.active === false) {
       return {
@@ -136,6 +150,21 @@ export async function resolveExtensionOrSessionSyncContext(options: {
         { status: 403, headers: corsHeaders }
       ),
     };
+  }
+
+  if (authMethod === "SESSION") {
+    const effectiveRole = sessionSnapshot
+      ? resolveEffectiveRoleForSchool(sessionSnapshot, currentSchool)
+      : session?.user?.role || "";
+    if (!isAllowedMessagingRole(effectiveRole)) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Perfil sem permissão para sincronizar dados nesta instituição." },
+          { status: 403, headers: corsHeaders }
+        ),
+      };
+    }
   }
 
   if (currentSchool.edition === "INSTITUCIONAL_ESSENCIAL") {
@@ -440,6 +469,8 @@ export async function executePowerBiFrequencySync(options: {
     : "Importado do Power BI (PRESENTE NA ESCOLA)";
   const referenceWeek = getIsoWeekKey(new Date());
 
+  const persistedLowAttendanceRows: Array<{ studentId: string; attendancePercent: number }> = [];
+
   for (let i = 0; i < rowsToUpsert.length; i += BATCH_SIZE) {
     const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
     const values = chunk.map(
@@ -447,7 +478,42 @@ export async function executePowerBiFrequencySync(options: {
         Prisma.sql`(${r.id}, ${r.studentId}, CAST(${r.percent} AS DOUBLE PRECISION), ${r.detail}, ${defaultAction})`
     );
 
-    await withTenantContext(prisma, currentSchool.id, async (tx) => {
+    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      if (typeof (tx as any).$queryRaw === "function") {
+        return (tx as any).$queryRaw`
+          INSERT INTO "LowAttendanceRecord" (
+            "id",
+            "studentId",
+            "attendancePercent",
+            "enrollmentDetail",
+            "actionsTaken",
+            "updatedAt"
+          )
+          SELECT
+            v."id",
+            v."studentId",
+            v."attendancePercent",
+            v."enrollmentDetail",
+            v."actionsTaken",
+            NOW()
+          FROM (VALUES ${Prisma.join(values)}) AS v(
+            "id",
+            "studentId",
+            "attendancePercent",
+            "enrollmentDetail",
+            "actionsTaken"
+          )
+          INNER JOIN "Student" AS s
+            ON s."id" = v."studentId"
+           AND s."schoolId" = ${currentSchool.id}
+          ON CONFLICT ("studentId") DO UPDATE SET
+            "attendancePercent" = EXCLUDED."attendancePercent",
+            "enrollmentDetail" = EXCLUDED."enrollmentDetail",
+            "updatedAt" = NOW()
+          RETURNING "studentId", "attendancePercent"
+        ` as Promise<Array<{ studentId: string; attendancePercent: number }>>;
+      }
+
       await tx.$executeRaw`
         INSERT INTO "LowAttendanceRecord" (
           "id",
@@ -479,7 +545,9 @@ export async function executePowerBiFrequencySync(options: {
           "enrollmentDetail" = EXCLUDED."enrollmentDetail",
           "updatedAt" = NOW()
       `;
+      return chunk.map((r) => ({ studentId: r.studentId, attendancePercent: r.percent }));
     });
+    persistedLowAttendanceRows.push(...chunkPersisted);
 
     try {
       const snapshotValues = chunk.map(
@@ -538,7 +606,22 @@ export async function executePowerBiFrequencySync(options: {
         ([id, data]) =>
           Prisma.sql`(${id}, CAST(${data.isExchangeStudent ?? null} AS BOOLEAN), CAST(${data.isSpecialNeeds ?? null} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
       );
-      await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const updatedCount = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+        if (typeof (tx as any).$queryRaw === "function") {
+          const rows = (await (tx as any).$queryRaw`
+            UPDATE "Student" AS s
+            SET
+              "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
+              "isSpecialNeeds" = COALESCE(v."setSpecial", s."isSpecialNeeds"),
+              "age" = COALESCE(v."ageVal", s."age"),
+              "updatedAt" = NOW()
+            FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
+            WHERE s."id" = v."id"
+              AND s."schoolId" = ${currentSchool.id}
+            RETURNING s."id"
+          `) as Array<{ id: string }>;
+          return rows.length;
+        }
         await tx.$executeRaw`
           UPDATE "Student" AS s
           SET
@@ -550,9 +633,10 @@ export async function executePowerBiFrequencySync(options: {
           WHERE s."id" = v."id"
             AND s."schoolId" = ${currentSchool.id}
         `;
+        return slice.length;
       });
+      estudantesEnriquecidos += updatedCount;
     }
-    estudantesEnriquecidos = studentUpdateEntries.length;
   }
 
   let amparosCriados = 0;
@@ -666,8 +750,10 @@ export async function executePowerBiFrequencySync(options: {
     amparosAtualizados = amparoResult.updatedCount;
   }
 
-  const atualizados = rowsToUpsert.length;
-  const emRiscoCount = rowsToUpsert.filter((r) => r.percent < 75).length;
+  const atualizados = persistedLowAttendanceRows.length;
+  const emRiscoCount = persistedLowAttendanceRows.filter(
+    (r) => Number(r.attendancePercent) < 75
+  ).length;
 
   await logAudit({
     action: "UPDATE_LOW_ATTENDANCE",
@@ -815,6 +901,8 @@ export async function executeSerpProtectionSync(options: {
   const BATCH_SIZE = 250;
   const defaultEnrollment = "Importado do SERP (Rede de Proteção)";
 
+  const persistedSerpRows: Array<{ studentId: string; serpStatus: string | null }> = [];
+
   for (let i = 0; i < rowsToUpsert.length; i += BATCH_SIZE) {
     const chunk = rowsToUpsert.slice(i, i + BATCH_SIZE);
     const values = chunk.map(
@@ -832,7 +920,57 @@ export async function executeSerpProtectionSync(options: {
         )`
     );
 
-    await withTenantContext(prisma, currentSchool.id, async (tx) => {
+    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      if (typeof (tx as any).$queryRaw === "function") {
+        return (tx as any).$queryRaw`
+          INSERT INTO "LowAttendanceRecord" (
+            "id",
+            "studentId",
+            "attendancePercent",
+            "enrollmentDetail",
+            "serpProtocol",
+            "serpStatus",
+            "serpOpenedAt",
+            "serpDetails",
+            "actionsTaken",
+            "updatedAt"
+          )
+          SELECT
+            v."id",
+            v."studentId",
+            v."attendancePercent",
+            v."enrollmentDetail",
+            v."serpProtocol",
+            v."serpStatus",
+            v."serpOpenedAt",
+            v."serpDetails",
+            v."actionsTaken",
+            NOW()
+          FROM (VALUES ${Prisma.join(values)}) AS v(
+            "id",
+            "studentId",
+            "attendancePercent",
+            "enrollmentDetail",
+            "serpProtocol",
+            "serpStatus",
+            "serpOpenedAt",
+            "serpDetails",
+            "actionsTaken"
+          )
+          INNER JOIN "Student" AS s
+            ON s."id" = v."studentId"
+           AND s."schoolId" = ${currentSchool.id}
+          ON CONFLICT ("studentId") DO UPDATE SET
+            "serpProtocol" = EXCLUDED."serpProtocol",
+            "serpStatus" = EXCLUDED."serpStatus",
+            "serpOpenedAt" = EXCLUDED."serpOpenedAt",
+            "serpDetails" = EXCLUDED."serpDetails",
+            "actionsTaken" = EXCLUDED."actionsTaken",
+            "updatedAt" = NOW()
+          RETURNING "studentId", "serpStatus"
+        ` as Promise<Array<{ studentId: string; serpStatus: string | null }>>;
+      }
+
       await tx.$executeRaw`
         INSERT INTO "LowAttendanceRecord" (
           "id",
@@ -879,12 +1017,14 @@ export async function executeSerpProtectionSync(options: {
           "actionsTaken" = EXCLUDED."actionsTaken",
           "updatedAt" = NOW()
       `;
+      return chunk.map((r) => ({ studentId: r.studentId, serpStatus: r.statusEnum }));
     });
+    persistedSerpRows.push(...chunkPersisted);
   }
 
-  const atualizados = rowsToUpsert.length;
-  const conselhoTutelarCount = rowsToUpsert.filter(
-    (r) => r.statusEnum === "CONSELHO_TUTELAR"
+  const atualizados = persistedSerpRows.length;
+  const conselhoTutelarCount = persistedSerpRows.filter(
+    (r) => r.serpStatus === "CONSELHO_TUTELAR"
   ).length;
 
   await logAudit({

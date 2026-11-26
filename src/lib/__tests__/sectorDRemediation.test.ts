@@ -112,8 +112,8 @@ vi.mock("@/lib/safePhase3Queries", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaObj: any = {
     school: {
       findUnique: vi.fn(async () => hoisted.schoolRecord),
       findFirst: vi.fn(async () => hoisted.schoolRecord),
@@ -129,9 +129,12 @@ vi.mock("@/lib/prisma", () => ({
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     $executeRaw: hoisted.executeRaw,
-    $transaction: vi.fn(async (ops: any[]) => Promise.all(ops)),
-  },
-}));
+  };
+  prismaObj.$transaction = vi.fn(async (arg: any) =>
+    typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
+  );
+  return { prisma: prismaObj };
+});
 
 import { createAiPseudonymizer } from "@/lib/aiPseudonymizer";
 import { getCurrentSchool, invalidateSchoolCache } from "@/lib/currentSchool";
