@@ -51,12 +51,21 @@ export async function POST(req: Request) {
 
     // Identificadores internos explícitos opcionais de MessageLog (logId / messageLogId).
     // Campos de evento/mensagem do gateway (ex.: messageId) NÃO representam MessageLog.id.
-    const explicitLogId =
+    const normalizedLogId =
       typeof payload?.logId === "string" && payload.logId.trim()
         ? payload.logId.trim()
-        : typeof payload?.messageLogId === "string" && payload.messageLogId.trim()
+        : null;
+    const normalizedMessageLogId =
+      typeof payload?.messageLogId === "string" && payload.messageLogId.trim()
         ? payload.messageLogId.trim()
         : null;
+    if (normalizedLogId && normalizedMessageLogId && normalizedLogId !== normalizedMessageLogId) {
+      return NextResponse.json({
+        ignored: true,
+        reason: "Identificadores internos logId e messageLogId conflitantes.",
+      });
+    }
+    const explicitLogId = normalizedLogId || normalizedMessageLogId;
     const explicitSchoolId =
       typeof payload?.schoolId === "string" && payload.schoolId.trim()
         ? payload.schoolId.trim()
@@ -268,6 +277,13 @@ export async function POST(req: Request) {
         return {
           kind: "ignored" as const,
           reason: "Identificador explícito incompatível com os dados de correlação.",
+        };
+      }
+
+      if (!explicitLogId && new Date(targetLog.sentAt).getTime() < cutoff.getTime()) {
+        return {
+          kind: "ignored" as const,
+          reason: "Nenhum envio recente vinculado ao número",
         };
       }
 

@@ -2983,6 +2983,209 @@ describe.skipIf(!SHOULD_RUN)(
         expect(betaAfterRollback?.deliveryStatus).toBe("SENT");
         expect(betaAfterRollback?.contentHash).toBe("hash-shared-b-11");
         expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 9. logId e messageLogId conflitantes -> ignorado antes de consultar qualquer MessageLog
+        vi.mocked(logAudit).mockClear();
+        const findUniqueSpy = vi.spyOn(prisma.messageLog, "findUnique");
+        const findManySpy = vi.spyOn(prisma.messageLog, "findMany");
+        const updateSpy = vi.spyOn(prisma.messageLog, "update");
+        withTenantSpy.mockClear();
+
+        const rConflictIds = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              logId: "wh-alpha-single",
+              messageLogId: "wh-alpha-legacy",
+              phone: "41977771111",
+              text: "Não deve consultar nem atualizar.",
+            }),
+          })
+        );
+        expect(rConflictIds.status).toBe(200);
+        expect(await rConflictIds.json()).toMatchObject({
+          ignored: true,
+          reason: "Identificadores internos logId e messageLogId conflitantes.",
+        });
+        expect(findUniqueSpy).not.toHaveBeenCalled();
+        expect(findManySpy).not.toHaveBeenCalled();
+        expect(updateSpy).not.toHaveBeenCalled();
+        expect(withTenantSpy).not.toHaveBeenCalled();
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+        findUniqueSpy.mockRestore();
+        findManySpy.mockRestore();
+        updateSpy.mockRestore();
+
+        // 10. logId e messageLogId iguais + messageLogId individualmente
+        const rMatchingIds = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              event: "status",
+              deliveryStatus: "READ",
+              logId: "wh-alpha-single",
+              messageLogId: "  wh-alpha-single  ",
+              phone: "41977771111",
+            }),
+          })
+        );
+        expect(rMatchingIds.status).toBe(200);
+        expect(await rMatchingIds.json()).toMatchObject({
+          success: true,
+          updatedLogId: "wh-alpha-single",
+          deliveryStatus: "READ",
+        });
+
+        const rMessageLogIdOnly = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              event: "status",
+              deliveryStatus: "DELIVERED",
+              messageLogId: "wh-alpha-legacy",
+              phone: "41977771111",
+            }),
+          })
+        );
+        expect(rMessageLogIdOnly.status).toBe(200);
+        expect(await rMessageLogIdOnly.json()).toMatchObject({
+          success: true,
+          updatedLogId: "wh-alpha-legacy",
+          deliveryStatus: "DELIVERED",
+        });
+
+        // 11. Limite exato de 14 dias na busca por telefone continua elegível
+        const fixedNowMs = Date.parse("2026-11-26T17:00:00.000Z");
+        const exactCutoffMs = fixedNowMs - 14 * 24 * 60 * 60 * 1000;
+        const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(fixedNowMs);
+        try {
+          await prisma.student.create({
+            data: {
+              id: "stu-alpha-window",
+              name: "Carlos Janela",
+              cgm: "300100999",
+              phone: "41955551111",
+              schoolId: "school-alpha",
+              classGroupId: "cg-alpha-wh",
+            },
+          });
+          await prisma.messageLog.create({
+            data: {
+              id: "wh-window-exact",
+              schoolId: "school-alpha",
+              studentId: "stu-alpha-window",
+              reasonTitle: "Limite 14 dias",
+              messageContent: "Msg limite",
+              phoneUsed: "41955551111",
+              sentByName: "Equipe A",
+              sentAt: new Date(exactCutoffMs),
+              deliveryStatus: "SENT",
+              contentHash: "hash-window-exact",
+            },
+          });
+
+          const rExactBoundary = await webhookWhatsappHandler(
+            new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer webhook-realpg-secret",
+              },
+              body: JSON.stringify({
+                event: "status",
+                deliveryStatus: "DELIVERED",
+                phone: "41955551111",
+              }),
+            })
+          );
+          expect(rExactBoundary.status).toBe(200);
+          expect(await rExactBoundary.json()).toMatchObject({
+            success: true,
+            updatedLogId: "wh-window-exact",
+            deliveryStatus: "DELIVERED",
+          });
+
+          // 12. Mudança determinística de sentAt fora da janela entre seleção por telefone e releitura após o lock
+          await prisma.messageLog.create({
+            data: {
+              id: "wh-window-race",
+              schoolId: "school-alpha",
+              studentId: "stu-alpha-window",
+              reasonTitle: "Corrida Janela 14 dias",
+              messageContent: "Msg corrida",
+              phoneUsed: "41955551111",
+              sentByName: "Equipe A",
+              sentAt: new Date(fixedNowMs - 1000),
+              deliveryStatus: "SENT",
+              contentHash: "hash-window-race",
+            },
+          });
+
+          vi.mocked(logAudit).mockClear();
+          withTenantSpy.mockImplementationOnce(async (client, schoolId, fn) => {
+            return client.$transaction(async (tx) => {
+              await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+              const originalQueryRaw = tx.$queryRaw.bind(tx);
+              let raced = false;
+              const patchedTx = new Proxy(tx, {
+                get(target, prop, receiver) {
+                  if (prop === "$queryRaw") {
+                    return async (...args: any[]) => {
+                      if (!raced) {
+                        raced = true;
+                        await client.messageLog.update({
+                          where: { id: "wh-window-race" },
+                          data: { sentAt: new Date(exactCutoffMs - 1000) },
+                        });
+                      }
+                      return (originalQueryRaw as any)(...args);
+                    };
+                  }
+                  return Reflect.get(target, prop, receiver);
+                },
+              });
+              return fn(patchedTx as any);
+            });
+          });
+
+          const rWindowRace = await webhookWhatsappHandler(
+            new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer webhook-realpg-secret",
+              },
+              body: JSON.stringify({
+                phone: "41955551111",
+                text: "Retorno que chegou após retificação tirar o registro da janela.",
+              }),
+            })
+          );
+          expect(rWindowRace.status).toBe(200);
+          expect(await rWindowRace.json()).toMatchObject({
+            ignored: true,
+            reason: "Nenhum envio recente vinculado ao número",
+          });
+          const raceAfter = await prisma.messageLog.findUnique({ where: { id: "wh-window-race" } });
+          expect(raceAfter?.guardianReplied).toBe(false);
+          expect(raceAfter?.deliveryStatus).toBe("SENT");
+          expect(raceAfter?.contentHash).toBe("hash-window-race");
+          expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+        } finally {
+          dateNowSpy.mockRestore();
+        }
       } finally {
         withTenantSpy.mockRestore();
         if (originalSecret === undefined) {

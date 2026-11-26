@@ -599,6 +599,10 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
 
   it("9. [WEBHOOK MULTI-TENANT E CONTENT HASH] impede colisão de mesmo telefone entre escolas e calcula contentHash", async () => {
     process.env.WHATSAPP_WEBHOOK_SECRET = "secret-webhook-key-123";
+    const dateNowSpy = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.parse("2026-11-10T12:00:00.000Z"));
+    try {
 
     // Adiciona uma mensagem na Escola B com o MESMO telefone da Escola A
     mockMessageLogs["msg-escola-b-colisao"] = {
@@ -680,6 +684,9 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
       repliedAt: updatedA.repliedAt,
     });
     expect(integrityCheck.valid).toBe(true);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
   });
 
   it("10. [SANITIZAÇÃO 500 EM IA] não vaza error.message bruto para o cliente HTTP", async () => {
