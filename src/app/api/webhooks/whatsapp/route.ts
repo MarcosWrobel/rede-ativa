@@ -5,6 +5,8 @@ import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { classifyGuardianReplyHeuristic } from "@/lib/whatsappProvider";
 import { safeCompareStrings } from "@/lib/syncToken";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
+import { withTenantContext } from "@/lib/rlsTenantContext";
+import { lockScopedMessageLogForUpdate } from "@/services/messageDispatchService";
 
 export const dynamic = "force-dynamic";
 
@@ -47,18 +49,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ ignored: true, reason: "Telefone ausente ou inválido" });
     }
 
-    // Identificadores explícitos opcionais no payload do webhook/gateway (H-06)
+    // Identificadores internos explícitos opcionais de MessageLog (logId / messageLogId).
+    // Campos de evento/mensagem do gateway (ex.: messageId) NÃO representam MessageLog.id.
     const explicitLogId =
-      typeof payload?.logId === "string"
+      typeof payload?.logId === "string" && payload.logId.trim()
         ? payload.logId.trim()
-        : typeof payload?.messageLogId === "string"
+        : typeof payload?.messageLogId === "string" && payload.messageLogId.trim()
         ? payload.messageLogId.trim()
-        : typeof payload?.messageId === "string"
-        ? payload.messageId.trim()
         : null;
-    const explicitSchoolId = typeof payload?.schoolId === "string" ? payload.schoolId.trim() : null;
-    const explicitStudentId = typeof payload?.studentId === "string" ? payload.studentId.trim() : null;
-    const explicitCgm = typeof payload?.cgm === "string" ? payload.cgm.trim() : null;
+    const explicitSchoolId =
+      typeof payload?.schoolId === "string" && payload.schoolId.trim()
+        ? payload.schoolId.trim()
+        : null;
+    const explicitStudentId =
+      typeof payload?.studentId === "string" && payload.studentId.trim()
+        ? payload.studentId.trim()
+        : null;
+    const explicitCgm =
+      typeof payload?.cgm === "string" && payload.cgm.trim()
+        ? payload.cgm.trim()
+        : null;
     const incomingText = String(payload?.text || payload?.message || payload?.body || "").trim();
 
     // Localiza o acionamento recente para este telefone (últimos 14 dias)
@@ -66,130 +76,286 @@ export async function POST(req: Request) {
     const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
     const phoneSuffix = digits.length >= 10 ? digits.slice(-10) : digits;
 
-    let targetLog: any = null;
+    let resolvedSchoolId: string | null = explicitSchoolId;
+    let resolvedLogId: string | null = null;
 
-    // 1. Busca prioritária por ID direto de MessageLog se fornecido pelo webhook/gateway
+    // 1. Identificação inicial mínima pré-escola:
+    //    Se houver ID interno explícito (logId / messageLogId), valida existência e correlação sem redirecionar.
     if (explicitLogId) {
-      targetLog = await prisma.messageLog.findUnique({
+      const preLog = await prisma.messageLog.findUnique({
         where: { id: explicitLogId },
-        include: { student: true },
+        select: {
+          id: true,
+          schoolId: true,
+          studentId: true,
+          phoneUsed: true,
+          student: {
+            select: {
+              id: true,
+              schoolId: true,
+              cgm: true,
+            },
+          },
+        },
       });
-      if (targetLog && explicitSchoolId && targetLog.student.schoolId !== explicitSchoolId) {
-        targetLog = null;
-      }
-    }
 
-    // 2. Se não encontrou por ID direto, busca pelos logs recentes do telefone com escopo
-    if (!targetLog) {
-      const candidateLogs = await prisma.messageLog.findMany({
+      if (!preLog) {
+        return NextResponse.json({
+          ignored: true,
+          reason: "Registro de mensagem explícito não encontrado.",
+        });
+      }
+
+      const preStudentSchoolId = preLog.student?.schoolId || null;
+      const preLogSchoolCoherent =
+        preStudentSchoolId !== null &&
+        (preLog.schoolId == null || preLog.schoolId === preStudentSchoolId);
+      const prePhoneDigits = normalizeWhatsAppPhone(preLog.phoneUsed || "");
+      const prePhoneSuffix =
+        prePhoneDigits.length >= 10 ? prePhoneDigits.slice(-10) : prePhoneDigits;
+
+      if (
+        !preLogSchoolCoherent ||
+        (explicitSchoolId && preStudentSchoolId !== explicitSchoolId) ||
+        (explicitStudentId && preLog.studentId !== explicitStudentId) ||
+        (explicitCgm && (preLog.student?.cgm || null) !== explicitCgm) ||
+        prePhoneSuffix !== phoneSuffix
+      ) {
+        return NextResponse.json({
+          ignored: true,
+          reason: "Identificador explícito incompatível com os dados de correlação.",
+        });
+      }
+
+      resolvedSchoolId = preStudentSchoolId;
+      resolvedLogId = preLog.id;
+    } else if (!resolvedSchoolId) {
+      // 2. Busca por telefone sem escola explícita:
+      //    Avalia ambiguidade entre escolas em TODO o conjunto elegível antes de ordenar ou limitar.
+      const eligiblePreRows = await prisma.messageLog.findMany({
         where: {
           phoneUsed: { endsWith: phoneSuffix },
           sentAt: { gte: cutoff },
-          ...(explicitSchoolId ? { student: { schoolId: explicitSchoolId } } : {}),
           ...(explicitStudentId ? { studentId: explicitStudentId } : {}),
           ...(explicitCgm ? { student: { cgm: explicitCgm } } : {}),
         },
-        orderBy: { sentAt: "desc" },
-        include: { student: true },
-        take: 10,
+        select: {
+          id: true,
+          schoolId: true,
+          studentId: true,
+          student: {
+            select: {
+              schoolId: true,
+            },
+          },
+        },
       });
 
-      if (candidateLogs.length > 0) {
-        // Multi-tenant check: se os logs candidatos pertencerem a mais de uma instituição de ensino
-        // e não houver explicitSchoolId nem identificador unívoco:
-        const distinctSchoolIds = Array.from(
-          new Set(candidateLogs.map((l: any) => l.student?.schoolId).filter(Boolean))
-        );
+      const coherentSchoolIds = Array.from(
+        new Set(
+          eligiblePreRows
+            .filter(
+              (r: any) =>
+                r.student?.schoolId &&
+                (r.schoolId == null || r.schoolId === r.student.schoolId)
+            )
+            .map((r: any) => r.student.schoolId as string)
+        )
+      );
 
-        if (!explicitSchoolId && distinctSchoolIds.length > 1) {
-          // Proibição estrita de associação heurística entre escolas distintas (prevenção de IDOR passivo)
-          return NextResponse.json({
-            ignored: true,
-            reason: "Número vinculado a múltiplos estabelecimentos de ensino sem identificação explícita de escola.",
-          });
-        } else {
-          // Desambiguação de irmãos: se houver texto e múltiplos logs, tenta casar pelo primeiro nome do estudante
-          if (incomingText && candidateLogs.length > 1) {
-            const matchedByName = candidateLogs.find((l: any) => {
-              const firstName = l.student.name.split(" ")[0].toLowerCase();
-              return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
-            });
-            if (matchedByName) {
-              targetLog = matchedByName;
-            }
-          }
-
-          // Prioriza o envio mais recente ainda pendente de resposta do responsável
-          if (!targetLog) {
-            targetLog = candidateLogs.find((l: any) => !l.guardianReplied) || candidateLogs[0];
-          }
-        }
+      if (coherentSchoolIds.length === 0) {
+        return NextResponse.json({ ignored: true, reason: "Nenhum envio recente vinculado ao número" });
       }
+
+      if (coherentSchoolIds.length > 1) {
+        // Proibição estrita de associação heurística entre escolas distintas (prevenção de IDOR passivo)
+        return NextResponse.json({
+          ignored: true,
+          reason:
+            "Número vinculado a múltiplos estabelecimentos de ensino sem identificação explícita de escola.",
+        });
+      }
+
+      resolvedSchoolId = coherentSchoolIds[0];
     }
 
-    if (!targetLog) {
+    if (!resolvedSchoolId) {
       return NextResponse.json({ ignored: true, reason: "Nenhum envio recente vinculado ao número" });
     }
 
-    // 1. Atualização de recibo de entrega/leitura
-    if (eventType === "status" || payload?.deliveryStatus) {
-      const nextStatus = String(payload.deliveryStatus || "DELIVERED").toUpperCase();
-      if (["SENT", "DELIVERED", "READ", "FAILED_NO_WHATSAPP"].includes(nextStatus)) {
-        await prisma.messageLog.update({
-          where: { id: targetLog.id },
-          data: {
-            deliveryStatus: nextStatus,
-            deliveryUpdatedAt: new Date(),
+    // 3. Seleção intra-escola, bloqueio transacional e atualização dentro de withTenantContext
+    const txResult = await withTenantContext(prisma, resolvedSchoolId, async (tx) => {
+      let targetLogId = resolvedLogId;
+
+      if (!targetLogId) {
+        const candidateLogs = await tx.messageLog.findMany({
+          where: {
+            phoneUsed: { endsWith: phoneSuffix },
+            sentAt: { gte: cutoff },
+            OR: [{ schoolId: null }, { schoolId: resolvedSchoolId }],
+            student: {
+              schoolId: resolvedSchoolId,
+              ...(explicitCgm ? { cgm: explicitCgm } : {}),
+            },
+            ...(explicitStudentId ? { studentId: explicitStudentId } : {}),
+          },
+          orderBy: { sentAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            guardianReplied: true,
+            student: {
+              select: {
+                name: true,
+              },
+            },
           },
         });
-        return NextResponse.json({ success: true, updatedLogId: targetLog.id, deliveryStatus: nextStatus });
+
+        if (candidateLogs.length === 0) {
+          return { kind: "ignored" as const, reason: "Nenhum envio recente vinculado ao número" };
+        }
+
+        // Desambiguação de irmãos: se houver texto e múltiplos logs na mesma escola, tenta casar pelo primeiro nome
+        let selected: any = null;
+        if (incomingText && candidateLogs.length > 1) {
+          selected = candidateLogs.find((l: any) => {
+            const firstName = (l.student?.name || "").split(" ")[0].toLowerCase();
+            return firstName.length >= 3 && incomingText.toLowerCase().includes(firstName);
+          });
+        }
+
+        if (!selected) {
+          selected = candidateLogs.find((l: any) => !l.guardianReplied) || candidateLogs[0];
+        }
+
+        targetLogId = selected.id;
       }
-    }
 
-    // 2. Mensagem de retorno recebida do responsável
-    if (!incomingText) {
-      return NextResponse.json({ ignored: true, reason: "Sem conteúdo textual" });
-    }
+      if (!targetLogId) {
+        return { kind: "ignored" as const, reason: "Nenhum envio recente vinculado ao número" };
+      }
 
-    const classified = classifyGuardianReplyHeuristic(incomingText);
-    const repliedAt = new Date();
-    const newContentHash = computeMessageContentHash({
-      studentId: targetLog.studentId,
-      schoolId: targetLog.student?.schoolId || null,
-      phoneUsed: targetLog.phoneUsed,
-      reasonTitle: targetLog.reasonTitle,
-      messageContent: targetLog.messageContent,
-      sentByName: targetLog.sentByName,
-      sentAt: targetLog.sentAt,
-      guardianReplied: true,
-      replyNotes: classified.formalSummary,
-      replyCategory: classified.category,
-      repliedAt,
-    });
+      const lockStatus = await lockScopedMessageLogForUpdate(tx, targetLogId, resolvedSchoolId);
+      if (lockStatus !== "LOCKED") {
+        return { kind: "ignored" as const, reason: "Nenhum envio recente vinculado ao número" };
+      }
 
-    const updated = await prisma.messageLog.update({
-      where: { id: targetLog.id },
-      data: {
+      const targetLog = await tx.messageLog.findUnique({
+        where: { id: targetLogId },
+        include: { student: true },
+      });
+
+      if (!targetLog) {
+        return { kind: "ignored" as const, reason: "Nenhum envio recente vinculado ao número" };
+      }
+
+      const targetStudentSchoolId = targetLog.student?.schoolId || null;
+      const targetSchoolCoherent =
+        targetStudentSchoolId === resolvedSchoolId &&
+        (targetLog.schoolId == null || targetLog.schoolId === resolvedSchoolId);
+      const targetPhoneDigits = normalizeWhatsAppPhone(targetLog.phoneUsed || "");
+      const targetPhoneSuffix =
+        targetPhoneDigits.length >= 10 ? targetPhoneDigits.slice(-10) : targetPhoneDigits;
+
+      if (
+        !targetSchoolCoherent ||
+        (explicitSchoolId && targetStudentSchoolId !== explicitSchoolId) ||
+        (explicitStudentId && targetLog.studentId !== explicitStudentId) ||
+        (explicitCgm && (targetLog.student?.cgm || null) !== explicitCgm) ||
+        targetPhoneSuffix !== phoneSuffix
+      ) {
+        return {
+          kind: "ignored" as const,
+          reason: "Identificador explícito incompatível com os dados de correlação.",
+        };
+      }
+
+      // 1. Atualização de recibo de entrega/leitura
+      if (eventType === "status" || payload?.deliveryStatus) {
+        const nextStatus = String(payload.deliveryStatus || "DELIVERED").toUpperCase();
+        if (["SENT", "DELIVERED", "READ", "FAILED_NO_WHATSAPP"].includes(nextStatus)) {
+          await tx.messageLog.update({
+            where: { id: targetLog.id },
+            data: {
+              deliveryStatus: nextStatus,
+              deliveryUpdatedAt: new Date(),
+            },
+          });
+          return {
+            kind: "status" as const,
+            updatedLogId: targetLog.id,
+            deliveryStatus: nextStatus,
+          };
+        }
+      }
+
+      // 2. Mensagem de retorno recebida do responsável
+      if (!incomingText) {
+        return { kind: "ignored" as const, reason: "Sem conteúdo textual" };
+      }
+
+      const classified = classifyGuardianReplyHeuristic(incomingText);
+      const repliedAt = new Date();
+      const newContentHash = computeMessageContentHash({
+        studentId: targetLog.studentId,
+        schoolId: targetStudentSchoolId,
+        phoneUsed: targetLog.phoneUsed,
+        reasonTitle: targetLog.reasonTitle,
+        messageContent: targetLog.messageContent,
+        sentByName: targetLog.sentByName,
+        sentAt: targetLog.sentAt,
         guardianReplied: true,
-        replyCategory: classified.category,
         replyNotes: classified.formalSummary,
+        replyCategory: classified.category,
         repliedAt,
-        deliveryStatus: "READ",
-        deliveryUpdatedAt: new Date(),
+      });
+
+      const updated = await tx.messageLog.update({
+        where: { id: targetLog.id },
+        data: {
+          guardianReplied: true,
+          replyCategory: classified.category,
+          replyNotes: classified.formalSummary,
+          repliedAt,
+          deliveryStatus: "READ",
+          deliveryUpdatedAt: new Date(),
+          contentHash: newContentHash,
+        },
+      });
+
+      return {
+        kind: "reply" as const,
+        updatedId: updated.id,
+        schoolId: targetStudentSchoolId,
+        studentName: targetLog.student?.name,
+        category: classified.category,
         contentHash: newContentHash,
-      },
+      };
     });
+
+    if (txResult.kind === "ignored") {
+      return NextResponse.json({ ignored: true, reason: txResult.reason });
+    }
+
+    if (txResult.kind === "status") {
+      return NextResponse.json({
+        success: true,
+        updatedLogId: txResult.updatedLogId,
+        deliveryStatus: txResult.deliveryStatus,
+      });
+    }
 
     await logAudit({
       action: "WEBHOOK_REPLY",
       entityType: "MessageLog",
-      entityId: targetLog.id,
-      schoolId: targetLog.student?.schoolId || null,
+      entityId: txResult.updatedId,
+      schoolId: txResult.schoolId,
       details: {
-        studentName: targetLog.student?.name,
+        studentName: txResult.studentName,
         phone: digits,
-        category: classified.category,
-        contentHash: newContentHash,
+        category: txResult.category,
+        contentHash: txResult.contentHash,
       },
       user: {
         name: "Webhook Automático WhatsApp",
@@ -200,8 +366,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      logId: updated.id,
-      category: classified.category,
+      logId: txResult.updatedId,
+      category: txResult.category,
     });
   } catch (error: any) {
     console.error("Erro no webhook WhatsApp:", error);

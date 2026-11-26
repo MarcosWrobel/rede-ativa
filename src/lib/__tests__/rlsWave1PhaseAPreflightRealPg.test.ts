@@ -202,6 +202,7 @@ import { logAudit } from "@/lib/audit";
 import * as rlsTenantContext from "@/lib/rlsTenantContext";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { GET as getMessagesHandler } from "@/app/api/messages/route";
+import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -2577,6 +2578,418 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.pendingSessionUser = null;
         testAuthState.useRealPermissions = false;
         testAuthState.useRealCurrentSchool = false;
+      }
+    });
+
+    it("integra withTenantContext em POST /api/webhooks/whatsapp com correlação, ambiguidade >10 candidatos, legado, divergente, hash e rollback", async () => {
+      const { computeMessageContentHash } = await import("@/lib/messageCrypto");
+      const originalSecret = process.env.WHATSAPP_WEBHOOK_SECRET;
+
+      await prisma.messageLog.deleteMany({});
+      await prisma.messageTemplate.deleteMany({});
+      await prisma.student.deleteMany({});
+      await prisma.classGroup.deleteMany({});
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+      await prisma.school.deleteMany({});
+
+      await prisma.school.createMany({
+        data: [
+          { id: "school-alpha", name: "Escola Alpha", inepCode: "11111111" },
+          { id: "school-beta", name: "Escola Beta", inepCode: "22222222" },
+        ],
+      });
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "cg-alpha-wh", name: "1º Ano A", segment: "EM", schoolId: "school-alpha" },
+          { id: "cg-beta-wh", name: "2º Ano B", segment: "EM", schoolId: "school-beta" },
+        ],
+      });
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-alpha-wh",
+            name: "Lucas Alpha",
+            cgm: "300100100",
+            phone: "41988881111",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-wh",
+          },
+          {
+            id: "stu-alpha-single",
+            name: "Mariana Unica",
+            cgm: "300100200",
+            phone: "41977771111",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-wh",
+          },
+          {
+            id: "stu-beta-wh",
+            name: "Ana Beta",
+            cgm: "300200200",
+            phone: "41988881111",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-wh",
+          },
+        ],
+      });
+
+      const baseSentAt = new Date("2026-11-25T12:00:00.000Z");
+      const singleHash = computeMessageContentHash({
+        studentId: "stu-alpha-single",
+        schoolId: "school-alpha",
+        phoneUsed: "41977771111",
+        reasonTitle: "Falta Unica",
+        messageContent: "Msg Unica",
+        sentByName: "Equipe A",
+        sentAt: baseSentAt,
+      });
+      const legacyHash = computeMessageContentHash({
+        studentId: "stu-alpha-single",
+        schoolId: "school-alpha",
+        phoneUsed: "41977771111",
+        reasonTitle: "Falta Legada",
+        messageContent: "Msg Legada",
+        sentByName: "Equipe A",
+        sentAt: new Date("2026-11-24T12:00:00.000Z"),
+      });
+
+      const batchLogs: Array<{
+        id: string;
+        schoolId: string | null;
+        studentId: string;
+        reasonTitle: string;
+        messageContent: string;
+        phoneUsed: string;
+        sentByName: string;
+        sentAt: Date;
+        deliveryStatus: string;
+        contentHash: string;
+      }> = [];
+
+      // 10 logs mais recentes na school-alpha com telefone compartilhado 41988881111
+      for (let i = 1; i <= 10; i++) {
+        const sentAtItem = new Date(Date.now() - i * 60 * 60 * 1000);
+        batchLogs.push({
+          id: `wh-alpha-shared-${i}`,
+          schoolId: "school-alpha",
+          studentId: "stu-alpha-wh",
+          reasonTitle: `Falta Shared A ${i}`,
+          messageContent: `Msg Shared A ${i}`,
+          phoneUsed: "41988881111",
+          sentByName: "Equipe A",
+          sentAt: sentAtItem,
+          deliveryStatus: "SENT",
+          contentHash: `hash-shared-a-${i}`,
+        });
+      }
+      // 1 log mais antigo (ainda dentro de 14 dias) na school-beta com o MESMO telefone (fora do top 10!)
+      batchLogs.push(
+        {
+          id: "wh-beta-shared-11",
+          schoolId: "school-beta",
+          studentId: "stu-beta-wh",
+          reasonTitle: "Falta Shared B 11",
+          messageContent: "Msg Shared B 11",
+          phoneUsed: "5541988881111",
+          sentByName: "Equipe B",
+          sentAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+          deliveryStatus: "SENT",
+          contentHash: "hash-shared-b-11",
+        },
+        // Log único coerente de school-alpha (telefone exclusivo)
+        {
+          id: "wh-alpha-single",
+          schoolId: "school-alpha",
+          studentId: "stu-alpha-single",
+          reasonTitle: "Falta Unica",
+          messageContent: "Msg Unica",
+          phoneUsed: "41977771111",
+          sentByName: "Equipe A",
+          sentAt: baseSentAt,
+          deliveryStatus: "SENT",
+          contentHash: singleHash,
+        },
+        // Log legado (schoolId: null) de school-alpha
+        {
+          id: "wh-alpha-legacy",
+          schoolId: null,
+          studentId: "stu-alpha-single",
+          reasonTitle: "Falta Legada",
+          messageContent: "Msg Legada",
+          phoneUsed: "41977771111",
+          sentByName: "Equipe A",
+          sentAt: new Date("2026-11-24T12:00:00.000Z"),
+          deliveryStatus: "SENT",
+          contentHash: legacyHash,
+        },
+        // Log divergente (schoolId: school-beta para estudante de school-alpha)
+        {
+          id: "wh-divergent",
+          schoolId: "school-beta",
+          studentId: "stu-alpha-single",
+          reasonTitle: "Falta Divergente",
+          messageContent: "Msg Divergente",
+          phoneUsed: "41977771111",
+          sentByName: "Equipe B",
+          sentAt: baseSentAt,
+          deliveryStatus: "SENT",
+          contentHash: "hash-divergent-intact",
+        }
+      );
+
+      await prisma.messageLog.createMany({ data: batchLogs });
+
+      const capturedContextSchools: Array<string | null> = [];
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+
+      try {
+        // 1. 503 quando webhook desabilitado
+        delete process.env.WHATSAPP_WEBHOOK_SECRET;
+        const r503 = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone: "41977771111", text: "ok" }),
+          })
+        );
+        expect(r503.status).toBe(503);
+
+        // 2. 401 para credencial inválida antes de qualquer consulta
+        process.env.WHATSAPP_WEBHOOK_SECRET = "webhook-realpg-secret";
+        const r401 = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer wrong-secret",
+            },
+            body: JSON.stringify({ phone: "41977771111", text: "ok" }),
+          })
+        );
+        expect(r401.status).toBe(401);
+        expect(withTenantSpy).not.toHaveBeenCalled();
+
+        // 3. Telefone compartilhado entre 2 escolas com 11º candidato fora do take(10) -> ignorado sem mutação
+        vi.mocked(logAudit).mockClear();
+        const rAmbiguousBeyond10 = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              phone: "41988881111",
+              text: "Ele está com febre hoje.",
+            }),
+          })
+        );
+        expect(rAmbiguousBeyond10.status).toBe(200);
+        const ambJson = await rAmbiguousBeyond10.json();
+        expect(ambJson.ignored).toBe(true);
+        expect(ambJson.reason).toContain("múltiplos estabelecimentos");
+        expect(
+          (await prisma.messageLog.findUnique({ where: { id: "wh-alpha-shared-1" } }))?.guardianReplied
+        ).toBe(false);
+        expect(
+          (await prisma.messageLog.findUnique({ where: { id: "wh-beta-shared-11" } }))?.guardianReplied
+        ).toBe(false);
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 4. ID explícito ausente ou incompatível com correlação -> ignorado sem redirecionar para outro log
+        for (const badBody of [
+          { logId: "wh-nao-existe", phone: "41977771111", text: "Foi ao médico" },
+          { logId: "wh-alpha-single", schoolId: "school-beta", phone: "41977771111", text: "Foi ao médico" },
+          { logId: "wh-alpha-single", cgm: "999999999", phone: "41977771111", text: "Foi ao médico" },
+          { logId: "wh-alpha-single", phone: "41966669999", text: "Foi ao médico" },
+          { logId: "wh-divergent", phone: "41977771111", text: "Foi ao médico" },
+        ]) {
+          const rBad = await webhookWhatsappHandler(
+            new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer webhook-realpg-secret",
+              },
+              body: JSON.stringify(badBody),
+            })
+          );
+          expect(rBad.status).toBe(200);
+          expect((await rBad.json()).ignored).toBe(true);
+        }
+        expect((await prisma.messageLog.findUnique({ where: { id: "wh-alpha-single" } }))?.contentHash).toBe(
+          singleHash
+        );
+        expect((await prisma.messageLog.findUnique({ where: { id: "wh-divergent" } }))?.contentHash).toBe(
+          "hash-divergent-intact"
+        );
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 5. Recibo de entrega legítimo (event: status) usando messageId de gateway (não tratado como MessageLog.id)
+        capturedContextSchools.length = 0;
+        const rStatus = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              event: "status",
+              deliveryStatus: "DELIVERED",
+              messageId: "wamid.gateway.event.999",
+              phone: "41977771111",
+              schoolId: "school-alpha",
+              logId: "wh-alpha-single",
+            }),
+          })
+        );
+        expect(rStatus.status).toBe(200);
+        expect(await rStatus.json()).toMatchObject({
+          success: true,
+          updatedLogId: "wh-alpha-single",
+          deliveryStatus: "DELIVERED",
+        });
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(
+          (await prisma.messageLog.findUnique({ where: { id: "wh-alpha-single" } }))?.deliveryStatus
+        ).toBe("DELIVERED");
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 6. Retorno legítimo no log único com verificação de contexto, hash e auditoria
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rReply = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-webhook-secret": "webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              messageId: "wamid.gateway.reply.1",
+              logId: "wh-alpha-single",
+              phone: "41977771111",
+              text: "Bom dia, ela teve febre e foi ao médico hoje.",
+            }),
+          })
+        );
+        expect(rReply.status).toBe(200);
+        const replyJson = await rReply.json();
+        expect(replyJson).toMatchObject({
+          success: true,
+          logId: "wh-alpha-single",
+          category: "SAUDE",
+        });
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        const singleAfterReply = await prisma.messageLog.findUnique({
+          where: { id: "wh-alpha-single" },
+        });
+        expect(singleAfterReply?.guardianReplied).toBe(true);
+        expect(singleAfterReply?.deliveryStatus).toBe("READ");
+        const expectedSingleHash = computeMessageContentHash({
+          studentId: "stu-alpha-single",
+          schoolId: "school-alpha",
+          phoneUsed: "41977771111",
+          reasonTitle: "Falta Unica",
+          messageContent: "Msg Unica",
+          sentByName: "Equipe A",
+          sentAt: baseSentAt,
+          guardianReplied: true,
+          replyNotes: singleAfterReply?.replyNotes ?? null,
+          replyCategory: singleAfterReply?.replyCategory ?? null,
+          repliedAt: singleAfterReply?.repliedAt ?? null,
+        });
+        expect(singleAfterReply?.contentHash).toBe(expectedSingleHash);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "WEBHOOK_REPLY",
+            entityId: "wh-alpha-single",
+            schoolId: "school-alpha",
+          })
+        );
+
+        // 7. Log legado (schoolId: null) aceito pela escola do estudante
+        vi.mocked(logAudit).mockClear();
+        const rLegacyReply = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              logId: "wh-alpha-legacy",
+              phone: "41977771111",
+              text: "Vai apresentar atestado amanhã no médico.",
+            }),
+          })
+        );
+        expect(rLegacyReply.status).toBe(200);
+        expect((await rLegacyReply.json()).success).toBe(true);
+        const legacyAfter = await prisma.messageLog.findUnique({ where: { id: "wh-alpha-legacy" } });
+        expect(legacyAfter?.guardianReplied).toBe(true);
+        expect(legacyAfter?.contentHash).not.toBe(legacyHash);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "WEBHOOK_REPLY",
+            entityId: "wh-alpha-legacy",
+            schoolId: "school-alpha",
+          })
+        );
+
+        // 8. Rollback antes do commit preserva status, retorno e hash e não emite auditoria
+        vi.mocked(logAudit).mockClear();
+        withTenantSpy.mockImplementationOnce(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            await fn(tx);
+            throw new Error("Simulated pre-commit failure on webhook");
+          });
+        });
+
+        const rRollback = await webhookWhatsappHandler(
+          new Request("http://127.0.0.1/api/webhooks/whatsapp", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer webhook-realpg-secret",
+            },
+            body: JSON.stringify({
+              logId: "wh-beta-shared-11",
+              schoolId: "school-beta",
+              phone: "41988881111",
+              text: "Retorno que deve sofrer rollback.",
+            }),
+          })
+        );
+        expect(rRollback.status).toBe(500);
+        const betaAfterRollback = await prisma.messageLog.findUnique({
+          where: { id: "wh-beta-shared-11" },
+        });
+        expect(betaAfterRollback?.guardianReplied).toBe(false);
+        expect(betaAfterRollback?.deliveryStatus).toBe("SENT");
+        expect(betaAfterRollback?.contentHash).toBe("hash-shared-b-11");
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+      } finally {
+        withTenantSpy.mockRestore();
+        if (originalSecret === undefined) {
+          delete process.env.WHATSAPP_WEBHOOK_SECRET;
+        } else {
+          process.env.WHATSAPP_WEBHOOK_SECRET = originalSecret;
+        }
       }
     });
   }
