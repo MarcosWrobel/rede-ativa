@@ -519,18 +519,33 @@ export async function DELETE(
   } catch (error: any) {
     console.error("[DELETE /api/schools/[id]] Erro:", error);
 
-    const isFkViolation =
-      error?.code === "P2003" ||
-      error?.meta?.constraint === "MessageLog_schoolId_fkey" ||
-      (typeof error?.message === "string" &&
-        error.message.includes("MessageLog_schoolId_fkey"));
+    const constraintText = [
+      error?.meta?.constraint,
+      error?.meta?.field_name,
+      error?.message,
+    ]
+      .filter((v): v is string => typeof v === "string")
+      .join(" ");
 
-    if (isFkViolation) {
+    const isMessageLogSchoolFk = constraintText.includes("MessageLog_schoolId_fkey");
+
+    if (isMessageLogSchoolFk) {
       return NextResponse.json(
         {
           error:
             "Exclusão bloqueada por integridade referencial: existem registros de mensageria vinculados a esta instituição com divergência de vínculo estudantil.",
           code: "SCHOOL_DELETE_INTEGRITY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (error?.code === "P2003") {
+      return NextResponse.json(
+        {
+          error:
+            "Exclusão bloqueada por integridade referencial: existem registros vinculados a esta instituição que impedem a remoção.",
+          code: "SCHOOL_DELETE_FK_CONFLICT",
         },
         { status: 409 }
       );

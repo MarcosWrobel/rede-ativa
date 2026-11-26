@@ -426,6 +426,7 @@ describe.skipIf(!SHOULD_RUN)(
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+      expect(body.error).toContain("mensageria");
 
       // Rollback atômico: registros da própria transação de school-alpha permanecem intactos
       expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).not.toBeNull();
@@ -514,5 +515,62 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       blockingForPhaseB: true,
       sampleIds: ["log-missing-school"],
     });
+  });
+
+  it("DELETE /api/schools/[id] retorna diagnóstico genérico de FK para P2003 de outra constraint sem mencionar mensageria", async () => {
+    const previousPrisma = prismaRef.current;
+    const noopDeleteMany = vi.fn(async () => ({ count: 0 }));
+    const noopUpdateMany = vi.fn(async () => ({ count: 0 }));
+    prismaRef.current = {
+      school: {
+        findUnique: vi.fn(async () => ({
+          id: "school-other-fk",
+          inepCode: "99000999",
+          name: "Escola Teste FK",
+          network: "MUNICIPAL",
+          city: "Cidade Teste",
+          _count: { students: 0, classGroups: 0, pedagogicalMinutes: 0, userSchools: 0 },
+        })),
+        delete: vi.fn(),
+      },
+      messageLog: { deleteMany: noopDeleteMany },
+      lowAttendanceRecord: { deleteMany: noopDeleteMany },
+      absenceJustification: { deleteMany: noopDeleteMany },
+      inPersonAttendance: { deleteMany: noopDeleteMany },
+      attendanceSnapshot: { deleteMany: noopDeleteMany },
+      studentContact: { deleteMany: noopDeleteMany },
+      pedagogicalMinuteStudent: { deleteMany: noopDeleteMany },
+      pedagogicalMinuteParticipant: { deleteMany: noopDeleteMany },
+      pedagogicalMinuteAddendum: { deleteMany: noopDeleteMany },
+      pedagogicalActionItem: { deleteMany: noopDeleteMany },
+      pedagogicalMinute: { deleteMany: noopDeleteMany },
+      student: { deleteMany: noopDeleteMany },
+      classGroup: { deleteMany: noopDeleteMany },
+      messageTemplate: { deleteMany: noopDeleteMany },
+      userSchool: { deleteMany: noopDeleteMany },
+      user: { updateMany: noopUpdateMany },
+      $transaction: vi.fn(async () => {
+        const fkErr = new Error("Foreign key constraint violated: `AuditLog_schoolId_fkey`") as Error & {
+          code?: string;
+          meta?: { field_name?: string };
+        };
+        fkErr.code = "P2003";
+        fkErr.meta = { field_name: "AuditLog_schoolId_fkey" };
+        throw fkErr;
+      }),
+    } as unknown as PrismaClient;
+
+    try {
+      const res = await deleteSchoolHandler(
+        new Request("http://127.0.0.1/api/schools/school-other-fk", { method: "DELETE" }),
+        { params: Promise.resolve({ id: "school-other-fk" }) }
+      );
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("SCHOOL_DELETE_FK_CONFLICT");
+      expect(body.error).not.toContain("mensageria");
+    } finally {
+      prismaRef.current = previousPrisma;
+    }
   });
 });
