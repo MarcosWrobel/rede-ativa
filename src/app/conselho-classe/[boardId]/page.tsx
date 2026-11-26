@@ -1,10 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   getCouncilBoardDetail,
+  isCouncilBoardAuthorizedInActiveSchool,
   listSchoolCouncilBoards,
   resolveAuthorizedSchoolForCouncil,
 } from "@/services/classCouncilService";
@@ -48,13 +48,13 @@ export default async function ConselhoTurmaPage({
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
   const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!currentSchool || !assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
+  if (!isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session)) {
     notFound();
   }
 
   const [board, schoolBoards] = await Promise.all([
-    getCouncilBoardDetail(ownership.schoolId, boardId),
-    listSchoolCouncilBoards(ownership.schoolId, ownership.year),
+    getCouncilBoardDetail(currentSchool.id, boardId),
+    listSchoolCouncilBoards(currentSchool.id, ownership.year),
   ]);
 
   if (!board) {
@@ -70,7 +70,7 @@ export default async function ConselhoTurmaPage({
       subjectsCount: b._count.subjects,
     }));
 
-  const canEdit = canMutateSchoolCouncil(session, ownership.schoolId);
+  const canEdit = canMutateSchoolCouncil(session, currentSchool.id);
 
   return (
     <ConselhoTurmaClient

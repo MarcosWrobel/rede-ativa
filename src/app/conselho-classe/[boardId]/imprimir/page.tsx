@@ -1,12 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { anonymizeOtherMinorsInText } from "@/lib/ataCrypto";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import {
   findCouncilBoardOwnershipRecord,
   getCouncilBoardDetail,
+  isCouncilBoardAuthorizedInActiveSchool,
   resolveAuthorizedSchoolForCouncil,
 } from "@/services/classCouncilService";
 import type {
@@ -49,14 +49,14 @@ export default async function ConselhoPrintPage({
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
   const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!currentSchool || !assertTenantOwnership(ownership.schoolId, currentSchool.id, session)) {
+  if (!isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session)) {
     notFound();
   }
 
   const [board, schoolDb] = await Promise.all([
-    getCouncilBoardDetail(ownership.schoolId, boardId),
+    getCouncilBoardDetail(currentSchool.id, boardId),
     prisma.school.findUnique({
-      where: { id: ownership.schoolId },
+      where: { id: currentSchool.id },
       select: {
         id: true,
         name: true,

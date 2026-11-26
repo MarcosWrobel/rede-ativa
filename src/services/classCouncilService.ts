@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateVerificationCode } from "@/lib/ataCrypto";
 import * as currentSchoolModule from "@/lib/currentSchool";
 import { checkIsSuperAdmin, type AuthSessionLike } from "@/lib/roles";
+import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   councilBelowAvgItemSchema,
   councilBoardMetadataUpdateSchema,
@@ -176,6 +177,24 @@ export async function resolveAuthorizedSchoolForCouncil(
     (s) => s.active !== false && (s.schoolId === school.id || s.id === school.id)
   );
   return hasDirectMatch ? school : null;
+}
+
+/**
+ * Exige que o conselho de classe (`ownership.schoolId`) pertença estritamente à escola ativa
+ * resolvida e autorizada para a sessão (`activeSchool.id`), inclusive para `SUPERADMIN`.
+ */
+export function isCouncilBoardAuthorizedInActiveSchool(
+  ownership: { schoolId?: string | null } | null | undefined,
+  activeSchool: currentSchoolModule.SchoolContext | null | undefined,
+  session: AuthSessionLike | null | undefined
+): activeSchool is currentSchoolModule.SchoolContext {
+  if (!ownership?.schoolId || !activeSchool?.id) {
+    return false;
+  }
+  return (
+    ownership.schoolId === activeSchool.id &&
+    assertTenantOwnership(ownership.schoolId, activeSchool.id, session)
+  );
 }
 
 export function parseBelowAverageJson(raw: string | null | undefined): CouncilBelowAvgItem[] {

@@ -4,6 +4,21 @@ import { useState, useRef, useEffect } from "react";
 import { Building2, ChevronDown, Check, Plus, Settings, Landmark, ShieldCheck } from "lucide-react";
 import { clearRedeAtivaCachesOnly } from "@/lib/pwaCleanup";
 
+export const SCHOOL_SWITCHED_EVENT = "redeativa:school-switched";
+
+const COUNCIL_DETAIL_PATH_REGEX =
+  /^\/conselho-classe\/(?!(?:professor|pre-conselho)(?:\/|$))[^/]+(?:\/.*)?$/;
+
+/**
+ * Resolve o destino de navegação após troca bem-sucedida de instituição.
+ * Quando o usuário está em um detalhe ou impressão do Conselho de Classe,
+ * retorna `/conselho-classe` para desmontar o conselho da escola anterior.
+ */
+export function resolvePostSchoolSwitchPath(pathname: string): string | null {
+  if (!pathname) return null;
+  return COUNCIL_DETAIL_PATH_REGEX.test(pathname) ? "/conselho-classe" : null;
+}
+
 interface SchoolOption {
   schoolId: string;
   name: string;
@@ -25,12 +40,16 @@ interface SchoolSelectorProps {
   } | null;
   userSchools?: SchoolOption[];
   isAdmin?: boolean;
+  onNavigate?: (path: string) => void;
+  onReload?: () => void;
 }
 
 export default function SchoolSelector({
   currentSchool,
   userSchools = [],
   isAdmin = false,
+  onNavigate,
+  onReload,
 }: SchoolSelectorProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -65,10 +84,32 @@ export default function SchoolSelector({
         return;
       }
 
+      if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(
+          new CustomEvent(SCHOOL_SWITCHED_EVENT, {
+            detail: { schoolId },
+          })
+        );
+      }
+
       await clearRedeAtivaCachesOnly().catch(() => {});
 
+      const postSwitchPath = resolvePostSchoolSwitchPath(window.location.pathname);
+      if (postSwitchPath) {
+        if (onNavigate) {
+          onNavigate(postSwitchPath);
+        } else {
+          window.location.assign(postSwitchPath);
+        }
+        return;
+      }
+
       // Recarrega a página para que todos os Server Components e APIs assumam o novo contexto
-      window.location.reload();
+      if (onReload) {
+        onReload();
+      } else {
+        window.location.reload();
+      }
     } catch (err: any) {
       console.error("Falha ao alternar escola:", err);
       alert("Erro de conexão ao alternar instituição escolar.");

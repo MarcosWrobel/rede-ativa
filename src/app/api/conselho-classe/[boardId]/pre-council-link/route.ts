@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { createPreCouncilTeacherToken } from "@/lib/councilTeacherToken";
 import { generateQrCodeDataUrl, getTrustedAppOrigin } from "@/lib/qrCode";
@@ -9,6 +8,7 @@ import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   getSavedPreCouncilForLink,
+  isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
@@ -31,14 +31,14 @@ export async function POST(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -52,14 +52,14 @@ export async function POST(
     }
 
     const { trimesterId, matchedConversation } = await getSavedPreCouncilForLink({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       trimester: parsed.data.trimester,
       conversationId: parsed.data.conversationId || null,
     });
 
     const tokenResult = createPreCouncilTeacherToken({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       trimester: parsed.data.trimester,
       conversationId: matchedConversation?.id || null,
@@ -77,7 +77,7 @@ export async function POST(
       action: "CREATE_PRE_COUNCIL_TEACHER_LINK",
       entityType: "ClassCouncilTrimester",
       entityId: trimesterId,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       details: {
         boardId,
         trimester: parsed.data.trimester,

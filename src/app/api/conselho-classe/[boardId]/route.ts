@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { councilBoardMetadataUpdateSchema, formatZodError } from "@/lib/schemas";
 import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   getCouncilBoardDetail,
+  isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
@@ -30,14 +30,14 @@ export async function GET(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    const board = await getCouncilBoardDetail(ownership.schoolId, boardId);
+    const board = await getCouncilBoardDetail(school.id, boardId);
     if (!board) {
       return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
     }
@@ -65,14 +65,14 @@ export async function PATCH(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -86,7 +86,7 @@ export async function PATCH(
     }
 
     const board = await updateCouncilBoardMetadata({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       payload: parsed.data,
     });
@@ -95,7 +95,7 @@ export async function PATCH(
       action: "UPSERT_COUNCIL_BOARD",
       entityType: "ClassCouncilBoard",
       entityId: boardId,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       details: {
         boardId,
         classGroupId: ownership.classGroupId,

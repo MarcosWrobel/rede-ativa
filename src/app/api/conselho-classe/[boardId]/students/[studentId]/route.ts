@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { councilStudentCardUpdateSchema, formatZodError } from "@/lib/schemas";
 import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
+  isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
@@ -29,14 +29,14 @@ export async function PATCH(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -55,7 +55,7 @@ export async function PATCH(
     }
 
     const card = await updateStudentCouncilCard({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       studentId,
       payload: parsed.data,
@@ -66,7 +66,7 @@ export async function PATCH(
       action: "UPDATE_COUNCIL_STUDENT_CARD",
       entityType: "StudentCouncilCard",
       entityId: card.id,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       details: {
         boardId,
         studentId,

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   isValidPdfBuffer,
   mergeParsedSereCouncilReports,
@@ -13,6 +12,7 @@ import {
   canMutateSchoolCouncil,
   CouncilDomainError,
   findCouncilBoardOwnershipRecord,
+  isCouncilBoardAuthorizedInActiveSchool,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
 } from "@/services/classCouncilService";
@@ -41,14 +41,14 @@ export async function POST(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -144,7 +144,7 @@ export async function POST(
     if (rawMode === "preview") {
       const preview = await previewCouncilSerePdfImport({
         boardId,
-        schoolId: ownership.schoolId,
+        schoolId: school.id,
         batch,
       });
 
@@ -168,7 +168,7 @@ export async function POST(
 
     const result = await applyCouncilSerePdfImport({
       boardId,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       batch,
       actor,
       req,

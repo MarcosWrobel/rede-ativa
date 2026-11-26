@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { extractClientIp, logAudit } from "@/lib/audit";
 import { stripParticipantSecrets } from "@/lib/ataCrypto";
 import { councilGenerateMinuteSchema, formatZodError } from "@/lib/schemas";
@@ -8,6 +7,7 @@ import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   generateMinuteDraftFromCouncil,
+  isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
@@ -30,14 +30,14 @@ export async function POST(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -52,7 +52,7 @@ export async function POST(
 
     const ip = extractClientIp(req);
     const minute = await generateMinuteDraftFromCouncil({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       payload: parsed.data,
       authorId: authCheck.userId,
@@ -66,7 +66,7 @@ export async function POST(
       action: "GENERATE_COUNCIL_MINUTE_DRAFT",
       entityType: "PedagogicalMinute",
       entityId: minute.id,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       details: {
         boardId,
         minuteId: minute.id,

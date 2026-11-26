@@ -22,6 +22,7 @@ import CouncilSeatingMapTab from "@/components/conselho/CouncilSeatingMapTab";
 import CouncilTrimesterOverviewTab from "@/components/conselho/CouncilTrimesterOverviewTab";
 import CouncilPostMeetingTab from "@/components/conselho/CouncilPostMeetingTab";
 import CouncilStudentFichaModal from "@/components/conselho/CouncilStudentFichaModal";
+import { SCHOOL_SWITCHED_EVENT } from "@/components/SchoolSelector";
 import { getPreCouncilProgress, parsePreCouncilData } from "@/components/conselho/preCouncilUtils";
 import {
   COUNCIL_ENROLLMENT_STATUS_LABELS,
@@ -68,11 +69,46 @@ export default function ConselhoTurmaClient({
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [presentationRequestNonce, setPresentationRequestNonce] = useState(0);
   const [projectorRequestNonce, setProjectorRequestNonce] = useState(0);
+  const [isSwitchingSchool, setIsSwitchingSchool] = useState(false);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const activeContextRef = useRef({
+    boardId: initialBoard.id,
+    schoolId: initialBoard.schoolId,
+    invalidated: false,
+  });
 
   useEffect(() => {
+    activeContextRef.current = {
+      boardId: initialBoard.id,
+      schoolId: initialBoard.schoolId,
+      invalidated: false,
+    };
+    setBoard(initialBoard);
+    setIsSwitchingSchool(false);
+  }, [initialBoard]);
+
+  useEffect(() => {
+    function handleSchoolSwitched(event: Event) {
+      const targetSchoolId = (event as CustomEvent<{ schoolId?: string }>)?.detail?.schoolId;
+      if (targetSchoolId && targetSchoolId === activeContextRef.current.schoolId) {
+        return;
+      }
+      activeContextRef.current.invalidated = true;
+      refreshAbortRef.current?.abort();
+      setIsSubjectsModalOpen(false);
+      setIsPdfImportModalOpen(false);
+      setEditingCardId(null);
+      setToast(null);
+      setIsSwitchingSchool(true);
+    }
+
+    window.addEventListener(SCHOOL_SWITCHED_EVENT, handleSchoolSwitched);
     return () => {
+      activeContextRef.current.invalidated = true;
+      refreshAbortRef.current?.abort();
+      window.removeEventListener(SCHOOL_SWITCHED_EVENT, handleSchoolSwitched);
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current);
       }
@@ -80,6 +116,7 @@ export default function ConselhoTurmaClient({
   }, []);
 
   function notify(message: string, kind: "success" | "error" = "success") {
+    if (activeContextRef.current.invalidated) return;
     setToast({ message, kind });
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
@@ -90,22 +127,46 @@ export default function ConselhoTurmaClient({
   }
 
   async function refreshBoard() {
+    if (activeContextRef.current.invalidated) return;
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const expectedBoardId = activeContextRef.current.boardId;
+    const expectedSchoolId = activeContextRef.current.schoolId;
+
     try {
-      const res = await fetch(`/api/conselho-classe/${board.id}`);
+      const res = await fetch(`/api/conselho-classe/${expectedBoardId}`, {
+        signal: controller.signal,
+      });
       const data: { success?: boolean; board?: CouncilBoardDetailRecord } = await res.json();
-      if (res.ok && data.board) {
+      if (
+        activeContextRef.current.invalidated ||
+        controller.signal.aborted ||
+        activeContextRef.current.boardId !== expectedBoardId ||
+        activeContextRef.current.schoolId !== expectedSchoolId
+      ) {
+        return;
+      }
+      if (
+        res.ok &&
+        data.board &&
+        data.board.id === expectedBoardId &&
+        data.board.schoolId === expectedSchoolId
+      ) {
         setBoard(data.board);
       }
     } catch {
-      // Mantém estado atual em falha silenciosa de recarga
+      // Mantém estado atual em falha silenciosa de recarga ou aborto por troca de escola
     }
   }
 
   function handleSubjectsUpdated(subjects: CouncilSubjectRecord[]) {
+    if (activeContextRef.current.invalidated) return;
     setBoard((prev) => ({ ...prev, subjects }));
   }
 
   function handleTrimesterUpdated(updatedTrimester: CouncilTrimesterRecord) {
+    if (activeContextRef.current.invalidated) return;
     setBoard((prev) => {
       const exists = prev.trimesters.some((t) => t.trimester === updatedTrimester.trimester);
       const nextTrimesters = exists
@@ -118,6 +179,7 @@ export default function ConselhoTurmaClient({
   }
 
   function handleCardUpdated(updatedCard: CouncilStudentCardRecord) {
+    if (activeContextRef.current.invalidated) return;
     setBoard((prev) => ({
       ...prev,
       studentCards: prev.studentCards.map((c) =>
@@ -206,6 +268,16 @@ export default function ConselhoTurmaClient({
       accentClass: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
     },
   ];
+
+  if (isSwitchingSchool) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12 text-center">
+        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          Alternando instituição...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

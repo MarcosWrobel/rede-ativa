@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import CouncilMatrixGrid from "./CouncilMatrixGrid";
 import CouncilTeacherLinkModal from "./CouncilTeacherLinkModal";
+import { SCHOOL_SWITCHED_EVENT } from "@/components/SchoolSelector";
 import CouncilPreCouncilConversationsView from "./CouncilPreCouncilConversationsView";
 import CouncilPreCouncilSynthesisAckView from "./CouncilPreCouncilSynthesisAckView";
 import {
@@ -129,8 +130,21 @@ export default function CouncilPreCouncilTab({
   const isDirtyRef = useRef(isDirty);
   isDirtyRef.current = isDirty;
 
+  const saveAbortRef = useRef<AbortController | null>(null);
+  const activeScopeRef = useRef({
+    boardId: board.id,
+    schoolId: board.schoolId,
+    invalidated: false,
+  });
+
   // Reidrata quando troca turma ou trimestre
   useEffect(() => {
+    saveAbortRef.current?.abort();
+    activeScopeRef.current = {
+      boardId: board.id,
+      schoolId: board.schoolId,
+      invalidated: false,
+    };
     const initial = resolveInitialPreCouncilData({
       board,
       activeTrimester,
@@ -140,7 +154,31 @@ export default function CouncilPreCouncilTab({
     setDraft(initial);
     setBaselineSnapshot(JSON.stringify(initial));
     setSelectedConvId(initial.conversations[0]?.id || "");
-  }, [board.id, activeTrimester]);
+    setTeacherLinkOpen(false);
+    setSavingPreCouncil(false);
+    setSyncingAll(false);
+  }, [board.id, board.schoolId, activeTrimester]);
+
+  useEffect(() => {
+    function handleSchoolSwitched(event: Event) {
+      const targetSchoolId = (event as CustomEvent<{ schoolId?: string }>)?.detail?.schoolId;
+      if (targetSchoolId && targetSchoolId === activeScopeRef.current.schoolId) {
+        return;
+      }
+      activeScopeRef.current.invalidated = true;
+      saveAbortRef.current?.abort();
+      setTeacherLinkOpen(false);
+      setSavingPreCouncil(false);
+      setSyncingAll(false);
+    }
+
+    window.addEventListener(SCHOOL_SWITCHED_EVENT, handleSchoolSwitched);
+    return () => {
+      activeScopeRef.current.invalidated = true;
+      saveAbortRef.current?.abort();
+      window.removeEventListener(SCHOOL_SWITCHED_EVENT, handleSchoolSwitched);
+    };
+  }, []);
 
   // Atualiza dados vindos do servidor sem descartar edições locais pendentes
   useEffect(() => {
@@ -304,6 +342,13 @@ export default function CouncilPreCouncilTab({
       return;
     }
 
+    if (activeScopeRef.current.invalidated) return;
+    saveAbortRef.current?.abort();
+    const controller = new AbortController();
+    saveAbortRef.current = controller;
+    const requestBoardId = board.id;
+    const requestSchoolId = board.schoolId;
+
     setSavingPreCouncil(true);
     try {
       const payloadToSend = {
@@ -336,9 +381,10 @@ export default function CouncilPreCouncilTab({
         },
       };
 
-      const res = await fetch(`/api/conselho-classe/${board.id}/trimesters`, {
+      const res = await fetch(`/api/conselho-classe/${requestBoardId}/trimesters`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           trimester: activeTrimester,
           preCouncil: payloadToSend,
@@ -349,6 +395,15 @@ export default function CouncilPreCouncilTab({
         trimesterRecord?: CouncilTrimesterRecord;
         error?: string;
       } = await res.json();
+
+      if (
+        activeScopeRef.current.invalidated ||
+        controller.signal.aborted ||
+        activeScopeRef.current.boardId !== requestBoardId ||
+        activeScopeRef.current.schoolId !== requestSchoolId
+      ) {
+        return;
+      }
 
       if (!res.ok || !data.trimesterRecord) {
         onNotify(data.error || "Não foi possível salvar o Pré-Conselho.", "error");
@@ -363,9 +418,14 @@ export default function CouncilPreCouncilTab({
       }
       onNotify("Pré-Conselho salvo.", "success");
     } catch {
+      if (activeScopeRef.current.invalidated || controller.signal.aborted) {
+        return;
+      }
       onNotify("Falha de conexão ao salvar o Pré-Conselho.", "error");
     } finally {
-      setSavingPreCouncil(false);
+      if (!activeScopeRef.current.invalidated && !controller.signal.aborted) {
+        setSavingPreCouncil(false);
+      }
     }
   }
 

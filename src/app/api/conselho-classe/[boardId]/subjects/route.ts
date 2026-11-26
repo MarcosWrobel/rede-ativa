@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { councilSubjectsBatchSchema, formatZodError } from "@/lib/schemas";
 import {
   canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
+  isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
@@ -29,14 +29,14 @@ export async function PUT(
     }
 
     const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
@@ -50,7 +50,7 @@ export async function PUT(
     }
 
     const result = await saveOrCloneCouncilSubjects({
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       boardId,
       payload: parsed.data,
     });
@@ -59,7 +59,7 @@ export async function PUT(
       action: result.mode === "CLONED" ? "CLONE_COUNCIL_SUBJECTS" : "UPDATE_COUNCIL_SUBJECTS",
       entityType: "ClassCouncilBoard",
       entityId: boardId,
-      schoolId: ownership.schoolId,
+      schoolId: school.id,
       details: {
         boardId,
         mode: result.mode,
