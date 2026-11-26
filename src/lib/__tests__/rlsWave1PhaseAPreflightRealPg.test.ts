@@ -4496,6 +4496,323 @@ describe.skipIf(!SHOULD_RUN)(
         }
       }
     });
+
+    it("protege ON CONFLICT de StudentCouncilSubjectEntry pelo schoolId persistido e calcula trimester*BelowAvgJson apenas com notas confirmadas", async () => {
+      await prisma.school.update({
+        where: { id: "school-alpha" },
+        data: { settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }) },
+      });
+      await prisma.school.update({
+        where: { id: "school-beta" },
+        data: { settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }) },
+      });
+
+      await prisma.classGroup.create({
+        data: {
+          id: "cg-alpha-conf",
+          name: "1º Ano A",
+          segment: "EM",
+          shift: "Manhã",
+          schoolId: "school-alpha",
+        },
+      });
+      await prisma.student.create({
+        data: {
+          id: "stu-alpha-conf",
+          name: "Aluno Conflito Matriz",
+          cgm: "750000111",
+          phone: "41999997501",
+          schoolId: "school-alpha",
+          classGroupId: "cg-alpha-conf",
+          active: true,
+        },
+      });
+      await prisma.user.create({
+        data: {
+          id: "bi-ped-conf",
+          name: "Pedagoga Conflito",
+          email: "ped.conf@redeativa.local",
+          role: "PEDAGOGA",
+          active: true,
+          schoolId: "school-alpha",
+        },
+      });
+      await prisma.userSchool.create({
+        data: {
+          id: "us-bi-ped-conf",
+          userId: "bi-ped-conf",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+
+      await prisma.classCouncilBoard.create({
+        data: {
+          id: "board-alpha-conf",
+          schoolId: "school-alpha",
+          classGroupId: "cg-alpha-conf",
+          year: 2026,
+        },
+      });
+      await prisma.classCouncilSubject.createMany({
+        data: [
+          {
+            id: "sub-conf-mat",
+            schoolId: "school-alpha",
+            boardId: "board-alpha-conf",
+            name: "MATEMATICA",
+            displayOrder: 1,
+            active: true,
+          },
+          {
+            id: "sub-conf-port",
+            schoolId: "school-alpha",
+            boardId: "board-alpha-conf",
+            name: "PORTUGUES",
+            displayOrder: 2,
+            active: true,
+          },
+          {
+            id: "sub-conf-hist",
+            schoolId: "school-alpha",
+            boardId: "board-alpha-conf",
+            name: "HISTORIA",
+            displayOrder: 3,
+            active: true,
+          },
+          {
+            id: "sub-conf-art",
+            schoolId: "school-alpha",
+            boardId: "board-alpha-conf",
+            name: "ARTES",
+            displayOrder: 4,
+            active: true,
+          },
+        ],
+      });
+      await prisma.studentCouncilCard.create({
+        data: {
+          id: "card-alpha-conf",
+          schoolId: "school-alpha",
+          boardId: "board-alpha-conf",
+          studentId: "stu-alpha-conf",
+          tags: ["Manual Tag"],
+        },
+      });
+
+      await prisma.studentCouncilSubjectEntry.createMany({
+        data: [
+          {
+            id: "entry-divergent-beta",
+            schoolId: "school-beta",
+            cardId: "card-alpha-conf",
+            subjectId: "sub-conf-mat",
+            trimester: 1,
+            descriptorCodes: [2],
+            grade: 3.5,
+          },
+          {
+            id: "entry-legit-hist",
+            schoolId: "school-alpha",
+            cardId: "card-alpha-conf",
+            subjectId: "sub-conf-hist",
+            trimester: 1,
+            descriptorCodes: [],
+            grade: 7.5,
+          },
+          {
+            id: "entry-manual-art",
+            schoolId: "school-alpha",
+            cardId: "card-alpha-conf",
+            subjectId: "sub-conf-art",
+            trimester: 1,
+            descriptorCodes: [1],
+            grade: 4.8,
+          },
+        ],
+      });
+
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
+      testAuthState.pendingSessionUser = {
+        id: "bi-ped-conf",
+        email: "ped.conf@redeativa.local",
+        active: true,
+      };
+
+      const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation((client, schoolId, fn) =>
+          originalWithTenantContext(client, schoolId, async (tx) => {
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          })
+        );
+
+      try {
+        vi.mocked(logAudit).mockClear();
+
+        // 1. Combina conflito divergente (sub-conf-mat = 4.1 descartada), update legítimo (sub-conf-hist = 5.2)
+        //    e insert legítimo (sub-conf-port = 8.4), preservando nota manual (sub-conf-art = 4.8)
+        const rSync1 = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [],
+              notasMapa: [
+                {
+                  cgm: "750000111",
+                  nome: "Aluno Conflito Matriz",
+                  disciplinaRaw: "MATEMATICA - 101",
+                  nota1Tri: 4.1,
+                  codturma: "T1",
+                },
+                {
+                  cgm: "750000111",
+                  nome: "Aluno Conflito Matriz",
+                  disciplinaRaw: "HISTORIA - 102",
+                  nota1Tri: 5.2,
+                  codturma: "T1",
+                },
+                {
+                  cgm: "750000111",
+                  nome: "Aluno Conflito Matriz",
+                  disciplinaRaw: "PORTUGUES - 103",
+                  nota1Tri: 8.4,
+                  codturma: "T1",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rSync1.status).toBe(200);
+        const body1 = await rSync1.json();
+        expect(body1).toMatchObject({
+          sucesso: true,
+          notasGravadas: 2,
+          abaixoDaMediaDetectados: 1,
+          cardsAtualizados: 1,
+        });
+        expect(capturedContextSchools.length).toBeGreaterThan(0);
+        expect(capturedContextSchools.every((s) => s === "school-alpha")).toBe(true);
+
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "SYNC_CLASS_COUNCIL_BI",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              notasGravadas: 2,
+              abaixoDaMediaDetectados: 1,
+              cardsAtualizados: 1,
+            }),
+          })
+        );
+
+        const divergentRow = await prisma.studentCouncilSubjectEntry.findUnique({
+          where: { id: "entry-divergent-beta" },
+        });
+        expect(divergentRow).toMatchObject({
+          schoolId: "school-beta",
+          grade: 3.5,
+          descriptorCodes: [2],
+        });
+
+        const histRow = await prisma.studentCouncilSubjectEntry.findUnique({
+          where: {
+            cardId_subjectId_trimester: {
+              cardId: "card-alpha-conf",
+              subjectId: "sub-conf-hist",
+              trimester: 1,
+            },
+          },
+        });
+        expect(histRow).toMatchObject({ schoolId: "school-alpha", grade: 5.2 });
+
+        const portRow = await prisma.studentCouncilSubjectEntry.findUnique({
+          where: {
+            cardId_subjectId_trimester: {
+              cardId: "card-alpha-conf",
+              subjectId: "sub-conf-port",
+              trimester: 1,
+            },
+          },
+        });
+        expect(portRow).toMatchObject({ schoolId: "school-alpha", grade: 8.4 });
+
+        const cardAfter1 = await prisma.studentCouncilCard.findUnique({
+          where: { id: "card-alpha-conf" },
+        });
+        expect(cardAfter1?.tags).toEqual(["Manual Tag"]);
+        const belowList = JSON.parse(cardAfter1?.trimester1BelowAvgJson || "[]") as Array<{
+          subjectId?: string;
+          grade: number | null;
+        }>;
+        expect(belowList.map((b) => b.subjectId)).toEqual(["sub-conf-hist", "sub-conf-art"]);
+        expect(belowList.find((b) => b.subjectId === "sub-conf-mat")).toBeUndefined();
+
+        // 2. Execução contendo apenas a nota divergente descartada não altera resumo nem incrementa contadores
+        vi.mocked(logAudit).mockClear();
+        const rSync2 = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [],
+              notasMapa: [
+                {
+                  cgm: "750000111",
+                  nome: "Aluno Conflito Matriz",
+                  disciplinaRaw: "MATEMATICA - 101",
+                  nota1Tri: 2.0,
+                  codturma: "T1",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rSync2.status).toBe(200);
+        const body2 = await rSync2.json();
+        expect(body2).toMatchObject({
+          sucesso: true,
+          notasGravadas: 0,
+          abaixoDaMediaDetectados: 0,
+          cardsAtualizados: 0,
+        });
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "SYNC_CLASS_COUNCIL_BI",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              notasGravadas: 0,
+              abaixoDaMediaDetectados: 0,
+              cardsAtualizados: 0,
+            }),
+          })
+        );
+        const cardAfter2 = await prisma.studentCouncilCard.findUnique({
+          where: { id: "card-alpha-conf" },
+        });
+        expect(cardAfter2?.trimester1BelowAvgJson).toBe(cardAfter1?.trimester1BelowAvgJson);
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.useRealExtensionSyncAuth = false;
+      }
+    });
   }
 );
 

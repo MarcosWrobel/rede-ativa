@@ -786,6 +786,7 @@ export async function executeClassCouncilBiSync(options: {
     >();
 
     for (const card of board.studentCards) {
+      if (card.schoolId && card.schoolId !== currentSchool.id) continue;
       const cardMap = new Map<
         string,
         {
@@ -796,6 +797,8 @@ export async function executeClassCouncilBiSync(options: {
         }
       >();
       for (const e of card.subjectEntries || []) {
+        if (e.schoolId && e.schoolId !== currentSchool.id) continue;
+        if (!activeSubjectById.has(e.subjectId)) continue;
         if (e.trimester === 1 || e.trimester === 2 || e.trimester === 3) {
           cardMap.set(`${e.subjectId}::${e.trimester}`, {
             subjectId: e.subjectId,
@@ -836,7 +839,8 @@ export async function executeClassCouncilBiSync(options: {
 
         if (!card || !subject) continue;
 
-        const cardEntriesMap = entriesByCardId.get(card.id)!;
+        const cardEntriesMap = entriesByCardId.get(card.id);
+        if (!cardEntriesMap) continue;
         const triGrades: Array<[1 | 2 | 3, number | null]> = [
           [1, item.nota1Tri],
           [2, item.nota2Tri],
@@ -850,13 +854,6 @@ export async function executeClassCouncilBiSync(options: {
           const existing = cardEntriesMap.get(entryKey);
           const mergedCodes = mergeBiDescriptorCodes(existing?.descriptorCodes ?? [], grade);
 
-          cardEntriesMap.set(entryKey, {
-            subjectId: subject.id,
-            trimester: tri,
-            descriptorCodes: mergedCodes,
-            grade,
-          });
-
           entriesToUpsert.push({
             id: crypto.randomUUID(),
             cardId: card.id,
@@ -865,8 +862,6 @@ export async function executeClassCouncilBiSync(options: {
             descriptorCodes: mergedCodes,
             grade,
           });
-
-          markTouchedTrimester(card.id, tri);
         }
       }
     }
@@ -897,7 +892,15 @@ export async function executeClassCouncilBiSync(options: {
         });
 
         const persistedEntries = await withTenantContext(prisma, currentSchool.id, async (tx) =>
-          tx.$queryRaw<Array<{ cardId: string; subjectId: string; trimester: number; grade: number }>>`
+          tx.$queryRaw<
+            Array<{
+              cardId: string;
+              subjectId: string;
+              trimester: number;
+              grade: number;
+              descriptorCodes?: number[];
+            }>
+          >`
             INSERT INTO "StudentCouncilSubjectEntry" (
               "id",
               "schoolId",
@@ -950,7 +953,8 @@ export async function executeClassCouncilBiSync(options: {
               "grade" = EXCLUDED."grade",
               "updatedByEmail" = EXCLUDED."updatedByEmail",
               "updatedAt" = NOW()
-            RETURNING "cardId", "subjectId", "trimester", "grade"
+            WHERE "StudentCouncilSubjectEntry"."schoolId" = ${currentSchool.id}
+            RETURNING "cardId", "subjectId", "trimester", "grade", "descriptorCodes"
           `
         );
 
@@ -958,6 +962,31 @@ export async function executeClassCouncilBiSync(options: {
         abaixoDaMediaDetectados += persistedEntries.filter(
           (r) => Number(r.grade) < 6.0
         ).length;
+
+        for (const persisted of persistedEntries) {
+          if (
+            persisted.trimester !== 1 &&
+            persisted.trimester !== 2 &&
+            persisted.trimester !== 3
+          ) {
+            continue;
+          }
+          const cardEntriesMap = entriesByCardId.get(persisted.cardId);
+          if (cardEntriesMap) {
+            const entryKey = `${persisted.subjectId}::${persisted.trimester}`;
+            const existing = cardEntriesMap.get(entryKey);
+            const numericGrade = Number(persisted.grade);
+            cardEntriesMap.set(entryKey, {
+              subjectId: persisted.subjectId,
+              trimester: persisted.trimester,
+              descriptorCodes:
+                persisted.descriptorCodes ??
+                mergeBiDescriptorCodes(existing?.descriptorCodes ?? [], numericGrade),
+              grade: numericGrade,
+            });
+          }
+          markTouchedTrimester(persisted.cardId, persisted.trimester);
+        }
       }
     }
 

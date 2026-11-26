@@ -464,6 +464,7 @@ export async function getCouncilBoardDetail(
             },
           },
           subjectEntries: {
+            where: { schoolId },
             orderBy: [{ trimester: "asc" }],
           },
         },
