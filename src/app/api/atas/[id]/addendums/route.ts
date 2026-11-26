@@ -24,6 +24,16 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let stage = "precheck";
+  let stageStartedAt = performance.now();
+  const stageDurationsMs: Record<string, number> = {};
+  const advanceStage = (next: string) => {
+    const now = performance.now();
+    stageDurationsMs[stage] = Math.round(now - stageStartedAt);
+    stage = next;
+    stageStartedAt = now;
+  };
+
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
@@ -106,22 +116,22 @@ export async function POST(
     await resetRateLimit(pinLockKey);
 
     // Executa em transação atômica para garantir encadeamento linear estrito dos hashes dos adendos
+    advanceStage("transaction_open");
     const addendum = await prisma.$transaction(async (tx) => {
-      // Bloqueio pessimista de linha na ata pai para garantir linearidade estrita da hash-chain
-      try {
-        await tx.$executeRaw`
-          SELECT "id" FROM "PedagogicalMinute" WHERE "id" = ${id} FOR UPDATE;
-        `;
-      } catch (lockErr) {
-        // Tolerância em ambientes de teste sem suporte a FOR UPDATE
-      }
+      advanceStage("minute_lock");
+      // Bloqueia a ata pai antes de ler o último elo da cadeia.
+      await tx.$executeRaw`
+        SELECT "id" FROM "PedagogicalMinute" WHERE "id" = ${id} FOR UPDATE;
+      `;
 
+      advanceStage("minute_read");
       const minute = await tx.pedagogicalMinute.findUnique({
         where: { id },
         include: {
           addendums: {
             orderBy: { createdAt: "desc" },
             take: 1,
+            select: { addendumHash: true, createdAt: true },
           },
         },
       });
@@ -130,7 +140,6 @@ export async function POST(
         throw new Error("Ata pedagógica não encontrada");
       }
 
-      const currentSchool = await getCurrentSchool(authCheck.schoolId);
       if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
         throw new Error("Acesso negado a registro de outra instituição de ensino.");
       }
@@ -143,12 +152,10 @@ export async function POST(
       }
 
       // Obtém o hash imediatamente anterior (ou o da ata ou o do último adendo) para encadear
-      const previousHash =
-        minute.addendums.length > 0
-          ? minute.addendums[0].addendumHash
-          : minute.contentHash || "genesis";
-
-      const now = new Date();
+      const latestAddendum = minute.addendums[0];
+      const previousHash = latestAddendum?.addendumHash ?? (minute.contentHash || "genesis");
+      // Mantém a ordem da cadeia mesmo quando dois adendos usam o mesmo milissegundo.
+      const now = new Date(Math.max(Date.now(), (latestAddendum?.createdAt.getTime() ?? 0) + 1));
       const addendumHash = computeAddendumHash(
         previousHash,
         content,
@@ -158,6 +165,7 @@ export async function POST(
         participantSignatureData
       );
 
+      advanceStage("addendum_create");
       const created = await tx.pedagogicalMinuteAddendum.create({
         data: {
           minuteId: id,
@@ -173,6 +181,7 @@ export async function POST(
         },
       });
 
+      advanceStage("transaction_commit");
       return {
         ...created,
         minuteAtaNumber: minute.ataNumber,
@@ -181,6 +190,7 @@ export async function POST(
       };
     }, { maxWait: 5000, timeout: 10000 });
 
+    advanceStage("audit");
     await logAudit({
       action: "ADD_ATA_ADDENDUM",
       entityType: "PedagogicalMinuteAddendum",
@@ -197,7 +207,13 @@ export async function POST(
 
     return NextResponse.json({ success: true, addendum }, { status: 201 });
   } catch (error: any) {
-    console.error("[POST /api/atas/[id]/addendums] Erro:", error);
+    console.error("[POST /api/atas/[id]/addendums] Erro:", {
+      requestId: req.headers.get("x-vercel-id"),
+      code: error.code,
+      stage,
+      stageElapsedMs: Math.round(performance.now() - stageStartedAt),
+      stageDurationsMs,
+    });
     const status = error.message?.includes("Acesso negado") ? 403 : error.message?.includes("não encontrada") ? 404 : error.message?.includes("já finalizadas") ? 400 : 500;
     const safeMsg = status === 500 ? "Erro ao adicionar termo de aditamento" : error.message || "Erro ao adicionar termo de aditamento";
     return NextResponse.json({ error: safeMsg }, { status });
