@@ -107,6 +107,7 @@ vi.mock("@/lib/whatsappProvider", async () => {
 
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
+import { logAudit } from "@/lib/audit";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 
@@ -829,6 +830,51 @@ describe.skipIf(!SHOULD_RUN)(
         txSpy.mockRestore();
       }
     });
+
+    it("rejeita envio quando estudante da escola A está vinculado a turma da escola B sem criar log, chamar provedor ou vazar dados da turma", async () => {
+      await prisma.classGroup.update({
+        where: { id: "cg-beta" },
+        data: { name: "Turma Privada Beta" },
+      });
+      await prisma.student.create({
+        data: {
+          id: "stu-alpha-cross-cg",
+          schoolId: "school-alpha",
+          classGroupId: "cg-beta",
+          name: "Estudante Alpha Turma Cruzada",
+          phone: "41999995555",
+        },
+      });
+
+      testAuthState.schoolId = "school-alpha";
+      testAuthState.inepCode = "99000101";
+      vi.mocked(dispatchWhatsAppMessage).mockClear();
+      vi.mocked(logAudit).mockClear();
+
+      const res = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha-cross-cg",
+            templateId: "tpl-alpha",
+            reasonTitle: "Tentativa turma cruzada",
+            messageContent: "Não deve persistir nem auditar turma de B",
+          }),
+        })
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).not.toContain("Turma Privada Beta");
+      expect(body.error).not.toContain("cg-beta");
+      expect(await prisma.messageLog.count()).toBe(0);
+      expect(dispatchWhatsAppMessage).not.toHaveBeenCalled();
+
+      const auditCalls = vi.mocked(logAudit).mock.calls;
+      const sendAudit = auditCalls.find((c) => c[0]?.action === "SEND_MESSAGE");
+      expect(sendAudit).toBeUndefined();
+    });
   }
 );
 
@@ -977,17 +1023,24 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
             ? {
                 id: "stu-piloto",
                 schoolId: "default-leopoldina",
+                classGroupId: "cg-piloto",
                 phone: "41999994444",
                 name: "Estudante Piloto",
-                classGroup: { name: "7º Ano A" },
               }
             : {
                 id: "stu-alpha",
                 schoolId: "school-alpha",
+                classGroupId: "cg-alpha",
                 phone: "41999991111",
                 name: "Estudante Alpha",
-                classGroup: { name: "6º Ano A" },
               }
+        ),
+      },
+      classGroup: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === "cg-piloto"
+            ? { id: "cg-piloto", schoolId: "default-leopoldina", name: "7º Ano A" }
+            : { id: "cg-alpha", schoolId: "school-alpha", name: "6º Ano A" }
         ),
       },
       messageTemplate: {

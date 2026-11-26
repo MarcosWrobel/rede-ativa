@@ -350,6 +350,7 @@ const prismaMock: any = {
     upsert: vi.fn(async () => db.schools.find((s) => s.id === "default-leopoldina")),
   },
   classGroup: {
+    findUnique: vi.fn(async ({ where }: any) => db.classGroups.find((c) => c.id === where.id) || null),
     findFirst: vi.fn(async ({ where }: any) => db.classGroups.find((c) => matchFilter(c, where)) || null),
     findMany: vi.fn(async ({ where }: any = {}) =>
       db.classGroups

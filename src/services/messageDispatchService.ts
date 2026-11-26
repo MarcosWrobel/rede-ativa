@@ -95,7 +95,13 @@ export async function dispatchAndPersistMessage(
   const txResult = await withTenantContext(prisma, resolvedSchoolId, async (tx) => {
     const student = await tx.student.findUnique({
       where: { id: studentId },
-      include: { classGroup: true },
+      select: {
+        id: true,
+        schoolId: true,
+        classGroupId: true,
+        name: true,
+        phone: true,
+      },
     });
 
     if (
@@ -107,6 +113,25 @@ export async function dispatchAndPersistMessage(
         ok: false as const,
         status: 404,
         error: "Aluno não encontrado nesta instituição",
+      };
+    }
+
+    const classGroup = student.classGroupId
+      ? await tx.classGroup.findUnique({
+          where: { id: student.classGroupId },
+          select: { id: true, schoolId: true, name: true },
+        })
+      : null;
+
+    if (
+      !classGroup ||
+      !assertTenantOwnership(classGroup.schoolId, resolvedSchoolId, session) ||
+      classGroup.schoolId !== resolvedSchoolId
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "Turma do estudante não pertence ou não está disponível nesta instituição.",
       };
     }
 
@@ -182,6 +207,7 @@ export async function dispatchAndPersistMessage(
       ok: true as const,
       log,
       student,
+      validatedClassGroupName: classGroup.name,
       digits,
       contentHash,
     };
@@ -191,7 +217,7 @@ export async function dispatchAndPersistMessage(
     return txResult;
   }
 
-  const { log, student, digits, contentHash } = txResult;
+  const { log, student, validatedClassGroupName, digits, contentHash } = txResult;
 
   // 3. Despacho no gateway / construção de URL otimizada wa.me (somente após commit da Tx 1)
   const dispatch = await dispatchWhatsAppMessage({
@@ -220,7 +246,7 @@ export async function dispatchAndPersistMessage(
     entityId: log.id,
     details: {
       studentName: student.name,
-      turma: student.classGroup.name,
+      turma: validatedClassGroupName,
       reason: reasonTitle,
       phone: digits,
       deliveryStatus: finalStatus,

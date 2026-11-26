@@ -278,6 +278,13 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
             createMany: hoisted.studentCreateMany,
             update: hoisted.studentUpdate,
           },
+          classGroup: {
+            findUnique: vi.fn(async ({ where }: any) => ({
+              id: where.id,
+              schoolId: hoisted.currentSchool.id,
+              name: "6º Ano A",
+            })),
+          },
           messageTemplate: {
             findMany: hoisted.templateFindMany,
             findUnique: hoisted.templateFindUnique,

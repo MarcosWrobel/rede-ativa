@@ -141,6 +141,13 @@ vi.mock("@/lib/prisma", () => ({
           student: {
             findUnique: vi.fn(async ({ where }: any) => hoisted.students.get(where.id) || null),
           },
+          classGroup: {
+            findUnique: vi.fn(async ({ where }: any) => ({
+              id: where.id,
+              schoolId: "school-e-1",
+              name: "6º Ano A",
+            })),
+          },
           messageTemplate: {
             findUnique: vi.fn(async () => null),
           },
@@ -247,6 +254,7 @@ describe("Remediação Setorial do Setor E e Camada Transversal (E1-E4, T1-T2)",
         name: "Estudante Teste",
         phone: "42999998888",
         schoolId: "school-e-1",
+        classGroupId: "cg-1",
         classGroup: { id: "cg-1", name: "6º Ano A" },
       });
 
