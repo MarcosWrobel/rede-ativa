@@ -455,7 +455,7 @@ export async function DELETE(
             ? await tx.classGroup.count({ where: { schoolId: target.id } })
             : 0;
 
-        await assertNoCrossSchoolCleanupConflicts(tx, {
+        const lockedIds = await assertNoCrossSchoolCleanupConflicts(tx, {
           schoolId: target.id,
           conflictCode: "SCHOOL_DELETE_INTEGRITY_CONFLICT",
           actionLabel: "Exclusão",
@@ -484,23 +484,59 @@ export async function DELETE(
         await tx.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: target.id } } });
         await tx.pedagogicalMinute.deleteMany({ where: { schoolId: target.id } });
         if (typeof tx.studentCouncilSubjectEntry?.deleteMany === "function") {
-          await tx.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: target.id } });
+          if (!lockedIds) {
+            await tx.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: target.id } });
+          } else if (lockedIds.lockedCouncilEntryIds.length > 0) {
+            await tx.studentCouncilSubjectEntry.deleteMany({
+              where: { id: { in: lockedIds.lockedCouncilEntryIds }, schoolId: target.id },
+            });
+          }
         }
         if (typeof tx.studentCouncilCard?.deleteMany === "function") {
-          await tx.studentCouncilCard.deleteMany({ where: { schoolId: target.id } });
+          if (!lockedIds) {
+            await tx.studentCouncilCard.deleteMany({ where: { schoolId: target.id } });
+          } else if (lockedIds.lockedCouncilCardIds.length > 0) {
+            await tx.studentCouncilCard.deleteMany({
+              where: { id: { in: lockedIds.lockedCouncilCardIds }, schoolId: target.id },
+            });
+          }
         }
         if (typeof tx.classCouncilTrimester?.deleteMany === "function") {
-          await tx.classCouncilTrimester.deleteMany({ where: { schoolId: target.id } });
+          if (!lockedIds) {
+            await tx.classCouncilTrimester.deleteMany({ where: { schoolId: target.id } });
+          } else if (lockedIds.lockedCouncilTrimesterIds.length > 0) {
+            await tx.classCouncilTrimester.deleteMany({
+              where: { id: { in: lockedIds.lockedCouncilTrimesterIds }, schoolId: target.id },
+            });
+          }
         }
         if (typeof tx.classCouncilSubject?.deleteMany === "function") {
-          await tx.classCouncilSubject.deleteMany({ where: { schoolId: target.id } });
+          if (!lockedIds) {
+            await tx.classCouncilSubject.deleteMany({ where: { schoolId: target.id } });
+          } else if (lockedIds.lockedCouncilSubjectIds.length > 0) {
+            await tx.classCouncilSubject.deleteMany({
+              where: { id: { in: lockedIds.lockedCouncilSubjectIds }, schoolId: target.id },
+            });
+          }
         }
         if (typeof tx.classCouncilBoard?.deleteMany === "function") {
-          await tx.classCouncilBoard.deleteMany({ where: { schoolId: target.id } });
+          if (!lockedIds) {
+            await tx.classCouncilBoard.deleteMany({ where: { schoolId: target.id } });
+          } else if (lockedIds.lockedCouncilBoardIds.length > 0) {
+            await tx.classCouncilBoard.deleteMany({
+              where: { id: { in: lockedIds.lockedCouncilBoardIds }, schoolId: target.id },
+            });
+          }
         }
         await tx.student.deleteMany({ where: { schoolId: target.id } });
         await tx.classGroup.deleteMany({ where: { schoolId: target.id } });
-        await tx.messageTemplate.deleteMany({ where: { schoolId: target.id } });
+        if (!lockedIds) {
+          await tx.messageTemplate.deleteMany({ where: { schoolId: target.id } });
+        } else if (lockedIds.lockedTemplateIds.length > 0) {
+          await tx.messageTemplate.deleteMany({
+            where: { id: { in: lockedIds.lockedTemplateIds }, schoolId: target.id },
+          });
+        }
         await tx.userSchool.deleteMany({ where: { schoolId: target.id } });
         await tx.user.updateMany({
           where: { schoolId: target.id },

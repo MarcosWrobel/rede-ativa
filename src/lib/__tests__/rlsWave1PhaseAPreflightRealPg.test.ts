@@ -6454,6 +6454,314 @@ describe.skipIf(!SHOULD_RUN)(
         expect(
           await prisma.auditLog.count({ where: { action: "DELETE_SCHOOL", entityId: "school-audit-fail" } })
         ).toBe(0);
+
+        // 9. Modelo criado concorrentemente durante DELETE (fora do conjunto bloqueado):
+        //    não é removido por deleteMany({ where: { schoolId } }), aborta com 409 FK e preserva templateId em school-beta
+        await prisma.school.create({
+          data: {
+            id: "school-conc-new",
+            inepCode: "99000883",
+            name: "Escola Novo Modelo Concorrente",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-conc-new-1",
+            schoolId: "school-conc-new",
+            title: "Modelo Bloqueado 1",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+
+        let newTplLockResolve!: () => void;
+        const newTplLockPromise = new Promise<void>((res) => {
+          newTplLockResolve = res;
+        });
+        let releaseNewTplDelete!: () => void;
+        const releaseNewTplPromise = new Promise<void>((res) => {
+          releaseNewTplDelete = res;
+        });
+        beforeDeleteHook = async () => {
+          newTplLockResolve();
+          await releaseNewTplPromise;
+        };
+
+        const delNewTplPromise = deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-new", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-conc-new" }) }
+        );
+        await newTplLockPromise;
+
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-conc-new-2",
+            schoolId: "school-conc-new",
+            title: "Modelo Criado Concorrente 2",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+        await prisma.messageLog.create({
+          data: {
+            id: "ml-beta-new-tpl",
+            schoolId: "school-beta",
+            studentId: "stu-lc-b1",
+            templateId: "tpl-conc-new-2",
+            reasonTitle: "Faltas",
+            messageContent: "Referência a modelo criado durante DELETE",
+            phoneUsed: "41999999502",
+            sentByName: "Sistema",
+          },
+        });
+        releaseNewTplDelete();
+
+        const rDelNewTpl = await delNewTplPromise;
+        expect(rDelNewTpl.status).toBe(409);
+        expect((await rDelNewTpl.json()).code).toBe("SCHOOL_DELETE_FK_CONFLICT");
+        expect(await prisma.school.findUnique({ where: { id: "school-conc-new" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-conc-new-1" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-conc-new-2" } })).not.toBeNull();
+        expect((await prisma.messageLog.findUnique({ where: { id: "ml-beta-new-tpl" } }))?.templateId).toBe(
+          "tpl-conc-new-2"
+        );
+        expect(
+          await prisma.auditLog.count({ where: { action: "DELETE_SCHOOL", entityId: "school-conc-new" } })
+        ).toBe(0);
+
+        // 10. Mudança concorrente de vínculo em MessageLog existente mantendo templateId igual:
+        //     FOR UPDATE em MessageLog impede re-vinculação a school-beta durante DELETE
+        await prisma.school.create({
+          data: {
+            id: "school-conc-rebind",
+            inepCode: "99000884",
+            name: "Escola Rebind Log",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.classGroup.create({
+          data: {
+            id: "cg-conc-rebind",
+            name: "1º Ano R",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-conc-rebind",
+          },
+        });
+        await prisma.student.create({
+          data: {
+            id: "stu-conc-rebind",
+            name: "Aluno Rebind",
+            cgm: "960000101",
+            phone: "41999999601",
+            schoolId: "school-conc-rebind",
+            classGroupId: "cg-conc-rebind",
+            active: true,
+          },
+        });
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-conc-rebind",
+            schoolId: "school-conc-rebind",
+            title: "Modelo Rebind",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+        await prisma.messageLog.create({
+          data: {
+            id: "ml-conc-rebind",
+            schoolId: "school-conc-rebind",
+            studentId: "stu-conc-rebind",
+            templateId: "tpl-conc-rebind",
+            reasonTitle: "Faltas",
+            messageContent: "Log Rebind",
+            phoneUsed: "41999999601",
+            sentByName: "Sistema",
+          },
+        });
+
+        let rebindLockResolve!: () => void;
+        const rebindLockPromise = new Promise<void>((res) => {
+          rebindLockResolve = res;
+        });
+        let releaseRebindDelete!: () => void;
+        const releaseRebindPromise = new Promise<void>((res) => {
+          releaseRebindDelete = res;
+        });
+        beforeDeleteHook = async () => {
+          rebindLockResolve();
+          await releaseRebindPromise;
+        };
+
+        const delRebindPromise = deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-rebind", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-conc-rebind" }) }
+        );
+        await rebindLockPromise;
+
+        let rebindSettled = false;
+        const concurrentRebindPromise = prisma.messageLog
+          .update({
+            where: { id: "ml-conc-rebind" },
+            data: { schoolId: "school-beta" },
+          })
+          .then(
+            () => {
+              rebindSettled = true;
+              return "updated";
+            },
+            () => {
+              rebindSettled = true;
+              return "rejected";
+            }
+          );
+
+        await new Promise((r) => setTimeout(r, 80));
+        expect(rebindSettled).toBe(false);
+        releaseRebindDelete();
+
+        const [rDelRebind, rebindOutcome] = await Promise.all([
+          delRebindPromise,
+          concurrentRebindPromise,
+        ]);
+        expect(rDelRebind.status).toBe(200);
+        expect(rebindOutcome).toBe("rejected");
+        expect(await prisma.school.findUnique({ where: { id: "school-conc-rebind" } })).toBeNull();
+
+        // 11. Concorrência no Conselho durante POST /api/schools/[id]/sanitize:
+        //     FOR UPDATE em ClassCouncilBoard/Subject/Card bloqueia inserção concorrente de nota divergente até o fim do saneamento
+        await prisma.school.create({
+          data: {
+            id: "school-conc-council",
+            inepCode: "99000885",
+            name: "Escola Concorrência Conselho",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.classGroup.create({
+          data: {
+            id: "cg-conc-council",
+            name: "1º Ano C",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-conc-council",
+          },
+        });
+        await prisma.student.create({
+          data: {
+            id: "stu-conc-council",
+            name: "Aluno Conselho Conc",
+            cgm: "970000101",
+            phone: "41999999701",
+            schoolId: "school-conc-council",
+            classGroupId: "cg-conc-council",
+            active: true,
+          },
+        });
+        await prisma.classCouncilBoard.create({
+          data: {
+            id: "board-conc-council",
+            schoolId: "school-conc-council",
+            classGroupId: "cg-conc-council",
+            year: 2026,
+          },
+        });
+        await prisma.classCouncilSubject.create({
+          data: {
+            id: "sub-conc-council",
+            schoolId: "school-conc-council",
+            boardId: "board-conc-council",
+            name: "PORTUGUES",
+            displayOrder: 1,
+            active: true,
+          },
+        });
+        await prisma.studentCouncilCard.create({
+          data: {
+            id: "card-conc-council",
+            schoolId: "school-conc-council",
+            boardId: "board-conc-council",
+            studentId: "stu-conc-council",
+          },
+        });
+
+        let councilLockResolve!: () => void;
+        const councilLockPromise = new Promise<void>((res) => {
+          councilLockResolve = res;
+        });
+        let releaseCouncilSanitize!: () => void;
+        const releaseCouncilPromise = new Promise<void>((res) => {
+          releaseCouncilSanitize = res;
+        });
+        beforeDeleteHook = async () => {
+          councilLockResolve();
+          await releaseCouncilPromise;
+        };
+
+        const sanCouncilPromise = sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-council/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-conc-council" }) }
+        );
+        await councilLockPromise;
+
+        let councilInsertSettled = false;
+        const concurrentCouncilEntryPromise = prisma.studentCouncilSubjectEntry
+          .create({
+            data: {
+              id: "entry-conc-div",
+              schoolId: "school-beta",
+              cardId: "card-conc-council",
+              subjectId: "sub-conc-council",
+              trimester: 1,
+              descriptorCodes: [2],
+              grade: 4.0,
+            },
+          })
+          .then(
+            () => {
+              councilInsertSettled = true;
+              return "committed";
+            },
+            () => {
+              councilInsertSettled = true;
+              return "rejected";
+            }
+          );
+
+        await new Promise((r) => setTimeout(r, 80));
+        expect(councilInsertSettled).toBe(false);
+        releaseCouncilSanitize();
+
+        const [rSanConcCouncil, councilInsertOutcome] = await Promise.all([
+          sanCouncilPromise,
+          concurrentCouncilEntryPromise,
+        ]);
+        expect(rSanConcCouncil.status).toBe(200);
+        expect(councilInsertOutcome).toBe("rejected");
+        expect(
+          await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-conc-div" } })
+        ).toBeNull();
+        expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
       } finally {
         beforeTxHook = null;
         beforeDeleteHook = null;
