@@ -26,3 +26,47 @@ footer {
 body {
   overflow-x: hidden !important;
 }
+
+/* Modo Compacto (Popup 480x760px): exibe apenas a conversa ativa (#main) */
+@media (max-width: 768px) {
+  #app:has(#main),
+  #app:has(#main) *:has(> #main),
+  #app:has(#main) *:has(> * > #main) {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+  }
+
+  /* Oculta coluna da lista de conversas sem afetar ancestrais de #main */
+  #app:has(#main) #side,
+  #app:has(#main) #pane-side,
+  #app:has(#main) div:has(> #side):not(:has(#main)),
+  #app:has(#main) div:has(> #pane-side):not(:has(#main)) {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+  }
+
+  /* Oculta a barra lateral fina de ícones quando #main está ativo */
+  #app:has(#main) div:has(> header):not(:has(#main)):not(:has([role="dialog"])):has([data-icon*="chat"], [aria-label*="Conversas"], [aria-label*="Chats"]) {
+    display: none !important;
+    width: 0 !important;
+  }
+
+  /* Faz a conversa ativa ocupar 100% da janela compacta */
+  #app:has(#main) *:has(> #main) {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+
+  #main {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 100% !important;
+  }
+
+  #main > * {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+}

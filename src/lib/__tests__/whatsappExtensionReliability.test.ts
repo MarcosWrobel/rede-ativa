@@ -699,7 +699,7 @@ function createWhatsAppContentHarness(options?: {
   };
 }
 
-describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.7.0)", () => {
+describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Busca Ativa (v1.7.1)", () => {
   it("1. Reinjeção 1x, 5x e 10x de whatsapp-content.js não acumula listeners, timers, observers nem barras duplicadas", () => {
     const h = createWhatsAppContentHarness();
 
@@ -717,7 +717,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     const pingResponses = h.sendRuntimeToContent({ type: "LEOPOLDINA_PING" });
     expect(pingResponses).toHaveLength(1);
-    expect(pingResponses[0]).toEqual({ pong: true, version: "1.7.0" });
+    expect(pingResponses[0]).toEqual({ pong: true, version: "1.7.1" });
   });
 
   it("2. __REDEATIVA_WA_CLEANUP__ remove todos os listeners, cancela timers pendentes e impede confirmação posterior", () => {
@@ -1211,7 +1211,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
 
     expect(winListeners).toHaveLength(1);
     expect(runtimeListeners).toHaveLength(1);
-    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.7.0");
+    expect((sandbox.document.documentElement.dataset as any).redeativaExtensionVersion).toBe("1.7.1");
   });
 
   it("12. WhatsAppDispatchToggle e BuscaAtivaClient removem todos os listeners e timers no cleanup de useEffect", () => {
@@ -1230,9 +1230,9 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     expect(buscaAtivaSource).toContain("if (toastTimer) clearTimeout(toastTimer)");
   });
 
-  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.7.0 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
+  it("13. Pacotes ZIP distribuídos contêm exatamente os arquivos de extension/ com hashes SHA-256 idênticos e versão 1.7.1 sincronizada com EXPECTED_EXTENSION_VERSION", () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
-    expect(manifest.version).toBe("1.7.0");
+    expect(manifest.version).toBe("1.7.1");
     expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version);
 
     expect(fs.existsSync(ZIP_REDE_ATIVA_PATH)).toBe(true);
@@ -2395,7 +2395,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     });
 
     expect(rootDataset.redeativaExtension).toBe("true");
-    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.0");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.1");
 
     // Simula hidratação do Next/React removendo atributos data-* do <html>
     delete rootDataset.redeativaExtension;
@@ -2404,7 +2404,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     mutationObservers[0].cb();
 
     expect(rootDataset.redeativaExtension).toBe("true");
-    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.0");
+    expect(rootDataset.redeativaExtensionVersion).toBe("1.7.1");
     expect(
       postedMessages.filter((m) => m.type === "REDEATIVA_EXTENSION_READY").length
     ).toBeGreaterThan(readyCountBefore);
@@ -2416,7 +2416,7 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
       { id: "ext-rede-ativa-test" },
       (res: any) => pingReplies.push(res)
     );
-    expect(pingReplies[0]).toEqual({ alive: true, version: "1.7.0" });
+    expect(pingReplies[0]).toEqual({ alive: true, version: "1.7.1" });
 
     // Modal aberto sem enviar studentName no payload -> bridge infere "NATIELE PACHECO" do <dialog open>
     for (const fn of winListeners.get("message") || []) {
@@ -2717,5 +2717,26 @@ describe("Suite de Regressão de Desempenho e Confiabilidade — Extensão & Bus
     );
     expect(toggleSource).toContain("if (event.source !== undefined && event.source !== window) return;");
     expect(toggleSource).toContain("event.origin !== window.location.origin");
+  });
+
+  it("27. Janela compacta (480x760px) oculta a coluna da lista de conversas (#side/#pane-side) apenas quando #main está aberto e preserva 100% de largura para a conversa", () => {
+    const backgroundSource = fs.readFileSync(
+      path.join(ROOT_DIR, "extension/background.js"),
+      "utf8"
+    );
+    expect(backgroundSource).toContain("const POPUP_WIDTH = 480;");
+    expect(backgroundSource).toContain("const POPUP_HEIGHT = 760;");
+
+    const focusCss = fs.readFileSync(
+      path.join(ROOT_DIR, "extension/whatsapp-focus.css"),
+      "utf8"
+    );
+    expect(focusCss).toContain("@media (max-width: 768px)");
+    expect(focusCss).toContain("#app:has(#main) #side");
+    expect(focusCss).toContain("#app:has(#main) #pane-side");
+    expect(focusCss).toContain("div:has(> #side):not(:has(#main))");
+    expect(focusCss).toContain("div:has(> #pane-side):not(:has(#main))");
+    expect(focusCss).toMatch(/#main\s*\{[\s\S]*width:\s*100%\s*!important;/);
+    expect(focusCss).toMatch(/#main\s*\{[\s\S]*min-width:\s*0\s*!important;/);
   });
 });

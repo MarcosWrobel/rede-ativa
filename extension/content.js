@@ -1,9 +1,9 @@
-// content.js - Extrator Power BI Multi-Relatório (Frequência & BI Aprendizagem v1.7.0)
+// content.js - Extrator Power BI Multi-Relatório (Frequência & BI Aprendizagem v1.7.1)
 (function() {
   if (window.__leopoldina_content_injected) return;
   window.__leopoldina_content_injected = true;
 
-  console.log('[Rede Ativa] Content script v1.7.0 carregado com sucesso.');
+  console.log('[Rede Ativa] Content script v1.7.1 carregado com sucesso.');
 
   // Armazena alunos únicos mapeados por CGM (Modo Presente na Escola / Frequência)
   const alunosCapturados = new Map();
