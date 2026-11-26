@@ -173,4 +173,60 @@ describe("FASE 3 — Frontend & UX Pedagógica Human-in-the-Loop", () => {
     expect(html).toContain("7º Ano B");
     expect(html).toContain("Falta Retificada");
   });
+
+  it("consome o payload { logs, total, page, pageSize, totalPages } de GET /api/messages no HistoricoClient", () => {
+    const getMessagesResponse = {
+      logs: [
+        {
+          id: "hist-get-1",
+          schoolId: "school-alpha",
+          studentId: "stu-1",
+          reasonTitle: "Faltas Consecutivas",
+          messageContent: "Contato realizado com responsável.",
+          phoneUsed: "41999991111",
+          sentByName: "Pedagoga Ana",
+          sentAt: "2026-11-15T12:00:00.000Z",
+          guardianReplied: false,
+          replyNotes: null,
+          replyCategory: null,
+          deliveryStatus: "SENT",
+          student: {
+            id: "stu-1",
+            name: "Mariana Souza",
+            schoolId: "school-alpha",
+            classGroupId: "cg-1",
+            classGroup: {
+              id: "cg-1",
+              name: "8º Ano A",
+              segment: "EF2",
+              schoolId: "school-alpha",
+            },
+          },
+        },
+      ],
+      total: 11,
+      page: 1,
+      pageSize: 10,
+      totalPages: 2,
+    };
+
+    const html = renderToString(
+      <HistoricoClient
+        initialLogs={getMessagesResponse.logs}
+        initialTotal={getMessagesResponse.total}
+        pedagogas={["Pedagoga Ana"]}
+        classGroups={[{ id: "cg-1", name: "8º Ano A" }]}
+        currentUser={{
+          name: "Pedagoga Ana",
+          email: "ana@escola.pr.gov.br",
+          role: "PEDAGOGA",
+        }}
+      />
+    );
+
+    expect(html).toContain("Mariana Souza");
+    expect(html).toContain("8º Ano A");
+    expect(html).toContain("Faltas Consecutivas");
+    expect(html).toContain("11");
+  });
 });

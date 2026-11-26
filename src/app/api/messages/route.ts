@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,13 @@ export async function GET(req: Request) {
     const dateTo = (searchParams.get("dateTo") || "").trim();
 
     const andFilters: any[] = [
-      { student: { schoolId: currentSchool.id } }
+      { OR: [{ schoolId: null }, { schoolId: currentSchool.id }] },
+      {
+        student: {
+          schoolId: currentSchool.id,
+          classGroup: { schoolId: currentSchool.id },
+        },
+      },
     ];
 
     if (search) {
@@ -44,9 +51,23 @@ export async function GET(req: Request) {
     }
 
     if (classGroupId) {
-      andFilters.push({ student: { classGroupId } });
+      andFilters.push({
+        student: {
+          schoolId: currentSchool.id,
+          classGroupId,
+          classGroup: { schoolId: currentSchool.id },
+        },
+      });
     } else if (segment && segment !== "TODOS") {
-      andFilters.push({ student: { classGroup: { segment } } });
+      andFilters.push({
+        student: {
+          schoolId: currentSchool.id,
+          classGroup: {
+            schoolId: currentSchool.id,
+            segment,
+          },
+        },
+      });
     }
 
     if (pedagoga) {
@@ -85,9 +106,9 @@ export async function GET(req: Request) {
     const where = andFilters.length > 0 ? { AND: andFilters } : {};
     const skip = (page - 1) * pageSize;
 
-    const [total, logs] = await Promise.all([
-      prisma.messageLog.count({ where }),
-      prisma.messageLog.findMany({
+    const { total, logs } = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const count = await tx.messageLog.count({ where });
+      const items = await tx.messageLog.findMany({
         where,
         skip,
         take: pageSize,
@@ -97,8 +118,9 @@ export async function GET(req: Request) {
             include: { classGroup: true },
           },
         },
-      }),
-    ]);
+      });
+      return { total: count, logs: items };
+    });
 
     return NextResponse.json({
       logs,

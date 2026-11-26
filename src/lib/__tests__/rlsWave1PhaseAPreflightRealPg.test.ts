@@ -195,10 +195,13 @@ vi.mock("@/lib/extensionSyncAuth", async () => {
   };
 });
 
+import { auth } from "@/lib/auth";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { logAudit } from "@/lib/audit";
+import * as rlsTenantContext from "@/lib/rlsTenantContext";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
+import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -2253,6 +2256,327 @@ describe.skipIf(!SHOULD_RUN)(
         await prisma.userSchool.deleteMany({});
         await prisma.user.deleteMany({});
         await prisma.student.deleteMany({ where: { id: "stu-alpha-turma-b-mgr" } });
+      }
+    });
+
+    it("integra withTenantContext em GET /api/messages com coerência Fase A, exclusão de turma cruzada, filtros, paginação e contrato do Histórico", async () => {
+      await prisma.messageLog.deleteMany({});
+      await prisma.messageTemplate.deleteMany({});
+      await prisma.student.deleteMany({});
+      await prisma.classGroup.deleteMany({});
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+      await prisma.school.deleteMany({});
+
+      await prisma.school.createMany({
+        data: [
+          { id: "school-alpha", name: "Escola Alpha", inepCode: "11111111" },
+          { id: "school-beta", name: "Escola Beta", inepCode: "22222222" },
+        ],
+      });
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "cg-alpha-em", name: "1º Ano A", segment: "EM", schoolId: "school-alpha" },
+          { id: "cg-alpha-ef", name: "9º Ano B", segment: "EF2", schoolId: "school-alpha" },
+          { id: "cg-beta-em", name: "2º Ano B", segment: "EM", schoolId: "school-beta" },
+        ],
+      });
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-alpha-em",
+            name: "Estudante Alpha EM",
+            cgm: "100100100",
+            phone: "41999991111",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-em",
+          },
+          {
+            id: "stu-alpha-ef",
+            name: "Estudante Alpha EF",
+            cgm: "100100200",
+            phone: "41999991112",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-ef",
+          },
+          {
+            id: "stu-alpha-turma-b",
+            name: "Estudante Alpha Turma Cruzada",
+            cgm: "100100300",
+            phone: "41999993333",
+            schoolId: "school-alpha",
+            classGroupId: "cg-beta-em",
+          },
+          {
+            id: "stu-beta-em",
+            name: "Estudante Beta EM",
+            cgm: "200200200",
+            phone: "41999992222",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-em",
+          },
+        ],
+      });
+
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "list-pedagoga-a",
+            email: "pedagoga.list@redeativa.local",
+            name: "Pedagoga Listagem A",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "list-sem-vinculo",
+            email: "sem.vinculo.list@redeativa.local",
+            name: "Sem Vinculo",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+        ],
+      });
+      await prisma.userSchool.create({
+        data: {
+          id: "us-list-ped-a",
+          userId: "list-pedagoga-a",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+
+      const logsData: Array<{
+        id: string;
+        schoolId: string | null;
+        studentId: string;
+        reasonTitle: string;
+        messageContent: string;
+        phoneUsed: string;
+        sentByName: string;
+        sentAt: Date;
+        deliveryStatus: string;
+      }> = [];
+      // 10 logs coerentes de Alpha (cg-alpha-em), ordenados do mais recente ao mais antigo
+      for (let i = 1; i <= 10; i++) {
+        const day = String(20 - i).padStart(2, "0"); // 2026-11-19 até 2026-11-10
+        logsData.push({
+          id: `list-alpha-${i}`,
+          schoolId: "school-alpha",
+          studentId: "stu-alpha-em",
+          reasonTitle: i === 3 ? "Motivo Especial TermoBuscaAlpha" : `Motivo Alpha ${i}`,
+          messageContent: `Conteudo Alpha ${i}`,
+          phoneUsed: "41999991111",
+          sentByName: "Pedagoga Listagem A",
+          sentAt: new Date(`2026-11-${day}T12:00:00.000-03:00`),
+          deliveryStatus: "SENT",
+        });
+      }
+      // 1 log legado (schoolId: null) de Alpha em cg-alpha-ef (mais antigo -> cai na página 2)
+      logsData.push({
+        id: "list-alpha-legacy",
+        schoolId: null,
+        studentId: "stu-alpha-ef",
+        reasonTitle: "Motivo Legado Alpha",
+        messageContent: "Conteudo Legado",
+        phoneUsed: "41999991112",
+        sentByName: "Pedagoga Listagem A",
+        sentAt: new Date("2026-11-05T10:00:00.000-03:00"),
+        deliveryStatus: "DELIVERED",
+      });
+      // 3 logs excluídos: outra escola, escola divergente, e estudante de Alpha em turma de Beta
+      logsData.push(
+        {
+          id: "list-beta-only",
+          schoolId: "school-beta",
+          studentId: "stu-beta-em",
+          reasonTitle: "Motivo Exclusivo Beta",
+          messageContent: "Conteudo Beta",
+          phoneUsed: "41999992222",
+          sentByName: "Pedagoga Beta",
+          sentAt: new Date("2026-11-21T12:00:00.000-03:00"),
+          deliveryStatus: "SENT",
+        },
+        {
+          id: "list-divergent",
+          schoolId: "school-beta",
+          studentId: "stu-alpha-em",
+          reasonTitle: "Motivo Divergente Excluido",
+          messageContent: "Conteudo Divergente",
+          phoneUsed: "41999991111",
+          sentByName: "Pedagoga Beta",
+          sentAt: new Date("2026-11-22T12:00:00.000-03:00"),
+          deliveryStatus: "SENT",
+        },
+        {
+          id: "list-turma-cruzada",
+          schoolId: "school-alpha",
+          studentId: "stu-alpha-turma-b",
+          reasonTitle: "Motivo Turma Cruzada Excluido",
+          messageContent: "Conteudo Turma Cruzada",
+          phoneUsed: "41999993333",
+          sentByName: "Pedagoga Listagem A",
+          sentAt: new Date("2026-11-23T12:00:00.000-03:00"),
+          deliveryStatus: "SENT",
+        }
+      );
+
+      await prisma.messageLog.createMany({ data: logsData });
+
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      const capturedContextSchools: Array<string | null> = [];
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, fn) => {
+          return client.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          });
+        });
+
+      try {
+        // 1. Sem sessão -> 401; sessão sem vínculo ativo -> 403
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        const rUnauth = await getMessagesHandler(new Request("http://127.0.0.1/api/messages"));
+        expect(rUnauth.status).toBe(401);
+
+        testAuthState.pendingSessionUser = {
+          id: "list-sem-vinculo",
+          email: "sem.vinculo.list@redeativa.local",
+          active: true,
+        };
+        const rNoLink = await getMessagesHandler(new Request("http://127.0.0.1/api/messages"));
+        expect(rNoLink.status).toBe(403);
+
+        // 2. Sessão autorizada de school-alpha (parâmetro schoolId=school-beta na query é ignorado)
+        testAuthState.pendingSessionUser = {
+          id: "list-pedagoga-a",
+          email: "pedagoga.list@redeativa.local",
+          active: true,
+        };
+        capturedContextSchools.length = 0;
+
+        const rPage1 = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?page=1&pageSize=10&schoolId=school-beta")
+        );
+        expect(rPage1.status).toBe(200);
+        const page1Json = await rPage1.json();
+        expect(withTenantSpy).toHaveBeenCalled();
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(page1Json.total).toBe(11);
+        expect(page1Json.page).toBe(1);
+        expect(page1Json.pageSize).toBe(10);
+        expect(page1Json.totalPages).toBe(2);
+        expect(page1Json.logs).toHaveLength(10);
+        // Ordenação decrescente por sentAt e contrato completo de student + classGroup
+        expect(page1Json.logs[0].id).toBe("list-alpha-1");
+        expect(page1Json.logs[9].id).toBe("list-alpha-10");
+        expect(page1Json.logs[0].student).toMatchObject({
+          id: "stu-alpha-em",
+          name: "Estudante Alpha EM",
+          schoolId: "school-alpha",
+          classGroup: {
+            id: "cg-alpha-em",
+            name: "1º Ano A",
+            segment: "EM",
+            schoolId: "school-alpha",
+          },
+        });
+        const page1Ids = page1Json.logs.map((l: { id: string }) => l.id);
+        expect(page1Ids).not.toContain("list-beta-only");
+        expect(page1Ids).not.toContain("list-divergent");
+        expect(page1Ids).not.toContain("list-turma-cruzada");
+
+        // 3. Página 2 retorna o log legado (schoolId null)
+        const rPage2 = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?page=2&pageSize=10")
+        );
+        expect(rPage2.status).toBe(200);
+        const page2Json = await rPage2.json();
+        expect(page2Json.total).toBe(11);
+        expect(page2Json.page).toBe(2);
+        expect(page2Json.totalPages).toBe(2);
+        expect(page2Json.logs).toHaveLength(1);
+        expect(page2Json.logs[0].id).toBe("list-alpha-legacy");
+        expect(page2Json.logs[0].schoolId).toBeNull();
+        expect(page2Json.logs[0].student.classGroup.id).toBe("cg-alpha-ef");
+
+        // 4. Página vazia preserva total e totalPages
+        const rPageEmpty = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?page=3&pageSize=10")
+        );
+        expect(rPageEmpty.status).toBe(200);
+        const pageEmptyJson = await rPageEmpty.json();
+        expect(pageEmptyJson.total).toBe(11);
+        expect(pageEmptyJson.page).toBe(3);
+        expect(pageEmptyJson.totalPages).toBe(2);
+        expect(pageEmptyJson.logs).toEqual([]);
+
+        // 5. Busca textual encontra apenas registro elegível de Alpha e nunca expõe excluídos
+        const rSearchAlpha = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?search=TermoBuscaAlpha")
+        );
+        expect(rSearchAlpha.status).toBe(200);
+        const searchAlphaJson = await rSearchAlpha.json();
+        expect(searchAlphaJson.total).toBe(1);
+        expect(searchAlphaJson.logs[0].id).toBe("list-alpha-3");
+
+        const rSearchExcluded = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?search=Excluido")
+        );
+        expect(rSearchExcluded.status).toBe(200);
+        const searchExcludedJson = await rSearchExcluded.json();
+        expect(searchExcludedJson.total).toBe(0);
+        expect(searchExcludedJson.logs).toEqual([]);
+
+        // 6. Filtros por turma e segmento respeitam coerência da turma dentro da escola autorizada
+        const rTurmaCruzada = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?classGroupId=cg-beta-em")
+        );
+        expect(rTurmaCruzada.status).toBe(200);
+        expect((await rTurmaCruzada.json())).toMatchObject({ total: 0, logs: [] });
+
+        const rTurmaEf = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?classGroupId=cg-alpha-ef")
+        );
+        expect(rTurmaEf.status).toBe(200);
+        const turmaEfJson = await rTurmaEf.json();
+        expect(turmaEfJson.total).toBe(1);
+        expect(turmaEfJson.logs[0].id).toBe("list-alpha-legacy");
+
+        const rSegEm = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?segment=EM")
+        );
+        expect(rSegEm.status).toBe(200);
+        expect((await rSegEm.json()).total).toBe(10);
+
+        const rSegEf2 = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?segment=EF2")
+        );
+        expect(rSegEf2.status).toBe(200);
+        expect((await rSegEf2.json()).total).toBe(1);
+
+        // 7. Intervalo de datas com deslocamento -03:00
+        const rDate = await getMessagesHandler(
+          new Request("http://127.0.0.1/api/messages?dateFrom=2026-11-10&dateTo=2026-11-10")
+        );
+        expect(rDate.status).toBe(200);
+        const dateJson = await rDate.json();
+        expect(dateJson.total).toBe(1);
+        expect(dateJson.logs[0].id).toBe("list-alpha-10");
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
       }
     });
   }
