@@ -124,6 +124,20 @@ vi.mock("@/lib/prisma", () => {
     },
   };
   prismaObj.$executeRaw = vi.fn(async () => 0);
+  prismaObj.$queryRaw = vi.fn(async (_strings: any, logId: string, schoolId: string) => {
+    const row = mockMessageLogs[logId];
+    if (!row) return [];
+    const stSchool = row.student?.schoolId;
+    return stSchool === schoolId && (row.schoolId == null || row.schoolId === schoolId)
+      ? [{ id: row.id }]
+      : [];
+  });
+  prismaObj.classGroup = {
+    findFirst: vi.fn(async ({ where }: any) => {
+      if (!where?.id || !where?.schoolId) return null;
+      return { id: where.id, schoolId: where.schoolId, name: "6º Ano A" };
+    }),
+  };
   prismaObj.$transaction = vi.fn(async (arg: any) =>
     typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
   );

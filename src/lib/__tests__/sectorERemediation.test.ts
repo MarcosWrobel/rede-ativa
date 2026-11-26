@@ -138,6 +138,14 @@ vi.mock("@/lib/prisma", () => ({
       if (typeof arg === "function") {
         return arg({
           $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async (_strings: any, logId: string, schoolId: string) => {
+            const row = hoisted.messageLogs.get(logId);
+            if (!row) return [];
+            const stSchool = row.student?.schoolId;
+            return stSchool === schoolId && (row.schoolId == null || row.schoolId === schoolId)
+              ? [{ id: row.id }]
+              : [];
+          }),
           student: {
             findUnique: vi.fn(async ({ where }: any) => hoisted.students.get(where.id) || null),
           },

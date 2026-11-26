@@ -9,6 +9,7 @@ import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
 import { isAllowedMessagingRole } from "@/lib/roles";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { lockScopedMessageLogForUpdate } from "@/services/messageDispatchService";
 
 async function handleStatusUpdate(req: Request) {
   try {
@@ -45,16 +46,33 @@ async function handleStatusUpdate(req: Request) {
     const { logId, deliveryStatus } = parsed.data;
 
     const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
-      if (typeof (tx as { $queryRaw?: unknown }).$queryRaw === "function") {
-        await tx.$queryRaw`SELECT "id" FROM "MessageLog" WHERE "id" = ${logId} FOR UPDATE`;
+      const lockStatus = await lockScopedMessageLogForUpdate(tx, logId, currentSchool.id);
+      if (lockStatus === "NOT_FOUND") {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "Registro de envio não encontrado",
+        };
+      }
+      if (lockStatus === "FORBIDDEN") {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
       }
 
       const existing = await tx.messageLog.findUnique({
         where: { id: logId },
         include: {
           student: {
-            include: {
-              classGroup: true,
+            select: {
+              id: true,
+              schoolId: true,
+              classGroupId: true,
+              name: true,
+              phone: true,
+              guardianName: true,
               contacts: true,
             },
           },
@@ -83,6 +101,28 @@ async function handleStatusUpdate(req: Request) {
           ok: false as const,
           status: 403,
           error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      const classGroup = existing.student.classGroupId
+        ? await tx.classGroup.findFirst({
+            where: {
+              id: existing.student.classGroupId,
+              schoolId: currentSchool.id,
+            },
+            select: { id: true, schoolId: true, name: true },
+          })
+        : null;
+
+      if (
+        !classGroup ||
+        !assertTenantOwnership(classGroup.schoolId, currentSchool.id, authCheck.session) ||
+        classGroup.schoolId !== currentSchool.id
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Turma do estudante não pertence ou não está disponível nesta instituição.",
         };
       }
 
@@ -135,6 +175,7 @@ async function handleStatusUpdate(req: Request) {
       return {
         ok: true as const,
         existing,
+        validatedClassGroupName: classGroup.name,
         updated,
         syncedContactInvalidated,
       };
@@ -144,7 +185,7 @@ async function handleStatusUpdate(req: Request) {
       return NextResponse.json({ error: txResult.error }, { status: txResult.status });
     }
 
-    const { existing, updated, syncedContactInvalidated } = txResult;
+    const { existing, validatedClassGroupName, updated, syncedContactInvalidated } = txResult;
 
     await logAudit({
       action: "UPDATE_DELIVERY_STATUS",
@@ -152,7 +193,7 @@ async function handleStatusUpdate(req: Request) {
       entityId: logId,
       details: {
         studentName: existing.student.name,
-        turma: existing.student.classGroup.name,
+        turma: validatedClassGroupName,
         phoneUsed: existing.phoneUsed,
         previousStatus: existing.deliveryStatus,
         newStatus: deliveryStatus,

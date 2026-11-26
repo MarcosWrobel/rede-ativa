@@ -15,6 +15,7 @@ import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
 import { isAllowedMessagingRole } from "@/lib/roles";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { lockScopedMessageLogForUpdate } from "@/services/messageDispatchService";
 
 function classifyReplyLocally(rawText: string): {
   formalSummary: string;
@@ -74,8 +75,16 @@ export async function POST(req: Request) {
     } = parsed.data;
 
     const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
-      if (typeof (tx as { $queryRaw?: unknown }).$queryRaw === "function") {
-        await tx.$queryRaw`SELECT "id" FROM "MessageLog" WHERE "id" = ${logId} FOR UPDATE`;
+      const lockStatus = await lockScopedMessageLogForUpdate(tx, logId, currentSchool.id);
+      if (lockStatus === "NOT_FOUND") {
+        return { ok: false as const, status: 404, error: "Registro não encontrado" };
+      }
+      if (lockStatus === "FORBIDDEN") {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
       }
 
       const previous = await tx.messageLog.findUnique({

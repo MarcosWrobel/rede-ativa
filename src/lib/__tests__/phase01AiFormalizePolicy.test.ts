@@ -266,6 +266,14 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async (_strings: any, logId: string, schoolId: string) => {
+      const row = hoisted.state.messageLogs.find((m) => m.id === logId);
+      if (!row) return [];
+      const stSchool = row.student?.schoolId;
+      return stSchool === schoolId && (row.schoolId == null || row.schoolId === schoolId)
+        ? [{ id: row.id }]
+        : [];
+    }),
     $transaction: vi.fn(async (arg: any, opts?: any) => {
       hoisted.transactionOptions.push(opts ?? null);
       if (hoisted.failTransactionWithError) {

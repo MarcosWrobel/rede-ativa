@@ -1,4 +1,5 @@
 import type { Session } from "next-auth";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
@@ -335,4 +336,38 @@ export async function claimPendingQueuedMessages(options: {
 
     return claimed;
   });
+}
+
+/**
+ * Adquire lock exclusivo (`FOR UPDATE OF ml`) somente quando o `MessageLog`
+ * pertence à escola autorizada (via `Student.schoolId === schoolId` e
+ * `MessageLog.schoolId IS NULL OR MessageLog.schoolId = schoolId`).
+ * Quando nenhuma linha elegível é bloqueada, verifica apenas a existência do ID
+ * sem bloquear nem carregar conteúdo, preservando 404 (ausente) vs 403 (fora do escopo).
+ */
+export async function lockScopedMessageLogForUpdate(
+  tx: Prisma.TransactionClient,
+  logId: string,
+  schoolId: string
+): Promise<"LOCKED" | "NOT_FOUND" | "FORBIDDEN"> {
+  const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT ml."id"
+    FROM "MessageLog" ml
+    INNER JOIN "Student" s ON s."id" = ml."studentId"
+    WHERE ml."id" = ${logId}
+      AND s."schoolId" = ${schoolId}
+      AND (ml."schoolId" IS NULL OR ml."schoolId" = ${schoolId})
+    FOR UPDATE OF ml
+  `;
+
+  if (lockedRows.length > 0) {
+    return "LOCKED";
+  }
+
+  const exists = await tx.messageLog.findUnique({
+    where: { id: logId },
+    select: { id: true },
+  });
+
+  return exists ? "FORBIDDEN" : "NOT_FOUND";
 }

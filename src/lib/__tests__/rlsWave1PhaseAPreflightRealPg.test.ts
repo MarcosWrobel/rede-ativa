@@ -1719,10 +1719,106 @@ describe.skipIf(!SHOULD_RUN)(
         } finally {
           txSpy.mockRestore();
         }
+
+        // 7. Requisição de A sobre log de B é recusada (403) sem bloquear no row lock de B (mesmo com B bloqueado em outra Tx)
+        const releaseBetaLock = await new Promise<() => void>((resolveLockHeld) => {
+          let releaseFn!: () => void;
+          const lockReady = new Promise<void>((r) => {
+            releaseFn = r;
+          });
+          void prisma.$transaction(async (txB) => {
+            await txB.$queryRaw`SELECT "id" FROM "MessageLog" WHERE "id" = 'sr-beta-ok' FOR UPDATE`;
+            resolveLockHeld(releaseFn);
+            await lockReady;
+          });
+        });
+        try {
+          const rStatusNoBlock = await patchMessageStatusHandler(
+            new Request("http://127.0.0.1/api/messages/status", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ logId: "sr-beta-ok", deliveryStatus: "DELIVERED" }),
+            })
+          );
+          expect(rStatusNoBlock.status).toBe(403);
+          const rReplyNoBlock = await postMessageReplyHandler(
+            new Request("http://127.0.0.1/api/messages/reply", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ logId: "sr-beta-ok", guardianReplied: false }),
+            })
+          );
+          expect(rReplyNoBlock.status).toBe(403);
+          expect((await prisma.messageLog.findUnique({ where: { id: "sr-beta-ok" } }))?.deliveryStatus).toBe("SENT");
+        } finally {
+          releaseBetaLock();
+        }
+
+        // 8. Estudante de A associado a turma de B -> 403 antes de alterar MessageLog ou StudentContact, sem auditoria
+        await prisma.classGroup.update({
+          where: { id: "cg-beta" },
+          data: { name: "Turma Secreta B" },
+        });
+        await prisma.student.create({
+          data: {
+            id: "stu-alpha-turma-b",
+            schoolId: "school-alpha",
+            classGroupId: "cg-beta",
+            name: "Estudante A Turma B",
+            phone: "41999996666",
+          },
+        });
+        await prisma.studentContact.create({
+          data: {
+            id: "contact-alpha-tb",
+            studentId: "stu-alpha-turma-b",
+            name: "Responsável TB",
+            kinship: "MAE",
+            phone: "41999996666",
+            whatsappValid: true,
+          },
+        });
+        await prisma.messageLog.create({
+          data: {
+            id: "sr-alpha-turma-b",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha-turma-b",
+            templateId: "tpl-alpha",
+            reasonTitle: "Falta",
+            messageContent: "Msg TB",
+            phoneUsed: "41999996666",
+            sentByName: "Equipe A",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+        });
+
+        vi.mocked(logAudit).mockClear();
+        const resCrossCgStatus = await patchMessageStatusHandler(
+          new Request("http://127.0.0.1/api/messages/status", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ logId: "sr-alpha-turma-b", deliveryStatus: "FAILED_NO_WHATSAPP" }),
+          })
+        );
+        expect(resCrossCgStatus.status).toBe(403);
+        const crossCgBody = await resCrossCgStatus.json();
+        expect(crossCgBody.error).not.toContain("Turma Secreta B");
+        expect(crossCgBody.error).not.toContain("cg-beta");
+        expect((await prisma.messageLog.findUnique({ where: { id: "sr-alpha-turma-b" } }))?.deliveryStatus).toBe(
+          "SENT"
+        );
+        expect((await prisma.studentContact.findUnique({ where: { id: "contact-alpha-tb" } }))?.whatsappValid).toBe(
+          true
+        );
+        expect(
+          vi.mocked(logAudit).mock.calls.find((c) => c[0]?.action === "UPDATE_DELIVERY_STATUS")
+        ).toBeUndefined();
       } finally {
         testAuthState.role = "PEDAGOGA";
         testAuthState.schoolId = "school-alpha";
-        await prisma.studentContact.deleteMany({ where: { id: "contact-alpha-1" } });
+        await prisma.studentContact.deleteMany({ where: { id: { in: ["contact-alpha-1", "contact-alpha-tb"] } } });
       }
     });
   }
