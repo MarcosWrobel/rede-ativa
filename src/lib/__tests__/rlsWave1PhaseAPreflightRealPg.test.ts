@@ -9,10 +9,14 @@ import {
 
 const prismaRef = vi.hoisted(() => ({ current: null as unknown as PrismaClient }));
 const testAuthState = vi.hoisted(() => ({
-  schoolId: "school-alpha",
+  schoolId: "school-alpha" as string | undefined,
+  inepCode: "99000101",
+  role: "PEDAGOGA",
   userId: "",
   userName: "Equipe Teste",
   email: "equipe@redeativa.local",
+  snapshot: null as Record<string, unknown> | null,
+  useRealCurrentSchool: false,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -40,16 +44,17 @@ vi.mock("@/lib/permissions", () => ({
     userId: testAuthState.userId,
     userName: testAuthState.userName,
     email: testAuthState.email,
+    role: testAuthState.role,
     session: {
       user: {
         id: testAuthState.userId,
         name: testAuthState.userName,
         email: testAuthState.email,
-        role: "PEDAGOGA",
+        role: testAuthState.role,
         schoolId: testAuthState.schoolId,
       },
     },
-    snapshot: null,
+    snapshot: testAuthState.snapshot,
   })),
 }));
 
@@ -57,19 +62,29 @@ vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(async () => {}),
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  invalidateSchoolCache: vi.fn(),
-  requireAuthorizedSchool: vi.fn(async () => ({
-    ok: true,
-    school: { id: testAuthState.schoolId, inepCode: "99000101" },
-  })),
-}));
+vi.mock("@/lib/currentSchool", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
+  return {
+    ...actual,
+    invalidateSchoolCache: vi.fn(),
+    requireAuthorizedSchool: vi.fn(async (session, explicitSchoolId, snapshot, options) => {
+      if (testAuthState.useRealCurrentSchool) {
+        return actual.requireAuthorizedSchool(session, explicitSchoolId, snapshot, options);
+      }
+      return {
+        ok: true,
+        school: { id: testAuthState.schoolId, inepCode: testAuthState.inepCode },
+      };
+    }),
+  };
+});
 
 vi.mock("@/lib/rateLimit", () => ({
   enforceRateLimit: vi.fn(async () => ({ ok: true })),
   RATE_LIMIT_POLICIES: { MESSAGE_REPLY: {} },
 }));
 
+import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 
@@ -608,6 +623,82 @@ describe.skipIf(!SHOULD_RUN)(
       expect(preflightClean.findings.logsMissingSchoolId.count).toBe(0);
       expect(preflightClean.readyForPhaseB).toBe(true);
     });
+
+    it("bloqueia envio para perfil sem permissão (PROFESSOR) e para SUPERADMIN sem escola selecionada mesmo com fallback de leitura ativo", async () => {
+      // 1. Perfil sem permissão de envio (ex.: PROFESSOR na escola)
+      testAuthState.schoolId = "school-alpha";
+      testAuthState.inepCode = "99000101";
+      testAuthState.role = "PROFESSOR";
+      testAuthState.snapshot = {
+        id: "user-prof",
+        email: "prof@redeativa.local",
+        name: "Docente",
+        role: "PROFESSOR",
+        active: true,
+        schoolId: "school-alpha",
+        schools: [{ schoolId: "school-alpha", role: "PROFESSOR", active: true }],
+        networks: [],
+      };
+
+      const resForbiddenRole = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Tentativa sem papel",
+            messageContent: "Não deve gravar",
+          }),
+        })
+      );
+      expect(resForbiddenRole.status).toBe(403);
+      expect(await prisma.messageLog.count()).toBe(0);
+
+      // 2. SUPERADMIN sem escola selecionada: fallback de leitura retorna escola, mas gravação é bloqueada (403)
+      testAuthState.useRealCurrentSchool = true;
+      testAuthState.schoolId = undefined;
+      testAuthState.role = "SUPERADMIN";
+      testAuthState.snapshot = {
+        id: "user-super",
+        email: "superadmin@redeativa.local",
+        name: "Superadmin",
+        role: "SUPERADMIN",
+        active: true,
+        schoolId: null,
+        schools: [],
+        networks: [],
+      };
+
+      try {
+        const readCheck = await requireAuthorizedSchool(
+          { user: { id: "user-super", email: "superadmin@redeativa.local", role: "SUPERADMIN" } },
+          null,
+          testAuthState.snapshot as unknown as Parameters<typeof requireAuthorizedSchool>[2]
+        );
+        expect(readCheck.ok).toBe(true);
+
+        const resSuperNoSchool = await sendMessageHandler(
+          new Request("http://127.0.0.1/api/messages/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              studentId: "stu-alpha",
+              templateId: "tpl-alpha",
+              reasonTitle: "Superadmin sem seleção",
+              messageContent: "Não deve gravar via fallback de leitura",
+            }),
+          })
+        );
+        expect(resSuperNoSchool.status).toBe(403);
+        expect(await prisma.messageLog.count()).toBe(0);
+      } finally {
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.role = "PEDAGOGA";
+        testAuthState.snapshot = null;
+        testAuthState.schoolId = "school-alpha";
+      }
+    });
   }
 );
 
@@ -736,6 +827,119 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       expect(body.error).not.toContain("mensageria");
     } finally {
       prismaRef.current = previousPrisma;
+    }
+  });
+
+  it("permite modelo global (schoolId null) na escola piloto mantendo templateId distinto de null e rejeita em outra escola", async () => {
+    const previousPrisma = prismaRef.current;
+    const prevSchoolId = testAuthState.schoolId;
+    const prevInep = testAuthState.inepCode;
+    const createLogMock = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: `log-${createLogMock.mock.calls.length}`,
+      ...data,
+    }));
+
+    prismaRef.current = {
+      student: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === "stu-piloto"
+            ? {
+                id: "stu-piloto",
+                schoolId: "default-leopoldina",
+                phone: "41999994444",
+                name: "Estudante Piloto",
+                classGroup: { name: "7º Ano A" },
+              }
+            : {
+                id: "stu-alpha",
+                schoolId: "school-alpha",
+                phone: "41999991111",
+                name: "Estudante Alpha",
+                classGroup: { name: "6º Ano A" },
+              }
+        ),
+      },
+      messageTemplate: {
+        findUnique: vi.fn(async () => ({ id: "tpl-global", schoolId: null })),
+      },
+      messageLog: {
+        create: createLogMock,
+        update: vi.fn(),
+      },
+    } as unknown as PrismaClient;
+
+    try {
+      // 1. Escola Piloto com modelo global (templateId = "tpl-global" != null)
+      testAuthState.schoolId = "default-leopoldina";
+      testAuthState.inepCode = "41042730";
+      const resPilotGlobal = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-piloto",
+            templateId: "tpl-global",
+            reasonTitle: "Aviso Global",
+            messageContent: "Mensagem com modelo global na escola piloto",
+          }),
+        })
+      );
+      expect(resPilotGlobal.status).toBe(200);
+      expect(createLogMock).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            schoolId: "default-leopoldina",
+            templateId: "tpl-global",
+          }),
+        })
+      );
+
+      // 2. Escola Piloto sem modelo (templateId = null) distingue-se do modelo global
+      const resPilotNoTpl = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-piloto",
+            templateId: null,
+            reasonTitle: "Sem modelo",
+            messageContent: "Mensagem sem modelo na escola piloto",
+          }),
+        })
+      );
+      expect(resPilotNoTpl.status).toBe(200);
+      expect(createLogMock).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            schoolId: "default-leopoldina",
+            templateId: null,
+          }),
+        })
+      );
+
+      // 3. Outra escola (school-alpha) rejeita modelo global (403) sem criar log
+      testAuthState.schoolId = "school-alpha";
+      testAuthState.inepCode = "99000101";
+      const resAlphaGlobal = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha",
+            templateId: "tpl-global",
+            reasonTitle: "Tentativa global",
+            messageContent: "Não deve gravar",
+          }),
+        })
+      );
+      expect(resAlphaGlobal.status).toBe(403);
+      expect(createLogMock).toHaveBeenCalledTimes(2);
+    } finally {
+      prismaRef.current = previousPrisma;
+      testAuthState.schoolId = prevSchoolId;
+      testAuthState.inepCode = prevInep;
     }
   });
 });

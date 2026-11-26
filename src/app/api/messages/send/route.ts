@@ -3,7 +3,16 @@ import { requireAuth } from "@/lib/permissions";
 import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
+import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
 import { dispatchAndPersistMessage } from "@/services/messageDispatchService";
+
+const ALLOWED_SEND_ROLES = new Set([
+  "PEDAGOGA",
+  "GESTOR_ESCOLAR",
+  "GESTAO_SECRETARIA",
+  "SUPERADMIN",
+  "ADMIN",
+]);
 
 export async function POST(req: Request) {
   try {
@@ -28,9 +37,27 @@ export async function POST(req: Request) {
       initialDeliveryStatus,
     } = parsed.data;
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    const schoolCheck = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
+    );
     if (!schoolCheck.ok) return schoolCheck.response;
     const currentSchool = schoolCheck.school;
+
+    const effectiveRole = (
+      (authCheck.snapshot
+        ? resolveEffectiveRoleForSchool(authCheck.snapshot, currentSchool)
+        : authCheck.role) || ""
+    ).toUpperCase();
+
+    if (!effectiveRole || !ALLOWED_SEND_ROLES.has(effectiveRole)) {
+      return NextResponse.json(
+        { error: "Perfil sem autorização para enviar mensagens nesta instituição." },
+        { status: 403 }
+      );
+    }
 
     const result = await dispatchAndPersistMessage({
       studentId,
@@ -40,6 +67,7 @@ export async function POST(req: Request) {
       customPhone,
       initialDeliveryStatus,
       currentSchoolId: currentSchool.id,
+      currentSchoolInepCode: currentSchool.inepCode,
       session: authCheck.session,
       userId: authCheck.userId,
       userName: authCheck.userName,

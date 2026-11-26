@@ -223,10 +223,15 @@ export async function getSchoolContextByVerifiedId(
  * - Nunca faz fallback para a primeira escola ativa para usuários sem vínculo ou com escola inativa.
  * - Nunca executa escrita automática (`ensureDefaultSchool`) em caminhos de leitura.
  */
+export interface AuthorizedSchoolOptions {
+  allowSuperAdminReadOnlyFallback?: boolean;
+}
+
 export async function getAuthorizedCurrentSchool(
   session: AuthSessionLike | null | undefined,
   explicitSchoolId?: string | null,
-  preloadedSnapshot?: ServerUserAuthSnapshot | null
+  preloadedSnapshot?: ServerUserAuthSnapshot | null,
+  options?: AuthorizedSchoolOptions
 ): Promise<SchoolContext | null> {
   const snapshot = preloadedSnapshot ?? (await resolveServerUserAuthSnapshot(session));
   if (!snapshot || snapshot.active === false) {
@@ -321,7 +326,7 @@ export async function getAuthorizedCurrentSchool(
   }
 
   // Apenas SuperAdmin ativo sem seleção pode visualizar a primeira escola ativa existente (somente leitura)
-  if (isSuper) {
+  if (isSuper && options?.allowSuperAdminReadOnlyFallback !== false) {
     try {
       const firstSchool = await withNeonWakeRetry(() =>
         prisma.school.findFirst({
@@ -344,12 +349,13 @@ export async function getAuthorizedCurrentSchool(
 export async function requireAuthorizedSchool(
   session: AuthSessionLike | null | undefined,
   explicitSchoolId?: string | null,
-  preloadedSnapshot?: ServerUserAuthSnapshot | null
+  preloadedSnapshot?: ServerUserAuthSnapshot | null,
+  options?: AuthorizedSchoolOptions
 ): Promise<
   | { ok: true; school: SchoolContext }
   | { ok: false; response: NextResponse }
 > {
-  const school = await getAuthorizedCurrentSchool(session, explicitSchoolId, preloadedSnapshot);
+  const school = await getAuthorizedCurrentSchool(session, explicitSchoolId, preloadedSnapshot, options);
   if (!school) {
     return {
       ok: false,

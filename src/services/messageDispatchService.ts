@@ -18,6 +18,7 @@ export interface DispatchMessageInput {
   customPhone?: string | null;
   initialDeliveryStatus?: DeliveryStatus;
   currentSchoolId: string;
+  currentSchoolInepCode?: string | null;
   session: Session | null;
   userId?: string;
   userName: string;
@@ -75,6 +76,7 @@ export async function dispatchAndPersistMessage(
     customPhone,
     initialDeliveryStatus,
     currentSchoolId,
+    currentSchoolInepCode,
     session,
     userId,
     userName,
@@ -100,6 +102,9 @@ export async function dispatchAndPersistMessage(
     };
   }
 
+  const isPilotSchool =
+    currentSchoolInepCode === "41042730" || currentSchoolId === "default-leopoldina";
+
   let validatedTemplateId: string | null = null;
   if (templateId) {
     const template = await prisma.messageTemplate.findUnique({
@@ -113,10 +118,12 @@ export async function dispatchAndPersistMessage(
         error: "Modelo de mensagem não encontrado.",
       };
     }
+    const isGlobalTemplateAllowedForPilot = template.schoolId === null && isPilotSchool;
     if (
-      !template.schoolId ||
-      !assertTenantOwnership(template.schoolId, currentSchoolId, session) ||
-      template.schoolId !== student.schoolId
+      !isGlobalTemplateAllowedForPilot &&
+      (!template.schoolId ||
+        !assertTenantOwnership(template.schoolId, currentSchoolId, session) ||
+        template.schoolId !== student.schoolId)
     ) {
       return {
         ok: false,
