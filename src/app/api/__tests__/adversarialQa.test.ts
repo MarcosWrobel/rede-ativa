@@ -575,6 +575,15 @@ const prismaMock: any = {
       db.auditLogs.filter((l) => matchFilter(l, where))
     ),
   },
+  $queryRaw: vi.fn(async (_strings: any, logId?: string, schoolId?: string) => {
+    if (!logId || !schoolId) return [];
+    const row = db.messageLogs.find((m) => m.id === logId);
+    if (!row) return [];
+    const st = db.students.find((s) => s.id === row.studentId);
+    return st?.schoolId === schoolId && (row.schoolId == null || row.schoolId === schoolId)
+      ? [{ id: row.id }]
+      : [];
+  }),
 };
 
 vi.mock("@/lib/prisma", () => ({

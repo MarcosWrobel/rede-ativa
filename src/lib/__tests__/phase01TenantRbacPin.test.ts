@@ -308,6 +308,12 @@ vi.mock("@/lib/prisma", () => {
         hoisted.state.atas.filter((a) => a.schoolId === where?.schoolId)
       ),
     },
+    classGroup: {
+      findFirst: vi.fn(async ({ where }: any) => {
+        if (!where?.id || !where?.schoolId) return null;
+        return { id: where.id, schoolId: where.schoolId, name: "6º Ano A" };
+      }),
+    },
     messageLog: {
       findUnique: vi.fn(async ({ where }: any) =>
         hoisted.state.messageLogs.find((m) => m.id === where?.id) || null
@@ -329,7 +335,15 @@ vi.mock("@/lib/prisma", () => {
     },
     auditLog: { create: vi.fn(async () => ({})) },
     $executeRaw: vi.fn(async () => 0),
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (_strings: any, logId?: string, schoolId?: string) => {
+      if (!logId || !schoolId) return [];
+      const row = hoisted.state.messageLogs.find((m) => m.id === logId);
+      if (!row) return [];
+      const stSchool = row.student?.schoolId;
+      return stSchool === schoolId && (row.schoolId == null || row.schoolId === schoolId)
+        ? [{ id: row.id }]
+        : [];
+    }),
     $transaction: vi.fn(async (arg: any) => (typeof arg === "function" ? arg(prismaMock) : Promise.all(arg))),
   };
   return { prisma: prismaMock };

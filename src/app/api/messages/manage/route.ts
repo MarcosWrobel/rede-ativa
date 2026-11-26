@@ -1,21 +1,52 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { requireSchoolAdmin } from "@/lib/permissions";
+import { requireAuth, requireSchoolAdmin } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { computeMessageContentHash } from "@/lib/messageCrypto";
+import { withTenantContext } from "@/lib/rlsTenantContext";
+import { lockScopedMessageLogForUpdate } from "@/services/messageDispatchService";
 import {
   formatZodError,
   messageManageUpdateSchema,
   messageManageDeleteSchema,
 } from "@/lib/schemas";
 
+async function authorizeManageSchool() {
+  const authCheck = await requireAuth();
+  if (!authCheck.ok) {
+    return { ok: false as const, response: authCheck.response };
+  }
+
+  const schoolCheck = await requireAuthorizedSchool(
+    authCheck.session,
+    authCheck.schoolId,
+    authCheck.snapshot,
+    { allowSuperAdminReadOnlyFallback: false }
+  );
+  if (!schoolCheck.ok) {
+    return { ok: false as const, response: schoolCheck.response };
+  }
+
+  const adminCheck = await requireSchoolAdmin(schoolCheck.school.id);
+  if (!adminCheck.ok) {
+    return { ok: false as const, response: adminCheck.response };
+  }
+
+  return {
+    ok: true as const,
+    authCheck: adminCheck,
+    currentSchool: schoolCheck.school,
+  };
+}
+
 // PUT: Editar campos de um registro do histórico (Restrito à Gestão Escolar da unidade ou SuperAdmin)
 export async function PUT(req: Request) {
   try {
-    const authCheck = await requireSchoolAdmin();
-    if (!authCheck.ok) return authCheck.response;
+    const authRes = await authorizeManageSchool();
+    if (!authRes.ok) return authRes.response;
+    const { authCheck, currentSchool } = authRes;
 
     const body = await req.json();
     const parsed = messageManageUpdateSchema.safeParse(body);
@@ -36,89 +67,163 @@ export async function PUT(req: Request) {
       messageContent,
     } = parsed.data;
 
-    const previous = await prisma.messageLog.findUnique({
-      where: { id },
-      include: {
-        student: {
-          include: { classGroup: true },
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const lockStatus = await lockScopedMessageLogForUpdate(tx, id, currentSchool.id);
+      if (lockStatus === "NOT_FOUND") {
+        return { ok: false as const, status: 404, error: "Registro não encontrado" };
+      }
+      if (lockStatus === "FORBIDDEN") {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      const previous = await tx.messageLog.findUnique({
+        where: { id },
+        include: {
+          student: {
+            select: {
+              id: true,
+              schoolId: true,
+              classGroupId: true,
+              name: true,
+            },
+          },
         },
-      },
-    });
+      });
 
-    if (!previous) {
-      return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
-    }
+      if (!previous) {
+        return { ok: false as const, status: 404, error: "Registro não encontrado" };
+      }
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
-    if (!schoolCheck.ok) return schoolCheck.response;
-    const currentSchool = schoolCheck.school;
-    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
+      const studentSchoolId = previous.student?.schoolId;
+      const logSchoolCoherent =
+        previous.schoolId == null ||
+        (previous.schoolId === currentSchool.id && previous.schoolId === studentSchoolId);
 
-    const updateData: any = {};
-    if (reasonTitle !== undefined) updateData.reasonTitle = reasonTitle;
-    if (phoneUsed !== undefined) updateData.phoneUsed = phoneUsed;
-    if (sentByName !== undefined) updateData.sentByName = sentByName;
-    if (messageContent !== undefined) updateData.messageContent = messageContent;
-    if (sentAt) updateData.sentAt = new Date(sentAt);
-    if (guardianReplied !== undefined) {
-      updateData.guardianReplied = Boolean(guardianReplied);
-      updateData.repliedAt = Boolean(guardianReplied) ? previous.repliedAt || new Date() : null;
-      updateData.repliedByUserId = Boolean(guardianReplied)
-        ? previous.repliedByUserId || authCheck.userId || null
+      if (
+        !assertTenantOwnership(studentSchoolId, currentSchool.id, authCheck.session) ||
+        studentSchoolId !== currentSchool.id ||
+        !logSchoolCoherent
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      const classGroup = previous.student.classGroupId
+        ? await tx.classGroup.findFirst({
+            where: {
+              id: previous.student.classGroupId,
+              schoolId: currentSchool.id,
+            },
+            select: { id: true, schoolId: true, name: true },
+          })
         : null;
-    }
-    if (replyNotes !== undefined) updateData.replyNotes = replyNotes;
-    if (replyCategory !== undefined) updateData.replyCategory = replyCategory || null;
-    if (deliveryStatus !== undefined) {
-      updateData.deliveryStatus = deliveryStatus;
-      updateData.deliveryUpdatedAt = new Date();
-    }
 
-    // Recalcula o Hash SHA-256 canônico de integridade probatória se campos-chave forem alterados
-    const effectiveSentAt = updateData.sentAt || previous.sentAt;
-    const effectiveReason = updateData.reasonTitle !== undefined ? updateData.reasonTitle : previous.reasonTitle;
-    const effectivePhone = updateData.phoneUsed !== undefined ? updateData.phoneUsed : previous.phoneUsed;
-    const effectiveContent = updateData.messageContent !== undefined ? updateData.messageContent : previous.messageContent;
-    const effectiveSentByName = updateData.sentByName !== undefined ? updateData.sentByName : previous.sentByName;
-    const effectiveGuardianReplied =
-      updateData.guardianReplied !== undefined
-        ? updateData.guardianReplied
-        : Boolean(previous.guardianReplied);
-    const effectiveReplyNotes =
-      updateData.replyNotes !== undefined ? updateData.replyNotes : previous.replyNotes;
-    const effectiveReplyCategory =
-      updateData.replyCategory !== undefined ? updateData.replyCategory : previous.replyCategory;
-    const effectiveRepliedAt =
-      updateData.repliedAt !== undefined ? updateData.repliedAt : previous.repliedAt;
+      if (
+        !classGroup ||
+        !assertTenantOwnership(classGroup.schoolId, currentSchool.id, authCheck.session) ||
+        classGroup.schoolId !== currentSchool.id
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Turma do estudante não pertence ou não está disponível nesta instituição.",
+        };
+      }
 
-    updateData.contentHash = computeMessageContentHash({
-      studentId: previous.studentId,
-      schoolId: previous.student.schoolId || currentSchool.id,
-      phoneUsed: effectivePhone,
-      reasonTitle: effectiveReason,
-      messageContent: effectiveContent,
-      sentByName: effectiveSentByName,
-      sentAt: effectiveSentAt,
-      guardianReplied: effectiveGuardianReplied,
-      replyNotes: effectiveReplyNotes,
-      replyCategory: effectiveReplyCategory,
-      repliedAt: effectiveRepliedAt,
-    });
+      const updateData: any = {};
+      if (reasonTitle !== undefined) updateData.reasonTitle = reasonTitle;
+      if (phoneUsed !== undefined) updateData.phoneUsed = phoneUsed;
+      if (sentByName !== undefined) updateData.sentByName = sentByName;
+      if (messageContent !== undefined) updateData.messageContent = messageContent;
+      if (sentAt) updateData.sentAt = new Date(sentAt);
+      if (guardianReplied !== undefined) {
+        updateData.guardianReplied = Boolean(guardianReplied);
+        updateData.repliedAt = Boolean(guardianReplied) ? previous.repliedAt || new Date() : null;
+        updateData.repliedByUserId = Boolean(guardianReplied)
+          ? previous.repliedByUserId || authCheck.userId || null
+          : null;
+      }
+      if (replyNotes !== undefined) updateData.replyNotes = replyNotes;
+      if (replyCategory !== undefined) updateData.replyCategory = replyCategory || null;
+      if (deliveryStatus !== undefined) {
+        updateData.deliveryStatus = deliveryStatus;
+        updateData.deliveryUpdatedAt = new Date();
+      }
 
-    const updated = await prisma.messageLog.update({
-      where: { id },
-      data: updateData,
-      include: {
+      // Recalcula o Hash SHA-256 canônico de integridade probatória a partir dos valores que serão persistidos
+      const effectiveSentAt = updateData.sentAt || previous.sentAt;
+      const effectiveReason =
+        updateData.reasonTitle !== undefined ? updateData.reasonTitle : previous.reasonTitle;
+      const effectivePhone =
+        updateData.phoneUsed !== undefined ? updateData.phoneUsed : previous.phoneUsed;
+      const effectiveContent =
+        updateData.messageContent !== undefined
+          ? updateData.messageContent
+          : previous.messageContent;
+      const effectiveSentByName =
+        updateData.sentByName !== undefined ? updateData.sentByName : previous.sentByName;
+      const effectiveGuardianReplied =
+        updateData.guardianReplied !== undefined
+          ? updateData.guardianReplied
+          : Boolean(previous.guardianReplied);
+      const effectiveReplyNotes =
+        updateData.replyNotes !== undefined ? updateData.replyNotes : previous.replyNotes;
+      const effectiveReplyCategory =
+        updateData.replyCategory !== undefined ? updateData.replyCategory : previous.replyCategory;
+      const effectiveRepliedAt =
+        updateData.repliedAt !== undefined ? updateData.repliedAt : previous.repliedAt;
+
+      updateData.contentHash = computeMessageContentHash({
+        studentId: previous.studentId,
+        schoolId: studentSchoolId,
+        phoneUsed: effectivePhone,
+        reasonTitle: effectiveReason,
+        messageContent: effectiveContent,
+        sentByName: effectiveSentByName,
+        sentAt: effectiveSentAt,
+        guardianReplied: effectiveGuardianReplied,
+        replyNotes: effectiveReplyNotes,
+        replyCategory: effectiveReplyCategory,
+        repliedAt: effectiveRepliedAt,
+      });
+
+      const updatedRow = await tx.messageLog.update({
+        where: { id },
+        data: updateData,
+      });
+
+      const updated = {
+        ...updatedRow,
         student: {
-          include: { classGroup: true },
+          ...previous.student,
+          classGroup: {
+            id: classGroup.id,
+            schoolId: classGroup.schoolId,
+            name: classGroup.name,
+          },
         },
-      },
+      };
+
+      return {
+        ok: true as const,
+        previous,
+        validatedClassGroupName: classGroup.name,
+        updated,
+      };
     });
+
+    if (!txResult.ok) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.status });
+    }
+
+    const { previous, validatedClassGroupName, updated } = txResult;
 
     await logAudit({
       action: "UPDATE_MESSAGE_LOG",
@@ -126,7 +231,7 @@ export async function PUT(req: Request) {
       entityId: id,
       details: {
         studentName: previous.student.name,
-        classGroup: previous.student.classGroup.name,
+        classGroup: validatedClassGroupName,
         changes: {
           before: {
             reasonTitle: previous.reasonTitle,
@@ -165,8 +270,9 @@ export async function PUT(req: Request) {
 // DELETE: Excluir um registro do histórico (Restrito à Gestão Escolar da unidade ou SuperAdmin)
 export async function DELETE(req: Request) {
   try {
-    const authCheck = await requireSchoolAdmin();
-    if (!authCheck.ok) return authCheck.response;
+    const authRes = await authorizeManageSchool();
+    if (!authRes.ok) return authRes.response;
+    const { authCheck, currentSchool } = authRes;
 
     const { searchParams } = new URL(req.url);
     const parsedQuery = messageManageDeleteSchema.safeParse({ id: searchParams.get("id") });
@@ -175,32 +281,92 @@ export async function DELETE(req: Request) {
     }
     const { id } = parsedQuery.data;
 
-    const previous = await prisma.messageLog.findUnique({
-      where: { id },
-      include: {
-        student: {
-          include: { classGroup: true },
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const lockStatus = await lockScopedMessageLogForUpdate(tx, id, currentSchool.id);
+      if (lockStatus === "NOT_FOUND") {
+        return { ok: false as const, status: 404, error: "Registro não encontrado" };
+      }
+      if (lockStatus === "FORBIDDEN") {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      const previous = await tx.messageLog.findUnique({
+        where: { id },
+        include: {
+          student: {
+            select: {
+              id: true,
+              schoolId: true,
+              classGroupId: true,
+              name: true,
+            },
+          },
         },
-      },
+      });
+
+      if (!previous) {
+        return { ok: false as const, status: 404, error: "Registro não encontrado" };
+      }
+
+      const studentSchoolId = previous.student?.schoolId;
+      const logSchoolCoherent =
+        previous.schoolId == null ||
+        (previous.schoolId === currentSchool.id && previous.schoolId === studentSchoolId);
+
+      if (
+        !assertTenantOwnership(studentSchoolId, currentSchool.id, authCheck.session) ||
+        studentSchoolId !== currentSchool.id ||
+        !logSchoolCoherent
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      const classGroup = previous.student.classGroupId
+        ? await tx.classGroup.findFirst({
+            where: {
+              id: previous.student.classGroupId,
+              schoolId: currentSchool.id,
+            },
+            select: { id: true, schoolId: true, name: true },
+          })
+        : null;
+
+      if (
+        !classGroup ||
+        !assertTenantOwnership(classGroup.schoolId, currentSchool.id, authCheck.session) ||
+        classGroup.schoolId !== currentSchool.id
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Turma do estudante não pertence ou não está disponível nesta instituição.",
+        };
+      }
+
+      await tx.messageLog.delete({
+        where: { id },
+      });
+
+      return {
+        ok: true as const,
+        previous,
+        validatedClassGroupName: classGroup.name,
+      };
     });
 
-    if (!previous) {
-      return NextResponse.json({ error: "Registro não encontrado" }, { status: 404 });
+    if (!txResult.ok) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.status });
     }
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
-    if (!schoolCheck.ok) return schoolCheck.response;
-    const currentSchool = schoolCheck.school;
-    if (!assertTenantOwnership(previous.student.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
-    await prisma.messageLog.delete({
-      where: { id },
-    });
+    const { previous, validatedClassGroupName } = txResult;
 
     await logAudit({
       action: "DELETE_MESSAGE_LOG",
@@ -208,7 +374,7 @@ export async function DELETE(req: Request) {
       entityId: id,
       details: {
         studentName: previous.student.name,
-        classGroup: previous.student.classGroup.name,
+        classGroup: validatedClassGroupName,
         reasonTitle: previous.reasonTitle,
         phoneUsed: previous.phoneUsed,
         sentByName: previous.sentByName,

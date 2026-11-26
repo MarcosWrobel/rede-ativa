@@ -552,6 +552,7 @@ describe("Segurança Probatória e Multi-Tenant do Retorno WhatsApp (/api/messag
     };
 
     // Mensagem com retorno prévio
+    mockMessageLogs["msg-escola-a"].student.classGroupId = "cg-escola-a";
     mockMessageLogs["msg-escola-a"].guardianReplied = true;
     mockMessageLogs["msg-escola-a"].replyNotes = "Retorno inicial registrado.";
     mockMessageLogs["msg-escola-a"].replyCategory = "TRANSPORTE";

@@ -20,6 +20,7 @@ const testAuthState = vi.hoisted(() => ({
   pendingTokenSchoolId: null as string | null,
   useRealExtensionSyncAuth: false,
   pendingSessionUser: null as Record<string, unknown> | null,
+  useRealPermissions: false,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -33,33 +34,64 @@ vi.mock("@/lib/prisma", () => ({
   ),
 }));
 
-vi.mock("@/lib/permissions", () => ({
-  requireSuperAdmin: vi.fn(async () => ({
-    ok: true,
-    userId: "superadmin-test",
-    userName: "Superadmin Teste",
-    email: "superadmin@redeativa.local",
-  })),
-  requireSchoolAdmin: vi.fn(),
-  requireAuth: vi.fn(async () => ({
-    ok: true,
-    schoolId: testAuthState.schoolId,
-    userId: testAuthState.userId,
-    userName: testAuthState.userName,
-    email: testAuthState.email,
-    role: testAuthState.role,
-    session: {
-      user: {
-        id: testAuthState.userId,
-        name: testAuthState.userName,
+vi.mock("@/lib/permissions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/permissions")>("@/lib/permissions");
+  return {
+    ...actual,
+    requireSuperAdmin: vi.fn(async () => ({
+      ok: true,
+      userId: "superadmin-test",
+      userName: "Superadmin Teste",
+      email: "superadmin@redeativa.local",
+    })),
+    requireSchoolAdmin: vi.fn(async (targetSchoolId?: string | null) => {
+      if (testAuthState.useRealPermissions) {
+        return actual.requireSchoolAdmin(targetSchoolId);
+      }
+      return {
+        ok: true,
+        userId: testAuthState.userId,
+        userName: testAuthState.userName,
         email: testAuthState.email,
         role: testAuthState.role,
         schoolId: testAuthState.schoolId,
-      },
-    },
-    snapshot: testAuthState.snapshot,
-  })),
-}));
+        session: {
+          user: {
+            id: testAuthState.userId,
+            name: testAuthState.userName,
+            email: testAuthState.email,
+            role: testAuthState.role,
+            schoolId: testAuthState.schoolId,
+          },
+        },
+        snapshot: testAuthState.snapshot,
+      };
+    }),
+    requireAuth: vi.fn(async () => {
+      if (testAuthState.useRealPermissions) {
+        return actual.requireAuth();
+      }
+      return {
+        ok: true,
+        schoolId: testAuthState.schoolId,
+        userId: testAuthState.userId,
+        userName: testAuthState.userName,
+        email: testAuthState.email,
+        role: testAuthState.role,
+        session: {
+          user: {
+            id: testAuthState.userId,
+            name: testAuthState.userName,
+            email: testAuthState.email,
+            role: testAuthState.role,
+            schoolId: testAuthState.schoolId,
+          },
+        },
+        snapshot: testAuthState.snapshot,
+      };
+    }),
+  };
+});
 
 vi.mock("@/lib/audit", async () => {
   const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
@@ -171,6 +203,7 @@ import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
 import { POST as postMessageReplyHandler } from "@/app/api/messages/reply/route";
+import { PUT as putMessageManageHandler, DELETE as deleteMessageManageHandler } from "@/app/api/messages/manage/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -1819,6 +1852,377 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.role = "PEDAGOGA";
         testAuthState.schoolId = "school-alpha";
         await prisma.studentContact.deleteMany({ where: { id: { in: ["contact-alpha-1", "contact-alpha-tb"] } } });
+      }
+    });
+
+    it("integra withTenantContext em PUT e DELETE /api/messages/manage com RBAC de gestão, bloqueio filtrado, turma validada, hash e rollback", async () => {
+      const { computeMessageContentHash } = await import("@/lib/messageCrypto");
+      const sentAt = new Date("2026-11-26T12:00:00.000Z");
+
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "mgr-gestor-a",
+            email: "gestor.a@redeativa.local",
+            name: "Gestor Alpha",
+            role: "GESTOR_ESCOLAR",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "mgr-pedagoga-a",
+            email: "pedagoga.mgr@redeativa.local",
+            name: "Pedagoga Alpha",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "mgr-superadmin",
+            email: "super.mgr@redeativa.local",
+            name: "Superadmin Mgr",
+            role: "SUPERADMIN",
+            schoolId: null,
+            active: true,
+          },
+        ],
+      });
+      await prisma.userSchool.createMany({
+        data: [
+          { userId: "mgr-gestor-a", schoolId: "school-alpha", role: "GESTOR_ESCOLAR", active: true },
+          { userId: "mgr-pedagoga-a", schoolId: "school-alpha", role: "PEDAGOGA", active: true },
+        ],
+      });
+
+      await prisma.student.create({
+        data: {
+          id: "stu-alpha-turma-b-mgr",
+          schoolId: "school-alpha",
+          classGroupId: "cg-beta",
+          name: "Estudante A Turma B",
+          phone: "41999997777",
+        },
+      });
+
+      const hashAlpha = computeMessageContentHash({
+        studentId: "stu-alpha",
+        schoolId: "school-alpha",
+        phoneUsed: "41999991111",
+        reasonTitle: "Falta",
+        messageContent: "Msg Alpha Original",
+        sentByName: "Equipe A",
+        sentAt,
+      });
+      const hashBeta = computeMessageContentHash({
+        studentId: "stu-beta",
+        schoolId: "school-beta",
+        phoneUsed: "41999992222",
+        reasonTitle: "Falta B",
+        messageContent: "Msg Beta Original",
+        sentByName: "Equipe B",
+        sentAt,
+      });
+
+      await prisma.messageLog.createMany({
+        data: [
+          {
+            id: "mgr-alpha-ok",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Falta",
+            messageContent: "Msg Alpha Original",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe A",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+          {
+            id: "mgr-alpha-legacy",
+            schoolId: null,
+            studentId: "stu-alpha",
+            templateId: null,
+            reasonTitle: "Legado",
+            messageContent: "Msg Legada",
+            phoneUsed: "41999991111",
+            sentByName: "Legado",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+          {
+            id: "mgr-beta-ok",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Falta B",
+            messageContent: "Msg Beta Original",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe B",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashBeta,
+          },
+          {
+            id: "mgr-divergent",
+            schoolId: "school-beta",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Divergente",
+            messageContent: "Msg Divergente",
+            phoneUsed: "41999991111",
+            sentByName: "Teste",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+          {
+            id: "mgr-alpha-turma-b",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha-turma-b-mgr",
+            templateId: "tpl-alpha",
+            reasonTitle: "Turma B",
+            messageContent: "Msg Turma B",
+            phoneUsed: "41999997777",
+            sentByName: "Equipe A",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+        ],
+      });
+
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      try {
+        // 1. Sessão sem permissão de gestão (PEDAGOGA) -> 403 em PUT e DELETE, sem auditoria
+        testAuthState.pendingSessionUser = { id: "mgr-pedagoga-a", email: "pedagoga.mgr@redeativa.local", active: true };
+        vi.mocked(logAudit).mockClear();
+        const rPedPut = await putMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "mgr-alpha-ok", reasonTitle: "Editado" }),
+          })
+        );
+        expect(rPedPut.status).toBe(403);
+        const rPedDel = await deleteMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage?id=mgr-alpha-ok", { method: "DELETE" })
+        );
+        expect(rPedDel.status).toBe(403);
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // 2. SUPERADMIN sem escola selecionada -> 403 (fallback de leitura desativado)
+        testAuthState.pendingSessionUser = { id: "mgr-superadmin", email: "super.mgr@redeativa.local", active: true };
+        const rSuperNoSchool = await putMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "mgr-alpha-ok", reasonTitle: "Super sem escola" }),
+          })
+        );
+        expect(rSuperNoSchool.status).toBe(403);
+
+        // 3. SUPERADMIN com school-alpha selecionada tentando PUT/DELETE em mgr-beta-ok -> 403 (acesso cruzado rejeitado)
+        testAuthState.pendingSessionUser = {
+          id: "mgr-superadmin",
+          email: "super.mgr@redeativa.local",
+          schoolId: "school-alpha",
+          active: true,
+        };
+        const rSuperCrossPut = await putMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "mgr-beta-ok", reasonTitle: "Invasão Superadmin" }),
+          })
+        );
+        expect(rSuperCrossPut.status).toBe(403);
+        const rSuperCrossDel = await deleteMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage?id=mgr-beta-ok", { method: "DELETE" })
+        );
+        expect(rSuperCrossDel.status).toBe(403);
+        expect((await prisma.messageLog.findUnique({ where: { id: "mgr-beta-ok" } }))?.reasonTitle).toBe("Falta B");
+
+        // 4. GESTOR_ESCOLAR de school-alpha: retificação legítima (PUT) + auditoria + hash
+        testAuthState.pendingSessionUser = { id: "mgr-gestor-a", email: "gestor.a@redeativa.local", active: true };
+        vi.mocked(logAudit).mockClear();
+        const rGestorPut = await putMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "mgr-alpha-ok", reasonTitle: "Falta Retificada" }),
+          })
+        );
+        expect(rGestorPut.status).toBe(200);
+        const rowAfterPut = await prisma.messageLog.findUnique({ where: { id: "mgr-alpha-ok" } });
+        expect(rowAfterPut?.reasonTitle).toBe("Falta Retificada");
+        expect(rowAfterPut?.messageContent).toBe("Msg Alpha Original");
+        const expectedPutHash = computeMessageContentHash({
+          studentId: "stu-alpha",
+          schoolId: "school-alpha",
+          phoneUsed: "41999991111",
+          reasonTitle: "Falta Retificada",
+          messageContent: "Msg Alpha Original",
+          sentByName: "Equipe A",
+          sentAt,
+          guardianReplied: false,
+          replyNotes: null,
+          replyCategory: null,
+          repliedAt: null,
+        });
+        expect(rowAfterPut?.contentHash).toBe(expectedPutHash);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "UPDATE_MESSAGE_LOG",
+            entityId: "mgr-alpha-ok",
+            schoolId: "school-alpha",
+          })
+        );
+
+        // 5. Log legado (schoolId null) aceito em PUT e DELETE; exclusão legítima + auditoria
+        const rLegacyPut = await putMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "mgr-alpha-legacy", reasonTitle: "Legado Retificado" }),
+          })
+        );
+        expect(rLegacyPut.status).toBe(200);
+        vi.mocked(logAudit).mockClear();
+        const rLegacyDel = await deleteMessageManageHandler(
+          new Request("http://127.0.0.1/api/messages/manage?id=mgr-alpha-legacy", { method: "DELETE" })
+        );
+        expect(rLegacyDel.status).toBe(200);
+        expect(await prisma.messageLog.findUnique({ where: { id: "mgr-alpha-legacy" } })).toBeNull();
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "DELETE_MESSAGE_LOG",
+            entityId: "mgr-alpha-legacy",
+            schoolId: "school-alpha",
+          })
+        );
+
+        // 6. Negativas: log divergente e estudante de A em turma de B -> 403, intactos e sem auditoria
+        for (const badId of ["mgr-divergent", "mgr-alpha-turma-b"]) {
+          vi.mocked(logAudit).mockClear();
+          const rBadPut = await putMessageManageHandler(
+            new Request("http://127.0.0.1/api/messages/manage", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: badId, reasonTitle: "Alteração indevida" }),
+            })
+          );
+          expect(rBadPut.status).toBe(403);
+          const rBadDel = await deleteMessageManageHandler(
+            new Request(`http://127.0.0.1/api/messages/manage?id=${badId}`, { method: "DELETE" })
+          );
+          expect(rBadDel.status).toBe(403);
+          expect(await prisma.messageLog.findUnique({ where: { id: badId } })).not.toBeNull();
+          expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+        }
+
+        // 7. Requisição recusada de A sobre B não bloqueia no row lock de B
+        const releaseBetaLock = await new Promise<() => void>((resolveLockHeld) => {
+          let releaseFn!: () => void;
+          const lockReady = new Promise<void>((r) => {
+            releaseFn = r;
+          });
+          void prisma.$transaction(async (txB) => {
+            await txB.$queryRaw`SELECT "id" FROM "MessageLog" WHERE "id" = 'mgr-beta-ok' FOR UPDATE`;
+            resolveLockHeld(releaseFn);
+            await lockReady;
+          });
+        });
+        try {
+          const rNoBlock = await putMessageManageHandler(
+            new Request("http://127.0.0.1/api/messages/manage", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "mgr-beta-ok", reasonTitle: "Sem bloqueio" }),
+            })
+          );
+          expect(rNoBlock.status).toBe(403);
+        } finally {
+          releaseBetaLock();
+        }
+
+        // 8. Concorrência PUT + POST /api/messages/reply: hash final coerente com estado persistido
+        const repliedAtIso = "2026-11-26T14:00:00.000Z";
+        const [rConcPut, rConcReply] = await Promise.all([
+          putMessageManageHandler(
+            new Request("http://127.0.0.1/api/messages/manage", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "mgr-alpha-ok", reasonTitle: "Concorrência Final" }),
+            })
+          ),
+          postMessageReplyHandler(
+            new Request("http://127.0.0.1/api/messages/reply", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                logId: "mgr-alpha-ok",
+                guardianReplied: true,
+                replyNotes: "Retorno concorrente",
+                replyCategory: "SAUDE",
+                extractedAt: repliedAtIso,
+              }),
+            })
+          ),
+        ]);
+        expect(rConcPut.status).toBe(200);
+        expect(rConcReply.status).toBe(200);
+        const rowConc = await prisma.messageLog.findUnique({ where: { id: "mgr-alpha-ok" } });
+        const expectedConcHash = computeMessageContentHash({
+          studentId: rowConc!.studentId,
+          schoolId: "school-alpha",
+          phoneUsed: rowConc!.phoneUsed,
+          reasonTitle: rowConc!.reasonTitle,
+          messageContent: rowConc!.messageContent,
+          sentByName: rowConc!.sentByName,
+          sentAt: rowConc!.sentAt,
+          guardianReplied: Boolean(rowConc!.guardianReplied),
+          replyNotes: rowConc!.replyNotes,
+          replyCategory: rowConc!.replyCategory,
+          repliedAt: rowConc!.repliedAt,
+        });
+        expect(rowConc?.contentHash).toBe(expectedConcHash);
+
+        // 9. Rollback pré-commit no DELETE preserva o registro e não emite auditoria
+        vi.mocked(logAudit).mockClear();
+        const originalTx = prisma.$transaction.bind(prisma);
+        const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((fn: unknown, opts?: unknown) => {
+          if (typeof fn === "function") {
+            return originalTx(async (tx) => {
+              await (fn as (client: unknown) => Promise<unknown>)(tx);
+              throw new Error("Simulated pre-commit failure on manage DELETE");
+            }, opts as Parameters<typeof originalTx>[1]);
+          }
+          return originalTx(fn as Parameters<typeof originalTx>[0]);
+        }) as typeof prisma.$transaction);
+        try {
+          const rDelRollback = await deleteMessageManageHandler(
+            new Request("http://127.0.0.1/api/messages/manage?id=mgr-alpha-ok", { method: "DELETE" })
+          );
+          expect(rDelRollback.status).toBe(500);
+          expect(await prisma.messageLog.findUnique({ where: { id: "mgr-alpha-ok" } })).not.toBeNull();
+          expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+        } finally {
+          txSpy.mockRestore();
+        }
+      } finally {
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.pendingSessionUser = null;
+        await prisma.messageLog.deleteMany({});
+        await prisma.userSchool.deleteMany({});
+        await prisma.user.deleteMany({});
+        await prisma.student.deleteMany({ where: { id: "stu-alpha-turma-b-mgr" } });
       }
     });
   }
