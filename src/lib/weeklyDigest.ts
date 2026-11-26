@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getSchoolContextByVerifiedId, UnauthorizedSchoolError } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export interface WeeklyDigestData {
   generatedAt: string;
@@ -56,19 +57,76 @@ export async function compileWeeklyDigest(targetSchoolId?: string): Promise<Week
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  // 1. Alunos ativos e registros de baixa frequência
-  const studentsWithLowAtt = await prisma.student.findMany({
-    where: { schoolId: school.id, active: true },
-    include: {
-      classGroup: true,
-      lowAttendanceRecord: true,
-      messageLogs: {
-        orderBy: { sentAt: "desc" },
-        take: 1,
-        select: { sentAt: true, guardianReplied: true, deliveryStatus: true },
-      },
-    },
-  });
+  const { studentsWithLowAtt, logsLast7Days, recentSnapshots } = await withTenantContext(
+    prisma,
+    school.id,
+    async (tx) => {
+      // 1. Alunos ativos e registros de baixa frequência (excluindo turmas de outra escola e logs divergentes)
+      const studentsRows = await tx.student.findMany({
+        where: {
+          schoolId: school.id,
+          active: true,
+          classGroup: { schoolId: school.id },
+        },
+        include: {
+          classGroup: true,
+          lowAttendanceRecord: true,
+          messageLogs: {
+            where: {
+              OR: [{ schoolId: null }, { schoolId: school.id }],
+            },
+            orderBy: { sentAt: "desc" },
+            take: 1,
+            select: { sentAt: true, guardianReplied: true, deliveryStatus: true },
+          },
+        },
+      });
+
+      // 2. Disparos e respostas nos últimos 7 dias (Fase A: nulo elegível apenas para aluno da escola; divergente excluído)
+      const logsRows = await tx.messageLog.findMany({
+        where: {
+          OR: [{ schoolId: null }, { schoolId: school.id }],
+          student: {
+            schoolId: school.id,
+            classGroup: { schoolId: school.id },
+          },
+          sentAt: { gte: sevenDaysAgo },
+        },
+        select: {
+          id: true,
+          guardianReplied: true,
+          deliveryStatus: true,
+          sentAt: true,
+        },
+      });
+
+      // 3. Quedas abruptas recentes a partir de snapshots (excluindo turmas de outra escola)
+      const snapshotRows = await tx.attendanceSnapshot.findMany({
+        where: {
+          student: {
+            schoolId: school.id,
+            classGroup: { schoolId: school.id },
+          },
+          recordedAt: { gte: sevenDaysAgo },
+          weeklyPercent: { not: null },
+          previousWeeklyPercent: { not: null },
+        },
+        include: {
+          student: {
+            include: { classGroup: true },
+          },
+        },
+        orderBy: { recordedAt: "desc" },
+        take: 20,
+      });
+
+      return {
+        studentsWithLowAtt: studentsRows,
+        logsLast7Days: logsRows,
+        recentSnapshots: snapshotRows,
+      };
+    }
+  );
 
   const totalStudents = studentsWithLowAtt.length;
   let criticalCount = 0;
@@ -145,20 +203,6 @@ export async function compileWeeklyDigest(targetSchoolId?: string): Promise<Week
     return a.attendancePercent - b.attendancePercent;
   });
 
-  // 2. Disparos e respostas nos últimos 7 dias
-  const logsLast7Days = await prisma.messageLog.findMany({
-    where: {
-      student: { schoolId: school.id },
-      sentAt: { gte: sevenDaysAgo },
-    },
-    select: {
-      id: true,
-      guardianReplied: true,
-      deliveryStatus: true,
-      sentAt: true,
-    },
-  });
-
   const sentLast7Days = logsLast7Days.length;
   const repliedLast7Days = logsLast7Days.filter((l) => l.guardianReplied).length;
   const replyRatePercent =
@@ -173,23 +217,6 @@ export async function compileWeeklyDigest(targetSchoolId?: string): Promise<Week
     }))
     .sort((a, b) => b.criticalCount - a.criticalCount)
     .slice(0, 6);
-
-  // 4. Quedas abruptas recentes a partir de snapshots
-  const recentSnapshots = await prisma.attendanceSnapshot.findMany({
-    where: {
-      student: { schoolId: school.id },
-      recordedAt: { gte: sevenDaysAgo },
-      weeklyPercent: { not: null },
-      previousWeeklyPercent: { not: null },
-    },
-    include: {
-      student: {
-        include: { classGroup: true },
-      },
-    },
-    orderBy: { recordedAt: "desc" },
-    take: 20,
-  });
 
   const abruptDrops = recentSnapshots
     .filter((s) => (s.previousWeeklyPercent || 0) - (s.weeklyPercent || 0) >= 15)

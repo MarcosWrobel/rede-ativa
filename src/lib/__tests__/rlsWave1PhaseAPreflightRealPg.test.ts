@@ -205,7 +205,10 @@ import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
 import { POST as frequenciaSyncHandler } from "@/app/api/frequencia/sync/route";
 import { POST as serpSyncHandler } from "@/app/api/serp/sync/route";
+import { NextRequest } from "next/server";
 import { POST as conselhoSyncHandler } from "@/app/api/conselho-classe/sync/route";
+import { GET as weeklyDigestGetHandler, POST as weeklyDigestPostHandler } from "@/app/api/cron/weekly-digest/route";
+import { compileWeeklyDigest } from "@/lib/weeklyDigest";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -4811,6 +4814,422 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = false;
         testAuthState.useRealCurrentSchool = false;
         testAuthState.useRealExtensionSyncAuth = false;
+      }
+    });
+
+    it("integra withTenantContext ao boletim semanal (cron geral, cron explícito, escola inativa, sessão com schoolId conflitante, SSR, Fase A e turmas cruzadas)", async () => {
+      const now = Date.now();
+      const oneDayAgo = new Date(now - 1 * 24 * 60 * 60 * 1000);
+      const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000);
+
+      await prisma.school.create({
+        data: {
+          id: "school-inactive",
+          inepCode: "99000303",
+          name: "Escola Sintética Inativa",
+          city: "Cidade Teste",
+          state: "PR",
+          nre: "NRE Teste",
+          network: "MUNICIPAL",
+          active: false,
+        },
+      });
+
+      await prisma.classGroup.createMany({
+        data: [
+          {
+            id: "cg-alpha-wd",
+            name: "1º Ano A",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-alpha",
+          },
+          {
+            id: "cg-beta-wd",
+            name: "1º Ano A",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-beta",
+          },
+          {
+            id: "cg-beta-wd-2",
+            name: "2º Ano B",
+            segment: "EM",
+            shift: "TARDE",
+            schoolId: "school-beta",
+          },
+          {
+            id: "cg-inact-wd",
+            name: "1º Ano A",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-inactive",
+          },
+        ],
+      });
+
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-wd-a1",
+            name: "Ana Boletim Alpha",
+            cgm: "810000101",
+            phone: "41999998101",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-wd",
+            active: true,
+          },
+          {
+            id: "stu-wd-a2",
+            name: "Bruno Ação Alpha",
+            cgm: "810000102",
+            phone: "41999998102",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-wd",
+            active: true,
+          },
+          {
+            id: "stu-wd-cross",
+            name: "Carlos Turma Cruzada",
+            cgm: "810000103",
+            phone: "41999998103",
+            schoolId: "school-alpha",
+            classGroupId: "cg-beta-wd-2",
+            active: true,
+          },
+          {
+            id: "stu-wd-b1",
+            name: "Daniela Boletim Beta",
+            cgm: "820000101",
+            phone: "41999998201",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-wd",
+            active: true,
+          },
+          {
+            id: "stu-wd-inact",
+            name: "Eduardo Escola Inativa",
+            cgm: "830000101",
+            phone: "41999998301",
+            schoolId: "school-inactive",
+            classGroupId: "cg-inact-wd",
+            active: true,
+          },
+        ],
+      });
+
+      await prisma.lowAttendanceRecord.createMany({
+        data: [
+          {
+            id: "la-wd-a1",
+            studentId: "stu-wd-a1",
+            attendancePercent: 60.0,
+            serpStatus: "EM_ANDAMENTO",
+            serpProtocol: "SERP-101",
+          },
+          {
+            id: "la-wd-a2",
+            studentId: "stu-wd-a2",
+            attendancePercent: 55.0,
+          },
+          {
+            id: "la-wd-cross",
+            studentId: "stu-wd-cross",
+            attendancePercent: 40.0,
+            serpStatus: "EM_ANDAMENTO",
+          },
+          {
+            id: "la-wd-b1",
+            studentId: "stu-wd-b1",
+            attendancePercent: 62.0,
+          },
+          {
+            id: "la-wd-inact",
+            studentId: "stu-wd-inact",
+            attendancePercent: 50.0,
+          },
+        ],
+      });
+
+      await prisma.attendanceSnapshot.createMany({
+        data: [
+          {
+            id: "snap-wd-a1",
+            studentId: "stu-wd-a1",
+            referenceWeek: "2026-W48",
+            attendancePercent: 60.0,
+            weeklyPercent: 60.0,
+            previousWeeklyPercent: 85.0,
+            recordedAt: oneDayAgo,
+          },
+          {
+            id: "snap-wd-cross",
+            studentId: "stu-wd-cross",
+            referenceWeek: "2026-W48",
+            attendancePercent: 50.0,
+            weeklyPercent: 50.0,
+            previousWeeklyPercent: 90.0,
+            recordedAt: oneDayAgo,
+          },
+          {
+            id: "snap-wd-b1",
+            studentId: "stu-wd-b1",
+            referenceWeek: "2026-W48",
+            attendancePercent: 62.0,
+            weeklyPercent: 62.0,
+            previousWeeklyPercent: 88.0,
+            recordedAt: oneDayAgo,
+          },
+        ],
+      });
+
+      await prisma.messageLog.createMany({
+        data: [
+          // Legado nulo elegível para stu-wd-a1 (deve contar e ser o último contato)
+          {
+            id: "ml-wd-a1-legacy",
+            studentId: "stu-wd-a1",
+            schoolId: null,
+            reasonTitle: "Faltas",
+            messageContent: "Contato legado elegível",
+            phoneUsed: "41999998101",
+            sentByName: "Sistema",
+            sentAt: twoDaysAgo,
+            guardianReplied: true,
+            deliveryStatus: "READ",
+          },
+          // Divergente mais recente para stu-wd-a1 (deve ser excluído do último contato e dos totais)
+          {
+            id: "ml-wd-a1-div",
+            studentId: "stu-wd-a1",
+            schoolId: "school-beta",
+            reasonTitle: "Faltas",
+            messageContent: "Contato divergente",
+            phoneUsed: "41999998101",
+            sentByName: "Sistema",
+            sentAt: oneDayAgo,
+            guardianReplied: false,
+            deliveryStatus: "SENT",
+          },
+          // Divergente único para stu-wd-a2 (stu-wd-a2 deve permanecer sem contato na fila de ação)
+          {
+            id: "ml-wd-a2-div",
+            studentId: "stu-wd-a2",
+            schoolId: "school-beta",
+            reasonTitle: "Faltas",
+            messageContent: "Contato divergente a2",
+            phoneUsed: "41999998102",
+            sentByName: "Sistema",
+            sentAt: oneDayAgo,
+            guardianReplied: false,
+            deliveryStatus: "SENT",
+          },
+          // Log de aluno com turma cruzada (não deve contar no boletim de school-alpha)
+          {
+            id: "ml-wd-cross",
+            studentId: "stu-wd-cross",
+            schoolId: "school-alpha",
+            reasonTitle: "Faltas",
+            messageContent: "Contato turma cruzada",
+            phoneUsed: "41999998103",
+            sentByName: "Sistema",
+            sentAt: oneDayAgo,
+            guardianReplied: true,
+            deliveryStatus: "READ",
+          },
+          // Log legítimo de school-beta
+          {
+            id: "ml-wd-b1",
+            studentId: "stu-wd-b1",
+            schoolId: "school-beta",
+            reasonTitle: "Faltas",
+            messageContent: "Contato beta",
+            phoneUsed: "41999998201",
+            sentByName: "Sistema",
+            sentAt: twoDaysAgo,
+            guardianReplied: false,
+            deliveryStatus: "DELIVERED",
+          },
+        ],
+      });
+
+      await prisma.user.create({
+        data: {
+          id: "wd-ped-a",
+          name: "Pedagoga Boletim",
+          email: "ped.boletim@redeativa.local",
+          role: "PEDAGOGA",
+          active: true,
+          schoolId: "school-alpha",
+        },
+      });
+      await prisma.userSchool.create({
+        data: {
+          id: "us-wd-ped-a",
+          userId: "wd-ped-a",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+
+      const originalCronSecret = process.env.CRON_SECRET;
+      process.env.CRON_SECRET = "cron-pg16-secret";
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation((client, schoolId, fn) =>
+          originalWithTenantContext(client, schoolId, async (tx) => {
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          })
+        );
+
+      try {
+        // 1. Sem credencial válida -> 401 sem abrir contexto transacional
+        testAuthState.pendingSessionUser = null;
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        const r401 = await weeklyDigestGetHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest", {
+            headers: { authorization: "Bearer wrong-secret" },
+          })
+        );
+        expect(r401.status).toBe(401);
+        expect(withTenantSpy).not.toHaveBeenCalled();
+
+        // 2. Cron com escola inativa ou ausente -> 404
+        const rInactive = await weeklyDigestGetHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest?schoolId=school-inactive", {
+            headers: { authorization: "Bearer cron-pg16-secret" },
+          })
+        );
+        expect(rInactive.status).toBe(404);
+
+        const rMissing = await weeklyDigestGetHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest?schoolId=school-nao-existe", {
+            headers: { authorization: "Bearer cron-pg16-secret" },
+          })
+        );
+        expect(rMissing.status).toBe(404);
+        expect(withTenantSpy).not.toHaveBeenCalled();
+
+        // 3. Cron geral sem schoolId: enumera apenas escolas ativas, abre Tx independente por escola e não vaza contexto pós-Tx
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rCronAll = await weeklyDigestGetHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest", {
+            headers: { authorization: "Bearer cron-pg16-secret" },
+          })
+        );
+        expect(rCronAll.status).toBe(200);
+        const cronAllBody = await rCronAll.json();
+        expect(cronAllBody.totalSchools).toBe(2);
+        expect(cronAllBody.digests).toHaveLength(2);
+        expect(capturedContextSchools).toEqual(["school-alpha", "school-beta"]);
+        const [{ afterAllVal }] = await prisma.$queryRaw<Array<{ afterAllVal: string | null }>>`
+          SELECT current_setting('app.current_school_id', true) AS "afterAllVal"
+        `;
+        expect(afterAllVal ?? "").toBe("");
+        expect(vi.mocked(logAudit)).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({ schoolId: "school-alpha", action: "GENERATE_WEEKLY_DIGEST" })
+        );
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({ schoolId: "school-beta", action: "GENERATE_WEEKLY_DIGEST" })
+        );
+
+        // 4. Cron com schoolId=school-alpha explícito: comprova Fase A e exclusão de turma cruzada
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rCronAlpha = await weeklyDigestGetHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest?schoolId=school-alpha", {
+            headers: { authorization: "Bearer cron-pg16-secret" },
+          })
+        );
+        expect(rCronAlpha.status).toBe(200);
+        const alphaBody = await rCronAlpha.json();
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(alphaBody.school.inepCode).toBe("99000101");
+        expect(alphaBody.kpis).toMatchObject({
+          totalStudents: 3,
+          criticalCount: 2,
+          criticalWithoutRecentContactCount: 1,
+          serpActiveCount: 1,
+          sentLast7Days: 1,
+          repliedLast7Days: 1,
+          replyRatePercent: 100,
+          abruptDropCount: 1,
+        });
+        expect(alphaBody.topRiskClasses).toEqual([
+          { className: "1º Ano A", shift: "MANHA", criticalCount: 2 },
+        ]);
+        expect(alphaBody.abruptDrops).toHaveLength(1);
+        expect(alphaBody.abruptDrops[0]).toMatchObject({
+          studentId: "stu-wd-a1",
+          className: "1º Ano A",
+          drop: 25,
+        });
+        expect(alphaBody.actionQueue).toHaveLength(1);
+        expect(alphaBody.actionQueue[0]).toMatchObject({
+          id: "stu-wd-a2",
+          lastContactAt: null,
+          daysWithoutContact: null,
+        });
+
+        // 5. Geração manual por sessão ignora ?schoolId=school-beta conflitante e usa escola da sessão
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        testAuthState.pendingSessionUser = {
+          id: "wd-ped-a",
+          email: "ped.boletim@redeativa.local",
+          active: true,
+        };
+        const rSessionPost = await weeklyDigestPostHandler(
+          new NextRequest("http://127.0.0.1/api/cron/weekly-digest?schoolId=school-beta", {
+            method: "POST",
+          })
+        );
+        expect(rSessionPost.status).toBe(200);
+        const sessionBody = await rSessionPost.json();
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(sessionBody.school.inepCode).toBe("99000101");
+        expect(sessionBody.kpis).toMatchObject(alphaBody.kpis);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            schoolId: "school-alpha",
+            action: "GENERATE_WEEKLY_DIGEST",
+            details: expect.objectContaining({ source: "MANUAL_UI" }),
+          })
+        );
+
+        // 6. Chamada usada pelo SSR (/boletim/page.tsx)
+        capturedContextSchools.length = 0;
+        const ssrDigest = await compileWeeklyDigest("school-alpha");
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(ssrDigest.kpis).toMatchObject(alphaBody.kpis);
+        expect(ssrDigest.abruptDrops).toHaveLength(1);
+        expect(ssrDigest.actionQueue).toHaveLength(1);
+        const [{ afterSsrVal }] = await prisma.$queryRaw<Array<{ afterSsrVal: string | null }>>`
+          SELECT current_setting('app.current_school_id', true) AS "afterSsrVal"
+        `;
+        expect(afterSsrVal ?? "").toBe("");
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
+        if (originalCronSecret === undefined) {
+          delete process.env.CRON_SECRET;
+        } else {
+          process.env.CRON_SECRET = originalCronSecret;
+        }
       }
     });
   }
