@@ -88,7 +88,11 @@ export async function dispatchAndPersistMessage(
     include: { classGroup: true },
   });
 
-  if (!student || !assertTenantOwnership(student.schoolId, currentSchoolId, session)) {
+  if (
+    !student ||
+    !assertTenantOwnership(student.schoolId, currentSchoolId, session) ||
+    student.schoolId !== currentSchoolId
+  ) {
     return {
       ok: false,
       status: 404,
@@ -110,8 +114,9 @@ export async function dispatchAndPersistMessage(
       };
     }
     if (
-      template.schoolId &&
-      !assertTenantOwnership(template.schoolId, currentSchoolId, session)
+      !template.schoolId ||
+      !assertTenantOwnership(template.schoolId, currentSchoolId, session) ||
+      template.schoolId !== student.schoolId
     ) {
       return {
         ok: false,
@@ -131,12 +136,13 @@ export async function dispatchAndPersistMessage(
     };
   }
 
+  const resolvedSchoolId = currentSchoolId;
   const sentAt = new Date();
 
   // 1. Calcular Hash SHA-256 canônico de integridade probatória (JUR-02)
   const contentHash = computeMessageContentHash({
     studentId: student.id,
-    schoolId: student.schoolId || currentSchoolId,
+    schoolId: resolvedSchoolId,
     phoneUsed: digits,
     reasonTitle,
     messageContent,
@@ -148,6 +154,7 @@ export async function dispatchAndPersistMessage(
   const initialStatus: DeliveryStatus = initialDeliveryStatus || "LINK_OPENED";
   const log = await prisma.messageLog.create({
     data: {
+      schoolId: resolvedSchoolId,
       studentId: student.id,
       templateId: validatedTemplateId,
       reasonTitle,

@@ -8,6 +8,12 @@ import {
 } from "@/lib/rlsWave1Preflight";
 
 const prismaRef = vi.hoisted(() => ({ current: null as unknown as PrismaClient }));
+const testAuthState = vi.hoisted(() => ({
+  schoolId: "school-alpha",
+  userId: "",
+  userName: "Equipe Teste",
+  email: "equipe@redeativa.local",
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: new Proxy(
@@ -28,6 +34,23 @@ vi.mock("@/lib/permissions", () => ({
     email: "superadmin@redeativa.local",
   })),
   requireSchoolAdmin: vi.fn(),
+  requireAuth: vi.fn(async () => ({
+    ok: true,
+    schoolId: testAuthState.schoolId,
+    userId: testAuthState.userId,
+    userName: testAuthState.userName,
+    email: testAuthState.email,
+    session: {
+      user: {
+        id: testAuthState.userId,
+        name: testAuthState.userName,
+        email: testAuthState.email,
+        role: "PEDAGOGA",
+        schoolId: testAuthState.schoolId,
+      },
+    },
+    snapshot: null,
+  })),
 }));
 
 vi.mock("@/lib/audit", () => ({
@@ -36,9 +59,19 @@ vi.mock("@/lib/audit", () => ({
 
 vi.mock("@/lib/currentSchool", () => ({
   invalidateSchoolCache: vi.fn(),
+  requireAuthorizedSchool: vi.fn(async () => ({
+    ok: true,
+    school: { id: testAuthState.schoolId, inepCode: "99000101" },
+  })),
+}));
+
+vi.mock("@/lib/rateLimit", () => ({
+  enforceRateLimit: vi.fn(async () => ({ ok: true })),
+  RATE_LIMIT_POLICIES: { MESSAGE_REPLY: {} },
 }));
 
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
+import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -442,6 +475,138 @@ describe.skipIf(!SHOULD_RUN)(
       expect(
         await prisma.messageLog.findUnique({ where: { id: "log-divergent-fk-block" } })
       ).not.toBeNull();
+    });
+
+    it("POST /api/messages/send grava MessageLog.schoolId da escola autorizada (com modelo próprio e modelo nulo), rejeita aluno/modelo cruzado e convive com escritor legado", async () => {
+      // 1. Escola Alpha com modelo próprio
+      testAuthState.schoolId = "school-alpha";
+      const resAlphaTpl = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Aviso Alpha",
+            messageContent: "Mensagem com modelo da escola Alpha",
+          }),
+        })
+      );
+      expect(resAlphaTpl.status).toBe(200);
+      const bodyAlphaTpl = await resAlphaTpl.json();
+      const rowAlphaTpl = await prisma.messageLog.findUnique({ where: { id: bodyAlphaTpl.logId } });
+      expect(rowAlphaTpl?.schoolId).toBe("school-alpha");
+      expect(rowAlphaTpl?.templateId).toBe("tpl-alpha");
+
+      // 2. Escola Alpha com templateId nulo (válido)
+      const resAlphaNull = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha",
+            templateId: null,
+            reasonTitle: "Contato livre",
+            messageContent: "Mensagem sem modelo da escola Alpha",
+          }),
+        })
+      );
+      expect(resAlphaNull.status).toBe(200);
+      const bodyAlphaNull = await resAlphaNull.json();
+      const rowAlphaNull = await prisma.messageLog.findUnique({ where: { id: bodyAlphaNull.logId } });
+      expect(rowAlphaNull?.schoolId).toBe("school-alpha");
+      expect(rowAlphaNull?.templateId).toBeNull();
+
+      // 3. Escola Beta com modelo próprio
+      testAuthState.schoolId = "school-beta";
+      const resBetaTpl = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Aviso Beta",
+            messageContent: "Mensagem com modelo da escola Beta",
+          }),
+        })
+      );
+      expect(resBetaTpl.status).toBe(200);
+      const bodyBetaTpl = await resBetaTpl.json();
+      const rowBetaTpl = await prisma.messageLog.findUnique({ where: { id: bodyBetaTpl.logId } });
+      expect(rowBetaTpl?.schoolId).toBe("school-beta");
+      expect(rowBetaTpl?.templateId).toBe("tpl-beta");
+
+      const countBeforeRejections = await prisma.messageLog.count();
+      expect(countBeforeRejections).toBe(3);
+
+      // 4. Rejeição de estudante de outra escola (sessão Alpha tentando enviar para stu-beta)
+      testAuthState.schoolId = "school-alpha";
+      const resCrossStudent = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-beta",
+            templateId: "tpl-alpha",
+            reasonTitle: "Tentativa cruzada",
+            messageContent: "Não deve gravar",
+          }),
+        })
+      );
+      expect(resCrossStudent.status).toBe(404);
+      expect(await prisma.messageLog.count()).toBe(countBeforeRejections);
+
+      // 5. Rejeição de modelo de outra escola (sessão Alpha com stu-alpha e tpl-beta)
+      const resCrossTpl = await sendMessageHandler(
+        new Request("http://127.0.0.1/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: "stu-alpha",
+            templateId: "tpl-beta",
+            reasonTitle: "Modelo cruzado",
+            messageContent: "Não deve gravar",
+          }),
+        })
+      );
+      expect(resCrossTpl.status).toBe(403);
+      expect(await prisma.messageLog.count()).toBe(countBeforeRejections);
+
+      // 6. Escritor legado ainda cria log com schoolId nulo; pré-flight detecta; reconciliação preenche preservando os existentes
+      await prisma.messageLog.create({
+        data: {
+          id: "log-legado-null",
+          schoolId: null,
+          studentId: "stu-beta",
+          templateId: null,
+          reasonTitle: "Escritor legado",
+          messageContent: "Criado com schoolId nulo",
+          phoneUsed: "41999992222",
+          sentByName: "Legado",
+        },
+      });
+
+      const preflightWithLegacy = await runRlsWave1Preflight(prisma);
+      expect(preflightWithLegacy.findings.logsMissingSchoolId.count).toBe(1);
+      expect(preflightWithLegacy.findings.logsMissingSchoolId.sampleIds).toContain("log-legado-null");
+      expect(preflightWithLegacy.readyForPhaseB).toBe(false);
+
+      const rec = await reconcileMessageLogSchoolId(prisma);
+      expect(rec.updatedCount).toBe(1);
+
+      const reconciledLegacy = await prisma.messageLog.findUnique({ where: { id: "log-legado-null" } });
+      expect(reconciledLegacy?.schoolId).toBe("school-beta");
+      expect((await prisma.messageLog.findUnique({ where: { id: bodyAlphaTpl.logId } }))?.schoolId).toBe(
+        "school-alpha"
+      );
+      expect((await prisma.messageLog.findUnique({ where: { id: bodyAlphaNull.logId } }))?.schoolId).toBe(
+        "school-alpha"
+      );
+
+      const preflightClean = await runRlsWave1Preflight(prisma);
+      expect(preflightClean.findings.logsMissingSchoolId.count).toBe(0);
+      expect(preflightClean.readyForPhaseB).toBe(true);
     });
   }
 );
