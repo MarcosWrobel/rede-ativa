@@ -195,6 +195,14 @@ vi.mock("@/lib/extensionSyncAuth", async () => {
   };
 });
 
+vi.mock("@/lib/escolaGoogleVerify", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/escolaGoogleVerify")>("@/lib/escolaGoogleVerify");
+  return {
+    ...actual,
+    verifyEscolaGoogleIdToken: vi.fn(),
+  };
+});
+
 import { auth } from "@/lib/auth";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
@@ -209,6 +217,8 @@ import { NextRequest } from "next/server";
 import { POST as conselhoSyncHandler } from "@/app/api/conselho-classe/sync/route";
 import { GET as weeklyDigestGetHandler, POST as weeklyDigestPostHandler } from "@/app/api/cron/weekly-digest/route";
 import { compileWeeklyDigest } from "@/lib/weeklyDigest";
+import { verifyEscolaGoogleIdToken } from "@/lib/escolaGoogleVerify";
+import { GET as signTokenGetHandler, POST as signTokenPostHandler } from "@/app/api/atas/sign-token/[token]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -247,6 +257,9 @@ describe.skipIf(!SHOULD_RUN)(
     });
 
     beforeEach(async () => {
+      await prisma.pedagogicalMinuteParticipant.deleteMany({});
+      await prisma.pedagogicalMinuteStudent.deleteMany({});
+      await prisma.pedagogicalMinute.deleteMany({});
       await prisma.studentCouncilSubjectEntry.deleteMany({});
       await prisma.studentCouncilCard.deleteMany({});
       await prisma.classCouncilSubject.deleteMany({});
@@ -5230,6 +5243,432 @@ describe.skipIf(!SHOULD_RUN)(
         } else {
           process.env.CRON_SECRET = originalCronSecret;
         }
+      }
+    });
+
+    it("integra withTenantContext em GET e POST /api/atas/sign-token/[token] (anonimização, vínculo legado cruzado, conflito de escola na requisição, OAuth, dryRun, expiração, revisão, reabertura e concorrência)", async () => {
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-sign-a1",
+            name: "Lucas Primeiro Alpha",
+            cgm: "910000101",
+            phone: "41999999101",
+            email: null,
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha",
+            active: true,
+          },
+          {
+            id: "stu-sign-a2",
+            name: "Mariana Segunda Alpha",
+            cgm: "910000102",
+            phone: "41999999102",
+            email: "mariana.existente@escola.pr.gov.br",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha",
+            active: true,
+          },
+          {
+            id: "stu-sign-b-legacy",
+            name: "Nome Cadastral Beta",
+            cgm: "920000101",
+            phone: "41999999201",
+            email: null,
+            schoolId: "school-beta",
+            classGroupId: "cg-beta",
+            active: true,
+          },
+        ],
+      });
+
+      const futureExpiry = new Date(Date.now() + 30 * 60 * 1000);
+      const pastExpiry = new Date(Date.now() - 5 * 60 * 1000);
+
+      // Ata 1: dois estudantes da school-alpha (anonimização + OAuth email null/existente + dryRun + concorrência)
+      await prisma.pedagogicalMinute.create({
+        data: {
+          id: "min-sign-alpha",
+          schoolId: "school-alpha",
+          year: 2026,
+          status: "DRAFT",
+          contentRevision: 1,
+          subject: "Atendimento conjunto Lucas Primeiro Alpha e Mariana Segunda Alpha",
+          summary:
+            "Registro oficial referente a Lucas Primeiro Alpha e Mariana Segunda Alpha com acompanhamento pedagógico.",
+          agreementsSummary: "Contato com responsáveis de Mariana Segunda Alpha e Lucas Primeiro Alpha.",
+          authorName: "Pedagoga Alpha",
+          authorEmail: "ped.alpha@escola.pr.gov.br",
+        },
+      });
+      await prisma.pedagogicalMinuteStudent.createMany({
+        data: [
+          {
+            id: "pms-sign-a1",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            studentNameSnapshot: "Lucas Primeiro Alpha",
+          },
+          {
+            id: "pms-sign-a2",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a2",
+            studentNameSnapshot: "Mariana Segunda Alpha",
+          },
+        ],
+      });
+      await prisma.pedagogicalMinuteParticipant.createMany({
+        data: [
+          {
+            id: "pmp-resp-a1",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            name: "Responsável Lucas",
+            role: "RESPONSAVEL",
+            mobileSignToken: "tok-pg16-get-valid",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-est-a1-oauth",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            name: "Lucas Primeiro Alpha",
+            role: "ESTUDANTE",
+            mobileSignToken: "tok-pg16-oauth-null",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-est-a2-existing",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a2",
+            name: "Mariana Segunda Alpha",
+            role: "ESTUDANTE",
+            mobileSignToken: "tok-pg16-oauth-keep",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-race-qr",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            name: "Pai Concorrência",
+            role: "RESPONSAVEL",
+            mobileSignToken: "tok-pg16-race-unique",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-expired",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            name: "Expirado",
+            role: "RESPONSAVEL",
+            mobileSignToken: "tok-pg16-expired",
+            mobileSignExpiresAt: pastExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-superseded",
+            minuteId: "min-sign-alpha",
+            studentId: "stu-sign-a1",
+            name: "Revisão Superada",
+            role: "RESPONSAVEL",
+            mobileSignToken: "tok-pg16-superseded",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 0,
+            hasActiveSignLink: true,
+          },
+        ],
+      });
+
+      // Ata 2: vínculo legado inconsistente apontando para stu-sign-b-legacy (school-beta)
+      await prisma.pedagogicalMinute.create({
+        data: {
+          id: "min-sign-legacy-cross",
+          schoolId: "school-alpha",
+          year: 2026,
+          status: "DRAFT",
+          contentRevision: 1,
+          subject: "Atendimento Lucas Primeiro Alpha e Nome Histórico Beta (Nome Cadastral Beta)",
+          summary:
+            "Ata oficial envolvendo Lucas Primeiro Alpha e Nome Histórico Beta, mantendo sigilo entre menores.",
+          agreementsSummary: "Encaminhamento para Nome Histórico Beta.",
+          authorName: "Pedagoga Alpha",
+          authorEmail: "ped.alpha@escola.pr.gov.br",
+        },
+      });
+      await prisma.pedagogicalMinuteStudent.createMany({
+        data: [
+          {
+            id: "pms-leg-a1",
+            minuteId: "min-sign-legacy-cross",
+            studentId: "stu-sign-a1",
+            studentNameSnapshot: "Lucas Primeiro Alpha",
+          },
+          {
+            id: "pms-leg-b",
+            minuteId: "min-sign-legacy-cross",
+            studentId: "stu-sign-b-legacy",
+            studentNameSnapshot: "Nome Histórico Beta",
+          },
+        ],
+      });
+      await prisma.pedagogicalMinuteParticipant.createMany({
+        data: [
+          {
+            id: "pmp-leg-resp",
+            minuteId: "min-sign-legacy-cross",
+            studentId: "stu-sign-a1",
+            name: "Responsável Legado",
+            role: "RESPONSAVEL",
+            mobileSignToken: "tok-pg16-legacy-get",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+          {
+            id: "pmp-leg-oauth-div",
+            minuteId: "min-sign-legacy-cross",
+            studentId: "stu-sign-b-legacy",
+            name: "Nome Histórico Beta",
+            role: "ESTUDANTE",
+            mobileSignToken: "tok-pg16-oauth-div",
+            mobileSignExpiresAt: futureExpiry,
+            mobileSignRevision: 1,
+            hasActiveSignLink: true,
+          },
+        ],
+      });
+
+      const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation((client, schoolId, fn) =>
+          originalWithTenantContext(client, schoolId, async (tx) => {
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            return fn(tx);
+          })
+        );
+
+      try {
+        // 1. GET válido com anonimização e tentativa de forjar escola por query/headers/cookies
+        capturedContextSchools.length = 0;
+        const rGetValid = await signTokenGetHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-get-valid?schoolId=school-beta", {
+            headers: {
+              "x-school-id": "school-beta",
+              cookie: "active_school_id=school-beta",
+            },
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-get-valid" }) }
+        );
+        expect(rGetValid.status).toBe(200);
+        const getValidBody = await rGetValid.json();
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(getValidBody.participant.schoolName).toBe("Escola Sintética Alpha");
+        expect(getValidBody.participant.subject).toContain("Lucas Primeiro Alpha");
+        expect(getValidBody.participant.subject).not.toContain("Mariana Segunda Alpha");
+        expect(getValidBody.participant.summary).not.toContain("Mariana Segunda Alpha");
+        expect(getValidBody.participant.agreementsSummary).not.toContain("Mariana Segunda Alpha");
+
+        // 2. GET com vínculo legado inconsistente (stu-sign-b-legacy pertence à school-beta):
+        //    não expõe "Nome Cadastral Beta" na leitura de Student e mantém anonimização de "Nome Histórico Beta"
+        capturedContextSchools.length = 0;
+        const rGetLegacy = await signTokenGetHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-legacy-get"),
+          { params: Promise.resolve({ token: "tok-pg16-legacy-get" }) }
+        );
+        expect(rGetLegacy.status).toBe(200);
+        const getLegacyBody = await rGetLegacy.json();
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(getLegacyBody.participant.subject).toContain("Lucas Primeiro Alpha");
+        expect(getLegacyBody.participant.summary).not.toContain("Nome Histórico Beta");
+        expect(getLegacyBody.participant.agreementsSummary).not.toContain("Nome Histórico Beta");
+
+        // 3. POST dryRun com OAuth: valida identidade fora da transação e não grava assinatura nem altera Student
+        capturedContextSchools.length = 0;
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: {
+            email: "lucas.primeiro@escola.pr.gov.br",
+            email_verified: true,
+            name: "Lucas Primeiro Alpha",
+            sub: "sub-lucas-1",
+          },
+        });
+        const rDryRun = await signTokenPostHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-oauth-null", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              googleIdToken: "fake-id-token-dry",
+              dryRun: true,
+            }),
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-oauth-null" }) }
+        );
+        expect(rDryRun.status).toBe(200);
+        expect((await rDryRun.json()).dryRun).toBe(true);
+        expect(capturedContextSchools).toEqual([]);
+        const lucasAfterDry = await prisma.student.findUnique({ where: { id: "stu-sign-a1" } });
+        expect(lucasAfterDry?.email).toBeNull();
+
+        // 4. POST OAuth preenche e-mail nulo na escola correta dentro de withTenantContext
+        capturedContextSchools.length = 0;
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: {
+            email: "lucas.primeiro@escola.pr.gov.br",
+            email_verified: true,
+            name: "Lucas Primeiro Alpha",
+            sub: "sub-lucas-1",
+          },
+        });
+        const rOAuthFill = await signTokenPostHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-oauth-null?schoolId=school-beta", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              googleIdToken: "fake-id-token-fill",
+            }),
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-oauth-null" }) }
+        );
+        expect(rOAuthFill.status).toBe(200);
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        const lucasAfterFill = await prisma.student.findUnique({ where: { id: "stu-sign-a1" } });
+        expect(lucasAfterFill?.email).toBe("lucas.primeiro@escola.pr.gov.br");
+
+        // 5. POST OAuth preserva e-mail existente na escola correta
+        capturedContextSchools.length = 0;
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: {
+            email: "mariana.nova@escola.pr.gov.br",
+            email_verified: true,
+            name: "Mariana Segunda Alpha",
+            sub: "sub-mariana-2",
+          },
+        });
+        const rOAuthKeep = await signTokenPostHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-oauth-keep", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              googleIdToken: "fake-id-token-keep",
+            }),
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-oauth-keep" }) }
+        );
+        expect(rOAuthKeep.status).toBe(200);
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        const marianaAfterKeep = await prisma.student.findUnique({ where: { id: "stu-sign-a2" } });
+        expect(marianaAfterKeep?.email).toBe("mariana.existente@escola.pr.gov.br");
+
+        // 6. POST OAuth com studentId de outra escola (vínculo divergente): zero alterações em Student da outra escola
+        capturedContextSchools.length = 0;
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: {
+            email: "historico.beta@escola.pr.gov.br",
+            email_verified: true,
+            name: "Nome Histórico Beta",
+            sub: "sub-beta-div",
+          },
+        });
+        const rOAuthDiv = await signTokenPostHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-oauth-div", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              googleIdToken: "fake-id-token-div",
+            }),
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-oauth-div" }) }
+        );
+        expect(rOAuthDiv.status).toBe(200);
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        const betaAfterDiv = await prisma.student.findUnique({ where: { id: "stu-sign-b-legacy" } });
+        expect(betaAfterDiv?.email).toBeNull();
+
+        // 7. Regressões: expiração (410), revisão superada (409) e revogação pós-reabertura (404)
+        const rExpired = await signTokenGetHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-expired"),
+          { params: Promise.resolve({ token: "tok-pg16-expired" }) }
+        );
+        expect(rExpired.status).toBe(410);
+
+        const rSuperseded = await signTokenPostHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-superseded", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            }),
+          }),
+          { params: Promise.resolve({ token: "tok-pg16-superseded" }) }
+        );
+        expect(rSuperseded.status).toBe(409);
+
+        // Simula reabertura revogando o token no banco
+        await prisma.pedagogicalMinuteParticipant.update({
+          where: { id: "pmp-superseded" },
+          data: { mobileSignToken: null, hasActiveSignLink: false },
+        });
+        const rRevoked = await signTokenGetHandler(
+          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-superseded"),
+          { params: Promise.resolve({ token: "tok-pg16-superseded" }) }
+        );
+        expect(rRevoked.status).toBe(404);
+
+        // 8. Dois envios simultâneos com o mesmo token sintético: apenas 1 assinatura registrada
+        const validPng =
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        const [raceRes1, raceRes2] = await Promise.all([
+          signTokenPostHandler(
+            new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-race-unique", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ expectedRevision: 1, signatureData: validPng }),
+            }),
+            { params: Promise.resolve({ token: "tok-pg16-race-unique" }) }
+          ),
+          signTokenPostHandler(
+            new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-race-unique", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ expectedRevision: 1, signatureData: validPng }),
+            }),
+            { params: Promise.resolve({ token: "tok-pg16-race-unique" }) }
+          ),
+        ]);
+        const raceStatuses = [raceRes1.status, raceRes2.status].sort((a, b) => a - b);
+        expect(raceStatuses[0]).toBe(200);
+        expect([404, 409]).toContain(raceStatuses[1]);
+
+        const raceParticipant = await prisma.pedagogicalMinuteParticipant.findUnique({
+          where: { id: "pmp-race-qr" },
+        });
+        expect(raceParticipant?.hasSignature).toBe(true);
+        expect(raceParticipant?.mobileSignToken).toBeNull();
+      } finally {
+        withTenantSpy.mockRestore();
       }
     });
   }

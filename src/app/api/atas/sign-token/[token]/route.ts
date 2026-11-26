@@ -14,6 +14,7 @@ import {
 } from "@/lib/escolaGoogleVerify";
 import { enforceRateLimit, getPublicIpRateLimitKey, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { acquireMinuteWriteLock } from "@/lib/minuteLock";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   evaluateMinuteRevisionLock,
   hasMinimumOfficialSummary,
@@ -56,6 +57,7 @@ export async function GET(
         minute: {
           select: {
             id: true,
+            schoolId: true,
             status: true,
             contentRevision: true,
             physicalScanRevision: true,
@@ -84,7 +86,6 @@ export async function GET(
                 studentId: true,
                 studentNameSnapshot: true,
                 previousNameSnapshots: true,
-                student: { select: { name: true } },
               },
             },
           },
@@ -172,12 +173,61 @@ export async function GET(
       );
     }
 
-    const linkedStudents = buildStudentMaskingEntries((participant.minute as any).students || []);
+    const rawMinuteStudents: Array<{
+      studentId: string;
+      studentNameSnapshot?: string | null;
+      previousNameSnapshots?: ReadonlyArray<string | null | undefined> | null;
+    }> = (participant.minute as any).students || [];
+
     const shouldAnonymizeOthers =
-      linkedStudents.length > 1 &&
+      rawMinuteStudents.length > 1 &&
       (participant.role === "RESPONSAVEL" ||
         participant.role === "FAMILIAR_CONTATO" ||
         participant.role === "ESTUDANTE");
+
+    const studentNameById = new Map<string, string>();
+    if (shouldAnonymizeOthers) {
+      const minuteSchoolId = participant.minute.schoolId;
+      if (!minuteSchoolId) {
+        return NextResponse.json(
+          {
+            error:
+              "Link de assinatura inválido, substituído, revogado após alteração da ata ou já utilizado. Solicite um novo link à equipe escolar.",
+            code: "LINK_REVOKED_OR_SUPERSEDED",
+          },
+          { status: 404 }
+        );
+      }
+      const studentIds = Array.from(
+        new Set(rawMinuteStudents.map((ms) => ms.studentId).filter(Boolean))
+      );
+      if (studentIds.length > 0) {
+        const scopedStudents = await withTenantContext(prisma, minuteSchoolId, async (tx) =>
+          tx.student.findMany({
+            where: {
+              id: { in: studentIds },
+              schoolId: minuteSchoolId,
+            },
+            select: {
+              id: true,
+              name: true,
+            },
+          })
+        );
+        for (const st of scopedStudents) {
+          studentNameById.set(st.id, st.name);
+        }
+      }
+    }
+
+    const linkedStudents = buildStudentMaskingEntries(
+      rawMinuteStudents.map((ms) => ({
+        ...ms,
+        student: studentNameById.has(ms.studentId)
+          ? { name: studentNameById.get(ms.studentId)! }
+          : null,
+      }))
+    );
 
     const safeSubject = shouldAnonymizeOthers
       ? anonymizeOtherMinorsInText(participant.minute.subject, participant.studentId, linkedStudents)
@@ -229,16 +279,50 @@ export async function POST(
 
     const participant = await prisma.pedagogicalMinuteParticipant.findUnique({
       where: { mobileSignToken: token },
-      include: {
+      select: {
+        id: true,
+        minuteId: true,
+        studentId: true,
+        name: true,
+        role: true,
+        expectedEmail: true,
+        signedAt: true,
+        signatureData: true,
+        verifiedEmail: true,
+        hasSignature: true,
+        signatureMode: true,
+        mobileSignToken: true,
+        mobileSignExpiresAt: true,
+        mobileSignRevision: true,
         minute: {
-          include: {
-            participants: true,
+          select: {
+            id: true,
+            schoolId: true,
+            status: true,
+            contentRevision: true,
+            physicalScanRevision: true,
+            physicalScanSupersededAt: true,
+            hasPhysicalScan: true,
+            govBrVerified: true,
+            summary: true,
+            participants: {
+              select: {
+                id: true,
+                signatureMode: true,
+                hasSignature: true,
+                signatureData: true,
+                verifiedEmail: true,
+                signedAt: true,
+                biometricVerified: true,
+                signedRevision: true,
+              },
+            },
           },
         },
       },
     });
 
-    if (!participant) {
+    if (!participant || !participant.minute?.schoolId) {
       console.warn("[POST /api/atas/sign-token] Submissão recusada:", { reason: "token_not_found" });
       return NextResponse.json(
         {
@@ -399,6 +483,7 @@ export async function POST(
 
       const now = new Date();
       const targetMinuteId = participant.minuteId || participant.minute.id;
+      const minuteSchoolId = participant.minute.schoolId;
       const runTx =
         typeof prisma.$transaction === "function"
           ? prisma.$transaction.bind(prisma)
@@ -408,11 +493,18 @@ export async function POST(
         await acquireMinuteWriteLock(tx, targetMinuteId);
 
         const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
-          where: { id: participant.id, mobileSignToken: token },
+          where: {
+            id: participant.id,
+            minuteId: targetMinuteId,
+            mobileSignToken: token,
+            minute: {
+              schoolId: minuteSchoolId,
+            },
+          },
           include: { minute: { include: { participants: true } } },
         });
 
-        if (!freshParticipant) {
+        if (!freshParticipant || freshParticipant.minute.schoolId !== minuteSchoolId) {
           return {
             ok: false as const,
             status: 404,
@@ -537,6 +629,7 @@ export async function POST(
         return {
           ok: true as const,
           studentId: freshParticipant.studentId,
+          schoolId: freshParticipant.minute.schoolId,
           signedRevision: txLockState.currentRevision,
         };
       });
@@ -548,12 +641,18 @@ export async function POST(
         );
       }
 
-      // Se houver studentId vinculado e o e-mail no cadastro do aluno estiver vazio, atualiza automaticamente
-      if (txResult.studentId) {
+      // Se houver studentId vinculado à mesma escola e o e-mail no cadastro estiver vazio, atualiza em contexto RLS
+      if (txResult.studentId && txResult.schoolId) {
         try {
-          await prisma.student.updateMany({
-            where: { id: txResult.studentId, email: null },
-            data: { email: verifiedEmail },
+          await withTenantContext(prisma, txResult.schoolId, async (tx) => {
+            await tx.student.updateMany({
+              where: {
+                id: txResult.studentId!,
+                schoolId: txResult.schoolId,
+                email: null,
+              },
+              data: { email: verifiedEmail },
+            });
           });
         } catch (err) {
           console.warn("[POST sign-token] Aviso ao salvar email no aluno:", err);
@@ -579,6 +678,7 @@ export async function POST(
 
     const now = new Date();
     const targetMinuteId = participant.minuteId || participant.minute.id;
+    const minuteSchoolId = participant.minute.schoolId;
     const runTx =
       typeof prisma.$transaction === "function"
         ? prisma.$transaction.bind(prisma)
@@ -588,11 +688,18 @@ export async function POST(
       await acquireMinuteWriteLock(tx, targetMinuteId);
 
       const freshParticipant = await tx.pedagogicalMinuteParticipant.findFirst({
-        where: { id: participant.id, mobileSignToken: token },
+        where: {
+          id: participant.id,
+          minuteId: targetMinuteId,
+          mobileSignToken: token,
+          minute: {
+            schoolId: minuteSchoolId,
+          },
+        },
         include: { minute: { include: { participants: true } } },
       });
 
-      if (!freshParticipant) {
+      if (!freshParticipant || freshParticipant.minute.schoolId !== minuteSchoolId) {
         return {
           ok: false as const,
           status: 404,

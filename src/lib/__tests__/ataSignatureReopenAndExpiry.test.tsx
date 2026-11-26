@@ -446,6 +446,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         mobileSignRevision: storedMobileSignRevision,
         minute: {
           id: "min-1",
+          schoolId: "school-a",
           status: "DRAFT",
           contentRevision: 1,
           subject: "Atendimento",
@@ -844,7 +845,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         mobileSignExpiresAt: new Date(Date.now() + 600_000),
         mobileSignRevision: 1,
         hasActiveSignLink: true,
-        minute: { id: "min-1", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
+        minute: { id: "min-1", schoolId: "school-a", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       // Dentro do lock transacional, o token já havia sido cancelado por outro request
       mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce(null);
@@ -1028,7 +1029,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         mobileSignExpiresAt: futureExpires,
         mobileSignRevision: 1,
         hasActiveSignLink: true,
-        minute: { id: "min-refused", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
+        minute: { id: "min-refused", schoolId: "school-a", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       mockPrisma.pedagogicalMinuteParticipant.findFirst.mockResolvedValueOnce({
         ...refusedDbParticipants[0],
@@ -1037,7 +1038,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
         mobileSignExpiresAt: futureExpires,
         mobileSignRevision: 1,
         hasActiveSignLink: true,
-        minute: { id: "min-refused", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
+        minute: { id: "min-refused", schoolId: "school-a", status: "DRAFT", contentRevision: 1, summary: "Resumo válido com mais de dez caracteres." },
       });
       const mobileRefusedRaceRes = await postPublicSignTokenHandler(
         new Request("http://localhost:3001/api/atas/sign-token/tok-refused-race", {
