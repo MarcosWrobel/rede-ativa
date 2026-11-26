@@ -5447,6 +5447,80 @@ describe.skipIf(!SHOULD_RUN)(
         ],
       });
 
+      // Ata 3: ata de um único estudante com vínculo divergente (stu-sign-b-legacy pertence à school-beta)
+      await prisma.pedagogicalMinute.create({
+        data: {
+          id: "min-sign-single-div",
+          schoolId: "school-alpha",
+          year: 2026,
+          status: "DRAFT",
+          contentRevision: 1,
+          subject: "Atendimento individual Nome Cadastral Beta (grafia Nome Histórico Beta)",
+          summary: "Resumo oficial de atendimento individual de Nome Cadastral Beta.",
+          agreementsSummary: "Combinados com Nome Histórico Beta.",
+          authorName: "Pedagoga Alpha",
+          authorEmail: "ped.alpha@escola.pr.gov.br",
+        },
+      });
+      await prisma.pedagogicalMinuteStudent.create({
+        data: {
+          id: "pms-single-div",
+          minuteId: "min-sign-single-div",
+          studentId: "stu-sign-b-legacy",
+          studentNameSnapshot: "Nome Histórico Beta",
+        },
+      });
+      await prisma.pedagogicalMinuteParticipant.create({
+        data: {
+          id: "pmp-single-div",
+          minuteId: "min-sign-single-div",
+          studentId: null,
+          name: "Responsável Único Divergente",
+          role: "RESPONSAVEL",
+          mobileSignToken: "tok-pg16-single-div",
+          mobileSignExpiresAt: futureExpiry,
+          mobileSignRevision: 1,
+          hasActiveSignLink: true,
+        },
+      });
+
+      // Ata 4: estudante da ata é coerente (stu-sign-a1), mas participant.studentId pertence à school-beta
+      await prisma.pedagogicalMinute.create({
+        data: {
+          id: "min-sign-part-div",
+          schoolId: "school-alpha",
+          year: 2026,
+          status: "DRAFT",
+          contentRevision: 1,
+          subject: "Atendimento Lucas Primeiro Alpha com participante divergente",
+          summary: "Resumo oficial referente a Lucas Primeiro Alpha na escola Alpha.",
+          agreementsSummary: "Combinados para Lucas Primeiro Alpha.",
+          authorName: "Pedagoga Alpha",
+          authorEmail: "ped.alpha@escola.pr.gov.br",
+        },
+      });
+      await prisma.pedagogicalMinuteStudent.create({
+        data: {
+          id: "pms-part-div",
+          minuteId: "min-sign-part-div",
+          studentId: "stu-sign-a1",
+          studentNameSnapshot: "Lucas Primeiro Alpha",
+        },
+      });
+      await prisma.pedagogicalMinuteParticipant.create({
+        data: {
+          id: "pmp-part-div",
+          minuteId: "min-sign-part-div",
+          studentId: "stu-sign-b-legacy",
+          name: "Participante Divergente",
+          role: "RESPONSAVEL",
+          mobileSignToken: "tok-pg16-part-div",
+          mobileSignExpiresAt: futureExpiry,
+          mobileSignRevision: 1,
+          hasActiveSignLink: true,
+        },
+      });
+
       const capturedContextSchools: Array<string | null> = [];
       const originalWithTenantContext = rlsTenantContext.withTenantContext;
       const withTenantSpy = vi
@@ -5482,19 +5556,39 @@ describe.skipIf(!SHOULD_RUN)(
         expect(getValidBody.participant.summary).not.toContain("Mariana Segunda Alpha");
         expect(getValidBody.participant.agreementsSummary).not.toContain("Mariana Segunda Alpha");
 
-        // 2. GET com vínculo legado inconsistente (stu-sign-b-legacy pertence à school-beta):
-        //    não expõe "Nome Cadastral Beta" na leitura de Student e mantém anonimização de "Nome Histórico Beta"
-        capturedContextSchools.length = 0;
-        const rGetLegacy = await signTokenGetHandler(
-          new Request("http://127.0.0.1/api/atas/sign-token/tok-pg16-legacy-get"),
-          { params: Promise.resolve({ token: "tok-pg16-legacy-get" }) }
-        );
-        expect(rGetLegacy.status).toBe(200);
-        const getLegacyBody = await rGetLegacy.json();
-        expect(capturedContextSchools).toEqual(["school-alpha"]);
-        expect(getLegacyBody.participant.subject).toContain("Lucas Primeiro Alpha");
-        expect(getLegacyBody.participant.summary).not.toContain("Nome Histórico Beta");
-        expect(getLegacyBody.participant.agreementsSummary).not.toContain("Nome Histórico Beta");
+        // 2. GET com vínculos divergentes (entre vários estudantes, estudante único e participant.studentId externo):
+        //    bloqueia com resposta pública genérica (409 STUDENT_LINK_UNVERIFIED), sem expor conteúdo da ata ou dados das fixtures
+        for (const divToken of ["tok-pg16-legacy-get", "tok-pg16-single-div", "tok-pg16-part-div"]) {
+          capturedContextSchools.length = 0;
+          const rGetDiv = await signTokenGetHandler(
+            new Request(`http://127.0.0.1/api/atas/sign-token/${divToken}`),
+            { params: Promise.resolve({ token: divToken }) }
+          );
+          expect(rGetDiv.status).toBe(409);
+          const divRaw = await rGetDiv.text();
+          const divBody = JSON.parse(divRaw);
+          expect(capturedContextSchools).toEqual(["school-alpha"]);
+          expect(divBody).toEqual({
+            error:
+              "Não foi possível confirmar o vínculo escolar dos registros desta ata. Procure a equipe escolar para revisar o vínculo.",
+            code: "STUDENT_LINK_UNVERIFIED",
+          });
+          expect(divBody.participant).toBeUndefined();
+          for (const forbidden of [
+            "Lucas Primeiro Alpha",
+            "Mariana Segunda Alpha",
+            "Nome Histórico Beta",
+            "Nome Cadastral Beta",
+            "Responsável Legado",
+            "Responsável Único Divergente",
+            "Participante Divergente",
+            "Escola Sintética",
+            "Atendimento",
+            "Resumo oficial",
+          ]) {
+            expect(divRaw).not.toContain(forbidden);
+          }
+        }
 
         // 3. POST dryRun com OAuth: valida identidade fora da transação e não grava assinatura nem altera Student
         capturedContextSchools.length = 0;

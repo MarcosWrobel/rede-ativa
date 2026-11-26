@@ -179,14 +179,17 @@ export async function GET(
       previousNameSnapshots?: ReadonlyArray<string | null | undefined> | null;
     }> = (participant.minute as any).students || [];
 
-    const shouldAnonymizeOthers =
-      rawMinuteStudents.length > 1 &&
-      (participant.role === "RESPONSAVEL" ||
-        participant.role === "FAMILIAR_CONTATO" ||
-        participant.role === "ESTUDANTE");
+    const referencedStudentIds = Array.from(
+      new Set(
+        [
+          ...rawMinuteStudents.map((ms) => ms.studentId),
+          ...(participant.studentId ? [participant.studentId] : []),
+        ].filter(Boolean)
+      )
+    );
 
     const studentNameById = new Map<string, string>();
-    if (shouldAnonymizeOthers) {
+    if (referencedStudentIds.length > 0) {
       const minuteSchoolId = participant.minute.schoolId;
       if (!minuteSchoolId) {
         return NextResponse.json(
@@ -198,27 +201,50 @@ export async function GET(
           { status: 404 }
         );
       }
-      const studentIds = Array.from(
-        new Set(rawMinuteStudents.map((ms) => ms.studentId).filter(Boolean))
+
+      const scopedStudents = await withTenantContext(prisma, minuteSchoolId, async (tx) =>
+        tx.student.findMany({
+          where: {
+            id: { in: referencedStudentIds },
+            schoolId: minuteSchoolId,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        })
       );
-      if (studentIds.length > 0) {
-        const scopedStudents = await withTenantContext(prisma, minuteSchoolId, async (tx) =>
-          tx.student.findMany({
-            where: {
-              id: { in: studentIds },
-              schoolId: minuteSchoolId,
-            },
-            select: {
-              id: true,
-              name: true,
-            },
-          })
+      for (const st of scopedStudents) {
+        studentNameById.set(st.id, st.name);
+      }
+
+      const hasUnverifiedStudentReference = referencedStudentIds.some(
+        (id) => !studentNameById.has(id)
+      );
+      if (hasUnverifiedStudentReference) {
+        return NextResponse.json(
+          {
+            error:
+              "Não foi possível confirmar o vínculo escolar dos registros desta ata. Procure a equipe escolar para revisar o vínculo.",
+            code: "STUDENT_LINK_UNVERIFIED",
+          },
+          { status: 409 }
         );
-        for (const st of scopedStudents) {
-          studentNameById.set(st.id, st.name);
-        }
       }
     }
+
+    const shouldAnonymizeOthers =
+      rawMinuteStudents.length > 1 &&
+      (participant.role === "RESPONSAVEL" ||
+        participant.role === "FAMILIAR_CONTATO" ||
+        participant.role === "ESTUDANTE");
+
+    const hasConfirmedReferenceStudent = Boolean(
+      participant.studentId &&
+        studentNameById.has(participant.studentId) &&
+        rawMinuteStudents.some((ms) => ms.studentId === participant.studentId)
+    );
+    const exemptStudentId = hasConfirmedReferenceStudent ? participant.studentId : null;
 
     const linkedStudents = buildStudentMaskingEntries(
       rawMinuteStudents.map((ms) => ({
@@ -230,14 +256,18 @@ export async function GET(
     );
 
     const safeSubject = shouldAnonymizeOthers
-      ? anonymizeOtherMinorsInText(participant.minute.subject, participant.studentId, linkedStudents)
+      ? anonymizeOtherMinorsInText(participant.minute.subject, exemptStudentId, linkedStudents)
       : participant.minute.subject;
     const safeSummary = shouldAnonymizeOthers
-      ? anonymizeOtherMinorsInText(participant.minute.summary, participant.studentId, linkedStudents)
+      ? anonymizeOtherMinorsInText(participant.minute.summary, exemptStudentId, linkedStudents)
       : participant.minute.summary;
     const safeAgreements =
       shouldAnonymizeOthers && participant.minute.agreementsSummary
-        ? anonymizeOtherMinorsInText(participant.minute.agreementsSummary, participant.studentId, linkedStudents)
+        ? anonymizeOtherMinorsInText(
+            participant.minute.agreementsSummary,
+            exemptStudentId,
+            linkedStudents
+          )
         : participant.minute.agreementsSummary;
 
     return NextResponse.json({
