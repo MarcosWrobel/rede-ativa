@@ -290,51 +290,49 @@ export async function claimPendingQueuedMessages(options: {
   const staleMinutes = Math.max(1, Math.min(options.staleDispatchMinutes ?? 5, 60));
   const staleThreshold = new Date(Date.now() - staleMinutes * 60_000);
 
-  // 1. Recuperação automática de mensagens presas em DISPATCHING caso o companion tenha caído
-  if (typeof prisma.$executeRaw === "function") {
-    try {
-      await prisma.$executeRaw`
-        UPDATE "MessageLog" ml
-        SET "deliveryStatus" = 'QUEUED',
-            "deliveryUpdatedAt" = NOW()
-        FROM "Student" s
-        WHERE ml."studentId" = s."id"
-          AND s."schoolId" = ${options.schoolId}
-          AND ml."deliveryStatus" = 'DISPATCHING'
-          AND COALESCE(ml."deliveryUpdatedAt", ml."sentAt") < ${staleThreshold}
-      `;
-    } catch (err) {
-      console.warn("[messageDispatchService] Aviso ao recuperar mensagens DISPATCHING órfãs:", err);
-    }
-  }
+  return withTenantContext(prisma, options.schoolId, async (tx) => {
+    // 1. Recuperação automática de mensagens presas em DISPATCHING dentro do contexto RLS e coerência da Fase A
+    await tx.$executeRaw`
+      UPDATE "MessageLog" ml
+      SET "deliveryStatus" = 'QUEUED',
+          "deliveryUpdatedAt" = NOW()
+      FROM "Student" s
+      WHERE ml."studentId" = s."id"
+        AND s."schoolId" = ${options.schoolId}
+        AND (ml."schoolId" IS NULL OR ml."schoolId" = ${options.schoolId})
+        AND ml."deliveryStatus" = 'DISPATCHING'
+        AND COALESCE(ml."deliveryUpdatedAt", ml."sentAt") < ${staleThreshold}
+    `;
 
-  // 2. Claim atômico (statement único compatível com PgBouncer transaction-mode)
-  const claimed = await prisma.$queryRaw<ClaimedPendingMessage[]>`
-    UPDATE "MessageLog"
-    SET "deliveryStatus" = 'DISPATCHING',
-        "deliveryUpdatedAt" = NOW()
-    WHERE "id" IN (
-      SELECT ml."id"
-      FROM "MessageLog" ml
-      INNER JOIN "Student" s ON s."id" = ml."studentId"
-      WHERE s."schoolId" = ${options.schoolId}
-        AND ml."deliveryStatus" = 'QUEUED'
-      ORDER BY ml."sentAt" ASC
-      LIMIT ${safeLimit}
-      FOR UPDATE OF ml SKIP LOCKED
-    )
-    RETURNING
-      "id",
-      "studentId",
-      "phoneUsed",
-      "reasonTitle",
-      "messageContent",
-      "sentByName",
-      "sentAt",
-      "contentHash",
-      "deliveryStatus",
-      "deliveryUpdatedAt"
-  `;
+    // 2. Claim atômico na mesma transação (compatível com PgBouncer transaction-mode)
+    const claimed = await tx.$queryRaw<ClaimedPendingMessage[]>`
+      UPDATE "MessageLog"
+      SET "deliveryStatus" = 'DISPATCHING',
+          "deliveryUpdatedAt" = NOW()
+      WHERE "id" IN (
+        SELECT ml."id"
+        FROM "MessageLog" ml
+        INNER JOIN "Student" s ON s."id" = ml."studentId"
+        WHERE s."schoolId" = ${options.schoolId}
+          AND (ml."schoolId" IS NULL OR ml."schoolId" = ${options.schoolId})
+          AND ml."deliveryStatus" = 'QUEUED'
+        ORDER BY ml."sentAt" ASC
+        LIMIT ${safeLimit}
+        FOR UPDATE OF ml SKIP LOCKED
+      )
+      RETURNING
+        "id",
+        "studentId",
+        "phoneUsed",
+        "reasonTitle",
+        "messageContent",
+        "sentByName",
+        "sentAt",
+        "contentHash",
+        "deliveryStatus",
+        "deliveryUpdatedAt"
+    `;
 
-  return claimed;
+    return claimed;
+  });
 }

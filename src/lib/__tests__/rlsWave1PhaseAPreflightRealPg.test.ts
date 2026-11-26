@@ -17,6 +17,7 @@ const testAuthState = vi.hoisted(() => ({
   email: "equipe@redeativa.local",
   snapshot: null as Record<string, unknown> | null,
   useRealCurrentSchool: false,
+  pendingTokenSchoolId: null as string | null,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -105,11 +106,45 @@ vi.mock("@/lib/whatsappProvider", async () => {
   };
 });
 
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn(async () =>
+    testAuthState.pendingTokenSchoolId
+      ? null
+      : {
+          user: {
+            id: testAuthState.userId,
+            name: testAuthState.userName,
+            email: testAuthState.email,
+            role: testAuthState.role,
+            schoolId: testAuthState.schoolId,
+            active: true,
+          },
+        }
+  ),
+}));
+
+vi.mock("@/lib/extensionSyncAuth", () => ({
+  authenticateExtensionSyncToken: vi.fn(async () => {
+    if (!testAuthState.pendingTokenSchoolId) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: "Não autorizado." }), { status: 401 }),
+      };
+    }
+    return {
+      ok: true,
+      targetSchoolId: testAuthState.pendingTokenSchoolId,
+      userName: "Companion Teste",
+    };
+  }),
+}));
+
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { logAudit } from "@/lib/audit";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
+import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -874,6 +909,260 @@ describe.skipIf(!SHOULD_RUN)(
       const auditCalls = vi.mocked(logAudit).mock.calls;
       const sendAudit = auditCalls.find((c) => c[0]?.action === "SEND_MESSAGE");
       expect(sendAudit).toBeUndefined();
+    });
+
+    it("GET /api/messages/pending usa withTenantContext na recuperação/claim, mantém elegível legado nulo, rejeita divergentes e isola concorrência", async () => {
+      const now = Date.now();
+      const tenMinutesAgo = new Date(now - 10 * 60_000);
+      const oneMinuteAgo = new Date(now - 60_000);
+
+      await prisma.messageLog.createMany({
+        data: [
+          {
+            id: "q-alpha-1",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Fila A1",
+            messageContent: "Msg A1",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe A",
+            deliveryStatus: "QUEUED",
+            sentAt: new Date(now - 40_000),
+          },
+          {
+            id: "q-alpha-legacy-null",
+            schoolId: null,
+            studentId: "stu-alpha",
+            templateId: null,
+            reasonTitle: "Legado A",
+            messageContent: "Msg Legada A",
+            phoneUsed: "41999991111",
+            sentByName: "Legado A",
+            deliveryStatus: "QUEUED",
+            sentAt: new Date(now - 30_000),
+          },
+          {
+            id: "d-alpha-expired",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Expirado A",
+            messageContent: "Msg Expirada A",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe A",
+            deliveryStatus: "DISPATCHING",
+            deliveryUpdatedAt: tenMinutesAgo,
+            sentAt: tenMinutesAgo,
+          },
+          {
+            id: "d-alpha-valid",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Válido A",
+            messageContent: "Msg Válida A",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe A",
+            deliveryStatus: "DISPATCHING",
+            deliveryUpdatedAt: oneMinuteAgo,
+            sentAt: oneMinuteAgo,
+          },
+          {
+            id: "q-divergent-log-b-stu-a",
+            schoolId: "school-beta",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Divergente 1",
+            messageContent: "Divergente 1",
+            phoneUsed: "41999991111",
+            sentByName: "Teste",
+            deliveryStatus: "QUEUED",
+            sentAt: new Date(now - 20_000),
+          },
+          {
+            id: "q-divergent-log-a-stu-b",
+            schoolId: "school-alpha",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Divergente 2",
+            messageContent: "Divergente 2",
+            phoneUsed: "41999992222",
+            sentByName: "Teste",
+            deliveryStatus: "QUEUED",
+            sentAt: new Date(now - 10_000),
+          },
+          {
+            id: "q-beta-1",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Fila B1",
+            messageContent: "Msg B1",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe B",
+            deliveryStatus: "QUEUED",
+            sentAt: new Date(now - 35_000),
+          },
+          {
+            id: "d-beta-expired",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Expirado B",
+            messageContent: "Msg Expirada B",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe B",
+            deliveryStatus: "DISPATCHING",
+            deliveryUpdatedAt: tenMinutesAgo,
+            sentAt: tenMinutesAgo,
+          },
+        ],
+      });
+
+      try {
+        // 1. Credencial de A via token recupera expirado de A e reclama apenas elegíveis de A (incluindo legado nulo)
+        testAuthState.pendingTokenSchoolId = "school-alpha";
+        const resA = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=10", {
+            headers: { "x-sync-token": "token-alpha" },
+          })
+        );
+        expect(resA.status).toBe(200);
+        const bodyA = await resA.json();
+        const idsA = bodyA.messages.map((m: { id: string }) => m.id).sort();
+        expect(idsA).toEqual(["d-alpha-expired", "q-alpha-1", "q-alpha-legacy-null"]);
+
+        // Itens de B, DISPATCHING válido de A e divergentes permanecem intactos
+        expect((await prisma.messageLog.findUnique({ where: { id: "d-alpha-valid" } }))?.deliveryStatus).toBe(
+          "DISPATCHING"
+        );
+        expect((await prisma.messageLog.findUnique({ where: { id: "q-beta-1" } }))?.deliveryStatus).toBe("QUEUED");
+        expect((await prisma.messageLog.findUnique({ where: { id: "d-beta-expired" } }))?.deliveryStatus).toBe(
+          "DISPATCHING"
+        );
+        expect(
+          (await prisma.messageLog.findUnique({ where: { id: "q-divergent-log-b-stu-a" } }))?.deliveryStatus
+        ).toBe("QUEUED");
+        expect(
+          (await prisma.messageLog.findUnique({ where: { id: "q-divergent-log-a-stu-b" } }))?.deliveryStatus
+        ).toBe("QUEUED");
+
+        // 2. Concorrência: 2 chamadas simultâneas para A (limit=2 com 3 itens) e chamada simultânea para B
+        await prisma.messageLog.updateMany({
+          where: { id: { in: ["q-alpha-1", "q-alpha-legacy-null", "d-alpha-expired"] } },
+          data: { deliveryStatus: "QUEUED", deliveryUpdatedAt: new Date(now - 5_000) },
+        });
+
+        const [resConcA1, resConcA2] = await Promise.all([
+          getPendingMessagesHandler(
+            new Request("http://127.0.0.1/api/messages/pending?limit=2", {
+              headers: { "x-sync-token": "token-alpha" },
+            })
+          ),
+          getPendingMessagesHandler(
+            new Request("http://127.0.0.1/api/messages/pending?limit=2", {
+              headers: { "x-sync-token": "token-alpha" },
+            })
+          ),
+        ]);
+        expect(resConcA1.status).toBe(200);
+        expect(resConcA2.status).toBe(200);
+        const [bodyConcA1, bodyConcA2] = await Promise.all([resConcA1.json(), resConcA2.json()]);
+        const concIdsA1 = bodyConcA1.messages.map((m: { id: string }) => m.id);
+        const concIdsA2 = bodyConcA2.messages.map((m: { id: string }) => m.id);
+        expect(concIdsA1.length).toBeLessThanOrEqual(2);
+        expect(concIdsA2.length).toBeLessThanOrEqual(2);
+        const unionA = new Set([...concIdsA1, ...concIdsA2]);
+        expect(unionA.size).toBe(concIdsA1.length + concIdsA2.length);
+        expect(Array.from(unionA).sort()).toEqual(["d-alpha-expired", "q-alpha-1", "q-alpha-legacy-null"]);
+
+        // Chamadas concorrentes de A e B isoladas
+        await prisma.messageLog.update({
+          where: { id: "q-alpha-1" },
+          data: { deliveryStatus: "QUEUED" },
+        });
+        const actualExtAuth = await import("@/lib/extensionSyncAuth");
+        vi.mocked(actualExtAuth.authenticateExtensionSyncToken)
+          .mockResolvedValueOnce({
+            ok: true,
+            targetSchoolId: "school-alpha",
+            userName: "Companion A",
+          } as never)
+          .mockResolvedValueOnce({
+            ok: true,
+            targetSchoolId: "school-beta",
+            userName: "Companion B",
+          } as never);
+
+        const [isoA, isoB] = await Promise.all([
+          getPendingMessagesHandler(
+            new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+              headers: { "x-sync-token": "token-a" },
+            })
+          ),
+          getPendingMessagesHandler(
+            new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+              headers: { "x-sync-token": "token-b" },
+            })
+          ),
+        ]);
+        const bodyIsoA = await isoA.json();
+        const bodyIsoB = await isoB.json();
+        expect(bodyIsoA.schoolId).toBe("school-alpha");
+        expect(bodyIsoA.messages.map((m: { id: string }) => m.id)).toEqual(["q-alpha-1"]);
+        expect(bodyIsoB.schoolId).toBe("school-beta");
+        expect(bodyIsoB.messages.map((m: { id: string }) => m.id).sort()).toEqual([
+          "d-beta-expired",
+          "q-beta-1",
+        ]);
+
+        // 3. Contexto app.current_school_id ativo na transação + rollback em falha após recuperação e antes do commit
+        await prisma.messageLog.update({
+          where: { id: "d-alpha-expired" },
+          data: { deliveryStatus: "DISPATCHING", deliveryUpdatedAt: tenMinutesAgo },
+        });
+        await prisma.messageLog.update({
+          where: { id: "q-alpha-1" },
+          data: { deliveryStatus: "QUEUED" },
+        });
+
+        const observedContextSettings: Array<string | null> = [];
+        const originalTx = prisma.$transaction.bind(prisma);
+        const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((fn: unknown, opts?: unknown) => {
+          if (typeof fn === "function") {
+            return originalTx(async (tx) => {
+              await (fn as (client: unknown) => Promise<unknown>)(tx);
+              const rows = await tx.$queryRaw<Array<{ val: string | null }>>`
+                SELECT current_setting('app.current_school_id', true) AS val
+              `;
+              observedContextSettings.push(rows[0]?.val ?? null);
+              throw new Error("Simulated failure after recovery/claim before commit");
+            }, opts as Parameters<typeof originalTx>[1]);
+          }
+          return originalTx(fn as Parameters<typeof originalTx>[0]);
+        }) as typeof prisma.$transaction);
+
+        try {
+          const resRollback = await getPendingMessagesHandler(
+            new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+              headers: { "x-sync-token": "token-alpha" },
+            })
+          );
+          expect(resRollback.status).toBe(500);
+          expect(observedContextSettings).toEqual(["school-alpha"]);
+
+          // Rollback preservou os estados anteriores (nenhum item devolvido como reservado)
+          expect((await prisma.messageLog.findUnique({ where: { id: "d-alpha-expired" } }))?.deliveryStatus).toBe(
+            "DISPATCHING"
+          );
+          expect((await prisma.messageLog.findUnique({ where: { id: "q-alpha-1" } }))?.deliveryStatus).toBe("QUEUED");
+        } finally {
+          txSpy.mockRestore();
+        }
+      } finally {
+        testAuthState.pendingTokenSchoolId = null;
+      }
     });
   }
 );

@@ -38,7 +38,9 @@ export async function GET(req: Request) {
           { status: 403, headers: corsHeaders }
         );
       }
-      currentSchool = await getAuthorizedCurrentSchool(session, snapshot.schoolId, snapshot);
+      currentSchool = await getAuthorizedCurrentSchool(session, snapshot.schoolId, snapshot, {
+        allowSuperAdminReadOnlyFallback: false,
+      });
       if (!currentSchool) {
         return NextResponse.json(
           { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },

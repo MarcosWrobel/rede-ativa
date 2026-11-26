@@ -29,6 +29,12 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     $executeRaw: (...args: any[]) => mockExecuteRaw(...args),
     $queryRaw: (...args: any[]) => mockQueryRaw(...args),
+    $transaction: vi.fn(async (fn: any) =>
+      fn({
+        $executeRaw: (...args: any[]) => mockExecuteRaw(...args),
+        $queryRaw: (...args: any[]) => mockQueryRaw(...args),
+      })
+    ),
   },
 }));
 
@@ -96,8 +102,8 @@ describe("P7: Fila Companion WhatsApp (/api/messages/pending & claimPendingQueue
     expect(body.messages[0].id).toBe("msg-1");
     expect(body.messages[0].deliveryStatus).toBe("DISPATCHING");
 
-    // Verifica recuperação de DISPATCHING órfãos + query FOR UPDATE OF ml SKIP LOCKED
-    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    // Verifica set_config + recuperação de DISPATCHING órfãos + query FOR UPDATE OF ml SKIP LOCKED
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(2);
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
     const sqlStrings = (mockQueryRaw.mock.calls[0][0] as TemplateStringsArray).join(" ");
     expect(sqlStrings).toContain("FOR UPDATE OF ml SKIP LOCKED");
@@ -107,7 +113,7 @@ describe("P7: Fila Companion WhatsApp (/api/messages/pending & claimPendingQueue
   it("limita o parâmetro limit entre 1 e 50 em claimPendingQueuedMessages", async () => {
     await claimPendingQueuedMessages({ schoolId: "escola-alpha", limit: 999 });
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-    // O segundo parâmetro interpolado na query é safeLimit (50)
-    expect(mockQueryRaw.mock.calls[0][2]).toBe(50);
+    // O terceiro parâmetro interpolado na query é safeLimit (50) (após s.schoolId e ml.schoolId)
+    expect(mockQueryRaw.mock.calls[0][3]).toBe(50);
   });
 });
