@@ -10,6 +10,7 @@ import {
   normalizeStudentName,
 } from "@/lib/studentMatcher";
 import { applyPendingCgmUpdatesSafely, populateGlobalTakenCgms } from "@/lib/syncCgmGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   matchStudentAndTrackPendingCgm,
   type ResolvedSchool,
@@ -374,24 +375,29 @@ export async function executeClassCouncilBiSync(options: {
     }
   }
 
-  // 2. Carrega turmas e estudantes ativos isolados estritamente pelo schoolId
-  const [schoolClassGroups, schoolStudents] = await Promise.all([
-    prisma.classGroup.findMany({
-      where: { schoolId: currentSchool.id },
-      select: { id: true, name: true, segment: true, shift: true },
-    }),
-    prisma.student.findMany({
-      where: { schoolId: currentSchool.id, active: true },
-      select: {
-        id: true,
-        cgm: true,
-        name: true,
-        classGroupId: true,
-        age: true,
-        isSpecialNeeds: true,
-      },
-    }),
-  ]);
+  // 2. Carrega turmas e estudantes ativos isolados estritamente pelo schoolId dentro de withTenantContext
+  const { schoolClassGroups, schoolStudents } = await withTenantContext(
+    prisma,
+    currentSchool.id,
+    async (tx) => {
+      const classGroups = await tx.classGroup.findMany({
+        where: { schoolId: currentSchool.id },
+        select: { id: true, name: true, segment: true, shift: true },
+      });
+      const students = await tx.student.findMany({
+        where: { schoolId: currentSchool.id, active: true },
+        select: {
+          id: true,
+          cgm: true,
+          name: true,
+          classGroupId: true,
+          age: true,
+          isSpecialNeeds: true,
+        },
+      });
+      return { schoolClassGroups: classGroups, schoolStudents: students };
+    }
+  );
 
   const studentByIdMap = new Map(schoolStudents.map((s) => [s.id, s]));
   const { cgmMap, nameMap, usedCgms } = buildStudentLookupMaps(schoolStudents);
@@ -588,35 +594,34 @@ export async function executeClassCouncilBiSync(options: {
   }
 
   // 5. Aplica vínculos seguros de CGM e idade na base de estudantes do tenant
-  const cgmVinculados = await applyPendingCgmUpdatesSafely(prisma, pendingCgmUpdates);
+  const cgmVinculados = await applyPendingCgmUpdatesSafely(
+    prisma,
+    pendingCgmUpdates,
+    currentSchool.id
+  );
 
+  let idadesAtualizadas = 0;
   if (pendingAgeUpdates.size > 0) {
     const ageEntries = Array.from(pendingAgeUpdates.entries());
     const BATCH_SIZE = 250;
-    if (typeof prisma.$executeRaw === "function") {
-      for (let i = 0; i < ageEntries.length; i += BATCH_SIZE) {
-        const chunk = ageEntries.slice(i, i + BATCH_SIZE);
-        const values = chunk.map(
-          ([id, age]) => Prisma.sql`(${id}, CAST(${age} AS INTEGER))`
-        );
-        await prisma.$executeRaw`
+    for (let i = 0; i < ageEntries.length; i += BATCH_SIZE) {
+      const chunk = ageEntries.slice(i, i + BATCH_SIZE);
+      const values = chunk.map(
+        ([id, age]) => Prisma.sql`(${id}, CAST(${age} AS INTEGER))`
+      );
+      const updatedAgeRows = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
           UPDATE "Student" AS s
           SET "age" = v."ageVal",
               "updatedAt" = NOW()
           FROM (VALUES ${Prisma.join(values)}) AS v("id", "ageVal")
           WHERE s."id" = v."id"
             AND s."schoolId" = ${currentSchool.id}
-        `;
-      }
-    } else {
-      await prisma.$transaction(
-        ageEntries.map(([id, age]) =>
-          prisma.student.update({
-            where: { id },
-            data: { age },
-          })
-        )
+            AND s."active" = true
+          RETURNING s."id"
+        `
       );
+      idadesAtualizadas += updatedAgeRows.length;
     }
   }
 
@@ -635,105 +640,129 @@ export async function executeClassCouncilBiSync(options: {
 
   // 7. Sincroniza cada turma afetada de forma não-destrutiva
   for (const classGroupId of affectedClassGroupIds) {
-    const existingBoardHeader = await prisma.classCouncilBoard.findUnique({
-      where: {
-        schoolId_classGroupId_year: {
-          schoolId: currentSchool.id,
-          classGroupId,
-          year,
-        },
-      },
-      select: { id: true },
-    });
+    const classGradesMap = gradesByClassGroup.get(classGroupId);
 
-    const board = existingBoardHeader
-      ? await getCouncilBoardDetail(currentSchool.id, existingBoardHeader.id)
-      : await ensureOrUpsertCouncilBoard({
-          schoolId: currentSchool.id,
-          payload: {
+    const boardSetup = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const validClassGroup = await tx.classGroup.findFirst({
+        where: { id: classGroupId, schoolId: currentSchool.id },
+        select: { id: true },
+      });
+      if (!validClassGroup) {
+        return null;
+      }
+
+      const existingBoardHeader = await tx.classCouncilBoard.findUnique({
+        where: {
+          schoolId_classGroupId_year: {
+            schoolId: currentSchool.id,
             classGroupId,
             year,
-            seatingMapMode: "REVEZAMENTO_MENSAL",
           },
-          authorName: userName,
-          authorEmail: userEmail,
-        });
+        },
+        select: { id: true },
+      });
 
-    if (!board) continue;
+      const board = existingBoardHeader
+        ? await getCouncilBoardDetail(currentSchool.id, existingBoardHeader.id, tx)
+        : await ensureOrUpsertCouncilBoard(
+            {
+              schoolId: currentSchool.id,
+              payload: {
+                classGroupId,
+                year,
+                seatingMapMode: "REVEZAMENTO_MENSAL",
+              },
+              authorName: userName,
+              authorEmail: userEmail,
+            },
+            tx
+          );
 
-    // 7a. Garante as disciplinas encontradas nas notas desta turma (preservando docentes existentes)
-    const subjectByMatchKey = new Map<string, (typeof board.subjects)[number]>();
-    for (const sub of board.subjects) {
-      subjectByMatchKey.set(toAsciiUpperKey(sub.name), sub);
-    }
+      if (!board || board.schoolId !== currentSchool.id || board.classGroupId !== classGroupId) {
+        return null;
+      }
 
-    const classGradesMap = gradesByClassGroup.get(classGroupId);
-    const missingSubjectsMap = new Map<string, string>();
-    const subjectsToReactivateIds = new Set<string>();
+      // 7a. Garante as disciplinas encontradas nas notas desta turma (preservando docentes existentes)
+      const subjectByMatchKey = new Map<string, (typeof board.subjects)[number]>();
+      for (const sub of board.subjects) {
+        subjectByMatchKey.set(toAsciiUpperKey(sub.name), sub);
+      }
 
-    if (classGradesMap) {
-      for (const item of classGradesMap.values()) {
-        const matched =
-          subjectByMatchKey.get(item.discipline.matchKey) ||
-          subjectByMatchKey.get(item.discipline.rawMatchKey);
+      const missingSubjectsMap = new Map<string, string>();
+      const subjectsToReactivateIds = new Set<string>();
 
-        if (matched) {
-          if (!matched.active) {
-            subjectsToReactivateIds.add(matched.id);
+      if (classGradesMap) {
+        for (const item of classGradesMap.values()) {
+          const matched =
+            subjectByMatchKey.get(item.discipline.matchKey) ||
+            subjectByMatchKey.get(item.discipline.rawMatchKey);
+
+          if (matched) {
+            if (!matched.active) {
+              subjectsToReactivateIds.add(matched.id);
+            }
+            subjectByMatchKey.set(item.discipline.matchKey, matched);
+            subjectByMatchKey.set(item.discipline.rawMatchKey, matched);
+          } else if (!missingSubjectsMap.has(item.discipline.matchKey)) {
+            missingSubjectsMap.set(item.discipline.matchKey, item.discipline.canonicalName);
           }
-          // Garante alias na lookup table para ambas as chaves
-          subjectByMatchKey.set(item.discipline.matchKey, matched);
-          subjectByMatchKey.set(item.discipline.rawMatchKey, matched);
-        } else if (!missingSubjectsMap.has(item.discipline.matchKey)) {
-          missingSubjectsMap.set(item.discipline.matchKey, item.discipline.canonicalName);
         }
       }
-    }
 
-    if (subjectsToReactivateIds.size > 0) {
-      await prisma.classCouncilSubject.updateMany({
-        where: {
-          id: { in: Array.from(subjectsToReactivateIds) },
-          boardId: board.id,
-          schoolId: currentSchool.id,
-        },
-        data: { active: true },
-      });
-      for (const sub of board.subjects) {
-        if (subjectsToReactivateIds.has(sub.id)) sub.active = true;
+      if (subjectsToReactivateIds.size > 0) {
+        await tx.classCouncilSubject.updateMany({
+          where: {
+            id: { in: Array.from(subjectsToReactivateIds) },
+            boardId: board.id,
+            schoolId: currentSchool.id,
+          },
+          data: { active: true },
+        });
+        for (const sub of board.subjects) {
+          if (subjectsToReactivateIds.has(sub.id)) sub.active = true;
+        }
       }
-    }
 
-    let nextOrder =
-      board.subjects.reduce((max, s) => Math.max(max, s.displayOrder ?? 0), -1) + 1;
+      let nextOrder =
+        board.subjects.reduce((max, s) => Math.max(max, s.displayOrder ?? 0), -1) + 1;
 
-    const sortedMissingSubjects = Array.from(missingSubjectsMap.entries()).sort((a, b) =>
-      a[1].localeCompare(b[1], "pt-BR")
-    );
+      const sortedMissingSubjects = Array.from(missingSubjectsMap.entries()).sort((a, b) =>
+        a[1].localeCompare(b[1], "pt-BR")
+      );
 
-    for (const [matchKey, canonicalName] of sortedMissingSubjects) {
-      const createdSub = await prisma.classCouncilSubject.upsert({
-        where: {
-          boardId_name: {
+      let createdSubjectsCount = 0;
+      for (const [matchKey, canonicalName] of sortedMissingSubjects) {
+        const createdSub = await tx.classCouncilSubject.upsert({
+          where: {
+            boardId_name: {
+              boardId: board.id,
+              name: canonicalName,
+            },
+          },
+          create: {
+            schoolId: currentSchool.id,
             boardId: board.id,
             name: canonicalName,
+            displayOrder: nextOrder++,
+            active: true,
           },
-        },
-        create: {
-          schoolId: currentSchool.id,
-          boardId: board.id,
-          name: canonicalName,
-          displayOrder: nextOrder++,
-          active: true,
-        },
-        update: {
-          active: true,
-        },
-      });
-      subjectByMatchKey.set(matchKey, createdSub);
-      board.subjects.push(createdSub);
-      disciplinasCriadas++;
-    }
+          update: {
+            active: true,
+          },
+        });
+        if (createdSub.schoolId === currentSchool.id && createdSub.boardId === board.id) {
+          subjectByMatchKey.set(matchKey, createdSub);
+          board.subjects.push(createdSub);
+          createdSubjectsCount++;
+        }
+      }
+
+      return { board, subjectByMatchKey, createdSubjectsCount };
+    });
+
+    if (!boardSetup) continue;
+    const { board, subjectByMatchKey, createdSubjectsCount } = boardSetup;
+    disciplinasCriadas += createdSubjectsCount;
 
     const activeSubjectById = new Map(
       board.subjects
@@ -838,43 +867,37 @@ export async function executeClassCouncilBiSync(options: {
           });
 
           markTouchedTrimester(card.id, tri);
-          notasGravadas++;
-          if (grade < 6.0) {
-            abaixoDaMediaDetectados++;
-          }
         }
       }
     }
 
-    // Persistência em lote de StudentCouncilSubjectEntry
+    // Persistência em lote de StudentCouncilSubjectEntry com coerência escolar e RETURNING
     const BATCH_SIZE = 250;
     if (entriesToUpsert.length > 0) {
-      if (typeof prisma.$executeRaw === "function") {
-        for (let i = 0; i < entriesToUpsert.length; i += BATCH_SIZE) {
-          const chunk = entriesToUpsert.slice(i, i + BATCH_SIZE);
-          const values = chunk.map((r) => {
-            const safeCodes = r.descriptorCodes.filter(
-              (c) => Number.isInteger(c) && c >= 1 && c <= 5
-            );
-            const codesExpr =
-              safeCodes.length === 0
-                ? Prisma.sql`ARRAY[]::INTEGER[]`
-                : Prisma.sql`ARRAY[${Prisma.join(safeCodes)}]::INTEGER[]`;
+      for (let i = 0; i < entriesToUpsert.length; i += BATCH_SIZE) {
+        const chunk = entriesToUpsert.slice(i, i + BATCH_SIZE);
+        const values = chunk.map((r) => {
+          const safeCodes = r.descriptorCodes.filter(
+            (c) => Number.isInteger(c) && c >= 1 && c <= 5
+          );
+          const codesExpr =
+            safeCodes.length === 0
+              ? Prisma.sql`ARRAY[]::INTEGER[]`
+              : Prisma.sql`ARRAY[${Prisma.join(safeCodes)}]::INTEGER[]`;
 
-            return Prisma.sql`(
-              ${r.id},
-              ${currentSchool.id},
-              ${r.cardId},
-              ${r.subjectId},
-              CAST(${r.trimester} AS INTEGER),
-              ${codesExpr},
-              CAST(${r.grade} AS DOUBLE PRECISION),
-              ${userEmail},
-              NOW()
-            )`;
-          });
+          return Prisma.sql`(
+            ${r.id},
+            ${r.cardId},
+            ${r.subjectId},
+            CAST(${r.trimester} AS INTEGER),
+            ${codesExpr},
+            CAST(${r.grade} AS DOUBLE PRECISION),
+            ${userEmail}
+          )`;
+        });
 
-          await prisma.$executeRaw`
+        const persistedEntries = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+          tx.$queryRaw<Array<{ cardId: string; subjectId: string; trimester: number; grade: number }>>`
             INSERT INTO "StudentCouncilSubjectEntry" (
               "id",
               "schoolId",
@@ -886,45 +909,55 @@ export async function executeClassCouncilBiSync(options: {
               "updatedByEmail",
               "updatedAt"
             )
-            VALUES ${Prisma.join(values)}
+            SELECT
+              v."id",
+              ${currentSchool.id},
+              v."cardId",
+              v."subjectId",
+              v."trimester",
+              v."descriptorCodes",
+              v."grade",
+              v."updatedByEmail",
+              NOW()
+            FROM (VALUES ${Prisma.join(values)}) AS v(
+              "id",
+              "cardId",
+              "subjectId",
+              "trimester",
+              "descriptorCodes",
+              "grade",
+              "updatedByEmail"
+            )
+            INNER JOIN "StudentCouncilCard" AS c
+              ON c."id" = v."cardId"
+             AND c."schoolId" = ${currentSchool.id}
+             AND c."boardId" = ${board.id}
+            INNER JOIN "ClassCouncilBoard" AS b
+              ON b."id" = c."boardId"
+             AND b."schoolId" = ${currentSchool.id}
+             AND b."classGroupId" = ${classGroupId}
+            INNER JOIN "Student" AS st
+              ON st."id" = c."studentId"
+             AND st."schoolId" = ${currentSchool.id}
+             AND st."classGroupId" = ${classGroupId}
+             AND st."active" = true
+            INNER JOIN "ClassCouncilSubject" AS sub
+              ON sub."id" = v."subjectId"
+             AND sub."schoolId" = ${currentSchool.id}
+             AND sub."boardId" = ${board.id}
             ON CONFLICT ("cardId", "subjectId", "trimester") DO UPDATE SET
               "descriptorCodes" = EXCLUDED."descriptorCodes",
               "grade" = EXCLUDED."grade",
               "updatedByEmail" = EXCLUDED."updatedByEmail",
               "updatedAt" = NOW()
-          `;
-        }
-      } else {
-        for (let i = 0; i < entriesToUpsert.length; i += BATCH_SIZE) {
-          const chunk = entriesToUpsert.slice(i, i + BATCH_SIZE);
-          await prisma.$transaction(
-            chunk.map((item) =>
-              prisma.studentCouncilSubjectEntry.upsert({
-                where: {
-                  cardId_subjectId_trimester: {
-                    cardId: item.cardId,
-                    subjectId: item.subjectId,
-                    trimester: item.trimester,
-                  },
-                },
-                create: {
-                  schoolId: currentSchool.id,
-                  cardId: item.cardId,
-                  subjectId: item.subjectId,
-                  trimester: item.trimester,
-                  descriptorCodes: item.descriptorCodes,
-                  grade: item.grade,
-                  updatedByEmail: userEmail,
-                },
-                update: {
-                  descriptorCodes: item.descriptorCodes,
-                  grade: item.grade,
-                  updatedByEmail: userEmail,
-                },
-              })
-            )
-          );
-        }
+            RETURNING "cardId", "subjectId", "trimester", "grade"
+          `
+        );
+
+        notasGravadas += persistedEntries.length;
+        abaixoDaMediaDetectados += persistedEntries.filter(
+          (r) => Number(r.grade) < 6.0
+        ).length;
       }
     }
 
@@ -1031,16 +1064,28 @@ export async function executeClassCouncilBiSync(options: {
     if (cardUpdates.length > 0) {
       for (let i = 0; i < cardUpdates.length; i += 100) {
         const chunk = cardUpdates.slice(i, i + 100);
-        await prisma.$transaction(
-          chunk.map((cu) =>
-            prisma.studentCouncilCard.update({
-              where: { id: cu.cardId },
+        const chunkUpdatedCount = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+          let updatedInChunk = 0;
+          for (const cu of chunk) {
+            const res = await tx.studentCouncilCard.updateMany({
+              where: {
+                id: cu.cardId,
+                schoolId: currentSchool.id,
+                boardId: board.id,
+                student: {
+                  schoolId: currentSchool.id,
+                  classGroupId,
+                  active: true,
+                },
+              },
               data: cu.data,
-            })
-          )
-        );
+            });
+            updatedInChunk += res.count;
+          }
+          return updatedInChunk;
+        });
+        cardsAtualizados += chunkUpdatedCount;
       }
-      cardsAtualizados += cardUpdates.length;
     }
   }
 
@@ -1057,7 +1102,7 @@ export async function executeClassCouncilBiSync(options: {
       turmasAfetadas: affectedClassGroupIds.length,
       alunosPareados: matchedStudentIds.size,
       alunosNaoEncontradosCount: naoEncontradosMap.size,
-      idadesAtualizadas: pendingAgeUpdates.size,
+      idadesAtualizadas,
       cgmVinculados,
       disciplinasCriadas,
       notasGravadas,
@@ -1083,7 +1128,7 @@ export async function executeClassCouncilBiSync(options: {
     turmasPareadas: codTurmaToClassGroupId.size,
     turmasAfetadas: affectedClassGroupIds.length,
     alunosPareados: matchedStudentIds.size,
-    idadesAtualizadas: pendingAgeUpdates.size,
+    idadesAtualizadas,
     cgmVinculados,
     disciplinasCriadas,
     notasGravadas,

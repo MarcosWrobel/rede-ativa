@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { generateVerificationCode } from "@/lib/ataCrypto";
@@ -416,8 +416,13 @@ export async function listSchoolCouncilBoards(schoolId: string, year: number) {
   };
 }
 
-export async function getCouncilBoardDetail(schoolId: string, boardId: string) {
-  const boardHeader = await prisma.classCouncilBoard.findUnique({
+export async function getCouncilBoardDetail(
+  schoolId: string,
+  boardId: string,
+  txClient?: Prisma.TransactionClient | PrismaClient
+) {
+  const db = txClient ?? prisma;
+  const boardHeader = await db.classCouncilBoard.findUnique({
     where: { id: boardId },
     select: { id: true, schoolId: true, classGroupId: true },
   });
@@ -426,10 +431,10 @@ export async function getCouncilBoardDetail(schoolId: string, boardId: string) {
     return null;
   }
 
-  await ensureTrimestersForBoard(prisma, schoolId, boardId);
-  await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, boardHeader.classGroupId);
+  await ensureTrimestersForBoard(db, schoolId, boardId);
+  await syncMissingStudentCardsForBoard(db, schoolId, boardId, boardHeader.classGroupId);
 
-  return prisma.classCouncilBoard.findUnique({
+  return db.classCouncilBoard.findUnique({
     where: { id: boardId },
     include: {
       classGroup: {
@@ -467,15 +472,19 @@ export async function getCouncilBoardDetail(schoolId: string, boardId: string) {
   });
 }
 
-export async function ensureOrUpsertCouncilBoard(params: {
-  schoolId: string;
-  payload: z.infer<typeof councilBoardUpsertSchema>;
-  authorName: string;
-  authorEmail: string;
-}) {
+export async function ensureOrUpsertCouncilBoard(
+  params: {
+    schoolId: string;
+    payload: z.infer<typeof councilBoardUpsertSchema>;
+    authorName: string;
+    authorEmail: string;
+  },
+  txClient?: Prisma.TransactionClient | PrismaClient
+) {
   const { schoolId, payload, authorName, authorEmail } = params;
+  const db = txClient ?? prisma;
 
-  const classGroup = await prisma.classGroup.findFirst({
+  const classGroup = await db.classGroup.findFirst({
     where: { id: payload.classGroupId, schoolId },
     select: { id: true, schoolId: true, name: true },
   });
@@ -493,7 +502,7 @@ export async function ensureOrUpsertCouncilBoard(params: {
     payload.teacherLeaderName
   );
 
-  const board = await prisma.$transaction(async (tx) => {
+  const upsertWithTx = async (tx: Prisma.TransactionClient | PrismaClient) => {
     const upserted = await tx.classCouncilBoard.upsert({
       where: {
         schoolId_classGroupId_year: {
@@ -547,8 +556,14 @@ export async function ensureOrUpsertCouncilBoard(params: {
     await syncMissingStudentCardsForBoard(tx, schoolId, upserted.id, classGroup.id);
 
     return upserted;
-  });
+  };
 
+  if (txClient) {
+    const board = await upsertWithTx(txClient);
+    return getCouncilBoardDetail(schoolId, board.id, txClient);
+  }
+
+  const board = await prisma.$transaction(async (tx) => upsertWithTx(tx));
   return getCouncilBoardDetail(schoolId, board.id);
 }
 

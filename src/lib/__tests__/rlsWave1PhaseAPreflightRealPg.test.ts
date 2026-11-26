@@ -205,6 +205,7 @@ import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
 import { POST as frequenciaSyncHandler } from "@/app/api/frequencia/sync/route";
 import { POST as serpSyncHandler } from "@/app/api/serp/sync/route";
+import { POST as conselhoSyncHandler } from "@/app/api/conselho-classe/sync/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
@@ -243,6 +244,10 @@ describe.skipIf(!SHOULD_RUN)(
     });
 
     beforeEach(async () => {
+      await prisma.studentCouncilSubjectEntry.deleteMany({});
+      await prisma.studentCouncilCard.deleteMany({});
+      await prisma.classCouncilSubject.deleteMany({});
+      await prisma.classCouncilBoard.deleteMany({});
       await prisma.absenceJustification.deleteMany({});
       await prisma.attendanceSnapshot.deleteMany({});
       await prisma.lowAttendanceRecord.deleteMany({});
@@ -3965,6 +3970,519 @@ describe.skipIf(!SHOULD_RUN)(
         expect(
           await prisma.lowAttendanceRecord.findUnique({ where: { studentId: "stu-alpha-drop-count" } })
         ).toBeNull();
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.useRealExtensionSyncAuth = false;
+        if (originalSyncToken === undefined) {
+          delete process.env.SYNC_API_TOKEN;
+        } else {
+          process.env.SYNC_API_TOKEN = originalSyncToken;
+        }
+      }
+    });
+
+    it("integra withTenantContext em POST /api/conselho-classe/sync com canMutateSchoolCouncil, turmas homônimas, CGM, perda de elegibilidade e falha em lote", async () => {
+      const { hashSchoolSyncToken } = await import("@/lib/syncToken");
+      const originalSyncToken = process.env.SYNC_API_TOKEN;
+      process.env.SYNC_API_TOKEN = "global-sync-council-token-realpg";
+
+      await prisma.studentCouncilSubjectEntry.deleteMany({});
+      await prisma.studentCouncilCard.deleteMany({});
+      await prisma.classCouncilSubject.deleteMany({});
+      await prisma.classCouncilTrimester.deleteMany({});
+      await prisma.classCouncilBoard.deleteMany({});
+      await prisma.absenceJustification.deleteMany({});
+      await prisma.attendanceSnapshot.deleteMany({});
+      await prisma.lowAttendanceRecord.deleteMany({});
+      await prisma.messageLog.deleteMany({});
+      await prisma.messageTemplate.deleteMany({});
+      await prisma.student.deleteMany({});
+      await prisma.classGroup.deleteMany({});
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+      await prisma.school.deleteMany({});
+
+      const tokenAlpha = "school-alpha-council-token";
+      const tokenAlphaHash = hashSchoolSyncToken(tokenAlpha);
+
+      await prisma.school.createMany({
+        data: [
+          {
+            id: "school-alpha",
+            name: "Colégio Alpha",
+            inepCode: "11111111",
+            active: true,
+            syncTokenHash: tokenAlphaHash,
+            settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }),
+          },
+          {
+            id: "school-beta",
+            name: "Colégio Beta",
+            inepCode: "22222222",
+            active: true,
+            settingsJson: JSON.stringify({ edition: "PILOTO_INTEGRADA" }),
+          },
+          {
+            id: "school-essencial",
+            name: "Colégio Essencial",
+            inepCode: "33333333",
+            active: true,
+            settingsJson: JSON.stringify({ edition: "INSTITUCIONAL_ESSENCIAL" }),
+          },
+        ],
+      });
+
+      // Duas escolas com turma de MESMO nome ("1º Ano A")
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "cg-alpha-bi", name: "1º Ano A", segment: "EM", schoolId: "school-alpha" },
+          { id: "cg-beta-bi", name: "1º Ano A", segment: "EM", schoolId: "school-beta" },
+          { id: "cg-ess-bi", name: "1º Ano A", segment: "EM", schoolId: "school-essencial" },
+        ],
+      });
+
+      await prisma.student.createMany({
+        data: [
+          {
+            id: "stu-alpha-bi-1",
+            name: "Lucas Conselho Alpha",
+            cgm: "710000111",
+            phone: "41999997101",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-bi",
+            active: true,
+            age: 15,
+          },
+          {
+            id: "stu-alpha-bi-nocgm",
+            name: "Sofia Sem Cgm Alpha",
+            cgm: null,
+            phone: "41999997102",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-bi",
+            active: true,
+            age: 15,
+          },
+          {
+            id: "stu-alpha-bi-drop",
+            name: "Aluno Perde Elegibilidade BI",
+            cgm: "710000333",
+            phone: "41999997103",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-bi",
+            active: true,
+            age: 14,
+          },
+          {
+            id: "stu-beta-bi-1",
+            name: "Pedro Conselho Beta",
+            cgm: "720000111",
+            phone: "41999997201",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta-bi",
+            active: true,
+            age: 16,
+          },
+        ],
+      });
+
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "bi-pedagoga-a",
+            email: "ped.bi@redeativa.local",
+            name: "Pedagoga BI Alpha",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "bi-prof-a",
+            email: "prof.bi@redeativa.local",
+            name: "Professor BI Alpha",
+            role: "PROFESSOR",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "bi-essencial",
+            email: "ess.bi@redeativa.local",
+            name: "Pedagoga Essencial",
+            role: "PEDAGOGA",
+            schoolId: "school-essencial",
+            active: true,
+          },
+        ],
+      });
+      await prisma.userSchool.createMany({
+        data: [
+          {
+            id: "us-bi-ped-a",
+            userId: "bi-pedagoga-a",
+            schoolId: "school-alpha",
+            role: "PEDAGOGA",
+            active: true,
+          },
+          {
+            id: "us-bi-prof-a",
+            userId: "bi-prof-a",
+            schoolId: "school-alpha",
+            role: "PROFESSOR",
+            active: true,
+          },
+          {
+            id: "us-bi-ess",
+            userId: "bi-essencial",
+            schoolId: "school-essencial",
+            role: "PEDAGOGA",
+            active: true,
+          },
+        ],
+      });
+
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
+
+      const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const baseWithTenantImpl = (
+        client: Parameters<typeof originalWithTenantContext>[0],
+        schoolId: string,
+        fn: Parameters<typeof originalWithTenantContext>[2]
+      ) =>
+        originalWithTenantContext(client, schoolId, async (tx) => {
+          const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT current_setting('app.current_school_id', true) AS val
+          `;
+          capturedContextSchools.push(val);
+          return fn(tx);
+        });
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(baseWithTenantImpl);
+
+      try {
+        // 1. Sem credencial -> 401; PROFESSOR com vínculo ativo -> 403 via canMutateSchoolCouncil; Essencial -> 403
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        const r401 = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [{ cgm: "710000111", nome: "Lucas Conselho Alpha", media1Tri: 8.5 }],
+              notasMapa: [],
+            }),
+          })
+        );
+        expect(r401.status).toBe(401);
+
+        testAuthState.pendingSessionUser = {
+          id: "bi-prof-a",
+          email: "prof.bi@redeativa.local",
+          active: true,
+        };
+        const rProf403 = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [{ cgm: "710000111", nome: "Lucas Conselho Alpha", media1Tri: 8.5 }],
+              notasMapa: [],
+            }),
+          })
+        );
+        expect(rProf403.status).toBe(403);
+        expect(withTenantSpy).not.toHaveBeenCalled();
+
+        testAuthState.pendingSessionUser = {
+          id: "bi-essencial",
+          email: "ess.bi@redeativa.local",
+          active: true,
+        };
+        const rEss403 = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [{ cgm: "710000111", nome: "Lucas Conselho Alpha", media1Tri: 8.5 }],
+              notasMapa: [],
+            }),
+          })
+        );
+        expect(rEss403.status).toBe(403);
+
+        // 2. Token por escola com ?schoolId=school-beta conflitante + colisão de CGM com school-beta ("720000111")
+        //    Opera exclusivamente na turma "1º Ano A" de school-alpha, mantendo school-beta intocada
+        testAuthState.pendingSessionUser = null;
+        vi.mocked(auth).mockResolvedValueOnce(null as any);
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+
+        const rSyncAlpha = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync?schoolId=school-beta", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenAlpha}`,
+            },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [
+                {
+                  cgmkey: "710000111-16",
+                  nome: "Lucas Conselho Alpha",
+                  media1Tri: 9.2,
+                  abaixoBasicoCount: 0,
+                  codturma: "T1",
+                },
+                {
+                  cgm: "720000111", // CGM já ocupado por stu-beta-bi-1
+                  nome: "Sofia Sem Cgm Alpha",
+                  media1Tri: 7.0,
+                  codturma: "T1",
+                },
+              ],
+              notasMapa: [
+                {
+                  cgm: "710000111",
+                  nome: "Lucas Conselho Alpha",
+                  disciplinaRaw: "MATEMATICA - 101",
+                  nota1Tri: 5.2,
+                  nota2Tri: 8.4,
+                  codturma: "T1",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rSyncAlpha.status).toBe(200);
+        const syncAlphaJson = await rSyncAlpha.json();
+        expect(syncAlphaJson).toMatchObject({
+          sucesso: true,
+          turmasAfetadas: 1,
+          alunosPareados: 2,
+          idadesAtualizadas: 1,
+          cgmVinculados: 0,
+          disciplinasCriadas: 1,
+          notasGravadas: 2,
+          abaixoDaMediaDetectados: 1,
+          cardsAtualizados: 1,
+        });
+        expect(capturedContextSchools.length).toBeGreaterThanOrEqual(4);
+        expect(capturedContextSchools.every((v) => v === "school-alpha")).toBe(true);
+
+        const alphaBoard = await prisma.classCouncilBoard.findUnique({
+          where: {
+            schoolId_classGroupId_year: {
+              schoolId: "school-alpha",
+              classGroupId: "cg-alpha-bi",
+              year: 2026,
+            },
+          },
+        });
+        expect(alphaBoard).not.toBeNull();
+        expect(
+          await prisma.classCouncilBoard.findUnique({
+            where: {
+              schoolId_classGroupId_year: {
+                schoolId: "school-beta",
+                classGroupId: "cg-beta-bi",
+                year: 2026,
+              },
+            },
+          })
+        ).toBeNull();
+        expect((await prisma.student.findUnique({ where: { id: "stu-alpha-bi-1" } }))?.age).toBe(16);
+        expect(
+          (await prisma.student.findUnique({ where: { id: "stu-alpha-bi-nocgm" } }))?.cgm
+        ).toBeNull();
+        expect((await prisma.student.findUnique({ where: { id: "stu-beta-bi-1" } }))?.age).toBe(16);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "SYNC_CLASS_COUNCIL_BI",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              notasGravadas: 2,
+              abaixoDaMediaDetectados: 1,
+              idadesAtualizadas: 1,
+            }),
+          })
+        );
+
+        // 3. Perda de elegibilidade antes da escrita: stu-alpha-bi-drop movido para school-beta após boardSetup
+        let movedDropBi = false;
+        withTenantSpy.mockImplementation((client, schoolId, fn) =>
+          baseWithTenantImpl(client, schoolId, async (tx) => {
+            const res = await fn(tx);
+            // Após a 2ª chamada withTenantContext (boardSetup, que segue a leitura inicial), move stu-alpha-bi-drop
+            if (!movedDropBi && capturedContextSchools.length >= 2) {
+              movedDropBi = true;
+              await client.student.update({
+                where: { id: "stu-alpha-bi-drop" },
+                data: { schoolId: "school-beta", classGroupId: "cg-beta-bi" },
+              });
+            }
+            return res;
+          })
+        );
+
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        testAuthState.pendingSessionUser = {
+          id: "bi-pedagoga-a",
+          email: "ped.bi@redeativa.local",
+          active: true,
+        };
+        const rDropBi = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [],
+              notasMapa: [
+                {
+                  cgm: "710000111",
+                  nome: "Lucas Conselho Alpha",
+                  disciplinaRaw: "MATEMATICA - 101",
+                  nota1Tri: 7.5,
+                  codturma: "T1",
+                },
+                {
+                  cgm: "710000333",
+                  nome: "Aluno Perde Elegibilidade BI",
+                  disciplinaRaw: "MATEMATICA - 101",
+                  nota1Tri: 4.0,
+                  codturma: "T1",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rDropBi.status).toBe(200);
+        const dropBiJson = await rDropBi.json();
+        expect(dropBiJson).toMatchObject({
+          sucesso: true,
+          notasGravadas: 1,
+          abaixoDaMediaDetectados: 0,
+        });
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "SYNC_CLASS_COUNCIL_BI",
+            schoolId: "school-alpha",
+            details: expect.objectContaining({
+              notasGravadas: 1,
+              abaixoDaMediaDetectados: 0,
+            }),
+          })
+        );
+        const dropCard = await prisma.studentCouncilCard.findFirst({
+          where: { studentId: "stu-alpha-bi-drop" },
+          include: { subjectEntries: true },
+        });
+        expect(dropCard?.subjectEntries ?? []).toHaveLength(0);
+
+        // 4. Falha em lote intermediário (>250 lançamentos): lote 1 (250) confirmado, lote 2 revertido, sem logAudit
+        const manyGrades: Array<{
+          cgm: string;
+          nome: string;
+          disciplinaRaw: string;
+          nota1Tri: number;
+          codturma: string;
+        }> = [];
+        const bulkStudents: Array<{
+          id: string;
+          name: string;
+          cgm: string;
+          phone: string;
+          schoolId: string;
+          classGroupId: string;
+          active: boolean;
+        }> = [];
+        for (let idx = 1; idx <= 251; idx++) {
+          const cgm = `7300${String(idx).padStart(5, "0")}`;
+          const name = `Estudante BI Lote ${idx}`;
+          bulkStudents.push({
+            id: `stu-bi-lote-${idx}`,
+            name,
+            cgm,
+            phone: "41999990000",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha-bi",
+            active: true,
+          });
+          manyGrades.push({
+            cgm,
+            nome: name,
+            disciplinaRaw: "MATEMATICA - 101",
+            nota1Tri: 8.0,
+            codturma: "T1",
+          });
+        }
+        await prisma.student.createMany({ data: bulkStudents });
+
+        let entryBatchCount = 0;
+        withTenantSpy.mockImplementation((client, schoolId, fn) =>
+          baseWithTenantImpl(client, schoolId, async (tx) => {
+            const origQuery = tx.$queryRaw.bind(tx);
+            const wrappedTx = new Proxy(tx, {
+              get(target, prop, receiver) {
+                if (prop === "$queryRaw") {
+                  return async (strings: TemplateStringsArray, ...values: any[]) => {
+                    const sqlText = strings.join(" ");
+                    if (sqlText.includes('"StudentCouncilSubjectEntry"')) {
+                      entryBatchCount++;
+                      if (entryBatchCount === 2) {
+                        throw new Error("Simulated council entry batch 2 failure");
+                      }
+                    }
+                    return (origQuery as any)(strings, ...values);
+                  };
+                }
+                return Reflect.get(target, prop, receiver);
+              },
+            });
+            return fn(wrappedTx as any);
+          })
+        );
+
+        vi.mocked(logAudit).mockClear();
+        const rBiBatchFail = await conselhoSyncHandler(
+          new Request("http://127.0.0.1/api/conselho-classe/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              year: 2026,
+              turmas: [{ codturma: "T1", turmaRaw: "1º Ano A", periodoAvaliacao: "TRIMESTRAL" }],
+              alunosTurma: [],
+              notasMapa: manyGrades,
+            }),
+          })
+        );
+        expect(rBiBatchFail.status).toBe(500);
+        const cardLote1 = await prisma.studentCouncilCard.findFirst({
+          where: { studentId: "stu-bi-lote-1" },
+          include: { subjectEntries: true },
+        });
+        const cardLote251 = await prisma.studentCouncilCard.findFirst({
+          where: { studentId: "stu-bi-lote-251" },
+          include: { subjectEntries: true },
+        });
+        expect(cardLote1?.subjectEntries).toHaveLength(1);
+        expect(cardLote251?.subjectEntries ?? []).toHaveLength(0);
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
       } finally {
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = null;

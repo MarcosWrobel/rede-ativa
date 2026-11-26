@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { getSyncCorsHeaders } from "@/lib/cors";
 import { classCouncilBiSyncSchema, formatZodError } from "@/lib/schemas";
 import { canMutateSchoolCouncil } from "@/services/classCouncilService";
@@ -33,8 +32,7 @@ export async function POST(req: Request) {
     }
 
     if (syncAuth.authMethod === "SESSION") {
-      const session = await auth();
-      if (!canMutateSchoolCouncil(session, syncAuth.currentSchool.id)) {
+      if (!canMutateSchoolCouncil(syncAuth.session, syncAuth.currentSchool.id)) {
         return NextResponse.json(
           { error: "Sem permissão operacional para atualizar o conselho de classe desta instituição." },
           { status: 403, headers: corsHeaders }

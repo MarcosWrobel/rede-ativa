@@ -2,10 +2,11 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import {
+  buildSessionFromSnapshot,
   resolveEffectiveRoleForSchool,
   resolveServerUserAuthSnapshot,
 } from "@/lib/serverAuthContext";
-import { isAllowedMessagingRole } from "@/lib/roles";
+import { isAllowedMessagingRole, type AuthSessionLike } from "@/lib/roles";
 import type { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -38,6 +39,7 @@ export type SyncAuthContextResult =
       userEmail: string;
       userId: string | undefined;
       currentSchool: ResolvedSchool;
+      session?: AuthSessionLike;
     }
   | {
       ok: false;
@@ -177,6 +179,13 @@ export async function resolveExtensionOrSessionSyncContext(options: {
     };
   }
 
+  const revalidatedSession: AuthSessionLike | undefined =
+    authMethod === "SESSION"
+      ? sessionSnapshot
+        ? (buildSessionFromSnapshot(session as AuthSessionLike, sessionSnapshot) as AuthSessionLike)
+        : (session as AuthSessionLike)
+      : undefined;
+
   return {
     ok: true,
     authMethod,
@@ -184,6 +193,7 @@ export async function resolveExtensionOrSessionSyncContext(options: {
     userEmail,
     userId,
     currentSchool,
+    session: revalidatedSession,
   };
 }
 

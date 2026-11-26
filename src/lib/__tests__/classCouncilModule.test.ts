@@ -138,6 +138,74 @@ vi.mock("@/lib/prisma", () => {
       }
       return Promise.all(arg);
     }),
+    $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...args: any[]) => {
+      const sqlText = Array.isArray(strings) ? strings.join(" ") : String(strings);
+      if (sqlText.includes('UPDATE "Student"')) {
+        const vals: any[] = args[0]?.values || [];
+        const schoolId = args[1];
+        const updated: Array<{ id: string }> = [];
+        for (let i = 0; i < vals.length; i += 2) {
+          const id = vals[i];
+          const age = vals[i + 1];
+          const st = hoisted.db.students.find(
+            (s) => s.id === id && s.schoolId === schoolId && (s.active ?? true)
+          );
+          if (st) {
+            st.age = age;
+            updated.push({ id: st.id });
+          }
+        }
+        return updated;
+      }
+      if (sqlText.includes('INSERT INTO "StudentCouncilSubjectEntry"')) {
+        const schoolId = args[0];
+        const flat: any[] = args[1]?.values || [];
+        const rows: any[][] = [];
+        let cur: any[] = [];
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        for (const v of flat) {
+          if (typeof v === "string" && uuidRe.test(v) && cur.length > 0) {
+            rows.push(cur);
+            cur = [];
+          }
+          cur.push(v);
+        }
+        if (cur.length > 0) rows.push(cur);
+
+        const persisted: Array<{ cardId: string; subjectId: string; trimester: number; grade: number }> = [];
+        for (const r of rows) {
+          const cardId = r[1];
+          const subjectId = r[2];
+          const trimester = r[3];
+          const grade = r[r.length - 2];
+          const updatedByEmail = r[r.length - 1];
+          const descriptorCodes = r.slice(4, r.length - 2);
+
+          const card = hoisted.db.cards.find((c) => c.id === cardId && c.schoolId === schoolId);
+          const sub = hoisted.db.subjects.find((s) => s.id === subjectId && s.schoolId === schoolId);
+          const st = card
+            ? hoisted.db.students.find(
+                (s) => s.id === card.studentId && s.schoolId === schoolId && (s.active ?? true)
+              )
+            : null;
+          if (!card || !sub || !st) continue;
+
+          let found = hoisted.db.entries.find(
+            (e) => e.cardId === cardId && e.subjectId === subjectId && e.trimester === trimester
+          );
+          if (found) {
+            Object.assign(found, { descriptorCodes, grade, updatedByEmail });
+          } else {
+            found = { id: nextId("entry"), cardId, subjectId, trimester, descriptorCodes, grade, updatedByEmail };
+            hoisted.db.entries.push(found);
+          }
+          persisted.push({ cardId, subjectId, trimester, grade });
+        }
+        return persisted;
+      }
+      return [];
+    }),
     classGroup: {
       findMany: vi.fn(async ({ where }: any = {}) => {
         if (hoisted.forceDbError) throw new Error("FATAL_DB_SECRET_CONNECTION_LEAK");
@@ -184,6 +252,16 @@ vi.mock("@/lib/prisma", () => {
         const st = hoisted.db.students.find((s) => s.id === where?.id);
         if (st) Object.assign(st, data);
         return st;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const st of hoisted.db.students) {
+          if (where?.id && st.id !== where.id) continue;
+          if (where?.schoolId && st.schoolId !== where.schoolId) continue;
+          Object.assign(st, data);
+          count++;
+        }
+        return { count };
       }),
       findUnique: vi.fn(async ({ where }: any) => {
         const st = hoisted.db.students.find((s) => s.id === where?.id);
@@ -369,6 +447,17 @@ vi.mock("@/lib/prisma", () => {
         }
         return { count: items.length };
       }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const c of hoisted.db.cards) {
+          if (where?.id && c.id !== where.id) continue;
+          if (where?.schoolId && c.schoolId !== where.schoolId) continue;
+          if (where?.boardId && c.boardId !== where.boardId) continue;
+          Object.assign(c, data);
+          count++;
+        }
+        return { count };
+      }),
       update: vi.fn(async ({ where, data }: any) => {
         let found: any = null;
         if (where?.id) {
@@ -463,6 +552,17 @@ vi.mock("@/lib/prisma", () => {
           }
         }
         return { count: items.length };
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const c of hoisted.db.cards) {
+          if (where?.id && c.id !== where.id) continue;
+          if (where?.schoolId && c.schoolId !== where.schoolId) continue;
+          if (where?.boardId && c.boardId !== where.boardId) continue;
+          Object.assign(c, data);
+          count++;
+        }
+        return { count };
       }),
       update: vi.fn(async ({ where, data }: any) => {
         const found = hoisted.db.cards.find((c) => c.id === where.id);
