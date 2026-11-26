@@ -152,6 +152,7 @@ vi.mock("@/lib/prisma", () => ({
             findUnique: vi.fn(async () => null),
           },
           messageLog: {
+            findUnique: vi.fn(async ({ where }: any) => hoisted.messageLogs.get(where.id) || null),
             create: vi.fn(async ({ data }: any) => {
               const created = { id: `log-${hoisted.messageLogs.size + 1}`, ...data };
               hoisted.messageLogs.set(created.id, created);
@@ -163,6 +164,10 @@ vi.mock("@/lib/prisma", () => ({
               hoisted.messageLogs.set(where.id, updated);
               return updated;
             }),
+          },
+          studentContact: {
+            findMany: vi.fn(async () => []),
+            updateMany: vi.fn(async () => ({ count: 0 })),
           },
         });
       }

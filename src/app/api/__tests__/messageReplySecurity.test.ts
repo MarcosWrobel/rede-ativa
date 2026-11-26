@@ -59,8 +59,8 @@ vi.mock("@/lib/currentSchool", async () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaObj: any = {
     messageLog: {
       findUnique: vi.fn(async ({ where }: any) => {
         return mockMessageLogs[where.id] || null;
@@ -122,8 +122,13 @@ vi.mock("@/lib/prisma", () => ({
         return { id: `audit-${mockAuditLogs.length}`, ...data };
       }),
     },
-  },
-}));
+  };
+  prismaObj.$executeRaw = vi.fn(async () => 0);
+  prismaObj.$transaction = vi.fn(async (arg: any) =>
+    typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
+  );
+  return { prisma: prismaObj };
+});
 
 vi.mock("@google/genai", () => {
   return {

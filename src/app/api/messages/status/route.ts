@@ -6,11 +6,35 @@ import { formatZodError, messageDeliveryStatusUpdateSchema } from "@/lib/schemas
 import { normalizeWhatsAppPhone } from "@/lib/studentMatcher";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
+import { isAllowedMessagingRole } from "@/lib/roles";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 async function handleStatusUpdate(req: Request) {
   try {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
+
+    const schoolCheck = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
+    );
+    if (!schoolCheck.ok) return schoolCheck.response;
+    const currentSchool = schoolCheck.school;
+
+    const effectiveRole =
+      (authCheck.snapshot
+        ? resolveEffectiveRoleForSchool(authCheck.snapshot, currentSchool)
+        : authCheck.role) || "";
+
+    if (!isAllowedMessagingRole(effectiveRole)) {
+      return NextResponse.json(
+        { error: "Perfil sem autorização para atualizar status de mensagens nesta instituição." },
+        { status: 403 }
+      );
+    }
 
     const rawBody = await req.json();
     const parsed = messageDeliveryStatusUpdateSchema.safeParse(rawBody);
@@ -20,57 +44,72 @@ async function handleStatusUpdate(req: Request) {
 
     const { logId, deliveryStatus } = parsed.data;
 
-    const existing = await prisma.messageLog.findUnique({
-      where: { id: logId },
-      include: {
-        student: {
-          include: {
-            classGroup: true,
-            contacts: true,
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      if (typeof (tx as { $queryRaw?: unknown }).$queryRaw === "function") {
+        await tx.$queryRaw`SELECT "id" FROM "MessageLog" WHERE "id" = ${logId} FOR UPDATE`;
+      }
+
+      const existing = await tx.messageLog.findUnique({
+        where: { id: logId },
+        include: {
+          student: {
+            include: {
+              classGroup: true,
+              contacts: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!existing) {
-      return NextResponse.json({ error: "Registro de envio não encontrado" }, { status: 404 });
-    }
+      if (!existing) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "Registro de envio não encontrado",
+        };
+      }
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
-    if (!schoolCheck.ok) return schoolCheck.response;
-    const currentSchool = schoolCheck.school;
-    if (!assertTenantOwnership(existing.student.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
+      const studentSchoolId = existing.student?.schoolId;
+      const logSchoolCoherent =
+        existing.schoolId == null ||
+        (existing.schoolId === currentSchool.id && existing.schoolId === studentSchoolId);
 
-    const updated = await prisma.messageLog.update({
-      where: { id: logId },
-      data: {
-        deliveryStatus,
-        deliveryUpdatedAt: new Date(),
-      },
-    });
+      if (
+        !assertTenantOwnership(studentSchoolId, currentSchool.id, authCheck.session) ||
+        studentSchoolId !== currentSchool.id ||
+        !logSchoolCoherent
+      ) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
 
-    // AUT-01: Saneamento automático do telefone no cadastro familiar do estudante
-    const normalizedTarget = normalizeWhatsAppPhone(existing.phoneUsed);
-    let syncedContactInvalidated = false;
+      const updated = await tx.messageLog.update({
+        where: { id: logId },
+        data: {
+          deliveryStatus,
+          deliveryUpdatedAt: new Date(),
+        },
+      });
 
-    try {
+      // AUT-01: Saneamento automático do telefone no cadastro familiar do estudante na mesma transação
+      const normalizedTarget = normalizeWhatsAppPhone(existing.phoneUsed);
+      let syncedContactInvalidated = false;
+
       const matchingContacts = existing.student.contacts.filter(
         (c) => normalizeWhatsAppPhone(c.phone) === normalizedTarget
       );
 
       if (deliveryStatus === "FAILED_NO_WHATSAPP") {
         if (matchingContacts.length > 0) {
-          await prisma.studentContact.updateMany({
+          await tx.studentContact.updateMany({
             where: { id: { in: matchingContacts.map((c) => c.id) } },
             data: { whatsappValid: false },
           });
         } else {
-          await prisma.studentContact.create({
+          await tx.studentContact.create({
             data: {
               studentId: existing.studentId,
               name: existing.student.guardianName || "Contato Cadastral",
@@ -87,14 +126,25 @@ async function handleStatusUpdate(req: Request) {
         (deliveryStatus === "SENT" || deliveryStatus === "DELIVERED" || deliveryStatus === "READ") &&
         matchingContacts.some((c) => !c.whatsappValid)
       ) {
-        await prisma.studentContact.updateMany({
+        await tx.studentContact.updateMany({
           where: { id: { in: matchingContacts.map((c) => c.id) } },
           data: { whatsappValid: true },
         });
       }
-    } catch (syncErr) {
-      console.warn("Aviso ao sincronizar whatsappValid em StudentContact:", syncErr);
+
+      return {
+        ok: true as const,
+        existing,
+        updated,
+        syncedContactInvalidated,
+      };
+    });
+
+    if (!txResult.ok) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.status });
     }
+
+    const { existing, updated, syncedContactInvalidated } = txResult;
 
     await logAudit({
       action: "UPDATE_DELIVERY_STATUS",

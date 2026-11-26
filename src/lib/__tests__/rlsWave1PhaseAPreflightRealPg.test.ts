@@ -169,6 +169,8 @@ import { logAudit } from "@/lib/audit";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sendMessageHandler } from "@/app/api/messages/send/route";
 import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/route";
+import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
+import { POST as postMessageReplyHandler } from "@/app/api/messages/reply/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -1440,6 +1442,287 @@ describe.skipIf(!SHOULD_RUN)(
         await prisma.userSchool.deleteMany({});
         await prisma.user.deleteMany({});
         await prisma.school.deleteMany({ where: { id: "school-inactive" } });
+      }
+    });
+
+    it("integra withTenantContext em PATCH /api/messages/status e POST /api/messages/reply com coerência Fase A, hash, atomicidade e rollback", async () => {
+      const { computeMessageContentHash } = await import("@/lib/messageCrypto");
+      const sentAt = new Date("2026-11-26T12:00:00.000Z");
+
+      const hashAlpha = computeMessageContentHash({
+        studentId: "stu-alpha",
+        schoolId: "school-alpha",
+        phoneUsed: "41999991111",
+        reasonTitle: "Falta",
+        messageContent: "Msg Alpha",
+        sentByName: "Equipe A",
+        sentAt,
+      });
+      const hashBeta = computeMessageContentHash({
+        studentId: "stu-beta",
+        schoolId: "school-beta",
+        phoneUsed: "41999992222",
+        reasonTitle: "Falta",
+        messageContent: "Msg Beta",
+        sentByName: "Equipe B",
+        sentAt,
+      });
+      const hashLegacy = computeMessageContentHash({
+        studentId: "stu-alpha",
+        schoolId: "school-alpha",
+        phoneUsed: "41999991111",
+        reasonTitle: "Legado",
+        messageContent: "Msg Legada",
+        sentByName: "Legado",
+        sentAt,
+      });
+
+      await prisma.studentContact.create({
+        data: {
+          id: "contact-alpha-1",
+          studentId: "stu-alpha",
+          name: "Responsável Alpha",
+          kinship: "MAE",
+          phone: "41999991111",
+          whatsappValid: true,
+        },
+      });
+
+      await prisma.messageLog.createMany({
+        data: [
+          {
+            id: "sr-alpha-ok",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Falta",
+            messageContent: "Msg Alpha",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe A",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+          {
+            id: "sr-alpha-legacy",
+            schoolId: null,
+            studentId: "stu-alpha",
+            templateId: null,
+            reasonTitle: "Legado",
+            messageContent: "Msg Legada",
+            phoneUsed: "41999991111",
+            sentByName: "Legado",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashLegacy,
+          },
+          {
+            id: "sr-beta-ok",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Falta",
+            messageContent: "Msg Beta",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe B",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashBeta,
+          },
+          {
+            id: "sr-divergent",
+            schoolId: "school-beta",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Divergente",
+            messageContent: "Msg Divergente",
+            phoneUsed: "41999991111",
+            sentByName: "Teste",
+            sentAt,
+            deliveryStatus: "SENT",
+            contentHash: hashAlpha,
+          },
+        ],
+      });
+
+      try {
+        // 1. Atualização legítima de status (FAILED_NO_WHATSAPP invalida StudentContact na mesma Tx)
+        testAuthState.schoolId = "school-alpha";
+        testAuthState.role = "PEDAGOGA";
+        const resStatusOk = await patchMessageStatusHandler(
+          new Request("http://127.0.0.1/api/messages/status", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ logId: "sr-alpha-ok", deliveryStatus: "FAILED_NO_WHATSAPP" }),
+          })
+        );
+        expect(resStatusOk.status).toBe(200);
+        expect((await prisma.messageLog.findUnique({ where: { id: "sr-alpha-ok" } }))?.deliveryStatus).toBe(
+          "FAILED_NO_WHATSAPP"
+        );
+        expect((await prisma.studentContact.findUnique({ where: { id: "contact-alpha-1" } }))?.whatsappValid).toBe(
+          false
+        );
+
+        // 2. Retorno legítimo (revalida StudentContact para true e atualiza hash bipartido)
+        const repliedAtIso = "2026-11-26T13:00:00.000Z";
+        const resReplyOk = await postMessageReplyHandler(
+          new Request("http://127.0.0.1/api/messages/reply", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              logId: "sr-alpha-ok",
+              guardianReplied: true,
+              replyNotes: "Responsável justificou ausência",
+              replyCategory: "SAUDE",
+              extractedAt: repliedAtIso,
+            }),
+          })
+        );
+        expect(resReplyOk.status).toBe(200);
+        const rowAfterReply = await prisma.messageLog.findUnique({ where: { id: "sr-alpha-ok" } });
+        expect(rowAfterReply?.guardianReplied).toBe(true);
+        const expectedReplyHash = computeMessageContentHash({
+          studentId: "stu-alpha",
+          schoolId: "school-alpha",
+          phoneUsed: "41999991111",
+          reasonTitle: "Falta",
+          messageContent: "Msg Alpha",
+          sentByName: "Equipe A",
+          sentAt,
+          guardianReplied: true,
+          replyNotes: "Responsável justificou ausência",
+          replyCategory: "SAUDE",
+          repliedAt: new Date(repliedAtIso),
+        });
+        expect(rowAfterReply?.contentHash).toBe(expectedReplyHash);
+        expect((await prisma.studentContact.findUnique({ where: { id: "contact-alpha-1" } }))?.whatsappValid).toBe(
+          true
+        );
+
+        // 3. Log legado com schoolId nulo (aluno de school-alpha) aceito em status e reply
+        const resLegacyStatus = await patchMessageStatusHandler(
+          new Request("http://127.0.0.1/api/messages/status", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ logId: "sr-alpha-legacy", deliveryStatus: "SENT" }),
+          })
+        );
+        expect(resLegacyStatus.status).toBe(200);
+        const resLegacyReply = await postMessageReplyHandler(
+          new Request("http://127.0.0.1/api/messages/reply", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              logId: "sr-alpha-legacy",
+              guardianReplied: true,
+              replyNotes: "Confirmado legado",
+              replyCategory: "TRANSPORTE",
+              extractedAt: repliedAtIso,
+            }),
+          })
+        );
+        expect(resLegacyReply.status).toBe(200);
+        const legacyRow = await prisma.messageLog.findUnique({ where: { id: "sr-alpha-legacy" } });
+        expect(legacyRow?.schoolId).toBeNull();
+        expect(legacyRow?.deliveryStatus).toBe("READ");
+        expect(legacyRow?.guardianReplied).toBe(true);
+
+        // 4. Negativas: log de outra escola (sr-beta-ok) e log divergente (sr-divergent) -> 403 sem mutação
+        for (const badId of ["sr-beta-ok", "sr-divergent"]) {
+          const rStatus = await patchMessageStatusHandler(
+            new Request("http://127.0.0.1/api/messages/status", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ logId: badId, deliveryStatus: "READ" }),
+            })
+          );
+          expect(rStatus.status).toBe(403);
+
+          const rReply = await postMessageReplyHandler(
+            new Request("http://127.0.0.1/api/messages/reply", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                logId: badId,
+                guardianReplied: true,
+                replyNotes: "Invasão",
+                replyCategory: "SAUDE",
+              }),
+            })
+          );
+          expect(rReply.status).toBe(403);
+
+          const untouched = await prisma.messageLog.findUnique({ where: { id: badId } });
+          expect(untouched?.deliveryStatus).toBe("SENT");
+          expect(untouched?.guardianReplied).toBe(false);
+          expect(untouched?.contentHash).toBe(badId === "sr-beta-ok" ? hashBeta : hashAlpha);
+        }
+
+        // 5. Sessão sem permissão (PROFESSOR) -> 403 antes da transação
+        testAuthState.role = "PROFESSOR";
+        const resProfStatus = await patchMessageStatusHandler(
+          new Request("http://127.0.0.1/api/messages/status", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ logId: "sr-alpha-ok", deliveryStatus: "DELIVERED" }),
+          })
+        );
+        expect(resProfStatus.status).toBe(403);
+        const resProfReply = await postMessageReplyHandler(
+          new Request("http://127.0.0.1/api/messages/reply", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              logId: "sr-alpha-ok",
+              guardianReplied: false,
+            }),
+          })
+        );
+        expect(resProfReply.status).toBe(403);
+        expect((await prisma.messageLog.findUnique({ where: { id: "sr-alpha-ok" } }))?.guardianReplied).toBe(true);
+
+        // 6. Contexto app.current_school_id ativo + rollback pré-commit reverte MessageLog e StudentContact
+        testAuthState.role = "PEDAGOGA";
+        const observedSettings: Array<string | null> = [];
+        const originalTx = prisma.$transaction.bind(prisma);
+        const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(((fn: unknown, opts?: unknown) => {
+          if (typeof fn === "function") {
+            return originalTx(async (tx) => {
+              await (fn as (client: unknown) => Promise<unknown>)(tx);
+              const rows = await tx.$queryRaw<Array<{ val: string | null }>>`
+                SELECT current_setting('app.current_school_id', true) AS val
+              `;
+              observedSettings.push(rows[0]?.val ?? null);
+              throw new Error("Simulated pre-commit failure on status update");
+            }, opts as Parameters<typeof originalTx>[1]);
+          }
+          return originalTx(fn as Parameters<typeof originalTx>[0]);
+        }) as typeof prisma.$transaction);
+
+        try {
+          const resRollbackStatus = await patchMessageStatusHandler(
+            new Request("http://127.0.0.1/api/messages/status", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ logId: "sr-alpha-ok", deliveryStatus: "DELIVERED" }),
+            })
+          );
+          expect(resRollbackStatus.status).toBe(500);
+          expect(observedSettings).toEqual(["school-alpha"]);
+          expect((await prisma.messageLog.findUnique({ where: { id: "sr-alpha-ok" } }))?.deliveryStatus).toBe(
+            "FAILED_NO_WHATSAPP"
+          );
+          expect((await prisma.studentContact.findUnique({ where: { id: "contact-alpha-1" } }))?.whatsappValid).toBe(
+            true
+          );
+        } finally {
+          txSpy.mockRestore();
+        }
+      } finally {
+        testAuthState.role = "PEDAGOGA";
+        testAuthState.schoolId = "school-alpha";
+        await prisma.studentContact.deleteMany({ where: { id: "contact-alpha-1" } });
       }
     });
   }

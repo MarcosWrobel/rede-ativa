@@ -265,6 +265,7 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async () => []),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
+    $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (arg: any, opts?: any) => {
       hoisted.transactionOptions.push(opts ?? null);
       if (hoisted.failTransactionWithError) {
