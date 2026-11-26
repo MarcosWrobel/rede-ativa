@@ -18,6 +18,8 @@ const testAuthState = vi.hoisted(() => ({
   snapshot: null as Record<string, unknown> | null,
   useRealCurrentSchool: false,
   pendingTokenSchoolId: null as string | null,
+  useRealExtensionSyncAuth: false,
+  pendingSessionUser: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -59,9 +61,13 @@ vi.mock("@/lib/permissions", () => ({
   })),
 }));
 
-vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(async () => {}),
-}));
+vi.mock("@/lib/audit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
+  return {
+    ...actual,
+    logAudit: vi.fn(async () => {}),
+  };
+});
 
 vi.mock("@/lib/currentSchool", async () => {
   const actual = await vi.importActual<typeof import("@/lib/currentSchool")>("@/lib/currentSchool");
@@ -84,10 +90,16 @@ const whatsappProviderMock = vi.hoisted(() => ({
   overrideDispatch: null as null | ((...args: unknown[]) => Promise<unknown>),
 }));
 
-vi.mock("@/lib/rateLimit", () => ({
-  enforceRateLimit: vi.fn(async () => ({ ok: true })),
-  RATE_LIMIT_POLICIES: { MESSAGE_REPLY: {} },
-}));
+vi.mock("@/lib/rateLimit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rateLimit")>("@/lib/rateLimit");
+  return {
+    ...actual,
+    enforceRateLimit: vi.fn(async () => ({ ok: true })),
+    getRateLimitStatus: vi.fn(async () => ({ count: 0, retryAfterSeconds: 0 })),
+    checkRateLimit: vi.fn(async () => ({ success: true, retryAfterSeconds: 0 })),
+    resetRateLimit: vi.fn(async () => {}),
+  };
+});
 
 vi.mock("@/lib/whatsappProvider", async () => {
   const actual = await vi.importActual<typeof import("@/lib/whatsappProvider")>(
@@ -107,8 +119,11 @@ vi.mock("@/lib/whatsappProvider", async () => {
 });
 
 vi.mock("@/lib/auth", () => ({
-  auth: vi.fn(async () =>
-    testAuthState.pendingTokenSchoolId
+  auth: vi.fn(async () => {
+    if (testAuthState.pendingSessionUser !== null) {
+      return { user: testAuthState.pendingSessionUser };
+    }
+    return testAuthState.pendingTokenSchoolId
       ? null
       : {
           user: {
@@ -119,25 +134,34 @@ vi.mock("@/lib/auth", () => ({
             schoolId: testAuthState.schoolId,
             active: true,
           },
-        }
-  ),
-}));
-
-vi.mock("@/lib/extensionSyncAuth", () => ({
-  authenticateExtensionSyncToken: vi.fn(async () => {
-    if (!testAuthState.pendingTokenSchoolId) {
-      return {
-        ok: false,
-        response: new Response(JSON.stringify({ error: "Não autorizado." }), { status: 401 }),
-      };
-    }
-    return {
-      ok: true,
-      targetSchoolId: testAuthState.pendingTokenSchoolId,
-      userName: "Companion Teste",
-    };
+        };
   }),
 }));
+
+vi.mock("@/lib/extensionSyncAuth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/extensionSyncAuth")>(
+    "@/lib/extensionSyncAuth"
+  );
+  return {
+    ...actual,
+    authenticateExtensionSyncToken: vi.fn(async (params) => {
+      if (testAuthState.useRealExtensionSyncAuth) {
+        return actual.authenticateExtensionSyncToken(params);
+      }
+      if (!testAuthState.pendingTokenSchoolId) {
+        return {
+          ok: false,
+          response: new Response(JSON.stringify({ error: "Não autorizado." }), { status: 401 }),
+        };
+      }
+      return {
+        ok: true,
+        targetSchoolId: testAuthState.pendingTokenSchoolId,
+        userName: "Companion Teste",
+      };
+    }),
+  };
+});
 
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
@@ -1162,6 +1186,260 @@ describe.skipIf(!SHOULD_RUN)(
         }
       } finally {
         testAuthState.pendingTokenSchoolId = null;
+      }
+    });
+
+    it("fecha autorização de GET /api/messages/pending para sessão (papel, vínculo revogado, SUPERADMIN), token por escola, token global e precedência", async () => {
+      const { hashSchoolSyncToken } = await import("@/lib/syncToken");
+      const now = Date.now();
+      const tenMinutesAgo = new Date(now - 10 * 60_000);
+
+      // Limpa usuários/vínculos sintéticos e prepara tokens e usuários reais no PostgreSQL 16
+      await prisma.userSchool.deleteMany({});
+      await prisma.user.deleteMany({});
+
+      const tokenAlphaPlain = "sync-alpha-secret-token";
+      const tokenBetaPlain = "sync-beta-secret-token";
+      await prisma.school.update({
+        where: { id: "school-alpha" },
+        data: { syncTokenHash: hashSchoolSyncToken(tokenAlphaPlain), active: true },
+      });
+      await prisma.school.update({
+        where: { id: "school-beta" },
+        data: { syncTokenHash: hashSchoolSyncToken(tokenBetaPlain), active: true },
+      });
+      await prisma.school.create({
+        data: {
+          id: "school-inactive",
+          inepCode: "99000199",
+          name: "Escola Inativa",
+          city: "Cidade Teste",
+          state: "PR",
+          nre: "NRE Teste",
+          network: "MUNICIPAL",
+          active: false,
+        },
+      });
+
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "u-pedagoga-a",
+            email: "pedagoga.a@redeativa.local",
+            name: "Pedagoga A",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "u-professor-a",
+            email: "professor.a@redeativa.local",
+            name: "Professor A",
+            role: "PROFESSOR",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "u-revoked-a",
+            email: "revoked.a@redeativa.local",
+            name: "Revogado A",
+            role: "PEDAGOGA",
+            schoolId: "school-alpha",
+            active: true,
+          },
+          {
+            id: "u-superadmin",
+            email: "super.queue@redeativa.local",
+            name: "Super Queue",
+            role: "SUPERADMIN",
+            schoolId: null,
+            active: true,
+          },
+        ],
+      });
+
+      await prisma.userSchool.createMany({
+        data: [
+          { userId: "u-pedagoga-a", schoolId: "school-alpha", role: "PEDAGOGA", active: true },
+          { userId: "u-professor-a", schoolId: "school-alpha", role: "PROFESSOR", active: true },
+          { userId: "u-revoked-a", schoolId: "school-alpha", role: "PEDAGOGA", active: false },
+        ],
+      });
+
+      const seedQueueItems = async () => {
+        await prisma.messageLog.deleteMany({});
+        await prisma.messageLog.createMany({
+          data: [
+            {
+              id: "auth-q-alpha",
+              schoolId: "school-alpha",
+              studentId: "stu-alpha",
+              templateId: "tpl-alpha",
+              reasonTitle: "Fila A",
+              messageContent: "Msg A",
+              phoneUsed: "41999991111",
+              sentByName: "Equipe A",
+              deliveryStatus: "QUEUED",
+              sentAt: new Date(now - 20_000),
+            },
+            {
+              id: "auth-d-alpha-exp",
+              schoolId: "school-alpha",
+              studentId: "stu-alpha",
+              templateId: "tpl-alpha",
+              reasonTitle: "Exp A",
+              messageContent: "Msg Exp A",
+              phoneUsed: "41999991111",
+              sentByName: "Equipe A",
+              deliveryStatus: "DISPATCHING",
+              deliveryUpdatedAt: tenMinutesAgo,
+              sentAt: tenMinutesAgo,
+            },
+            {
+              id: "auth-q-beta",
+              schoolId: "school-beta",
+              studentId: "stu-beta",
+              templateId: "tpl-beta",
+              reasonTitle: "Fila B",
+              messageContent: "Msg B",
+              phoneUsed: "41999992222",
+              sentByName: "Equipe B",
+              deliveryStatus: "QUEUED",
+              sentAt: new Date(now - 20_000),
+            },
+          ],
+        });
+      };
+
+      const assertNoQueueMutation = async () => {
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-q-alpha" } }))?.deliveryStatus).toBe("QUEUED");
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-d-alpha-exp" } }))?.deliveryStatus).toBe(
+          "DISPATCHING"
+        );
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-q-beta" } }))?.deliveryStatus).toBe("QUEUED");
+      };
+
+      const prevSyncToken = process.env.SYNC_API_TOKEN;
+      process.env.SYNC_API_TOKEN = "global-admin-sync-secret";
+      testAuthState.useRealCurrentSchool = true;
+      testAuthState.useRealExtensionSyncAuth = true;
+
+      try {
+        await seedQueueItems();
+
+        // 1. Sessão sem permissão de operação (PROFESSOR) -> 403, nada recuperado/reservado
+        testAuthState.pendingSessionUser = { id: "u-professor-a", email: "professor.a@redeativa.local", active: true };
+        const resProf = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5")
+        );
+        expect(resProf.status).toBe(403);
+        await assertNoQueueMutation();
+
+        // 2. Vínculo revogado (UserSchool.active = false) -> 403, nada recuperado/reservado
+        testAuthState.pendingSessionUser = { id: "u-revoked-a", email: "revoked.a@redeativa.local", active: true };
+        const resRevoked = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5")
+        );
+        expect(resRevoked.status).toBe(403);
+        await assertNoQueueMutation();
+
+        // 3. SUPERADMIN sem escola selecionada (fallback de leitura bloqueado) -> 403, nada recuperado/reservado
+        testAuthState.pendingSessionUser = { id: "u-superadmin", email: "super.queue@redeativa.local", active: true };
+        const resSuperNoSchool = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5")
+        );
+        expect(resSuperNoSchool.status).toBe(403);
+        await assertNoQueueMutation();
+
+        // 4. Sessão e token simultâneos: sessão sem permissão + token válido -> 403 (precedência da sessão, sem fallback ao token)
+        testAuthState.pendingSessionUser = { id: "u-professor-a", email: "professor.a@redeativa.local", active: true };
+        const resBothUnauthorized = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+            headers: { "x-sync-token": tokenAlphaPlain },
+          })
+        );
+        expect(resBothUnauthorized.status).toBe(403);
+        await assertNoQueueMutation();
+
+        // 5. Sessão autorizada (PEDAGOGA em school-alpha) + token de school-beta -> usa school-alpha da sessão
+        testAuthState.pendingSessionUser = { id: "u-pedagoga-a", email: "pedagoga.a@redeativa.local", active: true };
+        const resBothAuthorized = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+            headers: { "x-sync-token": tokenBetaPlain },
+          })
+        );
+        expect(resBothAuthorized.status).toBe(200);
+        const bodySessionWins = await resBothAuthorized.json();
+        expect(bodySessionWins.schoolId).toBe("school-alpha");
+        expect(bodySessionWins.messages.map((m: { id: string }) => m.id).sort()).toEqual([
+          "auth-d-alpha-exp",
+          "auth-q-alpha",
+        ]);
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-q-beta" } }))?.deliveryStatus).toBe("QUEUED");
+
+        // 6. Token por escola com indicação conflitante (schoolId=school-beta e x-school-id=school-beta) -> ignora conflito e usa school-alpha
+        await seedQueueItems();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.pendingTokenSchoolId = "active-token-mode"; // força auth() a retornar null
+        const resSchoolTokenConflict = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5&schoolId=school-beta", {
+            headers: {
+              "x-sync-token": tokenAlphaPlain,
+              "x-school-id": "school-beta",
+            },
+          })
+        );
+        expect(resSchoolTokenConflict.status).toBe(200);
+        const bodySchoolToken = await resSchoolTokenConflict.json();
+        expect(bodySchoolToken.schoolId).toBe("school-alpha");
+        expect(bodySchoolToken.messages.map((m: { id: string }) => m.id).sort()).toEqual([
+          "auth-d-alpha-exp",
+          "auth-q-alpha",
+        ]);
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-q-beta" } }))?.deliveryStatus).toBe("QUEUED");
+
+        // 7. Token administrativo global: sem schoolId -> 400; escola inativa -> 404; escola ativa -> 200
+        await seedQueueItems();
+        const resGlobalMissing = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5", {
+            headers: { authorization: "Bearer global-admin-sync-secret" },
+          })
+        );
+        expect(resGlobalMissing.status).toBe(400);
+        await assertNoQueueMutation();
+
+        const resGlobalInactive = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5&schoolId=school-inactive", {
+            headers: { authorization: "Bearer global-admin-sync-secret" },
+          })
+        );
+        expect(resGlobalInactive.status).toBe(404);
+        await assertNoQueueMutation();
+
+        const resGlobalActive = await getPendingMessagesHandler(
+          new Request("http://127.0.0.1/api/messages/pending?limit=5&schoolId=school-beta", {
+            headers: { authorization: "Bearer global-admin-sync-secret" },
+          })
+        );
+        expect(resGlobalActive.status).toBe(200);
+        const bodyGlobalBeta = await resGlobalActive.json();
+        expect(bodyGlobalBeta.schoolId).toBe("school-beta");
+        expect(bodyGlobalBeta.messages.map((m: { id: string }) => m.id)).toEqual(["auth-q-beta"]);
+        expect((await prisma.messageLog.findUnique({ where: { id: "auth-q-alpha" } }))?.deliveryStatus).toBe("QUEUED");
+      } finally {
+        if (prevSyncToken === undefined) {
+          delete process.env.SYNC_API_TOKEN;
+        } else {
+          process.env.SYNC_API_TOKEN = prevSyncToken;
+        }
+        testAuthState.useRealCurrentSchool = false;
+        testAuthState.useRealExtensionSyncAuth = false;
+        testAuthState.pendingSessionUser = null;
+        testAuthState.pendingTokenSchoolId = null;
+        await prisma.messageLog.deleteMany({});
+        await prisma.userSchool.deleteMany({});
+        await prisma.user.deleteMany({});
+        await prisma.school.deleteMany({ where: { id: "school-inactive" } });
       }
     });
   }

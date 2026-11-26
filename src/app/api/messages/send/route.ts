@@ -4,15 +4,8 @@ import { formatZodError, messageSendSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { enforceRateLimit, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
+import { isAllowedMessagingRole } from "@/lib/roles";
 import { dispatchAndPersistMessage } from "@/services/messageDispatchService";
-
-const ALLOWED_SEND_ROLES = new Set([
-  "PEDAGOGA",
-  "GESTOR_ESCOLAR",
-  "GESTAO_SECRETARIA",
-  "SUPERADMIN",
-  "ADMIN",
-]);
 
 export async function POST(req: Request) {
   try {
@@ -46,13 +39,12 @@ export async function POST(req: Request) {
     if (!schoolCheck.ok) return schoolCheck.response;
     const currentSchool = schoolCheck.school;
 
-    const effectiveRole = (
+    const effectiveRole =
       (authCheck.snapshot
         ? resolveEffectiveRoleForSchool(authCheck.snapshot, currentSchool)
-        : authCheck.role) || ""
-    ).toUpperCase();
+        : authCheck.role) || "";
 
-    if (!effectiveRole || !ALLOWED_SEND_ROLES.has(effectiveRole)) {
+    if (!isAllowedMessagingRole(effectiveRole)) {
       return NextResponse.json(
         { error: "Perfil sem autorização para enviar mensagens nesta instituição." },
         { status: 403 }

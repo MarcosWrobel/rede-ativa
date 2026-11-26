@@ -6,7 +6,11 @@ import {
   getSchoolContextByVerifiedId,
   type SchoolContext,
 } from "@/lib/currentSchool";
-import { resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
+import {
+  resolveEffectiveRoleForSchool,
+  resolveServerUserAuthSnapshot,
+} from "@/lib/serverAuthContext";
+import { isAllowedMessagingRole } from "@/lib/roles";
 import { authenticateExtensionSyncToken } from "@/lib/extensionSyncAuth";
 import { claimPendingQueuedMessages } from "@/services/messageDispatchService";
 
@@ -44,6 +48,13 @@ export async function GET(req: Request) {
       if (!currentSchool) {
         return NextResponse.json(
           { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+          { status: 403, headers: corsHeaders }
+        );
+      }
+      const effectiveRole = resolveEffectiveRoleForSchool(snapshot, currentSchool);
+      if (!isAllowedMessagingRole(effectiveRole)) {
+        return NextResponse.json(
+          { error: "Perfil sem autorização para operar a fila de mensagens nesta instituição." },
           { status: 403, headers: corsHeaders }
         );
       }

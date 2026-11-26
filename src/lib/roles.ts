@@ -195,6 +195,22 @@ export function checkIsSecretariat(
 }
 
 /**
+ * Papéis autorizados a operar a mensageria ativa (envio e fila de disparo) em uma escola.
+ */
+export const ALLOWED_MESSAGING_ROLES = new Set([
+  "PEDAGOGA",
+  "GESTOR_ESCOLAR",
+  "GESTAO_SECRETARIA",
+  "SUPERADMIN",
+  "ADMIN",
+]);
+
+export function isAllowedMessagingRole(role: string | null | undefined): boolean {
+  const normalized = (role || "").trim().toUpperCase();
+  return normalized.length > 0 && ALLOWED_MESSAGING_ROLES.has(normalized);
+}
+
+/**
  * Valida se o usuário tem privilégio de Gestor na escola alvo (Nível 3 ou superior).
  * Ordem estrita:
  * 1. SuperAdmin ativo -> true
