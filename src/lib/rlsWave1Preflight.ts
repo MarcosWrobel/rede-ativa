@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 
 export interface RlsWave1PreflightFinding {
   count: number;
+  blockingForPhaseA: boolean;
   blockingForPhaseB: boolean;
   transitionExpectedDuringPhaseA: boolean;
   description: string;
@@ -13,8 +14,11 @@ export interface RlsWave1PreflightReport {
   hasMessageLogSchoolIdColumn: boolean;
   totalMessageLogs: number;
   logsWithNullTemplateCount: number;
+  readyForPhaseA: boolean;
   readyForPhaseB: boolean;
   findings: {
+    studentsWithoutSchool: RlsWave1PreflightFinding;
+    logsWithMissingSchool: RlsWave1PreflightFinding;
     logsWithoutStudent: RlsWave1PreflightFinding;
     logsMissingSchoolId: RlsWave1PreflightFinding;
     logsDivergentSchoolId: RlsWave1PreflightFinding;
@@ -82,11 +86,24 @@ export async function runRlsWave1Preflight(
   const logsWithNullTemplateCount = toNumber(nullTemplateRows[0]?.count);
 
   const [
+    studentsWithoutSchoolRows,
     logsWithoutStudentRows,
     logsWithMissingTemplateRows,
     studentsWithMissingClassGroupRows,
     studentsWithCrossSchoolClassGroupRows,
   ] = await Promise.all([
+    prismaClient.$queryRaw<CountAndSampleRow[]>`
+      WITH bad AS (
+        SELECT st."id"
+        FROM "Student" st
+        LEFT JOIN "School" sc ON sc."id" = st."schoolId"
+        WHERE sc."id" IS NULL
+      )
+      SELECT (SELECT COUNT(*)::bigint FROM bad) AS "totalCount", b."id"
+      FROM bad b
+      ORDER BY b."id" ASC
+      LIMIT ${sampleLimit}
+    `,
     prismaClient.$queryRaw<CountAndSampleRow[]>`
       WITH bad AS (
         SELECT ml."id"
@@ -138,23 +155,38 @@ export async function runRlsWave1Preflight(
     `,
   ]);
 
+  let logsWithMissingSchool = { count: 0, sampleIds: [] as string[] };
   let logsMissingSchoolId = { count: 0, sampleIds: [] as string[] };
   let logsDivergentSchoolId = { count: 0, sampleIds: [] as string[] };
   let logsWithCrossSchoolTemplateRows: CountAndSampleRow[];
 
   if (hasMessageLogSchoolIdColumn) {
-    const [missingSchoolRows, divergentSchoolRows, crossTplRows] = await Promise.all([
-      prismaClient.$queryRaw<CountAndSampleRow[]>`
-        WITH bad AS (
-          SELECT ml."id"
-          FROM "MessageLog" ml
-          WHERE ml."schoolId" IS NULL
-        )
-        SELECT (SELECT COUNT(*)::bigint FROM bad) AS "totalCount", b."id"
-        FROM bad b
-        ORDER BY b."id" ASC
-        LIMIT ${sampleLimit}
-      `,
+    const [missingSchoolFkRows, missingSchoolRows, divergentSchoolRows, crossTplRows] =
+      await Promise.all([
+        prismaClient.$queryRaw<CountAndSampleRow[]>`
+          WITH bad AS (
+            SELECT ml."id"
+            FROM "MessageLog" ml
+            LEFT JOIN "School" sc ON sc."id" = ml."schoolId"
+            WHERE ml."schoolId" IS NOT NULL
+              AND sc."id" IS NULL
+          )
+          SELECT (SELECT COUNT(*)::bigint FROM bad) AS "totalCount", b."id"
+          FROM bad b
+          ORDER BY b."id" ASC
+          LIMIT ${sampleLimit}
+        `,
+        prismaClient.$queryRaw<CountAndSampleRow[]>`
+          WITH bad AS (
+            SELECT ml."id"
+            FROM "MessageLog" ml
+            WHERE ml."schoolId" IS NULL
+          )
+          SELECT (SELECT COUNT(*)::bigint FROM bad) AS "totalCount", b."id"
+          FROM bad b
+          ORDER BY b."id" ASC
+          LIMIT ${sampleLimit}
+        `,
       prismaClient.$queryRaw<CountAndSampleRow[]>`
         WITH bad AS (
           SELECT ml."id"
@@ -184,6 +216,7 @@ export async function runRlsWave1Preflight(
       `,
     ]);
 
+    logsWithMissingSchool = extractCountAndIds(missingSchoolFkRows);
     logsMissingSchoolId = extractCountAndIds(missingSchoolRows);
     logsDivergentSchoolId = extractCountAndIds(divergentSchoolRows);
     logsWithCrossSchoolTemplateRows = crossTplRows;
@@ -204,6 +237,7 @@ export async function runRlsWave1Preflight(
     `;
   }
 
+  const studentsWithoutSchool = extractCountAndIds(studentsWithoutSchoolRows);
   const logsWithoutStudent = extractCountAndIds(logsWithoutStudentRows);
   const logsWithMissingTemplate = extractCountAndIds(logsWithMissingTemplateRows);
   const logsWithCrossSchoolTemplate = extractCountAndIds(logsWithCrossSchoolTemplateRows);
@@ -213,14 +247,32 @@ export async function runRlsWave1Preflight(
   );
 
   const findings: RlsWave1PreflightReport["findings"] = {
+    studentsWithoutSchool: {
+      ...studentsWithoutSchool,
+      blockingForPhaseA: true,
+      blockingForPhaseB: true,
+      transitionExpectedDuringPhaseA: false,
+      description:
+        "Student com schoolId apontando para School inexistente (bloqueia backfill e FK simples MessageLog_schoolId_fkey na Fase A e Fase B).",
+    },
+    logsWithMissingSchool: {
+      ...logsWithMissingSchool,
+      blockingForPhaseA: true,
+      blockingForPhaseB: true,
+      transitionExpectedDuringPhaseA: false,
+      description:
+        "MessageLog com schoolId preenchido apontando para School inexistente (incompatível com MessageLog_schoolId_fkey na Fase A e Fase B).",
+    },
     logsWithoutStudent: {
       ...logsWithoutStudent,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description: "MessageLog sem Student correspondente.",
     },
     logsMissingSchoolId: {
       ...logsMissingSchoolId,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: true,
       description:
@@ -228,18 +280,21 @@ export async function runRlsWave1Preflight(
     },
     logsDivergentSchoolId: {
       ...logsDivergentSchoolId,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description: "MessageLog.schoolId preenchido divergente de Student.schoolId.",
     },
     logsWithMissingTemplate: {
       ...logsWithMissingTemplate,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description: "MessageLog com templateId não nulo apontando para MessageTemplate inexistente.",
     },
     logsWithCrossSchoolTemplate: {
       ...logsWithCrossSchoolTemplate,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description:
@@ -247,19 +302,24 @@ export async function runRlsWave1Preflight(
     },
     studentsWithMissingClassGroup: {
       ...studentsWithMissingClassGroup,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description: "Student sem ClassGroup correspondente.",
     },
     studentsWithCrossSchoolClassGroup: {
       ...studentsWithCrossSchoolClassGroup,
+      blockingForPhaseA: false,
       blockingForPhaseB: true,
       transitionExpectedDuringPhaseA: false,
       description: "Student vinculado a ClassGroup de outra escola (impede FK composta).",
     },
   };
 
-  const hasBlockingFinding = Object.values(findings).some(
+  const hasBlockingPhaseAFinding = Object.values(findings).some(
+    (f) => f.blockingForPhaseA && f.count > 0
+  );
+  const hasBlockingPhaseBFinding = Object.values(findings).some(
     (f) => f.blockingForPhaseB && f.count > 0
   );
 
@@ -268,7 +328,8 @@ export async function runRlsWave1Preflight(
     hasMessageLogSchoolIdColumn,
     totalMessageLogs,
     logsWithNullTemplateCount,
-    readyForPhaseB: hasMessageLogSchoolIdColumn && !hasBlockingFinding,
+    readyForPhaseA: !hasBlockingPhaseAFinding,
+    readyForPhaseB: hasMessageLogSchoolIdColumn && !hasBlockingPhaseBFinding,
     findings,
   };
 }

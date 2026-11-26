@@ -518,6 +518,24 @@ export async function DELETE(
     });
   } catch (error: any) {
     console.error("[DELETE /api/schools/[id]] Erro:", error);
+
+    const isFkViolation =
+      error?.code === "P2003" ||
+      error?.meta?.constraint === "MessageLog_schoolId_fkey" ||
+      (typeof error?.message === "string" &&
+        error.message.includes("MessageLog_schoolId_fkey"));
+
+    if (isFkViolation) {
+      return NextResponse.json(
+        {
+          error:
+            "Exclusão bloqueada por integridade referencial: existem registros de mensageria vinculados a esta instituição com divergência de vínculo estudantil.",
+          code: "SCHOOL_DELETE_INTEGRITY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: "Erro ao excluir instituição escolar" },
       { status: 500 }

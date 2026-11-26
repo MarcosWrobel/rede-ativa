@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -6,6 +6,39 @@ import {
   reconcileMessageLogSchoolId,
   runRlsWave1Preflight,
 } from "@/lib/rlsWave1Preflight";
+
+const prismaRef = vi.hoisted(() => ({ current: null as unknown as PrismaClient }));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        return (prismaRef.current as unknown as Record<string | symbol, unknown>)[prop];
+      },
+    }
+  ),
+}));
+
+vi.mock("@/lib/permissions", () => ({
+  requireSuperAdmin: vi.fn(async () => ({
+    ok: true,
+    userId: "superadmin-test",
+    userName: "Superadmin Teste",
+    email: "superadmin@redeativa.local",
+  })),
+  requireSchoolAdmin: vi.fn(),
+}));
+
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(async () => {}),
+}));
+
+vi.mock("@/lib/currentSchool", () => ({
+  invalidateSchoolCache: vi.fn(),
+}));
+
+import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -35,6 +68,7 @@ describe.skipIf(!SHOULD_RUN)(
       const url = assertSafeLocalPhaseADbUrl(process.env.RLS_PHASE_A_DB_URL);
       prisma = new PrismaClient({ datasources: { db: { url } } });
       await prisma.$connect();
+      prismaRef.current = prisma;
     });
 
     beforeEach(async () => {
@@ -176,7 +210,12 @@ describe.skipIf(!SHOULD_RUN)(
       expect(cleanReport.postgresVersion).toContain("PostgreSQL");
       expect(cleanReport.hasMessageLogSchoolIdColumn).toBe(true);
       expect(cleanReport.logsWithNullTemplateCount).toBe(1);
+      expect(cleanReport.readyForPhaseA).toBe(true);
       expect(cleanReport.readyForPhaseB).toBe(true);
+      expect(cleanReport.findings.studentsWithoutSchool.count).toBe(0);
+      expect(cleanReport.findings.studentsWithoutSchool.blockingForPhaseA).toBe(true);
+      expect(cleanReport.findings.logsWithMissingSchool.count).toBe(0);
+      expect(cleanReport.findings.logsWithMissingSchool.blockingForPhaseA).toBe(true);
 
       // Escritor legado cria novo log com schoolId = null durante a Fase A
       await prisma.messageLog.create({
@@ -193,8 +232,10 @@ describe.skipIf(!SHOULD_RUN)(
       });
 
       const duringTransition = await runRlsWave1Preflight(prisma);
+      expect(duringTransition.readyForPhaseA).toBe(true);
       expect(duringTransition.readyForPhaseB).toBe(false);
       expect(duringTransition.findings.logsMissingSchoolId.count).toBe(1);
+      expect(duringTransition.findings.logsMissingSchoolId.blockingForPhaseA).toBe(false);
       expect(duringTransition.findings.logsMissingSchoolId.transitionExpectedDuringPhaseA).toBe(true);
       expect(duringTransition.findings.logsMissingSchoolId.blockingForPhaseB).toBe(true);
       expect(duringTransition.findings.logsMissingSchoolId.sampleIds).toContain(
@@ -296,7 +337,182 @@ describe.skipIf(!SHOULD_RUN)(
 
       const afterReport = await runRlsWave1Preflight(prisma);
       expect(afterReport.hasMessageLogSchoolIdColumn).toBe(true);
+      expect(afterReport.readyForPhaseA).toBe(true);
       expect(afterReport.readyForPhaseB).toBe(true);
+    });
+
+    it("executa DELETE /api/schools/[id] real em dados coerentes mantendo a outra escola intacta", async () => {
+      await prisma.messageLog.createMany({
+        data: [
+          {
+            id: "log-coherent-alpha",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Aviso Alpha",
+            messageContent: "Mensagem coerente Alpha",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe Alpha",
+          },
+          {
+            id: "log-coherent-beta",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Aviso Beta",
+            messageContent: "Mensagem coerente Beta",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe Beta",
+          },
+        ],
+      });
+
+      const res = await deleteSchoolHandler(
+        new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+        { params: Promise.resolve({ id: "school-alpha" }) }
+      );
+      expect(res.status).toBe(200);
+
+      expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).toBeNull();
+      expect(await prisma.messageLog.findUnique({ where: { id: "log-coherent-alpha" } })).toBeNull();
+
+      // Outra escola e seus registros permanecem intactos
+      expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
+      expect(await prisma.student.findUnique({ where: { id: "stu-beta" } })).not.toBeNull();
+      expect(await prisma.messageLog.findUnique({ where: { id: "log-coherent-beta" } })).not.toBeNull();
+    });
+
+    it("sinaliza 409 e preserva todos os registros em rollback atômico quando DELETE /api/schools/[id] encontra MessageLog.schoolId divergente", async () => {
+      await prisma.messageLog.createMany({
+        data: [
+          {
+            id: "log-normal-alpha",
+            schoolId: "school-alpha",
+            studentId: "stu-alpha",
+            templateId: "tpl-alpha",
+            reasonTitle: "Aviso Alpha",
+            messageContent: "Mensagem normal Alpha",
+            phoneUsed: "41999991111",
+            sentByName: "Equipe Alpha",
+          },
+          {
+            id: "log-normal-beta",
+            schoolId: "school-beta",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Aviso Beta",
+            messageContent: "Mensagem normal Beta",
+            phoneUsed: "41999992222",
+            sentByName: "Equipe Beta",
+          },
+          {
+            // Divergência: schoolId aponta para school-alpha, mas studentId pertence a school-beta
+            id: "log-divergent-fk-block",
+            schoolId: "school-alpha",
+            studentId: "stu-beta",
+            templateId: "tpl-beta",
+            reasonTitle: "Divergente",
+            messageContent: "Log divergente que bloqueia exclusão de school-alpha",
+            phoneUsed: "41999992222",
+            sentByName: "Teste",
+          },
+        ],
+      });
+
+      const res = await deleteSchoolHandler(
+        new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+        { params: Promise.resolve({ id: "school-alpha" }) }
+      );
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+
+      // Rollback atômico: registros da própria transação de school-alpha permanecem intactos
+      expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).not.toBeNull();
+      expect(await prisma.classGroup.findUnique({ where: { id: "cg-alpha" } })).not.toBeNull();
+      expect(await prisma.student.findUnique({ where: { id: "stu-alpha" } })).not.toBeNull();
+      expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-alpha" } })).not.toBeNull();
+      expect(await prisma.messageLog.findUnique({ where: { id: "log-normal-alpha" } })).not.toBeNull();
+
+      // Dados da outra escola permanecem intactos
+      expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
+      expect(await prisma.student.findUnique({ where: { id: "stu-beta" } })).not.toBeNull();
+      expect(await prisma.messageLog.findUnique({ where: { id: "log-normal-beta" } })).not.toBeNull();
+      expect(
+        await prisma.messageLog.findUnique({ where: { id: "log-divergent-fk-block" } })
+      ).not.toBeNull();
     });
   }
 );
+
+describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós-migração)", () => {
+  it("reporta separadamente studentsWithoutSchool antes da migração bloqueando Fase A e Fase B", async () => {
+    const queryRaw = vi
+      .fn()
+      // 1-4: version, column exists (false), total logs, null templates
+      .mockResolvedValueOnce([{ version: "PostgreSQL 16.0" }])
+      .mockResolvedValueOnce([{ exists: false }])
+      .mockResolvedValueOnce([{ count: 2n }])
+      .mockResolvedValueOnce([{ count: 0n }])
+      // 5-9: studentsWithoutSchool, logsWithoutStudent, logsWithMissingTemplate, studentsWithMissingClassGroup, studentsWithCrossSchoolClassGroup
+      .mockResolvedValueOnce([{ totalCount: 1n, id: "stu-orphan-school" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      // 10: logsWithCrossSchoolTemplate (else branch)
+      .mockResolvedValueOnce([]);
+
+    const report = await runRlsWave1Preflight({ $queryRaw: queryRaw as unknown as PrismaClient["$queryRaw"] });
+
+    expect(report.hasMessageLogSchoolIdColumn).toBe(false);
+    expect(report.readyForPhaseA).toBe(false);
+    expect(report.readyForPhaseB).toBe(false);
+    expect(report.findings.studentsWithoutSchool).toMatchObject({
+      count: 1,
+      blockingForPhaseA: true,
+      blockingForPhaseB: true,
+      sampleIds: ["stu-orphan-school"],
+    });
+    expect(report.findings.logsWithMissingSchool).toMatchObject({
+      count: 0,
+      blockingForPhaseA: true,
+      blockingForPhaseB: true,
+      sampleIds: [],
+    });
+  });
+
+  it("reporta logsWithMissingSchool quando a coluna existe bloqueando Fase A e Fase B", async () => {
+    const queryRaw = vi
+      .fn()
+      // 1-4: version, column exists (true), total logs, null templates
+      .mockResolvedValueOnce([{ version: "PostgreSQL 16.0" }])
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ count: 2n }])
+      .mockResolvedValueOnce([{ count: 0n }])
+      // 5-9: studentsWithoutSchool, logsWithoutStudent, logsWithMissingTemplate, studentsWithMissingClassGroup, studentsWithCrossSchoolClassGroup
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      // 10-13: logsWithMissingSchool, logsMissingSchoolId, logsDivergentSchoolId, logsWithCrossSchoolTemplate
+      .mockResolvedValueOnce([{ totalCount: 1n, id: "log-missing-school" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const report = await runRlsWave1Preflight({ $queryRaw: queryRaw as unknown as PrismaClient["$queryRaw"] });
+
+    expect(report.hasMessageLogSchoolIdColumn).toBe(true);
+    expect(report.readyForPhaseA).toBe(false);
+    expect(report.readyForPhaseB).toBe(false);
+    expect(report.findings.studentsWithoutSchool.count).toBe(0);
+    expect(report.findings.logsWithMissingSchool).toMatchObject({
+      count: 1,
+      blockingForPhaseA: true,
+      blockingForPhaseB: true,
+      sampleIds: ["log-missing-school"],
+    });
+  });
+});
