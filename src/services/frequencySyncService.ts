@@ -478,43 +478,8 @@ export async function executePowerBiFrequencySync(options: {
         Prisma.sql`(${r.id}, ${r.studentId}, CAST(${r.percent} AS DOUBLE PRECISION), ${r.detail}, ${defaultAction})`
     );
 
-    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) => {
-      if (typeof (tx as any).$queryRaw === "function") {
-        return (tx as any).$queryRaw`
-          INSERT INTO "LowAttendanceRecord" (
-            "id",
-            "studentId",
-            "attendancePercent",
-            "enrollmentDetail",
-            "actionsTaken",
-            "updatedAt"
-          )
-          SELECT
-            v."id",
-            v."studentId",
-            v."attendancePercent",
-            v."enrollmentDetail",
-            v."actionsTaken",
-            NOW()
-          FROM (VALUES ${Prisma.join(values)}) AS v(
-            "id",
-            "studentId",
-            "attendancePercent",
-            "enrollmentDetail",
-            "actionsTaken"
-          )
-          INNER JOIN "Student" AS s
-            ON s."id" = v."studentId"
-           AND s."schoolId" = ${currentSchool.id}
-          ON CONFLICT ("studentId") DO UPDATE SET
-            "attendancePercent" = EXCLUDED."attendancePercent",
-            "enrollmentDetail" = EXCLUDED."enrollmentDetail",
-            "updatedAt" = NOW()
-          RETURNING "studentId", "attendancePercent"
-        ` as Promise<Array<{ studentId: string; attendancePercent: number }>>;
-      }
-
-      await tx.$executeRaw`
+    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.$queryRaw<Array<{ studentId: string; attendancePercent: number }>>`
         INSERT INTO "LowAttendanceRecord" (
           "id",
           "studentId",
@@ -544,9 +509,9 @@ export async function executePowerBiFrequencySync(options: {
           "attendancePercent" = EXCLUDED."attendancePercent",
           "enrollmentDetail" = EXCLUDED."enrollmentDetail",
           "updatedAt" = NOW()
-      `;
-      return chunk.map((r) => ({ studentId: r.studentId, attendancePercent: r.percent }));
-    });
+        RETURNING "studentId", "attendancePercent"
+      `
+    );
     persistedLowAttendanceRows.push(...chunkPersisted);
 
     try {
@@ -607,22 +572,7 @@ export async function executePowerBiFrequencySync(options: {
           Prisma.sql`(${id}, CAST(${data.isExchangeStudent ?? null} AS BOOLEAN), CAST(${data.isSpecialNeeds ?? null} AS BOOLEAN), CAST(${data.age ?? null} AS INTEGER))`
       );
       const updatedCount = await withTenantContext(prisma, currentSchool.id, async (tx) => {
-        if (typeof (tx as any).$queryRaw === "function") {
-          const rows = (await (tx as any).$queryRaw`
-            UPDATE "Student" AS s
-            SET
-              "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
-              "isSpecialNeeds" = COALESCE(v."setSpecial", s."isSpecialNeeds"),
-              "age" = COALESCE(v."ageVal", s."age"),
-              "updatedAt" = NOW()
-            FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
-            WHERE s."id" = v."id"
-              AND s."schoolId" = ${currentSchool.id}
-            RETURNING s."id"
-          `) as Array<{ id: string }>;
-          return rows.length;
-        }
-        await tx.$executeRaw`
+        const rows = await tx.$queryRaw<Array<{ id: string }>>`
           UPDATE "Student" AS s
           SET
             "isExchangeStudent" = COALESCE(v."setExchange", s."isExchangeStudent"),
@@ -632,8 +582,9 @@ export async function executePowerBiFrequencySync(options: {
           FROM (VALUES ${Prisma.join(values)}) AS v("id", "setExchange", "setSpecial", "ageVal")
           WHERE s."id" = v."id"
             AND s."schoolId" = ${currentSchool.id}
+          RETURNING s."id"
         `;
-        return slice.length;
+        return rows.length;
       });
       estudantesEnriquecidos += updatedCount;
     }
@@ -920,58 +871,8 @@ export async function executeSerpProtectionSync(options: {
         )`
     );
 
-    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) => {
-      if (typeof (tx as any).$queryRaw === "function") {
-        return (tx as any).$queryRaw`
-          INSERT INTO "LowAttendanceRecord" (
-            "id",
-            "studentId",
-            "attendancePercent",
-            "enrollmentDetail",
-            "serpProtocol",
-            "serpStatus",
-            "serpOpenedAt",
-            "serpDetails",
-            "actionsTaken",
-            "updatedAt"
-          )
-          SELECT
-            v."id",
-            v."studentId",
-            v."attendancePercent",
-            v."enrollmentDetail",
-            v."serpProtocol",
-            v."serpStatus",
-            v."serpOpenedAt",
-            v."serpDetails",
-            v."actionsTaken",
-            NOW()
-          FROM (VALUES ${Prisma.join(values)}) AS v(
-            "id",
-            "studentId",
-            "attendancePercent",
-            "enrollmentDetail",
-            "serpProtocol",
-            "serpStatus",
-            "serpOpenedAt",
-            "serpDetails",
-            "actionsTaken"
-          )
-          INNER JOIN "Student" AS s
-            ON s."id" = v."studentId"
-           AND s."schoolId" = ${currentSchool.id}
-          ON CONFLICT ("studentId") DO UPDATE SET
-            "serpProtocol" = EXCLUDED."serpProtocol",
-            "serpStatus" = EXCLUDED."serpStatus",
-            "serpOpenedAt" = EXCLUDED."serpOpenedAt",
-            "serpDetails" = EXCLUDED."serpDetails",
-            "actionsTaken" = EXCLUDED."actionsTaken",
-            "updatedAt" = NOW()
-          RETURNING "studentId", "serpStatus"
-        ` as Promise<Array<{ studentId: string; serpStatus: string | null }>>;
-      }
-
-      await tx.$executeRaw`
+    const chunkPersisted = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.$queryRaw<Array<{ studentId: string; serpStatus: string | null }>>`
         INSERT INTO "LowAttendanceRecord" (
           "id",
           "studentId",
@@ -1016,9 +917,9 @@ export async function executeSerpProtectionSync(options: {
           "serpDetails" = EXCLUDED."serpDetails",
           "actionsTaken" = EXCLUDED."actionsTaken",
           "updatedAt" = NOW()
-      `;
-      return chunk.map((r) => ({ studentId: r.studentId, serpStatus: r.statusEnum }));
-    });
+        RETURNING "studentId", "serpStatus"
+      `
+    );
     persistedSerpRows.push(...chunkPersisted);
   }
 

@@ -29,6 +29,16 @@ const hoisted = vi.hoisted(() => ({
   absenceJustificationUpdate: vi.fn(async () => ({})),
   absenceJustificationDeleteMany: vi.fn(async () => ({ count: 0 })),
   executeRaw: vi.fn(async () => 1),
+  queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+    const sqlText = Array.isArray(strings) ? strings.join(" ") : String(strings);
+    if (sqlText.includes("UPDATE \"Student\"")) {
+      return [{ id: "st-1" }];
+    }
+    if (sqlText.includes("\"serpStatus\"")) {
+      return [{ studentId: "st-active-2", serpStatus: "EM_ACOMPANHAMENTO" }];
+    }
+    return [{ studentId: "st-1", attendancePercent: 72 }];
+  }),
   transaction: vi.fn(async (ops: any[]) => Promise.all(ops)),
 }));
 
@@ -78,6 +88,7 @@ vi.mock("@/lib/prisma", () => {
       deleteMany: hoisted.absenceJustificationDeleteMany,
     },
     $executeRaw: hoisted.executeRaw,
+    $queryRaw: hoisted.queryRaw,
   };
   prismaObj.$transaction = vi.fn(async (arg: any) =>
     typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
@@ -236,10 +247,11 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       expect(data.cgmVinculados).toBe(0);
       // Não tentou atualizar Student.cgm para o valor colidente
       expect(hoisted.studentUpdate).not.toHaveBeenCalled();
-      // Gravou LowAttendanceRecord e AttendanceSnapshot normalmente (excluindo set_config de withTenantContext)
-      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
-        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
-      );
+      // Gravou LowAttendanceRecord ($queryRaw) e AttendanceSnapshot ($executeRaw) normalmente (excluindo set_config)
+      const dataSqlCalls = [
+        ...hoisted.queryRaw.mock.calls,
+        ...hoisted.executeRaw.mock.calls,
+      ].filter(([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config"));
       expect(dataSqlCalls).toHaveLength(2);
     });
 
@@ -301,10 +313,11 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       const data = await res.json();
       expect(data.atualizados).toBe(1);
       expect(data.estudantesEnriquecidos).toBe(0);
-      // Apenas 2 chamadas $executeRaw de dados (LowAttendanceRecord + AttendanceSnapshot), sem UPDATE Student redundante
-      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
-        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
-      );
+      // Apenas 2 chamadas de dados (LowAttendanceRecord + AttendanceSnapshot), sem UPDATE Student redundante
+      const dataSqlCalls = [
+        ...hoisted.queryRaw.mock.calls,
+        ...hoisted.executeRaw.mock.calls,
+      ].filter(([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config"));
       expect(dataSqlCalls).toHaveLength(2);
     });
 
@@ -341,9 +354,10 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       const data = await res.json();
       expect(data.estudantesEnriquecidos).toBe(1);
       // LowAttendanceRecord + AttendanceSnapshot + bulk UPDATE Student (excluindo set_config de withTenantContext)
-      const dataSqlCalls = hoisted.executeRaw.mock.calls.filter(
-        ([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config")
-      );
+      const dataSqlCalls = [
+        ...hoisted.queryRaw.mock.calls,
+        ...hoisted.executeRaw.mock.calls,
+      ].filter(([tpl]: any) => !String(tpl?.[0] ?? tpl).includes("set_config"));
       expect(dataSqlCalls).toHaveLength(3);
     });
 
@@ -507,6 +521,87 @@ describe("Sincronização de Frequência Power BI, CSV & JSON", () => {
       expect(data.atualizados).toBe(1);
       expect(data.cgmVinculados).toBe(0);
       expect(hoisted.studentUpdate).not.toHaveBeenCalled();
+    });
+
+    it("reflete em atualizados, emRiscoCount, estudantesEnriquecidos e conselhoTutelarCount apenas linhas retornadas pelo RETURNING quando filtro escolar descarta parte do lote", async () => {
+      hoisted.studentFindMany.mockResolvedValueOnce([
+        { id: "st-keep", cgm: "111", name: "ALUNO MANTIDO", age: 14 },
+        { id: "st-drop", cgm: "222", name: "ALUNO DESCARTADO", age: 14 },
+      ]);
+
+      hoisted.queryRaw
+        .mockResolvedValueOnce([{ studentId: "st-keep", attendancePercent: 85 }] as any)
+        .mockResolvedValueOnce([{ id: "st-keep" }] as any);
+
+      const freqReq = new Request("http://localhost:3000/api/frequencia/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alunos: [
+            { cgm: "111", nome: "ALUNO MANTIDO", mediaGeral: "85%", idade: 15 },
+            { cgm: "222", nome: "ALUNO DESCARTADO", mediaGeral: "45%", idade: 17 },
+          ],
+        }),
+      });
+      const freqRes = await frequenciaSyncPost(freqReq);
+      expect(freqRes.status).toBe(200);
+      const freqJson = await freqRes.json();
+      expect(freqJson).toMatchObject({
+        sucesso: true,
+        totalRecebido: 2,
+        atualizados: 1,
+        emRiscoCount: 0,
+        estudantesEnriquecidos: 1,
+      });
+      expect(hoisted.logAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "UPDATE_LOW_ATTENDANCE",
+          details: expect.objectContaining({
+            atualizados: 1,
+            emRiscoCount: 0,
+            estudantesEnriquecidos: 1,
+          }),
+        })
+      );
+
+      hoisted.logAudit.mockClear();
+      hoisted.studentFindMany.mockResolvedValueOnce([
+        { id: "st-keep", cgm: "111", name: "ALUNO MANTIDO" },
+        { id: "st-drop", cgm: "222", name: "ALUNO DESCARTADO" },
+      ]);
+      hoisted.queryRaw.mockResolvedValueOnce([
+        { studentId: "st-keep", serpStatus: "EM_ACOMPANHAMENTO" },
+      ] as any);
+
+      const serpReq = new Request("http://localhost:3000/api/serp/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fichas: [
+            { cgm: "111", nome: "ALUNO MANTIDO", status: "EM_ACOMPANHAMENTO" },
+            { cgm: "222", nome: "ALUNO DESCARTADO", status: "CONSELHO_TUTELAR" },
+          ],
+        }),
+      });
+      const serpRes = await serpSyncPost(serpReq);
+      expect(serpRes.status).toBe(200);
+      const serpJson = await serpRes.json();
+      expect(serpJson).toMatchObject({
+        sucesso: true,
+        totalRecebido: 2,
+        atualizados: 1,
+        conselhoTutelarCount: 0,
+      });
+      expect(hoisted.logAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "UPDATE_LOW_ATTENDANCE",
+          entityType: "SerpSync",
+          details: expect.objectContaining({
+            atualizados: 1,
+            conselhoTutelarCount: 0,
+          }),
+        })
+      );
     });
   });
 });

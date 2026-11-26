@@ -129,6 +129,7 @@ vi.mock("@/lib/prisma", () => {
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     $executeRaw: hoisted.executeRaw,
+    $queryRaw: vi.fn(async () => [{ studentId: "st-1", attendancePercent: 72 }]),
   };
   prismaObj.$transaction = vi.fn(async (arg: any) =>
     typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)

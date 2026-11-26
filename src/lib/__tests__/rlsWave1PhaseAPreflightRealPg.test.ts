@@ -2437,18 +2437,22 @@ describe.skipIf(!SHOULD_RUN)(
       testAuthState.useRealExtensionSyncAuth = true;
 
       const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const baseWithTenantImpl = (
+        client: Parameters<typeof originalWithTenantContext>[0],
+        schoolId: string,
+        fn: Parameters<typeof originalWithTenantContext>[2]
+      ) =>
+        originalWithTenantContext(client, schoolId, async (tx) => {
+          const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT current_setting('app.current_school_id', true) AS val
+          `;
+          capturedContextSchools.push(val);
+          return fn(tx);
+        });
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
-        .mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
+        .mockImplementation(baseWithTenantImpl);
 
       try {
         // 1. Sem sessão -> 401; sessão sem vínculo ativo -> 403
@@ -2749,18 +2753,22 @@ describe.skipIf(!SHOULD_RUN)(
       await prisma.messageLog.createMany({ data: batchLogs });
 
       const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const baseWithTenantImpl = (
+        client: Parameters<typeof originalWithTenantContext>[0],
+        schoolId: string,
+        fn: Parameters<typeof originalWithTenantContext>[2]
+      ) =>
+        originalWithTenantContext(client, schoolId, async (tx) => {
+          const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT current_setting('app.current_school_id', true) AS val
+          `;
+          capturedContextSchools.push(val);
+          return fn(tx);
+        });
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
-        .mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
+        .mockImplementation(baseWithTenantImpl);
 
       try {
         // 1. 503 quando webhook desabilitado
@@ -3402,18 +3410,22 @@ describe.skipIf(!SHOULD_RUN)(
       testAuthState.useRealExtensionSyncAuth = true;
 
       const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      const baseWithTenantImpl = (
+        client: Parameters<typeof originalWithTenantContext>[0],
+        schoolId: string,
+        fn: Parameters<typeof originalWithTenantContext>[2]
+      ) =>
+        originalWithTenantContext(client, schoolId, async (tx) => {
+          const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT current_setting('app.current_school_id', true) AS val
+          `;
+          capturedContextSchools.push(val);
+          return fn(tx);
+        });
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
-        .mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
+        .mockImplementation(baseWithTenantImpl);
 
       try {
         // 1. Credenciais inválidas e guardas de auth
@@ -3654,17 +3666,8 @@ describe.skipIf(!SHOULD_RUN)(
           )?.attendancePercent
         ).toBeCloseTo(62);
 
-        // Restaura implementação padrão do spy
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
+        // Restaura implementação delegada ao helper real de produção
+        withTenantSpy.mockImplementation(baseWithTenantImpl);
 
         // 4. Colisão concorrente P2002 em applyPendingCgmUpdatesSafely + retry em transação válida + SERP sync
         testAuthState.pendingSessionUser = null;
@@ -3672,13 +3675,8 @@ describe.skipIf(!SHOULD_RUN)(
         capturedContextSchools.length = 0;
 
         let racedCgmCollision = false;
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
+        withTenantSpy.mockImplementation((client, schoolId, fn) =>
+          baseWithTenantImpl(client, schoolId, async (tx) => {
             // Na 2ª chamada withTenantContext (lote de applyPendingCgmUpdatesSafely), simula corrida externa
             if (!racedCgmCollision && capturedContextSchools.length === 2) {
               racedCgmCollision = true;
@@ -3688,8 +3686,8 @@ describe.skipIf(!SHOULD_RUN)(
               });
             }
             return fn(tx);
-          });
-        });
+          })
+        );
 
         const rSerpCollision = await serpSyncHandler(
           new Request("http://127.0.0.1/api/serp/sync?schoolId=school-alpha", {
@@ -3736,16 +3734,7 @@ describe.skipIf(!SHOULD_RUN)(
         expect(capturedContextSchools.every((v) => v === "school-alpha")).toBe(true);
 
         // 5. Falha em lote intermediário (>250 itens): lote 1 confirmado, lote 2 revertido, sem logAudit
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
+        withTenantSpy.mockImplementation(baseWithTenantImpl);
 
         const bulkStudents: Array<{
           id: string;
@@ -3857,20 +3846,9 @@ describe.skipIf(!SHOULD_RUN)(
         });
 
         // 6.1 Power BI sync: stu-alpha-drop-count (40%, idade 18) é movido para school-beta após a leitura inicial
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return client.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_school_id', ${schoolId}, true)`;
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
-            `;
-            capturedContextSchools.push(val);
-            return fn(tx);
-          });
-        });
-        const baseTenantImpl = withTenantSpy.getMockImplementation()!;
         let movedDropFreq = false;
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return baseTenantImpl(client, schoolId, async (tx) => {
+        withTenantSpy.mockImplementation((client, schoolId, fn) =>
+          baseWithTenantImpl(client, schoolId, async (tx) => {
             const res = await fn(tx);
             if (!movedDropFreq) {
               movedDropFreq = true;
@@ -3880,8 +3858,8 @@ describe.skipIf(!SHOULD_RUN)(
               });
             }
             return res;
-          });
-        });
+          })
+        );
 
         vi.mocked(logAudit).mockClear();
         const rCountFreq = await frequenciaSyncHandler(
@@ -3928,8 +3906,8 @@ describe.skipIf(!SHOULD_RUN)(
           data: { schoolId: "school-alpha", classGroupId: "cg-alpha-sync" },
         });
         let movedDropSerp = false;
-        withTenantSpy.mockImplementation(async (client, schoolId, fn) => {
-          return baseTenantImpl(client, schoolId, async (tx) => {
+        withTenantSpy.mockImplementation((client, schoolId, fn) =>
+          baseWithTenantImpl(client, schoolId, async (tx) => {
             const res = await fn(tx);
             if (!movedDropSerp) {
               movedDropSerp = true;
@@ -3939,8 +3917,8 @@ describe.skipIf(!SHOULD_RUN)(
               });
             }
             return res;
-          });
-        });
+          })
+        );
 
         vi.mocked(logAudit).mockClear();
         const rCountSerp = await serpSyncHandler(
