@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { requireSchoolAdmin, requireSuperAdmin } from "@/lib/permissions";
 import { checkIsSuperAdmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { logAudit } from "@/lib/audit";
+import { logAudit, logAuditStrict } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { isProxyLogoPath, resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { parseSchoolAiExternalFormalizeFlag } from "@/lib/aiPolicy";
 import { mutateSchoolSettingsAtomically } from "@/lib/schoolSettingsMutation";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { assertNoCrossSchoolCleanupConflicts } from "@/lib/schoolCleanupGuards";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -441,7 +442,7 @@ export async function DELETE(
       );
     }
 
-    const { deletedStudentsCount, deletedClassesCount } = await withTenantContext(
+    await withTenantContext(
       prisma,
       target.id,
       async (tx) => {
@@ -454,74 +455,12 @@ export async function DELETE(
             ? await tx.classGroup.count({ where: { schoolId: target.id } })
             : 0;
 
-        if (typeof (tx.messageLog as any)?.findFirst === "function") {
-          const divergentMessageLog = await tx.messageLog.findFirst({
-            where: {
-              OR: [
-                {
-                  student: { schoolId: target.id },
-                  schoolId: { not: null },
-                  NOT: { schoolId: target.id },
-                },
-                {
-                  schoolId: target.id,
-                  student: { NOT: { schoolId: target.id } },
-                },
-              ],
-            },
-            select: { id: true },
-          });
-          if (divergentMessageLog) {
-            const conflictErr = new Error(
-              "Exclusão bloqueada por integridade referencial: existem registros de mensageria com divergência de vínculo institucional."
-            ) as Error & { code?: string };
-            conflictErr.code = "SCHOOL_DELETE_INTEGRITY_CONFLICT";
-            throw conflictErr;
-          }
-
-          const crossSchoolTemplateLog = await tx.messageLog.findFirst({
-            where: {
-              template: { schoolId: target.id },
-              OR: [
-                { schoolId: { not: null }, NOT: { schoolId: target.id } },
-                { student: { NOT: { schoolId: target.id } } },
-              ],
-            },
-            select: { id: true },
-          });
-          if (crossSchoolTemplateLog) {
-            const conflictErr = new Error(
-              "Exclusão bloqueada por integridade referencial: existem registros de mensageria de outra instituição referenciando modelos desta escola."
-            ) as Error & { code?: string };
-            conflictErr.code = "SCHOOL_DELETE_INTEGRITY_CONFLICT";
-            throw conflictErr;
-          }
-        }
-
-        if (typeof (tx.pedagogicalMinuteStudent as any)?.findFirst === "function") {
-          const crossSchoolMinuteStudent = await tx.pedagogicalMinuteStudent.findFirst({
-            where: {
-              OR: [
-                {
-                  minute: { schoolId: target.id },
-                  student: { NOT: { schoolId: target.id } },
-                },
-                {
-                  student: { schoolId: target.id },
-                  minute: { NOT: { schoolId: target.id } },
-                },
-              ],
-            },
-            select: { id: true },
-          });
-          if (crossSchoolMinuteStudent) {
-            const conflictErr = new Error(
-              "Exclusão bloqueada por integridade referencial: existem vínculos de atas pedagógicas com divergência de instituição."
-            ) as Error & { code?: string };
-            conflictErr.code = "SCHOOL_DELETE_INTEGRITY_CONFLICT";
-            throw conflictErr;
-          }
-        }
+        await assertNoCrossSchoolCleanupConflicts(tx, {
+          schoolId: target.id,
+          conflictCode: "SCHOOL_DELETE_INTEGRITY_CONFLICT",
+          actionLabel: "Exclusão",
+          checkTemplateCrossReferences: true,
+        });
 
         await tx.messageLog.deleteMany({
           where: {
@@ -569,33 +508,32 @@ export async function DELETE(
         });
         await tx.school.delete({ where: { id: target.id } });
 
-        return {
-          deletedStudentsCount: studentsCount,
-          deletedClassesCount: classGroupsCount,
-        };
+        await logAuditStrict(
+          {
+            action: "DELETE_SCHOOL",
+            entityType: "School",
+            entityId: id,
+            schoolId: null,
+            details: {
+              deletedSchoolId: id,
+              deletedSchoolName: target.name,
+              inepCode: target.inepCode,
+              network: target.network,
+              city: target.city,
+              deletedStudentsCount: studentsCount,
+              deletedClassesCount: classGroupsCount,
+            },
+            user: {
+              id: authCheck.userId,
+              name: authCheck.userName,
+              email: authCheck.email,
+            },
+            req,
+          },
+          tx
+        );
       }
     );
-
-    await logAudit({
-      action: "DELETE_SCHOOL",
-      entityType: "School",
-      entityId: id,
-      schoolId: id,
-      details: {
-        deletedSchoolName: target.name,
-        inepCode: target.inepCode,
-        network: target.network,
-        city: target.city,
-        deletedStudentsCount,
-        deletedClassesCount,
-      },
-      user: {
-        id: authCheck.userId,
-        name: authCheck.userName,
-        email: authCheck.email,
-      },
-      req,
-    });
 
     invalidateSchoolCache(id);
 

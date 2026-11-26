@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { assertNoCrossSchoolCleanupConflicts } from "@/lib/schoolCleanupGuards";
 
 export const dynamic = "force-dynamic";
 
@@ -67,56 +68,12 @@ export async function POST(
             ? await tx.pedagogicalMinute.count({ where: { schoolId: target.id } })
             : 0;
 
-        if (typeof (tx.messageLog as any)?.findFirst === "function") {
-          const divergentMessageLog = await tx.messageLog.findFirst({
-            where: {
-              OR: [
-                {
-                  student: { schoolId: target.id },
-                  schoolId: { not: null },
-                  NOT: { schoolId: target.id },
-                },
-                {
-                  schoolId: target.id,
-                  student: { NOT: { schoolId: target.id } },
-                },
-              ],
-            },
-            select: { id: true },
-          });
-          if (divergentMessageLog) {
-            const conflictErr = new Error(
-              "Higienização bloqueada por integridade referencial: existem registros de mensageria com divergência de vínculo institucional."
-            ) as Error & { code?: string };
-            conflictErr.code = "SCHOOL_SANITIZE_INTEGRITY_CONFLICT";
-            throw conflictErr;
-          }
-        }
-
-        if (typeof (tx.pedagogicalMinuteStudent as any)?.findFirst === "function") {
-          const crossSchoolMinuteStudent = await tx.pedagogicalMinuteStudent.findFirst({
-            where: {
-              OR: [
-                {
-                  minute: { schoolId: target.id },
-                  student: { NOT: { schoolId: target.id } },
-                },
-                {
-                  student: { schoolId: target.id },
-                  minute: { NOT: { schoolId: target.id } },
-                },
-              ],
-            },
-            select: { id: true },
-          });
-          if (crossSchoolMinuteStudent) {
-            const conflictErr = new Error(
-              "Higienização bloqueada por integridade referencial: existem vínculos de atas pedagógicas com divergência de instituição."
-            ) as Error & { code?: string };
-            conflictErr.code = "SCHOOL_SANITIZE_INTEGRITY_CONFLICT";
-            throw conflictErr;
-          }
-        }
+        await assertNoCrossSchoolCleanupConflicts(tx, {
+          schoolId: target.id,
+          conflictCode: "SCHOOL_SANITIZE_INTEGRITY_CONFLICT",
+          actionLabel: "Higienização",
+          checkTemplateCrossReferences: false,
+        });
 
         await tx.messageLog.deleteMany({
           where: {

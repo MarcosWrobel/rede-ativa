@@ -44,7 +44,7 @@ vi.mock("@/lib/permissions", async () => {
       }
       return {
         ok: true,
-        userId: "superadmin-test",
+        userId: null,
         userName: "Superadmin Teste",
         email: "superadmin@redeativa.local",
       };
@@ -264,6 +264,7 @@ describe.skipIf(!SHOULD_RUN)(
     });
 
     beforeEach(async () => {
+      await prisma.auditLog.deleteMany({});
       await prisma.pedagogicalMinuteParticipant.deleteMany({});
       await prisma.pedagogicalMinuteStudent.deleteMany({});
       await prisma.pedagogicalMinute.deleteMany({});
@@ -5820,10 +5821,18 @@ describe.skipIf(!SHOULD_RUN)(
       const capturedContextSchools: Array<string | null> = [];
       const originalWithTenantContext = rlsTenantContext.withTenantContext;
       let failStarterTemplate = false;
+      let failAuditStrictCreate = false;
+      let beforeTxHook: (() => Promise<void>) | null = null;
+      let beforeDeleteHook: (() => Promise<void>) | null = null;
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
         .mockImplementation((client, schoolId, fn) =>
           originalWithTenantContext(client, schoolId, async (tx) => {
+            if (beforeTxHook) {
+              const hook = beforeTxHook;
+              beforeTxHook = null;
+              await hook();
+            }
             const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
               SELECT current_setting('app.current_school_id', true) AS val
             `;
@@ -5841,6 +5850,34 @@ describe.skipIf(!SHOULD_RUN)(
                       throw new Error("Simulated starter template failure");
                     }
                     return origCreate(args);
+                  },
+                },
+              } as unknown as typeof tx;
+              return fn(wrappedTx);
+            }
+            if (failAuditStrictCreate || beforeDeleteHook) {
+              const origAuditCreate = tx.auditLog.create.bind(tx.auditLog);
+              const origMsgDeleteMany = tx.messageLog.deleteMany.bind(tx.messageLog);
+              const wrappedTx = {
+                ...tx,
+                messageLog: {
+                  ...tx.messageLog,
+                  deleteMany: async (args: any) => {
+                    if (beforeDeleteHook) {
+                      const hook = beforeDeleteHook;
+                      beforeDeleteHook = null;
+                      await hook();
+                    }
+                    return origMsgDeleteMany(args);
+                  },
+                },
+                auditLog: {
+                  ...tx.auditLog,
+                  create: async (args: any) => {
+                    if (failAuditStrictCreate) {
+                      throw new Error("Simulated AuditLog failure inside DELETE tx");
+                    }
+                    return origAuditCreate(args);
                   },
                 },
               } as unknown as typeof tx;
@@ -6150,7 +6187,78 @@ describe.skipIf(!SHOULD_RUN)(
           data: { studentId: "stu-lc-a1", studentNameSnapshot: "Aluno Ciclo Alpha" },
         });
 
-        // 6. Saneamento legítimo: limpa dados operacionais de school-alpha (incluindo legado nulo),
+        // 5c. Nota do Conselho divergente (schoolId=school-beta) vinculada a card/disciplina de school-alpha
+        //     não pode ser apagada por ON DELETE CASCADE: deve retornar 409 e preservar ambas as escolas
+        await prisma.classCouncilBoard.create({
+          data: {
+            id: "board-lc-a",
+            schoolId: "school-alpha",
+            classGroupId: "cg-alpha",
+            year: 2026,
+          },
+        });
+        await prisma.classCouncilSubject.create({
+          data: {
+            id: "sub-lc-a",
+            schoolId: "school-alpha",
+            boardId: "board-lc-a",
+            name: "MATEMATICA",
+            displayOrder: 1,
+            active: true,
+          },
+        });
+        await prisma.studentCouncilCard.create({
+          data: {
+            id: "card-lc-a",
+            schoolId: "school-alpha",
+            boardId: "board-lc-a",
+            studentId: "stu-lc-a1",
+          },
+        });
+        await prisma.studentCouncilSubjectEntry.create({
+          data: {
+            id: "entry-lc-div",
+            schoolId: "school-beta",
+            cardId: "card-lc-a",
+            subjectId: "sub-lc-a",
+            trimester: 1,
+            descriptorCodes: [2],
+            grade: 4.5,
+          },
+        });
+
+        const rSanCouncilDiv = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rSanCouncilDiv.status).toBe(409);
+        const sanCouncilBody = await rSanCouncilDiv.text();
+        expect(JSON.parse(sanCouncilBody).code).toBe("SCHOOL_SANITIZE_INTEGRITY_CONFLICT");
+        expect(sanCouncilBody).not.toContain("school-beta");
+        expect(sanCouncilBody).not.toContain("Beta");
+
+        const rDelCouncilDiv = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDelCouncilDiv.status).toBe(409);
+        const delCouncilBody = await rDelCouncilDiv.text();
+        expect(JSON.parse(delCouncilBody).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        expect(delCouncilBody).not.toContain("school-beta");
+        expect(delCouncilBody).not.toContain("Beta");
+
+        expect(await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-lc-div" } })).not.toBeNull();
+        expect(await prisma.studentCouncilCard.findUnique({ where: { id: "card-lc-a" } })).not.toBeNull();
+        expect(await prisma.classCouncilSubject.findUnique({ where: { id: "sub-lc-a" } })).not.toBeNull();
+        expect(await prisma.auditLog.count({ where: { entityId: "school-alpha" } })).toBe(0);
+
+        // Remove entrada divergente e substitui por entrada coerente de school-alpha
+        await prisma.studentCouncilSubjectEntry.update({
+          where: { id: "entry-lc-div" },
+          data: { schoolId: "school-alpha" },
+        });
+
+        // 6. Saneamento legítimo: limpa dados operacionais de school-alpha (incluindo legado nulo e Conselho coerente),
         //    preserva school-alpha, tpl-lc-a e UserSchool da equipe, mantendo school-beta intacta
         capturedContextSchools.length = 0;
         vi.mocked(logAudit).mockClear();
@@ -6165,6 +6273,7 @@ describe.skipIf(!SHOULD_RUN)(
         expect(await prisma.userSchool.findUnique({ where: { id: "us-lc-ped-a" } })).not.toBeNull();
         expect(await prisma.student.count({ where: { schoolId: "school-alpha" } })).toBe(0);
         expect(await prisma.classGroup.count({ where: { schoolId: "school-alpha" } })).toBe(0);
+        expect(await prisma.studentCouncilSubjectEntry.count({ where: { schoolId: "school-alpha" } })).toBe(0);
         expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-a-legacy" } })).toBeNull();
         expect(await prisma.student.count({ where: { schoolId: "school-beta" } })).toBe(2);
         expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-b-ok" } })).not.toBeNull();
@@ -6172,14 +6281,116 @@ describe.skipIf(!SHOULD_RUN)(
           expect.objectContaining({ action: "SANITIZE_SCHOOL", schoolId: "school-alpha" })
         );
 
-        // 7. Exclusão legítima de school-alpha após saneamento (remove escola, modelos e equipe mantendo school-beta intacta)
+        // 6b. Concorrência em DELETE /api/schools/[id]:
+        //     (i) Referência divergente confirmada antes do lock -> DELETE retorna 409 e templateId não é zerado
+        await prisma.school.create({
+          data: {
+            id: "school-conc-b",
+            inepCode: "99000881",
+            name: "Escola Concorrência B",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-conc-b",
+            schoolId: "school-conc-b",
+            title: "Modelo Concorrência",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+        beforeTxHook = async () => {
+          await prisma.messageLog.create({
+            data: {
+              id: "ml-conc-div-first",
+              schoolId: "school-beta",
+              studentId: "stu-lc-b1",
+              templateId: "tpl-conc-b",
+              reasonTitle: "Faltas",
+              messageContent: "Referência concorrente confirmada antes",
+              phoneUsed: "41999999502",
+              sentByName: "Sistema",
+            },
+          });
+        };
+        const rDelConcFirst = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-b", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-conc-b" }) }
+        );
+        expect(rDelConcFirst.status).toBe(409);
+        expect((await rDelConcFirst.json()).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        const concLogPersisted = await prisma.messageLog.findUnique({ where: { id: "ml-conc-div-first" } });
+        expect(concLogPersisted?.templateId).toBe("tpl-conc-b");
+        await prisma.messageLog.delete({ where: { id: "ml-conc-div-first" } });
+        await prisma.messageTemplate.delete({ where: { id: "tpl-conc-b" } });
+        await prisma.school.delete({ where: { id: "school-conc-b" } });
+
+        //     (ii) DELETE adquire FOR UPDATE em tpl-lc-a primeiro: inserção concorrente em school-beta bloqueia até commit e nunca grava templateId nulo
+        let lockReadyResolve!: () => void;
+        const lockReadyPromise = new Promise<void>((res) => {
+          lockReadyResolve = res;
+        });
+        let releaseDeleteResolve!: () => void;
+        const releaseDeletePromise = new Promise<void>((res) => {
+          releaseDeleteResolve = res;
+        });
+        beforeDeleteHook = async () => {
+          lockReadyResolve();
+          await releaseDeletePromise;
+        };
+
         capturedContextSchools.length = 0;
-        vi.mocked(logAudit).mockClear();
-        const rDelOk = await deleteSchoolHandler(
+        const delAlphaPromise = deleteSchoolHandler(
           new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
           { params: Promise.resolve({ id: "school-alpha" }) }
         );
+        await lockReadyPromise;
+
+        let concurrentInsertSettled = false;
+        const concurrentInsertPromise = prisma.messageLog
+          .create({
+            data: {
+              id: "ml-conc-blocked",
+              schoolId: "school-beta",
+              studentId: "stu-lc-b1",
+              templateId: "tpl-lc-a",
+              reasonTitle: "Faltas",
+              messageContent: "Tentativa concorrente pós-lock",
+              phoneUsed: "41999999502",
+              sentByName: "Sistema",
+            },
+          })
+          .then(
+            () => {
+              concurrentInsertSettled = true;
+              return "committed";
+            },
+            () => {
+              concurrentInsertSettled = true;
+              return "rejected";
+            }
+          );
+
+        await new Promise((r) => setTimeout(r, 80));
+        expect(concurrentInsertSettled).toBe(false);
+        releaseDeleteResolve();
+
+        const [rDelOk, concurrentOutcome] = await Promise.all([
+          delAlphaPromise,
+          concurrentInsertPromise,
+        ]);
+
+        // 7. Exclusão legítima de school-alpha e persistência real de AuditLog na mesma transação
         expect(rDelOk.status).toBe(200);
+        expect(concurrentOutcome).toBe("rejected");
+        expect(await prisma.messageLog.findUnique({ where: { id: "ml-conc-blocked" } })).toBeNull();
         expect(capturedContextSchools).toEqual(["school-alpha"]);
         expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).toBeNull();
         expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-lc-a" } })).toBeNull();
@@ -6187,10 +6398,66 @@ describe.skipIf(!SHOULD_RUN)(
         expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
         expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-lc-b" } })).not.toBeNull();
         expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-b-ok" } })).not.toBeNull();
-        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
-          expect.objectContaining({ action: "DELETE_SCHOOL", schoolId: "school-alpha" })
+
+        const realDeleteAudits = await prisma.auditLog.findMany({
+          where: { action: "DELETE_SCHOOL", entityId: "school-alpha" },
+        });
+        expect(realDeleteAudits).toHaveLength(1);
+        expect(realDeleteAudits[0]).toMatchObject({
+          schoolId: null,
+          entityType: "School",
+          entityId: "school-alpha",
+          userId: "lc-super",
+          userEmail: "super.ciclo@redeativa.local",
+        });
+        expect(JSON.parse(realDeleteAudits[0].details || "{}")).toMatchObject({
+          deletedSchoolId: "school-alpha",
+          deletedSchoolName: "Escola Sintética Alpha",
+          deletedStudentsCount: 0,
+          deletedClassesCount: 0,
+        });
+
+        // 8. Falha na gravação de AuditLog em DELETE /api/schools/[id] reverte toda a exclusão
+        await prisma.school.create({
+          data: {
+            id: "school-audit-fail",
+            inepCode: "99000882",
+            name: "Escola Falha Auditoria",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-audit-fail",
+            schoolId: "school-audit-fail",
+            title: "Modelo Audit Fail",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+
+        failAuditStrictCreate = true;
+        const rDelAuditFail = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-audit-fail", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-audit-fail" }) }
         );
+        failAuditStrictCreate = false;
+        expect(rDelAuditFail.status).toBe(500);
+        expect(await prisma.school.findUnique({ where: { id: "school-audit-fail" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-audit-fail" } })).not.toBeNull();
+        expect(
+          await prisma.auditLog.count({ where: { action: "DELETE_SCHOOL", entityId: "school-audit-fail" } })
+        ).toBe(0);
       } finally {
+        beforeTxHook = null;
+        beforeDeleteHook = null;
+        failAuditStrictCreate = false;
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = null;
         testAuthState.useRealPermissions = false;
