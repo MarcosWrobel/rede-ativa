@@ -3,6 +3,7 @@ import { requireAuth, requireSecretariat } from "@/lib/permissions";
 import { checkIsSuperAdmin, checkIsSecretariat } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
@@ -507,18 +508,20 @@ export async function POST(req: Request) {
       },
     ];
 
-    for (const t of baseTemplates) {
-      try {
-        await prisma.messageTemplate.create({
-          data: {
-            ...t,
-            schoolId: createdSchool.id,
-            active: true,
-          },
-        });
-      } catch (err) {
-        console.warn("[POST /api/schools] Erro ao injetar modelo starter:", err);
-      }
+    try {
+      await withTenantContext(prisma, createdSchool.id, async (tx) => {
+        for (const t of baseTemplates) {
+          await tx.messageTemplate.create({
+            data: {
+              ...t,
+              schoolId: createdSchool.id,
+              active: true,
+            },
+          });
+        }
+      });
+    } catch (err) {
+      console.warn("[POST /api/schools] Erro ao injetar modelo starter:", err);
     }
 
     // 5. Vincula automaticamente o usuário criador como GESTOR_ESCOLAR (ou GESTAO_SECRETARIA) na nova escola, sem usar "ADMIN" legado

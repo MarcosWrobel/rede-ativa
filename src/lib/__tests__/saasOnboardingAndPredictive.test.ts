@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock do prisma
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaMock: any = {
     school: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -23,8 +23,13 @@ vi.mock("@/lib/prisma", () => ({
       count: vi.fn(),
       groupBy: vi.fn(),
     },
-  },
-}));
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (arg: any) =>
+      typeof arg === "function" ? arg(prismaMock) : Promise.all(arg)
+    ),
+  };
+  return { prisma: prismaMock };
+});
 
 // Mock de autenticação e permissões
 vi.mock("@/lib/permissions", () => ({

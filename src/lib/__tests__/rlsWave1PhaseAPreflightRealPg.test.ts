@@ -38,12 +38,17 @@ vi.mock("@/lib/permissions", async () => {
   const actual = await vi.importActual<typeof import("@/lib/permissions")>("@/lib/permissions");
   return {
     ...actual,
-    requireSuperAdmin: vi.fn(async () => ({
-      ok: true,
-      userId: "superadmin-test",
-      userName: "Superadmin Teste",
-      email: "superadmin@redeativa.local",
-    })),
+    requireSuperAdmin: vi.fn(async () => {
+      if (testAuthState.useRealPermissions) {
+        return actual.requireSuperAdmin();
+      }
+      return {
+        ok: true,
+        userId: "superadmin-test",
+        userName: "Superadmin Teste",
+        email: "superadmin@redeativa.local",
+      };
+    }),
     requireSchoolAdmin: vi.fn(async (targetSchoolId?: string | null) => {
       if (testAuthState.useRealPermissions) {
         return actual.requireSchoolAdmin(targetSchoolId);
@@ -208,7 +213,9 @@ import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { logAudit } from "@/lib/audit";
 import * as rlsTenantContext from "@/lib/rlsTenantContext";
+import { POST as createSchoolHandler } from "@/app/api/schools/route";
 import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
+import { POST as sanitizeSchoolHandler } from "@/app/api/schools/[id]/sanitize/route";
 import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
 import { POST as frequenciaSyncHandler } from "@/app/api/frequencia/sync/route";
@@ -5763,6 +5770,430 @@ describe.skipIf(!SHOULD_RUN)(
         expect(raceParticipant?.mobileSignToken).toBeNull();
       } finally {
         withTenantSpy.mockRestore();
+      }
+    });
+
+    it("integra withTenantContext no ciclo de vida das escolas (POST /api/schools, POST /api/schools/[id]/sanitize e DELETE /api/schools/[id]) com isolamento entre escolas, proteção da piloto e rollback", async () => {
+      await prisma.user.createMany({
+        data: [
+          {
+            id: "lc-super",
+            name: "SuperAdmin Ciclo",
+            email: "super.ciclo@redeativa.local",
+            role: "SUPERADMIN",
+            active: true,
+          },
+          {
+            id: "lc-ped",
+            name: "Pedagoga Ciclo",
+            email: "ped.ciclo@redeativa.local",
+            role: "PEDAGOGA",
+            active: true,
+            schoolId: "school-alpha",
+          },
+        ],
+      });
+      await prisma.userSchool.create({
+        data: {
+          id: "us-lc-ped-a",
+          userId: "lc-ped",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+      await prisma.school.create({
+        data: {
+          id: "default-leopoldina",
+          inepCode: "41042730",
+          name: "Unidade Piloto Sintética",
+          city: "Cidade Piloto",
+          state: "PR",
+          nre: "NRE Piloto",
+          network: "ESTADUAL",
+          active: true,
+        },
+      });
+
+      testAuthState.useRealPermissions = true;
+
+      const capturedContextSchools: Array<string | null> = [];
+      const originalWithTenantContext = rlsTenantContext.withTenantContext;
+      let failStarterTemplate = false;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation((client, schoolId, fn) =>
+          originalWithTenantContext(client, schoolId, async (tx) => {
+            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS val
+            `;
+            capturedContextSchools.push(val);
+            if (failStarterTemplate) {
+              let count = 0;
+              const origCreate = tx.messageTemplate.create.bind(tx.messageTemplate);
+              const wrappedTx = {
+                ...tx,
+                messageTemplate: {
+                  ...tx.messageTemplate,
+                  create: async (args: any) => {
+                    count++;
+                    if (count === 2) {
+                      throw new Error("Simulated starter template failure");
+                    }
+                    return origCreate(args);
+                  },
+                },
+              } as unknown as typeof tx;
+              return fn(wrappedTx);
+            }
+            return fn(tx);
+          })
+        );
+
+      try {
+        // 1. Negativa por papel (PEDAGOGA) -> 403 sem abrir withTenantContext
+        testAuthState.pendingSessionUser = {
+          id: "lc-ped",
+          email: "ped.ciclo@redeativa.local",
+          active: true,
+        };
+        capturedContextSchools.length = 0;
+        const rPedCreate = await createSchoolHandler(
+          new Request("http://127.0.0.1/api/schools", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inepCode: "99000701",
+              name: "Escola Não Autorizada",
+              network: "ESTADUAL",
+              city: "Cidade Teste",
+              state: "PR",
+            }),
+          })
+        );
+        expect(rPedCreate.status).toBe(403);
+
+        const rPedSan = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rPedSan.status).toBe(403);
+
+        const rPedDel = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rPedDel.status).toBe(403);
+        expect(capturedContextSchools).toEqual([]);
+
+        // 2. Proteção da escola piloto (INEP 41042730 e ID default-leopoldina) -> 403
+        testAuthState.pendingSessionUser = {
+          id: "lc-super",
+          email: "super.ciclo@redeativa.local",
+          active: true,
+        };
+        const rPilotCreate = await createSchoolHandler(
+          new Request("http://127.0.0.1/api/schools", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inepCode: "41042730",
+              name: "Tentativa Piloto",
+              network: "ESTADUAL",
+              city: "Cidade Piloto",
+              state: "PR",
+            }),
+          })
+        );
+        expect(rPilotCreate.status).toBe(403);
+
+        const rPilotSan = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/default-leopoldina/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "default-leopoldina" }) }
+        );
+        expect(rPilotSan.status).toBe(403);
+
+        const rPilotDel = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/default-leopoldina", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "default-leopoldina" }) }
+        );
+        expect(rPilotDel.status).toBe(403);
+
+        // 3. POST /api/schools legítimo cria escola, 3 modelos starter em withTenantContext e vínculo do criador
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rCreateOk = await createSchoolHandler(
+          new Request("http://127.0.0.1/api/schools", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inepCode: "99000777",
+              name: "Escola Ciclo Criada",
+              network: "ESTADUAL",
+              city: "Cidade Ciclo",
+              state: "PR",
+            }),
+          })
+        );
+        expect(rCreateOk.status).toBe(201);
+        const createdOkBody = await rCreateOk.json();
+        const createdOkId = createdOkBody.school.id as string;
+        expect(capturedContextSchools).toEqual([createdOkId]);
+        const createdTemplates = await prisma.messageTemplate.findMany({
+          where: { schoolId: createdOkId },
+        });
+        expect(createdTemplates).toHaveLength(3);
+        const creatorLink = await prisma.userSchool.findUnique({
+          where: { userId_schoolId: { userId: "lc-super", schoolId: createdOkId } },
+        });
+        expect(creatorLink?.role).toBe("GESTOR_ESCOLAR");
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({ action: "CREATE_SCHOOL", schoolId: createdOkId })
+        );
+
+        // 4. POST /api/schools com falha no 2º modelo starter: rollback dos modelos (0 gravados), mas preserva criação e vínculo
+        failStarterTemplate = true;
+        capturedContextSchools.length = 0;
+        const rCreateFailTpl = await createSchoolHandler(
+          new Request("http://127.0.0.1/api/schools", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inepCode: "99000778",
+              name: "Escola Falha Starter",
+              network: "ESTADUAL",
+              city: "Cidade Ciclo",
+              state: "PR",
+            }),
+          })
+        );
+        failStarterTemplate = false;
+        expect(rCreateFailTpl.status).toBe(201);
+        const createdFailId = (await rCreateFailTpl.json()).school.id as string;
+        expect(capturedContextSchools).toEqual([createdFailId]);
+        const rolledBackTemplates = await prisma.messageTemplate.findMany({
+          where: { schoolId: createdFailId },
+        });
+        expect(rolledBackTemplates).toHaveLength(0);
+
+        // Limpa as duas escolas criadas antes de testar conflitos em school-alpha/school-beta
+        await prisma.messageTemplate.deleteMany({ where: { schoolId: { in: [createdOkId, createdFailId] } } });
+        await prisma.userSchool.deleteMany({ where: { schoolId: { in: [createdOkId, createdFailId] } } });
+        await prisma.school.deleteMany({ where: { id: { in: [createdOkId, createdFailId] } } });
+
+        // 5. Configura school-alpha e school-beta com dados legítimos + dependências divergentes
+        await prisma.student.createMany({
+          data: [
+            {
+              id: "stu-lc-a1",
+              name: "Aluno Ciclo Alpha",
+              cgm: "950000101",
+              phone: "41999999501",
+              schoolId: "school-alpha",
+              classGroupId: "cg-alpha",
+              active: true,
+            },
+            {
+              id: "stu-lc-b1",
+              name: "Aluno Ciclo Beta",
+              cgm: "950000201",
+              phone: "41999999502",
+              schoolId: "school-beta",
+              classGroupId: "cg-beta",
+              active: true,
+            },
+          ],
+        });
+        await prisma.messageTemplate.createMany({
+          data: [
+            {
+              id: "tpl-lc-a",
+              schoolId: "school-alpha",
+              title: "Modelo Alpha",
+              segment: "TODOS",
+              prefixText: "Olá {aluno}",
+              suffixText: "Fim",
+              active: true,
+            },
+            {
+              id: "tpl-lc-b",
+              schoolId: "school-beta",
+              title: "Modelo Beta",
+              segment: "TODOS",
+              prefixText: "Olá {aluno}",
+              suffixText: "Fim",
+              active: true,
+            },
+          ],
+        });
+        await prisma.messageLog.createMany({
+          data: [
+            {
+              id: "ml-lc-a-legacy",
+              schoolId: null,
+              studentId: "stu-lc-a1",
+              templateId: "tpl-lc-a",
+              reasonTitle: "Faltas",
+              messageContent: "Legado Alpha",
+              phoneUsed: "41999999501",
+              sentByName: "Sistema",
+            },
+            {
+              id: "ml-lc-b-ok",
+              schoolId: "school-beta",
+              studentId: "stu-lc-b1",
+              templateId: "tpl-lc-b",
+              reasonTitle: "Faltas",
+              messageContent: "Beta OK",
+              phoneUsed: "41999999502",
+              sentByName: "Sistema",
+            },
+            // Divergência 1: log de stu-lc-a1 marcado com schoolId=school-beta
+            {
+              id: "ml-lc-div",
+              schoolId: "school-beta",
+              studentId: "stu-lc-a1",
+              templateId: "tpl-lc-a",
+              reasonTitle: "Faltas",
+              messageContent: "Divergente",
+              phoneUsed: "41999999501",
+              sentByName: "Sistema",
+            },
+            // Divergência 2: log de school-beta referenciando templateId=tpl-lc-a (risco de ON DELETE SET NULL)
+            {
+              id: "ml-lc-b-cross-tpl",
+              schoolId: "school-beta",
+              studentId: "stu-lc-b1",
+              templateId: "tpl-lc-a",
+              reasonTitle: "Faltas",
+              messageContent: "Beta usando modelo Alpha",
+              phoneUsed: "41999999502",
+              sentByName: "Sistema",
+            },
+          ],
+        });
+
+        // 5a. MessageLog divergente bloqueia sanitize e delete com 409, rollback integral e sem logAudit
+        vi.mocked(logAudit).mockClear();
+        const rSanDivLog = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rSanDivLog.status).toBe(409);
+        expect((await rSanDivLog.json()).code).toBe("SCHOOL_SANITIZE_INTEGRITY_CONFLICT");
+
+        const rDelDivLog = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDelDivLog.status).toBe(409);
+        expect((await rDelDivLog.json()).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+        expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-a-legacy" } })).not.toBeNull();
+
+        // Remove divergência 1; mantém divergência 2 (template de school-alpha usado por school-beta)
+        await prisma.messageLog.delete({ where: { id: "ml-lc-div" } });
+        const rDelCrossTpl = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDelCrossTpl.status).toBe(409);
+        expect((await rDelCrossTpl.json()).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        const betaLogAfterCrossTpl = await prisma.messageLog.findUnique({
+          where: { id: "ml-lc-b-cross-tpl" },
+        });
+        expect(betaLogAfterCrossTpl?.templateId).toBe("tpl-lc-a");
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // Remove divergência 2 e adiciona PedagogicalMinuteStudent cruzado (ata de school-alpha -> aluno de school-beta)
+        await prisma.messageLog.delete({ where: { id: "ml-lc-b-cross-tpl" } });
+        await prisma.pedagogicalMinute.create({
+          data: {
+            id: "min-lc-a",
+            schoolId: "school-alpha",
+            year: 2026,
+            status: "DRAFT",
+            subject: "Ata Ciclo",
+            summary: "Resumo oficial da ata de ciclo para teste de integridade.",
+            authorName: "Pedagoga",
+            authorEmail: "ped@redeativa.local",
+          },
+        });
+        await prisma.pedagogicalMinuteStudent.create({
+          data: {
+            id: "pms-lc-cross",
+            minuteId: "min-lc-a",
+            studentId: "stu-lc-b1",
+            studentNameSnapshot: "Aluno Ciclo Beta",
+          },
+        });
+
+        const rSanCrossMin = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rSanCrossMin.status).toBe(409);
+        expect((await rSanCrossMin.json()).code).toBe("SCHOOL_SANITIZE_INTEGRITY_CONFLICT");
+
+        const rDelCrossMin = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDelCrossMin.status).toBe(409);
+        expect((await rDelCrossMin.json()).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        expect(await prisma.pedagogicalMinuteStudent.findUnique({ where: { id: "pms-lc-cross" } })).not.toBeNull();
+        expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+        // Corrige vínculo da ata para stu-lc-a1 (coerente)
+        await prisma.pedagogicalMinuteStudent.update({
+          where: { id: "pms-lc-cross" },
+          data: { studentId: "stu-lc-a1", studentNameSnapshot: "Aluno Ciclo Alpha" },
+        });
+
+        // 6. Saneamento legítimo: limpa dados operacionais de school-alpha (incluindo legado nulo),
+        //    preserva school-alpha, tpl-lc-a e UserSchool da equipe, mantendo school-beta intacta
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rSanOk = await sanitizeSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha/sanitize", { method: "POST" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rSanOk.status).toBe(200);
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-lc-a" } })).not.toBeNull();
+        expect(await prisma.userSchool.findUnique({ where: { id: "us-lc-ped-a" } })).not.toBeNull();
+        expect(await prisma.student.count({ where: { schoolId: "school-alpha" } })).toBe(0);
+        expect(await prisma.classGroup.count({ where: { schoolId: "school-alpha" } })).toBe(0);
+        expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-a-legacy" } })).toBeNull();
+        expect(await prisma.student.count({ where: { schoolId: "school-beta" } })).toBe(2);
+        expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-b-ok" } })).not.toBeNull();
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({ action: "SANITIZE_SCHOOL", schoolId: "school-alpha" })
+        );
+
+        // 7. Exclusão legítima de school-alpha após saneamento (remove escola, modelos e equipe mantendo school-beta intacta)
+        capturedContextSchools.length = 0;
+        vi.mocked(logAudit).mockClear();
+        const rDelOk = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDelOk.status).toBe(200);
+        expect(capturedContextSchools).toEqual(["school-alpha"]);
+        expect(await prisma.school.findUnique({ where: { id: "school-alpha" } })).toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-lc-a" } })).toBeNull();
+        expect(await prisma.userSchool.findUnique({ where: { id: "us-lc-ped-a" } })).toBeNull();
+        expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-lc-b" } })).not.toBeNull();
+        expect(await prisma.messageLog.findUnique({ where: { id: "ml-lc-b-ok" } })).not.toBeNull();
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({ action: "DELETE_SCHOOL", schoolId: "school-alpha" })
+        );
+      } finally {
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.useRealPermissions = false;
       }
     });
   }

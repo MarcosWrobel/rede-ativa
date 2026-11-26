@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export const dynamic = "force-dynamic";
 
@@ -30,13 +31,6 @@ export async function POST(
         id: true,
         inepCode: true,
         name: true,
-        _count: {
-          select: {
-            students: true,
-            classGroups: true,
-            pedagogicalMinutes: true,
-          },
-        },
       },
     });
 
@@ -56,41 +50,120 @@ export async function POST(
       );
     }
 
-    // Executa a higienização de todos os registros em batch transaction compatível com PgBouncer
-    await prisma.$transaction([
-      prisma.messageLog.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.absenceJustification.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.inPersonAttendance.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.attendanceSnapshot.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.studentContact.deleteMany({ where: { student: { schoolId: id } } }),
-      prisma.pedagogicalMinuteStudent.deleteMany({
-        where: {
-          OR: [{ minute: { schoolId: id } }, { student: { schoolId: id } }],
-        },
-      }),
-      prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: id } } }),
-      prisma.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: id } } }),
-      prisma.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: id } } }),
-      prisma.pedagogicalMinute.deleteMany({ where: { schoolId: id } }),
-      ...(typeof prisma.studentCouncilSubjectEntry?.deleteMany === "function"
-        ? [prisma.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: id } })]
-        : []),
-      ...(typeof prisma.studentCouncilCard?.deleteMany === "function"
-        ? [prisma.studentCouncilCard.deleteMany({ where: { schoolId: id } })]
-        : []),
-      ...(typeof prisma.classCouncilTrimester?.deleteMany === "function"
-        ? [prisma.classCouncilTrimester.deleteMany({ where: { schoolId: id } })]
-        : []),
-      ...(typeof prisma.classCouncilSubject?.deleteMany === "function"
-        ? [prisma.classCouncilSubject.deleteMany({ where: { schoolId: id } })]
-        : []),
-      ...(typeof prisma.classCouncilBoard?.deleteMany === "function"
-        ? [prisma.classCouncilBoard.deleteMany({ where: { schoolId: id } })]
-        : []),
-      prisma.student.deleteMany({ where: { schoolId: id } }),
-      prisma.classGroup.deleteMany({ where: { schoolId: id } }),
-    ]);
+    const { wipedStudentsCount, wipedClassesCount, wipedMinutesCount } = await withTenantContext(
+      prisma,
+      target.id,
+      async (tx) => {
+        const studentsCount =
+          typeof (tx.student as any)?.count === "function"
+            ? await tx.student.count({ where: { schoolId: target.id } })
+            : 0;
+        const classGroupsCount =
+          typeof (tx.classGroup as any)?.count === "function"
+            ? await tx.classGroup.count({ where: { schoolId: target.id } })
+            : 0;
+        const minutesCount =
+          typeof (tx.pedagogicalMinute as any)?.count === "function"
+            ? await tx.pedagogicalMinute.count({ where: { schoolId: target.id } })
+            : 0;
+
+        if (typeof (tx.messageLog as any)?.findFirst === "function") {
+          const divergentMessageLog = await tx.messageLog.findFirst({
+            where: {
+              OR: [
+                {
+                  student: { schoolId: target.id },
+                  schoolId: { not: null },
+                  NOT: { schoolId: target.id },
+                },
+                {
+                  schoolId: target.id,
+                  student: { NOT: { schoolId: target.id } },
+                },
+              ],
+            },
+            select: { id: true },
+          });
+          if (divergentMessageLog) {
+            const conflictErr = new Error(
+              "Higienização bloqueada por integridade referencial: existem registros de mensageria com divergência de vínculo institucional."
+            ) as Error & { code?: string };
+            conflictErr.code = "SCHOOL_SANITIZE_INTEGRITY_CONFLICT";
+            throw conflictErr;
+          }
+        }
+
+        if (typeof (tx.pedagogicalMinuteStudent as any)?.findFirst === "function") {
+          const crossSchoolMinuteStudent = await tx.pedagogicalMinuteStudent.findFirst({
+            where: {
+              OR: [
+                {
+                  minute: { schoolId: target.id },
+                  student: { NOT: { schoolId: target.id } },
+                },
+                {
+                  student: { schoolId: target.id },
+                  minute: { NOT: { schoolId: target.id } },
+                },
+              ],
+            },
+            select: { id: true },
+          });
+          if (crossSchoolMinuteStudent) {
+            const conflictErr = new Error(
+              "Higienização bloqueada por integridade referencial: existem vínculos de atas pedagógicas com divergência de instituição."
+            ) as Error & { code?: string };
+            conflictErr.code = "SCHOOL_SANITIZE_INTEGRITY_CONFLICT";
+            throw conflictErr;
+          }
+        }
+
+        await tx.messageLog.deleteMany({
+          where: {
+            student: { schoolId: target.id },
+            OR: [{ schoolId: null }, { schoolId: target.id }],
+          },
+        });
+        await tx.lowAttendanceRecord.deleteMany({ where: { student: { schoolId: target.id } } });
+        await tx.absenceJustification.deleteMany({ where: { student: { schoolId: target.id } } });
+        await tx.inPersonAttendance.deleteMany({ where: { student: { schoolId: target.id } } });
+        await tx.attendanceSnapshot.deleteMany({ where: { student: { schoolId: target.id } } });
+        await tx.studentContact.deleteMany({ where: { student: { schoolId: target.id } } });
+        await tx.pedagogicalMinuteStudent.deleteMany({
+          where: {
+            minute: { schoolId: target.id },
+            student: { schoolId: target.id },
+          },
+        });
+        await tx.pedagogicalMinuteParticipant.deleteMany({ where: { minute: { schoolId: target.id } } });
+        await tx.pedagogicalMinuteAddendum.deleteMany({ where: { minute: { schoolId: target.id } } });
+        await tx.pedagogicalActionItem.deleteMany({ where: { minute: { schoolId: target.id } } });
+        await tx.pedagogicalMinute.deleteMany({ where: { schoolId: target.id } });
+        if (typeof tx.studentCouncilSubjectEntry?.deleteMany === "function") {
+          await tx.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: target.id } });
+        }
+        if (typeof tx.studentCouncilCard?.deleteMany === "function") {
+          await tx.studentCouncilCard.deleteMany({ where: { schoolId: target.id } });
+        }
+        if (typeof tx.classCouncilTrimester?.deleteMany === "function") {
+          await tx.classCouncilTrimester.deleteMany({ where: { schoolId: target.id } });
+        }
+        if (typeof tx.classCouncilSubject?.deleteMany === "function") {
+          await tx.classCouncilSubject.deleteMany({ where: { schoolId: target.id } });
+        }
+        if (typeof tx.classCouncilBoard?.deleteMany === "function") {
+          await tx.classCouncilBoard.deleteMany({ where: { schoolId: target.id } });
+        }
+        await tx.student.deleteMany({ where: { schoolId: target.id } });
+        await tx.classGroup.deleteMany({ where: { schoolId: target.id } });
+
+        return {
+          wipedStudentsCount: studentsCount,
+          wipedClassesCount: classGroupsCount,
+          wipedMinutesCount: minutesCount,
+        };
+      }
+    );
 
     await logAudit({
       action: "SANITIZE_SCHOOL",
@@ -100,9 +173,9 @@ export async function POST(
       details: {
         schoolName: target.name,
         inepCode: target.inepCode,
-        wipedStudentsCount: target._count.students,
-        wipedClassesCount: target._count.classGroups,
-        wipedMinutesCount: target._count.pedagogicalMinutes,
+        wipedStudentsCount,
+        wipedClassesCount,
+        wipedMinutesCount,
       },
       user: {
         id: authCheck.userId,
@@ -121,6 +194,47 @@ export async function POST(
     });
   } catch (error: any) {
     console.error("[POST /api/schools/[id]/sanitize] Erro:", error);
+
+    if (error?.code === "SCHOOL_SANITIZE_INTEGRITY_CONFLICT") {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: "SCHOOL_SANITIZE_INTEGRITY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+
+    const constraintText = [
+      error?.meta?.constraint,
+      error?.meta?.field_name,
+      error?.message,
+    ]
+      .filter((v): v is string => typeof v === "string")
+      .join(" ");
+
+    if (constraintText.includes("MessageLog_schoolId_fkey")) {
+      return NextResponse.json(
+        {
+          error:
+            "Higienização bloqueada por integridade referencial: existem registros de mensageria vinculados a esta instituição com divergência de vínculo estudantil.",
+          code: "SCHOOL_SANITIZE_INTEGRITY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (error?.code === "P2003") {
+      return NextResponse.json(
+        {
+          error:
+            "Higienização bloqueada por integridade referencial: existem registros vinculados a esta instituição que impedem a limpeza.",
+          code: "SCHOOL_SANITIZE_FK_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: "Erro ao higienizar dados da instituição" },
       { status: 500 }
