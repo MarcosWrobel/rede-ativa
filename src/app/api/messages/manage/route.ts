@@ -83,14 +83,7 @@ export async function PUT(req: Request) {
       const previous = await tx.messageLog.findUnique({
         where: { id },
         include: {
-          student: {
-            select: {
-              id: true,
-              schoolId: true,
-              classGroupId: true,
-              name: true,
-            },
-          },
+          student: true,
         },
       });
 
@@ -121,7 +114,6 @@ export async function PUT(req: Request) {
               id: previous.student.classGroupId,
               schoolId: currentSchool.id,
             },
-            select: { id: true, schoolId: true, name: true },
           })
         : null;
 
@@ -203,11 +195,7 @@ export async function PUT(req: Request) {
         ...updatedRow,
         student: {
           ...previous.student,
-          classGroup: {
-            id: classGroup.id,
-            schoolId: classGroup.schoolId,
-            name: classGroup.name,
-          },
+          classGroup,
         },
       };
 

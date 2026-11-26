@@ -2059,7 +2059,13 @@ describe.skipIf(!SHOULD_RUN)(
           })
         );
         expect(rGestorPut.status).toBe(200);
+        const putJson = await rGestorPut.json();
         const rowAfterPut = await prisma.messageLog.findUnique({ where: { id: "mgr-alpha-ok" } });
+        const expectedStudent = await prisma.student.findUnique({
+          where: { id: "stu-alpha" },
+          include: { classGroup: true },
+        });
+        expect(expectedStudent).not.toBeNull();
         expect(rowAfterPut?.reasonTitle).toBe("Falta Retificada");
         expect(rowAfterPut?.messageContent).toBe("Msg Alpha Original");
         const expectedPutHash = computeMessageContentHash({
@@ -2076,6 +2082,27 @@ describe.skipIf(!SHOULD_RUN)(
           repliedAt: null,
         });
         expect(rowAfterPut?.contentHash).toBe(expectedPutHash);
+        expect(putJson.success).toBe(true);
+        expect(putJson.updated).toMatchObject({
+          id: "mgr-alpha-ok",
+          schoolId: "school-alpha",
+          studentId: "stu-alpha",
+          reasonTitle: "Falta Retificada",
+          messageContent: "Msg Alpha Original",
+          phoneUsed: "41999991111",
+          sentByName: "Equipe A",
+          contentHash: expectedPutHash,
+          student: {
+            ...JSON.parse(JSON.stringify(expectedStudent)),
+            classGroup: JSON.parse(JSON.stringify(expectedStudent!.classGroup)),
+          },
+        });
+        expect(Object.keys(putJson.updated.student).sort()).toEqual(
+          Object.keys(expectedStudent!).sort()
+        );
+        expect(Object.keys(putJson.updated.student.classGroup).sort()).toEqual(
+          Object.keys(expectedStudent!.classGroup).sort()
+        );
         expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
           expect.objectContaining({
             action: "UPDATE_MESSAGE_LOG",
@@ -2118,6 +2145,9 @@ describe.skipIf(!SHOULD_RUN)(
             })
           );
           expect(rBadPut.status).toBe(403);
+          const badPutJson = await rBadPut.json();
+          expect(badPutJson.updated).toBeUndefined();
+          expect(typeof badPutJson.error).toBe("string");
           const rBadDel = await deleteMessageManageHandler(
             new Request(`http://127.0.0.1/api/messages/manage?id=${badId}`, { method: "DELETE" })
           );

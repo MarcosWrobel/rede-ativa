@@ -106,4 +106,71 @@ describe("FASE 3 — Frontend & UX Pedagógica Human-in-the-Loop", () => {
     expect(html).toContain("Capturar Retorno");
     expect(html).toContain("+ Nota");
   });
+
+  it("mantém estudante e turma visíveis no HistoricoClient após substituir item por data.updated do PUT /api/messages/manage", () => {
+    const initialLog = {
+      id: "hist-edit-1",
+      schoolId: "school-alpha",
+      studentId: "student-200",
+      reasonTitle: "Busca Ativa",
+      messageContent: "Mensagem original",
+      phoneUsed: "42988887777",
+      sentByName: "Pedagoga Carla",
+      sentAt: "2026-11-08T11:00:00.000Z",
+      guardianReplied: false,
+      replyNotes: null,
+      replyCategory: null,
+      deliveryStatus: "SENT",
+      contentHash: "hash-before",
+      student: {
+        id: "student-200",
+        schoolId: "school-alpha",
+        classGroupId: "class-2",
+        name: "Lucas Pereira",
+        cgm: "987654321",
+        guardianName: "Maria Pereira",
+        guardianPhone: "42988887777",
+        classGroup: {
+          id: "class-2",
+          schoolId: "school-alpha",
+          name: "7º Ano B",
+          shift: "MATUTINO",
+        },
+      },
+    };
+
+    const dataFromManagePut = {
+      success: true,
+      updated: {
+        ...initialLog,
+        reasonTitle: "Falta Retificada",
+        contentHash: "hash-after",
+      },
+    };
+
+    // Simula a substituição feita em HistoricoClient.handleSaveEdit:
+    // prev.map((item) => (item.id === activeEditLog.id ? data.updated : item))
+    const logsAfterEdit = [initialLog].map((item) =>
+      item.id === initialLog.id ? dataFromManagePut.updated : item
+    );
+
+    const html = renderToString(
+      <HistoricoClient
+        initialLogs={logsAfterEdit}
+        initialTotal={1}
+        pedagogas={["Pedagoga Carla"]}
+        classGroups={[{ id: "class-2", name: "7º Ano B" }]}
+        currentUser={{
+          name: "Gestora Ana",
+          email: "gestora@escola.pr.gov.br",
+          role: "GESTOR_ESCOLAR",
+          isAdmin: true,
+        }}
+      />
+    );
+
+    expect(html).toContain("Lucas Pereira");
+    expect(html).toContain("7º Ano B");
+    expect(html).toContain("Falta Retificada");
+  });
 });
