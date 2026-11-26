@@ -69,6 +69,7 @@ model School {
   classGroups     ClassGroup[]
   students        Student[]
   templates       MessageTemplate[]
+  messageLogs     MessageLog[]
   auditLogs       AuditLog[]
   pedagogicalMinutes PedagogicalMinute[]
   classCouncilBoards           ClassCouncilBoard[]
@@ -197,6 +198,8 @@ model MessageTemplate {
 
 model MessageLog {
   id              String           @id @default(cuid())
+  schoolId        String?
+  school          School?          @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   studentId       String
   student         Student          @relation(fields: [studentId], references: [id], onDelete: Restrict)
   templateId      String?
@@ -219,6 +222,7 @@ model MessageLog {
   contentHash       String?          // Hash SHA-256 canônico de integridade probatória e não-repúdio (JUR-02)
 
   @@index([sentAt(sort: Desc)])
+  @@index([schoolId, sentAt(sort: Desc)])
   @@index([studentId, sentAt(sort: Desc)])
   @@index([studentId, sentAt(sort: Desc), deliveryStatus])
   @@index([guardianReplied])
