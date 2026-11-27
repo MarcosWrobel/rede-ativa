@@ -83,12 +83,12 @@ export default function SchoolSelector({
       : "SEED-PR";
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="min-w-0 sm:relative" ref={menuRef}>
       <button
         type="button"
         onClick={() => hasMultiple && setOpen(!open)}
         disabled={!hasMultiple || loading}
-        className={`flex items-center space-x-2 text-left px-2.5 py-1.5 rounded-lg border transition ${
+        className={`flex max-w-full items-center space-x-2 text-left px-2.5 py-1.5 rounded-lg border transition ${
           hasMultiple
             ? "bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 cursor-pointer"
             : "bg-transparent border-transparent cursor-default"
@@ -117,7 +117,7 @@ export default function SchoolSelector({
               {currentSchool?.name || "Instituição de Ensino"}
             </span>
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider ${
+              className={`shrink-0 text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider ${
                 currentSchool?.network === "MUNICIPAL"
                   ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                   : "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300"
@@ -135,14 +135,14 @@ export default function SchoolSelector({
 
         {hasMultiple && (
           <ChevronDown
-            className={`w-3.5 h-3.5 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+            className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
           />
         )}
       </button>
 
       {/* Dropdown Menu */}
       {open && (
-        <div className="absolute left-0 mt-1.5 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+        <div className="absolute right-3 top-full mt-1.5 w-72 max-w-[calc(100%-1.5rem)] sm:right-0 sm:w-80 sm:max-w-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
           <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700/80">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
               Suas escolas
