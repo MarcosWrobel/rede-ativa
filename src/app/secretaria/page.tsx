@@ -5,6 +5,7 @@ import { checkIsSecretariat, checkIsSuperAdmin } from "@/lib/roles";
 import { buildSessionFromSnapshot, resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import {
   aggregateSecretariaMetrics,
+  normalizeSecretariaFilterParam,
   resolveSecretariaNetworkScope,
 } from "@/lib/secretariaMetrics";
 import SecretariaClient from "./SecretariaClient";
@@ -16,7 +17,7 @@ export const metadata = {
 };
 
 interface Props {
-  searchParams?: Promise<{ city?: string; networkId?: string }>;
+  searchParams?: Promise<{ city?: string | string[]; networkId?: string | string[] }>;
 }
 
 export default async function SecretariaPage({ searchParams }: Props) {
@@ -75,8 +76,8 @@ export default async function SecretariaPage({ searchParams }: Props) {
     );
   }
 
-  const requestedCity = resolvedSearchParams.city?.trim();
-  const requestedNetworkId = resolvedSearchParams.networkId?.trim();
+  const requestedCity = normalizeSecretariaFilterParam(resolvedSearchParams.city);
+  const requestedNetworkId = normalizeSecretariaFilterParam(resolvedSearchParams.networkId);
   const effectiveNetworkIdFilter =
     requestedNetworkId && (isSuper || allowedNetworkIds.includes(requestedNetworkId))
       ? requestedNetworkId

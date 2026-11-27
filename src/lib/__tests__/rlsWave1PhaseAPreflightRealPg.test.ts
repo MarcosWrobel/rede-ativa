@@ -7128,6 +7128,9 @@ describe.skipIf(!SHOULD_RUN)(
 
       const prevUseRealPermissions = testAuthState.useRealPermissions;
       const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevSnapshot = testAuthState.snapshot;
+      const prevUserId = testAuthState.userId;
+      const prevRole = testAuthState.role;
       testAuthState.useRealPermissions = true;
 
       try {
@@ -7585,6 +7588,133 @@ describe.skipIf(!SHOULD_RUN)(
         expect(tenantCalls).toEqual([
           { schoolId: "school-sec-b1", currentSetting: "school-sec-b1" },
         ]);
+
+        // 6. Parâmetros repetidos, vazios e em ordem invertida (API e SSR) com GESTAO_SECRETARIA ativo
+        testAuthState.pendingSessionUser = secSessionUser;
+
+        // 6a. Primeiro valor válido com espaços e segundo conflitante -> usa o 1º valor normalizado (200 + paridade SSR)
+        tenantCalls.length = 0;
+        const rRepValid = await secretariaMetricsHandler(
+          new NextRequest(
+            "http://127.0.0.1/api/secretaria/metrics?city=%20Cidade%20Sec%20Teste%20&city=OutraCidade&networkId=%20net-sec-a%20&networkId=net-sec-b"
+          )
+        );
+        expect(rRepValid.status).toBe(200);
+        const repValidBody = await rRepValid.json();
+        expect(repValidBody.metrics).toEqual(secApiBody.metrics);
+        expect(repValidBody.schools).toEqual(secApiBody.schools);
+
+        const pageRepValidEl = (await SecretariaPage({
+          searchParams: Promise.resolve({
+            city: [" Cidade Sec Teste ", "OutraCidade"],
+            networkId: [" net-sec-a ", "net-sec-b"],
+          }),
+        })) as unknown as {
+          props: {
+            city: string;
+            metrics: typeof secApiBody.metrics;
+            initialSchools: typeof secApiBody.schools;
+            predictiveData: typeof secApiBody.predictiveAnalysis;
+          };
+        };
+        expect(pageRepValidEl.props.city).toBe("Cidade Sec Teste");
+        expect(pageRepValidEl.props.metrics).toEqual(repValidBody.metrics);
+        expect(pageRepValidEl.props.initialSchools).toEqual(repValidBody.schools);
+        expect(pageRepValidEl.props.predictiveData).toEqual(repValidBody.predictiveAnalysis);
+
+        // 6b. Primeiro valor vazio seguido de valor alheio -> vazio é tratado como ausência de filtro (200 + paridade SSR)
+        tenantCalls.length = 0;
+        const rRepEmpty = await secretariaMetricsHandler(
+          new NextRequest(
+            "http://127.0.0.1/api/secretaria/metrics?city=%20%20&city=OutraCidade&networkId=&networkId=net-sec-b"
+          )
+        );
+        expect(rRepEmpty.status).toBe(200);
+        const repEmptyBody = await rRepEmpty.json();
+        expect(repEmptyBody.metrics).toEqual(secApiBody.metrics);
+
+        const pageRepEmptyEl = (await SecretariaPage({
+          searchParams: Promise.resolve({
+            city: ["   ", "OutraCidade"],
+            networkId: ["", "net-sec-b"],
+          }),
+        })) as unknown as {
+          props: {
+            city: string;
+            metrics: typeof secApiBody.metrics;
+            initialSchools: Array<{ id: string }>;
+          };
+        };
+        expect(pageRepEmptyEl.props.city).toBe("Cidade Sec Teste");
+        expect(pageRepEmptyEl.props.metrics).toEqual(repEmptyBody.metrics);
+        expect(pageRepEmptyEl.props.initialSchools.map((s) => s.id)).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+        ]);
+
+        // 6c. Ordem invertida (rede/cidade alheia primeiro, autorizada depois) -> 403 na API e SSR seguro sem vazar rede alheia
+        tenantCalls.length = 0;
+        const rInvNet = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics?networkId=net-sec-b&networkId=net-sec-a")
+        );
+        expect(rInvNet.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        const rInvCity = await secretariaMetricsHandler(
+          new NextRequest(
+            "http://127.0.0.1/api/secretaria/metrics?city=OutraCidade&city=Cidade%20Sec%20Teste"
+          )
+        );
+        expect(rInvCity.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        const pageInvEl = (await SecretariaPage({
+          searchParams: Promise.resolve({
+            city: ["OutraCidade", "Cidade Sec Teste"],
+            networkId: ["net-sec-b", "net-sec-a"],
+          }),
+        })) as unknown as {
+          props: { city: string; initialSchools: Array<{ id: string }> };
+        };
+        expect(pageInvEl.props.city).toBe("Cidade Sec Teste");
+        expect(pageInvEl.props.initialSchools.map((s) => s.id)).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+        ]);
+        expect(
+          tenantCalls.some((c) => c.schoolId === "school-sec-b1" || c.schoolId === "school-sec-a-inativa")
+        ).toBe(false);
+
+        // 7. Ausência de snapshot e snapshot sem vínculos (mesmo com sessão sintética carregando net-sec-a) -> 403 e 0 transações
+        testAuthState.useRealPermissions = false;
+        testAuthState.role = "GESTAO_SECRETARIA";
+        testAuthState.userId = "";
+        testAuthState.snapshot = null;
+        testAuthState.pendingSessionUser = secSessionUser;
+
+        tenantCalls.length = 0;
+        const rNoSnapshot = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics")
+        );
+        expect(rNoSnapshot.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        testAuthState.snapshot = {
+          id: secUser.id,
+          email: secUser.email,
+          name: secUser.name,
+          role: "GESTAO_SECRETARIA",
+          active: true,
+          schoolId: null,
+          schools: [],
+          networks: [],
+        };
+        tenantCalls.length = 0;
+        const rEmptySnapshot = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics")
+        );
+        expect(rEmptySnapshot.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
       } finally {
         await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sec-a"] } } }).catch(() => {});
         await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "superadmin-sec-test"] } } }).catch(() => {});
@@ -7592,6 +7722,9 @@ describe.skipIf(!SHOULD_RUN)(
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
         testAuthState.useRealPermissions = prevUseRealPermissions;
+        testAuthState.snapshot = prevSnapshot;
+        testAuthState.userId = prevUserId;
+        testAuthState.role = prevRole;
       }
     });
   }

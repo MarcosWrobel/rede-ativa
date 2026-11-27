@@ -58,6 +58,19 @@ export interface SecretariaAggregatedResult {
 }
 
 /**
+ * Normaliza parâmetros de filtro (`city`, `networkId`) recebidos via query string ou Next.js searchParams.
+ * Preserva a semântica da API: usa apenas o primeiro valor, aplica trim e trata vazio como ausente.
+ */
+export function normalizeSecretariaFilterParam(
+  value: string | string[] | null | undefined
+): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== "string") return undefined;
+  const trimmed = first.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Resolve os networkIds e municípios autorizados para GESTAO_SECRETARIA a partir
  * de vínculos ativos e redes ativas revalidados no servidor (`snapshot`).
  * A ausência de vínculo válido no snapshot prevalece sobre dados antigos da sessão.
@@ -66,9 +79,8 @@ export async function resolveSecretariaNetworkScope(params: {
   isSuper: boolean;
   userId?: string | null;
   snapshot?: ServerUserAuthSnapshot | null;
-  sessionNetworks?: unknown[];
 }): Promise<SecretariaNetworkScope> {
-  const { isSuper, userId, snapshot, sessionNetworks } = params;
+  const { isSuper, userId, snapshot } = params;
   if (isSuper) {
     return { allowedNetworkIds: [], allowedCities: [] };
   }
@@ -89,42 +101,22 @@ export async function resolveSecretariaNetworkScope(params: {
         });
       }
     }
-  } else {
-    if (userId && typeof (prisma as any).userNetwork?.findMany === "function") {
-      const dbNetworks = await prisma.userNetwork.findMany({
-        where: { userId, active: true },
-        include: { network: true },
-      });
-      for (const un of dbNetworks as any[]) {
-        if (
-          un?.active !== false &&
-          un?.network?.active !== false &&
-          (!un?.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA") &&
-          un?.networkId
-        ) {
-          resolvedNetworks.push({
-            networkId: String(un.networkId).trim(),
-            city: String(un.network?.city || "").trim(),
-          });
-        }
-      }
-    }
-
-    if (resolvedNetworks.length === 0 && Array.isArray(sessionNetworks)) {
-      for (const net of sessionNetworks as any[]) {
-        if (
-          net?.active !== false &&
-          net?.network?.active !== false &&
-          (!net?.role || String(net.role).toUpperCase() === "GESTAO_SECRETARIA")
-        ) {
-          const nid = String(net?.networkId || net?.id || "").trim();
-          if (nid) {
-            resolvedNetworks.push({
-              networkId: nid,
-              city: String(net?.city || net?.network?.city || "").trim(),
-            });
-          }
-        }
+  } else if (userId && typeof (prisma as any).userNetwork?.findMany === "function") {
+    const dbNetworks = await prisma.userNetwork.findMany({
+      where: { userId, active: true },
+      include: { network: true },
+    });
+    for (const un of dbNetworks as any[]) {
+      if (
+        un?.active !== false &&
+        un?.network?.active !== false &&
+        (!un?.role || String(un.role).toUpperCase() === "GESTAO_SECRETARIA") &&
+        un?.networkId
+      ) {
+        resolvedNetworks.push({
+          networkId: String(un.networkId).trim(),
+          city: String(un.network?.city || "").trim(),
+        });
       }
     }
   }

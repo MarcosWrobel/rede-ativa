@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth, checkIsSuperAdmin, checkIsSecretariat } from "@/lib/permissions";
 import {
   aggregateSecretariaMetrics,
+  normalizeSecretariaFilterParam,
   resolveSecretariaNetworkScope,
 } from "@/lib/secretariaMetrics";
 
@@ -27,7 +28,6 @@ export async function GET(req: Request) {
       isSuper,
       userId: authCheck.userId,
       snapshot: authCheck.snapshot,
-      sessionNetworks: (authCheck.session?.user as any)?.networks,
     });
 
     if (!isSuper && allowedNetworkIds.length === 0) {
@@ -37,7 +37,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const rawNetworkIdParam = searchParams.get("networkId")?.trim();
+    const rawNetworkIdParam = normalizeSecretariaFilterParam(searchParams.getAll("networkId"));
     if (rawNetworkIdParam && !isSuper && !allowedNetworkIds.includes(rawNetworkIdParam)) {
       return NextResponse.json(
         { error: "Acesso negado às métricas consolidadas de outra rede municipal." },
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const rawCityParam = searchParams.get("city")?.trim();
+    const rawCityParam = normalizeSecretariaFilterParam(searchParams.getAll("city"));
     const requestedCity = rawCityParam || allowedCities[0] || "";
 
     if (!isSuper && rawCityParam && allowedCities.length > 0) {
