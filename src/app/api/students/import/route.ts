@@ -36,10 +36,14 @@ export async function POST(req: Request) {
     const { turmas, students, transferredStudents, options } = parsed.data;
 
     // 1. Resolve escola ativa com seleção explícita para SuperAdmin e permissão de escrita na escola alvo
+    const explicitServerSchoolId = authCheck.snapshot
+      ? authCheck.snapshot.schoolId
+      : authCheck.schoolId;
     const currentSchool = checkIsSuperAdmin(authCheck.session)
       ? await resolveExplicitSelectedSchoolForCouncil(
           authCheck.session,
-          authCheck.schoolId
+          explicitServerSchoolId,
+          authCheck.snapshot
         )
       : await resolveAuthorizedSchoolForCouncil(
           authCheck.session,

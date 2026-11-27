@@ -56,10 +56,14 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const explicitServerSchoolId = authCheck.snapshot
+      ? authCheck.snapshot.schoolId
+      : authCheck.schoolId;
     const currentSchool = checkIsSuperAdmin(authCheck.session)
       ? await resolveExplicitSelectedSchoolForCouncil(
           authCheck.session,
-          authCheck.schoolId
+          explicitServerSchoolId,
+          authCheck.snapshot
         )
       : await resolveAuthorizedSchoolForCouncil(
           authCheck.session,

@@ -204,7 +204,8 @@ export function isCouncilBoardAuthorizedInActiveSchool(
  */
 export async function resolveExplicitSelectedSchoolForCouncil(
   session: AuthSessionLike | null | undefined,
-  explicitSchoolId?: string | null
+  explicitSchoolId?: string | null,
+  snapshot?: { schoolId?: string | null } | null
 ): Promise<currentSchoolModule.SchoolContext | null> {
   if (!session?.user || session.user.active === false) {
     return null;
@@ -235,7 +236,10 @@ export async function resolveExplicitSelectedSchoolForCouncil(
   );
 
   if (isSuper || role === "GESTAO_SECRETARIA") {
-    const targetId = cleanExplicit || sessionSchoolId;
+    const authoritativeSessionSchoolId = snapshot
+      ? (snapshot.schoolId ? String(snapshot.schoolId).trim() : null)
+      : sessionSchoolId;
+    const targetId = cleanExplicit || authoritativeSessionSchoolId;
     if (!targetId) {
       return null;
     }

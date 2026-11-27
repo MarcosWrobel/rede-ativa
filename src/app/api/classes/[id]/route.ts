@@ -49,9 +49,13 @@ export async function PATCH(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await context.params;
+    const explicitServerSchoolId = authCheck.snapshot
+      ? authCheck.snapshot.schoolId
+      : authCheck.schoolId;
     const currentSchool = await resolveExplicitSelectedSchoolForCouncil(
       authCheck.session,
-      authCheck.schoolId
+      explicitServerSchoolId,
+      authCheck.snapshot
     );
     if (!currentSchool) {
       return NextResponse.json(

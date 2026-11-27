@@ -42,6 +42,126 @@ interface ImportSummary {
   missingPhoneImportedCount: number;
 }
 
+export function buildInitialTurmaPreviewState(params: {
+  parsed: SereParseResult;
+  existingClassGroups: Array<{ id: string; name: string; segment: string; shift?: string }>;
+  existingStudentsByCgm: Map<string, { classGroupId: string }>;
+}): {
+  configs: Record<string, TurmaSelectionConfig>;
+  ambiguousLineIds: Set<string>;
+} {
+  const { parsed, existingClassGroups, existingStudentsByCgm } = params;
+  const normalizedGroups = existingClassGroups.map((cg) => ({
+    id: cg.id,
+    name: cg.name,
+    segment: cg.segment,
+    shift: cg.shift || "MANHA",
+  }));
+
+  const configs: Record<string, TurmaSelectionConfig> = {};
+  const ambiguousLineIds = new Set<string>();
+
+  for (const t of parsed.turmas) {
+    const resolution = resolveSereTurmaMatch({
+      name: t.suggestedName,
+      shift: t.shift,
+      sourceIdentity: t.sourceIdentity,
+      studentCgms: t.students.map((s) => s.cgm).filter(Boolean),
+      existingClassGroups: normalizedGroups,
+      existingStudentsByCgm,
+    });
+    const matchedExisting =
+      resolution.status === "matched" && resolution.matchedClassGroupId
+        ? existingClassGroups.find((cg) => cg.id === resolution.matchedClassGroupId)
+        : undefined;
+
+    if (resolution.status === "ambiguous") {
+      ambiguousLineIds.add(t.tempId);
+    }
+
+    configs[t.tempId] = {
+      tempId: t.tempId,
+      selected: t.selectedByDefault,
+      customName: matchedExisting ? matchedExisting.name : t.suggestedName,
+      ...(matchedExisting ? { targetClassGroupId: matchedExisting.id } : {}),
+      segment: (matchedExisting?.segment as SchoolSegment) || t.segment,
+      shift: (matchedExisting?.shift as SchoolShift) || t.shift,
+      isComplementary: t.isComplementary,
+    };
+  }
+
+  return { configs, ambiguousLineIds };
+}
+
+export function applyTurmaTargetSelection(params: {
+  prevConfigs: Record<string, TurmaSelectionConfig>;
+  tempId: string;
+  rawValue: string;
+  existingClassGroups: Array<{ id: string; name: string; segment: string; shift?: string }>;
+}): Record<string, TurmaSelectionConfig> {
+  const { prevConfigs, tempId, rawValue, existingClassGroups } = params;
+  const current = prevConfigs[tempId];
+  if (!current) return prevConfigs;
+
+  const isCreateNew = rawValue === "__CREATE_NEW__";
+  const nextId = rawValue && !isCreateNew ? rawValue : undefined;
+  const chosen = nextId
+    ? existingClassGroups.find((cg) => cg.id === nextId)
+    : undefined;
+
+  return {
+    ...prevConfigs,
+    [tempId]: {
+      ...current,
+      targetClassGroupId: nextId,
+      confirmCreateNew: isCreateNew || undefined,
+      ...(chosen
+        ? {
+            customName: chosen.name,
+            segment: chosen.segment as SchoolSegment,
+            shift: (chosen.shift || current.shift) as SchoolShift,
+          }
+        : {}),
+    },
+  };
+}
+
+export function reopenAmbiguousTurmasFrom409(params: {
+  prevConfigs: Record<string, TurmaSelectionConfig>;
+  prevAmbiguousIds: Set<string>;
+  ambiguousTurmas: Array<{ tempId: string }>;
+}): {
+  configs: Record<string, TurmaSelectionConfig>;
+  ambiguousLineIds: Set<string>;
+} {
+  const affectedIds = new Set(params.ambiguousTurmas.map((item) => item.tempId));
+  const ambiguousLineIds = new Set([...params.prevAmbiguousIds, ...affectedIds]);
+  const configs = { ...params.prevConfigs };
+  for (const tid of affectedIds) {
+    if (configs[tid]) {
+      configs[tid] = {
+        ...configs[tid],
+        targetClassGroupId: undefined,
+        confirmCreateNew: undefined,
+      };
+    }
+  }
+  return { configs, ambiguousLineIds };
+}
+
+export function isTurmaAmbiguousUnresolved(
+  tempId: string,
+  cfg: TurmaSelectionConfig | undefined,
+  ambiguousLineIds: Set<string>
+): boolean {
+  return Boolean(
+    cfg?.selected &&
+      ambiguousLineIds.has(tempId) &&
+      !cfg.targetClassGroupId &&
+      !cfg.confirmCreateNew
+  );
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -70,7 +190,7 @@ export default function SereImportModal({
   const [loadedFileNames, setLoadedFileNames] = useState<string[]>([]);
   const [parseResult, setParseResult] = useState<SereParseResult | null>(null);
   const [turmaConfigs, setTurmaConfigs] = useState<Record<string, TurmaSelectionConfig>>({});
-  const [unresolvedAmbiguousIds, setUnresolvedAmbiguousIds] = useState<Set<string>>(new Set());
+  const [ambiguousLineIds, setAmbiguousLineIds] = useState<Set<string>>(new Set());
 
   const existingStudentsByCgm = useMemo(() => {
     const map = new Map<string, { classGroupId: string }>();
@@ -229,41 +349,17 @@ export default function SereImportModal({
         return;
       }
 
-      const nextConfigs: Record<string, TurmaSelectionConfig> = {};
-      const nextAmbiguous = new Set<string>();
-      for (const t of parsed.turmas) {
-        const resolution = resolveSereTurmaMatch({
-          name: t.suggestedName,
-          shift: t.shift,
-          sourceIdentity: t.sourceIdentity,
-          studentCgms: t.students.map((s) => s.cgm).filter(Boolean),
-          existingClassGroups: existingClassGroupsNormalized,
+      const { configs: nextConfigs, ambiguousLineIds: nextAmbiguous } =
+        buildInitialTurmaPreviewState({
+          parsed,
+          existingClassGroups,
           existingStudentsByCgm,
         });
-        const matchedExisting =
-          resolution.status === "matched" && resolution.matchedClassGroupId
-            ? existingClassGroups.find((cg) => cg.id === resolution.matchedClassGroupId)
-            : existingTurmaByUpper.get(normalizeClassGroupKey(t.suggestedName));
-
-        if (resolution.status === "ambiguous") {
-          nextAmbiguous.add(t.tempId);
-        }
-
-        nextConfigs[t.tempId] = {
-          tempId: t.tempId,
-          selected: t.selectedByDefault,
-          customName: matchedExisting ? matchedExisting.name : t.suggestedName,
-          ...(matchedExisting ? { targetClassGroupId: matchedExisting.id } : {}),
-          segment: (matchedExisting?.segment as SchoolSegment) || t.segment,
-          shift: (matchedExisting?.shift as SchoolShift) || t.shift,
-          isComplementary: t.isComplementary,
-        };
-      }
 
       setLoadedFileNames(files.map((f) => f.name));
       setParseResult(parsed);
       setTurmaConfigs(nextConfigs);
-      setUnresolvedAmbiguousIds(nextAmbiguous);
+      setAmbiguousLineIds(nextAmbiguous);
 
       if (parsed.schoolMetadata) {
         setSchoolNameEdit(
@@ -363,9 +459,13 @@ export default function SereImportModal({
           data.code === "AMBIGUOUS_CLASS_GROUP" &&
           Array.isArray(data.ambiguousTurmas)
         ) {
-          setUnresolvedAmbiguousIds(
-            new Set(data.ambiguousTurmas.map((item: { tempId: string }) => item.tempId))
-          );
+          const reopened = reopenAmbiguousTurmasFrom409({
+            prevConfigs: turmaConfigs,
+            prevAmbiguousIds: ambiguousLineIds,
+            ambiguousTurmas: data.ambiguousTurmas,
+          });
+          setAmbiguousLineIds(reopened.ambiguousLineIds);
+          setTurmaConfigs(reopened.configs);
         }
         throw new Error(data.error || "Erro ao gravar o lote de alunos.");
       }
@@ -840,11 +940,15 @@ export default function SereImportModal({
 
                           const existsInDb =
                             Boolean(cfg.targetClassGroupId) ||
-                            existingTurmaNamesUpper.has(
-                              normalizeClassGroupKey(cfg.customName)
-                            );
-                          const isAmbiguous =
-                            cfg.selected && unresolvedAmbiguousIds.has(t.tempId);
+                            (!ambiguousLineIds.has(t.tempId) &&
+                              existingTurmaNamesUpper.has(
+                                normalizeClassGroupKey(cfg.customName)
+                              ));
+                          const isAmbiguous = isTurmaAmbiguousUnresolved(
+                            t.tempId,
+                            cfg,
+                            ambiguousLineIds
+                          );
 
                           return (
                             <tr
@@ -889,34 +993,14 @@ export default function SereImportModal({
                                     }
                                     onChange={(e) => {
                                       const rawVal = e.target.value;
-                                      const isCreateNew = rawVal === "__CREATE_NEW__";
-                                      const nextId =
-                                        rawVal && !isCreateNew ? rawVal : undefined;
-                                      const chosen = nextId
-                                        ? existingClassGroups.find((cg) => cg.id === nextId)
-                                        : undefined;
-                                      setTurmaConfigs((prev) => ({
-                                        ...prev,
-                                        [t.tempId]: {
-                                          ...prev[t.tempId],
-                                          targetClassGroupId: nextId,
-                                          confirmCreateNew: isCreateNew,
-                                          ...(chosen
-                                            ? {
-                                                customName: chosen.name,
-                                                segment: chosen.segment as SchoolSegment,
-                                                shift: (chosen.shift || prev[t.tempId].shift) as SchoolShift,
-                                              }
-                                            : {}),
-                                        },
-                                      }));
-                                      if (rawVal) {
-                                        setUnresolvedAmbiguousIds((prev) => {
-                                          const next = new Set(prev);
-                                          next.delete(t.tempId);
-                                          return next;
-                                        });
-                                      }
+                                      setTurmaConfigs((prev) =>
+                                        applyTurmaTargetSelection({
+                                          prevConfigs: prev,
+                                          tempId: t.tempId,
+                                          rawValue: rawVal,
+                                          existingClassGroups,
+                                        })
+                                      );
                                     }}
                                     aria-label={`Vincular turma existente para ${t.seriacaoRaw} ${t.turmaRaw}`}
                                     className={`w-full px-2 py-1 border rounded-lg text-[11px] font-medium ${
@@ -1162,7 +1246,13 @@ export default function SereImportModal({
                   isImporting ||
                   !consolidated ||
                   consolidated.stats.activeStudentsCount === 0 ||
-                  consolidated.turmasToImport.some((t) => unresolvedAmbiguousIds.has(t.tempId))
+                  consolidated.turmasToImport.some((t) =>
+                    isTurmaAmbiguousUnresolved(
+                      t.tempId,
+                      turmaConfigs[t.tempId],
+                      ambiguousLineIds
+                    )
+                  )
                 }
                 onClick={handleConfirmImport}
                 className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-45 text-white font-bold shadow-sm transition"

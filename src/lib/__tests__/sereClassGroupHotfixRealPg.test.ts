@@ -111,14 +111,17 @@ describe.skipIf(!SHOULD_RUN)(
         data: { userId: gestorA.id, schoolId: schoolBId, role: "GESTAO_SECRETARIA", active: true },
       });
 
-      // SuperAdmin global
-      await prisma.user.create({
+      // SuperAdmin global com vínculo ativo em A, mas User.schoolId = null
+      const superUser = await prisma.user.create({
         data: {
           email: "super@redeativa.local",
           name: "SuperAdmin",
           role: "SUPERADMIN",
           active: true,
         },
+      });
+      await prisma.userSchool.create({
+        data: { userId: superUser.id, schoolId: schoolAId, role: "ADMIN", active: true },
       });
 
       authContext.email = "gestor-a@escola.pr.gov.br";
@@ -571,6 +574,130 @@ describe.skipIf(!SHOULD_RUN)(
       expect((await prisma.classGroup.findUnique({ where: { id: cgA.id } }))?.name).toBe("3º 3");
       expect((await prisma.classGroup.findUnique({ where: { id: cgB.id } }))?.name).toBe("3º 3");
       expect(await prisma.auditLog.count()).toBe(0);
+    });
+
+    it("1º 3 com único CGM em comum em 1º 2 (mesmo turno e série) exige escolha explícita (409) e preserva registros", async () => {
+      const cg12 = await prisma.classGroup.create({
+        data: { name: "1º 2", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
+      });
+      const st = await prisma.student.create({
+        data: {
+          cgm: "8500000001",
+          name: "ALUNO EM 1 2",
+          phone: "41999995001",
+          classGroupId: cg12.id,
+          schoolId: schoolAId,
+          active: true,
+        },
+      });
+
+      const payload = {
+        turmas: [
+          {
+            tempId: "t-13",
+            name: "1º 3",
+            sourceIdentity: "NOTURNO|1ª SÉRIE|NOITE|3",
+            segment: "NOTURNO",
+            shift: "NOITE",
+          },
+        ],
+        students: [
+          {
+            cgm: "8500000001",
+            name: "ALUNO EM 1 2",
+            phone: "41999995001",
+            turmaTempId: "t-13",
+          },
+        ],
+        transferredStudents: [],
+        options: { updateExisting: true, deactivateTransferred: true },
+      };
+
+      const res409 = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      );
+      expect(res409.status).toBe(409);
+      const body409 = await res409.json();
+      expect(body409.code).toBe("AMBIGUOUS_CLASS_GROUP");
+      expect((await prisma.classGroup.findUnique({ where: { id: cg12.id } }))?.name).toBe("1º 2");
+      expect((await prisma.student.findUnique({ where: { id: st.id } }))?.classGroupId).toBe(cg12.id);
+      expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(1);
+
+      // Com confirmCreateNew: true -> cria 1º 3 e mantém 1º 2 intacta
+      const res200 = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            turmas: [{ ...payload.turmas[0], confirmCreateNew: true }],
+          }),
+        })
+      );
+      expect(res200.status).toBe(200);
+      const cg13 = await prisma.classGroup.findFirst({ where: { schoolId: schoolAId, name: "1º 3" } });
+      expect(cg13).not.toBeNull();
+      expect((await prisma.student.findUnique({ where: { id: st.id } }))?.classGroupId).toBe(cg13?.id);
+    });
+
+    it("SUPERADMIN com vínculo ativo em A, sem cookie e sem seleção explícita recebe 403 nos POSTs e funciona após seleção válida", async () => {
+      authContext.email = "super@redeativa.local";
+      authContext.cookieSchoolId = undefined;
+      authContext.explicitSchoolId = undefined;
+
+      const rPostClass403 = await postClass(
+        new Request("http://localhost/api/classes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "1º 3", segment: "NOTURNO", shift: "NOITE" }),
+        })
+      );
+      const rImport403 = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            turmas: [{ tempId: "t-1", name: "1º 3", segment: "NOTURNO", shift: "NOITE" }],
+            students: [{ cgm: "8600000001", name: "ALUNO SUPER", phone: "41999996001", turmaTempId: "t-1" }],
+            transferredStudents: [],
+            options: { updateExisting: true, deactivateTransferred: true },
+          }),
+        })
+      );
+      expect(rPostClass403.status).toBe(403);
+      expect(rImport403.status).toBe(403);
+      expect(await prisma.classGroup.count()).toBe(0);
+      expect(await prisma.auditLog.count()).toBe(0);
+
+      // Agora seleciona validamente a escola A via cookie -> ambos os POSTs funcionam
+      authContext.cookieSchoolId = schoolAId;
+      const rPostClass201 = await postClass(
+        new Request("http://localhost/api/classes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "1º 3", segment: "NOTURNO", shift: "NOITE" }),
+        })
+      );
+      expect(rPostClass201.status).toBe(201);
+
+      const rImport200 = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            turmas: [{ tempId: "t-1", name: "1º 3", segment: "NOTURNO", shift: "NOITE" }],
+            students: [{ cgm: "8600000001", name: "ALUNO SUPER", phone: "41999996001", turmaTempId: "t-1" }],
+            transferredStudents: [],
+            options: { updateExisting: true, deactivateTransferred: true },
+          }),
+        })
+      );
+      expect(rImport200.status).toBe(200);
+      expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(1);
     });
   }
 );

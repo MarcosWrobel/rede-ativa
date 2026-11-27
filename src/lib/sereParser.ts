@@ -1564,6 +1564,16 @@ export function resolveSereTurmaMatch(params: {
   const gradeFromName = name.trim().match(/^(\d+)/)?.[1];
   const gradeNum = gradeFromSource || gradeFromName;
 
+  const codeFromSource = sourceIdentity?.split("|")[3]?.trim().toUpperCase() || "";
+  const codeFromName =
+    name
+      .trim()
+      .replace(/^\d+\s*[º°ª]?\s*(?:s[ée]rie\s*)?/i, "")
+      .trim()
+      .split(/\s+/)[0]
+      ?.toUpperCase() || "";
+  const turmaCode = codeFromSource || codeFromName;
+
   let nightGradeClasses: ExistingClassGroupCandidate[] = [];
   let legacyMatches: ExistingClassGroupCandidate[] = [];
 
@@ -1586,12 +1596,23 @@ export function resolveSereTurmaMatch(params: {
   if (sameShiftOverlapIds.size === 1) {
     const onlyId = Array.from(sameShiftOverlapIds)[0];
     const cand = byId.get(onlyId)!;
-    const hasGradeCompatibility =
-      !gradeNum ||
-      nightGradeClasses.some((n) => n.id === cand.id) ||
-      new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(normalizeClassGroupKey(cand.name));
+    const candKey = normalizeClassGroupKey(cand.name);
+    const isLegacyNightCand =
+      shift === "NOITE" &&
+      Boolean(gradeNum) &&
+      candKey === normalizeClassGroupKey(`${gradeNum}º Série`);
+    const hasGradeMatch =
+      !gradeNum || new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(candKey);
+    const hasTurmaCodeMatch =
+      !turmaCode ||
+      new RegExp(`(?:^|\\s|\\u00BA)${turmaCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`).test(
+        candKey
+      );
 
-    if (otherShiftOverlapIds.size === 0 && hasGradeCompatibility) {
+    if (
+      otherShiftOverlapIds.size === 0 &&
+      (isLegacyNightCand || (hasGradeMatch && hasTurmaCodeMatch))
+    ) {
       return {
         status: "matched",
         matchedClassGroupId: cand.id,
