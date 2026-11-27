@@ -84,7 +84,7 @@ vi.mock("@/lib/permissions", async () => {
         email: testAuthState.email,
         role: testAuthState.role,
         session: {
-          user: {
+          user: testAuthState.pendingSessionUser ?? {
             id: testAuthState.userId,
             name: testAuthState.userName,
             email: testAuthState.email,
@@ -7135,7 +7135,7 @@ describe.skipIf(!SHOULD_RUN)(
 
       try {
         await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sec-a"] } } });
-        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "superadmin-sec-test"] } } });
+        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "user-sec-no-link", "superadmin-sec-test"] } } });
         await prisma.educationNetwork.deleteMany({ where: { id: { in: ["net-sec-a", "net-sec-b"] } } });
 
         await prisma.educationNetwork.createMany({
@@ -7685,12 +7685,31 @@ describe.skipIf(!SHOULD_RUN)(
           tenantCalls.some((c) => c.schoolId === "school-sec-b1" || c.schoolId === "school-sec-a-inativa")
         ).toBe(false);
 
-        // 7. Ausência de snapshot e snapshot sem vínculos (mesmo com sessão sintética carregando net-sec-a) -> 403 e 0 transações
+        const secUserNoLink = await prisma.user.create({
+          data: {
+            id: "user-sec-no-link",
+            email: "sec-nolink@redeativa.local",
+            name: "Gestora Sem Vínculo",
+            role: "GESTAO_SECRETARIA",
+            active: true,
+          },
+        });
+        const secStaleNoLinkSessionUser = {
+          id: secUserNoLink.id,
+          email: secUserNoLink.email,
+          name: secUserNoLink.name,
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+          networks: [{ networkId: "net-sec-a", name: "SEMEC Sec A", city: "Cidade Sec Teste" }],
+        };
+
+        // 7. Ausência de snapshot (usuário sintético existente sem vínculo ativo no banco) e snapshot revalidado com networks: []
+        // mantendo vínculo antigo efetivamente em session.user.networks retornado por requireAuth -> 403 e 0 transações
         testAuthState.useRealPermissions = false;
         testAuthState.role = "GESTAO_SECRETARIA";
-        testAuthState.userId = "";
+        testAuthState.userId = secUserNoLink.id;
         testAuthState.snapshot = null;
-        testAuthState.pendingSessionUser = secSessionUser;
+        testAuthState.pendingSessionUser = secStaleNoLinkSessionUser;
 
         tenantCalls.length = 0;
         const rNoSnapshot = await secretariaMetricsHandler(
@@ -7700,15 +7719,16 @@ describe.skipIf(!SHOULD_RUN)(
         expect(tenantCalls).toHaveLength(0);
 
         testAuthState.snapshot = {
-          id: secUser.id,
-          email: secUser.email,
-          name: secUser.name,
+          id: secUserNoLink.id,
+          email: secUserNoLink.email,
+          name: secUserNoLink.name,
           role: "GESTAO_SECRETARIA",
           active: true,
           schoolId: null,
           schools: [],
           networks: [],
         };
+        testAuthState.pendingSessionUser = secStaleNoLinkSessionUser;
         tenantCalls.length = 0;
         const rEmptySnapshot = await secretariaMetricsHandler(
           new NextRequest("http://127.0.0.1/api/secretaria/metrics")
@@ -7717,7 +7737,7 @@ describe.skipIf(!SHOULD_RUN)(
         expect(tenantCalls).toHaveLength(0);
       } finally {
         await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sec-a"] } } }).catch(() => {});
-        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "superadmin-sec-test"] } } }).catch(() => {});
+        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "user-sec-no-link", "superadmin-sec-test"] } } }).catch(() => {});
         await prisma.educationNetwork.deleteMany({ where: { id: { in: ["net-sec-a", "net-sec-b"] } } }).catch(() => {});
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
