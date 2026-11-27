@@ -28,6 +28,7 @@ import {
   getPreCouncilProgress,
   mergeSubjectsIntoPreCouncilConversations,
   parsePreCouncilData,
+  sanitizePreCouncilMonitoredStudents,
 } from "./preCouncilUtils";
 import type {
   CouncilBoardDetailRecord,
@@ -61,7 +62,10 @@ function resolveInitialPreCouncilData(params: {
   currentUserName?: string | null;
 }): PreCouncilData {
   const parsed = parsePreCouncilData(params.trimesterRecord?.preCouncilJson);
-  if (parsed) return parsed;
+  if (parsed) {
+    const validIds = new Set(params.board.studentCards.map((c) => c.studentId));
+    return sanitizePreCouncilMonitoredStudents(parsed, validIds);
+  }
   return buildInitialPreCouncilData({
     trimester: params.activeTrimester,
     subjects: params.board.subjects,
@@ -121,6 +125,22 @@ export default function CouncilPreCouncilTab({
   const [syncingAll, setSyncingAll] = useState(false);
   const [teacherLinkOpen, setTeacherLinkOpen] = useState(false);
   const [teacherLinkSubjectId, setTeacherLinkSubjectId] = useState<string | null>(null);
+
+  const validStudentIdSet = useMemo(
+    () => new Set(board.studentCards.map((c) => c.studentId)),
+    [board.studentCards]
+  );
+
+  const savedConversationsById = useMemo(() => {
+    const parsed = parsePreCouncilData(trimesterRecord?.preCouncilJson);
+    const map = new Map<string, PreCouncilSubjectConversation>();
+    if (parsed) {
+      for (const conv of parsed.conversations) {
+        map.set(conv.id, conv);
+      }
+    }
+    return map;
+  }, [trimesterRecord?.preCouncilJson]);
 
   const isDirty = useMemo(() => {
     if (readOnly) return false;
@@ -182,8 +202,9 @@ export default function CouncilPreCouncilTab({
 
   // Atualiza dados vindos do servidor sem descartar edições locais pendentes
   useEffect(() => {
-    const parsed = parsePreCouncilData(trimesterRecord?.preCouncilJson);
-    if (!parsed) return;
+    const parsedRaw = parsePreCouncilData(trimesterRecord?.preCouncilJson);
+    if (!parsedRaw) return;
+    const parsed = sanitizePreCouncilMonitoredStudents(parsedRaw, validStudentIdSet);
 
     if (!isDirtyRef.current) {
       setDraft(parsed);
@@ -202,7 +223,15 @@ export default function CouncilPreCouncilTab({
       ...prev,
       conversations: prev.conversations.map((c) => {
         const srv = serverById.get(c.id);
-        if (!srv) return c;
+        const sanitizedLocalIds = c.monitoredStudentIds.filter((id) =>
+          validStudentIdSet.has(id)
+        );
+        if (!srv) {
+          return {
+            ...c,
+            monitoredStudentIds: sanitizedLocalIds,
+          };
+        }
         const serverSubmittedNewer =
           Boolean(srv.teacherSubmittedAt) &&
           srv.teacherSubmittedAt !== c.teacherSubmittedAt;
@@ -211,9 +240,9 @@ export default function CouncilPreCouncilTab({
           teacherName: c.teacherName.trim() ? c.teacherName : srv.teacherName,
           teacherEmail: c.teacherEmail || srv.teacherEmail,
           monitoredStudentIds:
-            serverSubmittedNewer || c.monitoredStudentIds.length === 0
+            serverSubmittedNewer || sanitizedLocalIds.length === 0
               ? srv.monitoredStudentIds
-              : c.monitoredStudentIds,
+              : sanitizedLocalIds,
           monitoredStudentsNotes:
             serverSubmittedNewer || !c.monitoredStudentsNotes.trim()
               ? srv.monitoredStudentsNotes
@@ -225,7 +254,7 @@ export default function CouncilPreCouncilTab({
         };
       }),
     }));
-  }, [trimesterRecord?.preCouncilJson]);
+  }, [trimesterRecord?.preCouncilJson, validStudentIdSet]);
 
   const progress = useMemo(() => getPreCouncilProgress(draft), [draft]);
 
@@ -365,7 +394,9 @@ export default function CouncilPreCouncilTab({
           subjectName: c.subjectName.trim(),
           teacherName: c.teacherName.trim(),
           teacherEmail: c.teacherEmail?.trim() || null,
-          monitoredStudentIds: Array.from(new Set(c.monitoredStudentIds)),
+          monitoredStudentIds: Array.from(new Set(c.monitoredStudentIds)).filter((id) =>
+            validStudentIdSet.has(id)
+          ),
           monitoredStudentsNotes: c.monitoredStudentsNotes.trim(),
           agreements: c.agreements.trim(),
           conversationStatus: c.conversationStatus,
@@ -413,8 +444,12 @@ export default function CouncilPreCouncilTab({
       onTrimesterUpdated(data.trimesterRecord);
       const savedParsed = parsePreCouncilData(data.trimesterRecord.preCouncilJson);
       if (savedParsed) {
-        setDraft(savedParsed);
-        setBaselineSnapshot(JSON.stringify(savedParsed));
+        const sanitizedSaved = sanitizePreCouncilMonitoredStudents(
+          savedParsed,
+          validStudentIdSet
+        );
+        setDraft(sanitizedSaved);
+        setBaselineSnapshot(JSON.stringify(sanitizedSaved));
       }
       onNotify("Pré-Conselho salvo.", "success");
     } catch {
@@ -598,6 +633,7 @@ export default function CouncilPreCouncilTab({
           onNotify={onNotify}
           alertsBundle={alertsBundle}
           matrixStatsBySubjectId={matrixStatsBySubjectId}
+          savedConversationsById={savedConversationsById}
           hideSensitiveTags={hideSensitiveTags}
           readOnly={readOnly}
         />
@@ -639,6 +675,7 @@ export default function CouncilPreCouncilTab({
         <CouncilTeacherLinkModal
           open={teacherLinkOpen}
           onClose={() => setTeacherLinkOpen(false)}
+          schoolId={board.schoolId}
           boardId={board.id}
           classNameLabel={board.classGroup.name}
           activeTrimester={activeTrimester}

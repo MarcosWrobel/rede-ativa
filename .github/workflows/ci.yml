@@ -31,6 +31,9 @@ jobs:
 
       - name: Validate Prisma Schema
         run: npx prisma validate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
 
       - name: Generate Prisma Client
         run: npx prisma generate
@@ -41,7 +44,8 @@ jobs:
       - name: Run Vitest Test Suites
         run: npm test
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
 
       - name: Build Next.js Application (Turbopack)
@@ -49,4 +53,5 @@ jobs:
         env:
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET || 'ci-testing-dummy-secret-minimum-32-chars-long' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || 'postgresql://ci:dummy@localhost:5432/ci_db' }}
           VERCEL: "0"

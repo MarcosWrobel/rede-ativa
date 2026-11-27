@@ -63,11 +63,9 @@ export async function POST(
     const matchedByEmail = council.subjects.find(
       (s) => (s.teacherEmail || "").trim().toLowerCase() === verifiedEmail
     );
-    const firstUnclaimed = council.subjects.find((s) => !(s.teacherEmail || "").trim());
     const suggestedSubjectId =
       tokenCheck.payload.subjectId ||
       matchedByEmail?.id ||
-      firstUnclaimed?.id ||
       council.subjects[0]?.id ||
       null;
 

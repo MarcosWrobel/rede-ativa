@@ -652,6 +652,7 @@ export default function CouncilMatrixGrid({
         <CouncilTeacherLinkModal
           open={teacherLinkModalOpen}
           onClose={() => setTeacherLinkModalOpen(false)}
+          schoolId={board.schoolId}
           boardId={board.id}
           classNameLabel={board.classGroup.name}
           activeTrimester={activeTrimester}

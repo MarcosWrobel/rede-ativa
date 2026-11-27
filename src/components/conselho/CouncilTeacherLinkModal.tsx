@@ -1,13 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  MessageCircle,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
+import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import type { CouncilSubjectRecord, CouncilTrimesterNumber } from "./types";
 
 interface CouncilTeacherLinkModalProps {
   open: boolean;
   onClose: () => void;
+  schoolId?: string | null;
   boardId: string;
   classNameLabel: string;
   activeTrimester: CouncilTrimesterNumber;
@@ -16,7 +25,7 @@ interface CouncilTeacherLinkModalProps {
   onNotify: (message: string, kind?: "success" | "error") => void;
 }
 
-interface GeneratedTeacherLink {
+export interface GeneratedTeacherLink {
   url: string;
   qrCodeDataUrl: string;
   trimester: number;
@@ -25,9 +34,41 @@ interface GeneratedTeacherLink {
   expiresAt: string;
 }
 
+const expiredTeacherLinkMessage = "O link expirou. Gere um novo link.";
+const maxBrowserTimeoutMs = 2_147_483_647;
+
+export function buildTeacherLinkWhatsAppMessage(params: {
+  classNameLabel: string;
+  generated: GeneratedTeacherLink;
+}): string {
+  const { classNameLabel, generated } = params;
+  const scopeLabel = generated.subjectName
+    ? `Componente: ${generated.subjectName}`
+    : "Escopo: Todos os componentes da turma";
+  const validityLabel = new Date(generated.expiresAt).toLocaleDateString("pt-BR");
+
+  return [
+    `Pré-Conselho • ${classNameLabel} • ${generated.trimester}º Trimestre`,
+    scopeLabel,
+    `Validade: até ${validityLabel}`,
+    `Acesse com sua conta institucional @escola.pr.gov.br: ${generated.url}`,
+  ].join("\n");
+}
+
+export function isGeneratedTeacherLinkActive(
+  generated: GeneratedTeacherLink | null,
+  nowMs: number = Date.now()
+): generated is GeneratedTeacherLink {
+  if (!generated || !generated.url) return false;
+  const expiresMs = new Date(generated.expiresAt).getTime();
+  if (!Number.isFinite(expiresMs)) return false;
+  return expiresMs > nowMs;
+}
+
 export default function CouncilTeacherLinkModal({
   open,
   onClose,
+  schoolId,
   boardId,
   classNameLabel,
   activeTrimester,
@@ -39,10 +80,12 @@ export default function CouncilTeacherLinkModal({
   const [expiresInDays, setExpiresInDays] = useState<number>(7);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<GeneratedTeacherLink | null>(null);
+  const [generated, setGenerated] =
+    useState<{ link: GeneratedTeacherLink; contextKey: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const reqSeqRef = useRef(0);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contextKey = JSON.stringify([schoolId, boardId, activeTrimester, initialSubjectId]);
 
   useEffect(() => {
     return () => {
@@ -55,6 +98,7 @@ export default function CouncilTeacherLinkModal({
       const seq = ++reqSeqRef.current;
       setLoading(true);
       setErrorMsg(null);
+      setGenerated(null);
       setCopied(false);
 
       try {
@@ -78,37 +122,89 @@ export default function CouncilTeacherLinkModal({
           return;
         }
 
-        setGenerated({
+        const nextGenerated: GeneratedTeacherLink = {
           url: data.url,
           qrCodeDataUrl: data.qrCodeDataUrl,
           trimester: data.trimester,
           subjectId: data.subjectId,
           subjectName: data.subjectName,
           expiresAt: data.expiresAt,
-        });
+        };
+        if (!isGeneratedTeacherLinkActive(nextGenerated)) {
+          setErrorMsg(expiredTeacherLinkMessage);
+          setGenerated(null);
+          return;
+        }
+        setGenerated({ link: nextGenerated, contextKey });
       } catch {
         if (seq !== reqSeqRef.current) return;
         setErrorMsg("Falha de conexão ao gerar o link para professores.");
+        setGenerated(null);
       } finally {
         if (seq === reqSeqRef.current) {
           setLoading(false);
         }
       }
     },
-    [boardId, activeTrimester]
+    [boardId, activeTrimester, contextKey]
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      reqSeqRef.current += 1;
+      setGenerated(null);
+      setErrorMsg(null);
+      setCopied(false);
+      setLoading(false);
+      return;
+    }
     const nextSubject = initialSubjectId || "";
     setSelectedSubjectId(nextSubject);
     void generateLink(nextSubject, expiresInDays);
-  }, [open, initialSubjectId, activeTrimester, generateLink]);
+  }, [open, initialSubjectId, activeTrimester, boardId, schoolId, generateLink]);
+
+  useEffect(() => {
+    if (!open || !generated || generated.contextKey !== contextKey) return;
+
+    const seq = reqSeqRef.current;
+    const expiresMs = Date.parse(generated.link.expiresAt);
+    let timer: ReturnType<typeof setTimeout>;
+    function scheduleExpiration() {
+      if (seq !== reqSeqRef.current) return;
+      const remainingMs = expiresMs - Date.now();
+      if (remainingMs <= 0) {
+        setGenerated(null);
+        setCopied(false);
+        setErrorMsg(expiredTeacherLinkMessage);
+        return;
+      }
+      timer = setTimeout(scheduleExpiration, Math.min(remainingMs, maxBrowserTimeoutMs));
+    }
+
+    scheduleExpiration();
+    return () => clearTimeout(timer);
+  }, [open, generated, contextKey]);
+
+  const linkForCurrentContext = open && generated?.contextKey === contextKey ? generated.link : null;
+  const activeGenerated =
+    !loading && !errorMsg && isGeneratedTeacherLinkActive(linkForCurrentContext)
+      ? linkForCurrentContext
+      : null;
+
+  const whatsappShareUrl = activeGenerated
+    ? buildWhatsAppDispatchUrl(
+        "",
+        buildTeacherLinkWhatsAppMessage({
+          classNameLabel,
+          generated: activeGenerated,
+        })
+      )
+    : null;
 
   async function handleCopyLink() {
-    if (!generated?.url) return;
+    if (!isGeneratedTeacherLinkActive(activeGenerated)) return;
     try {
-      await navigator.clipboard.writeText(generated.url);
+      await navigator.clipboard.writeText(activeGenerated.url);
       setCopied(true);
       onNotify("Link copiado.", "success");
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
@@ -116,6 +212,10 @@ export default function CouncilTeacherLinkModal({
     } catch {
       onNotify("Selecione o endereço e copie manualmente.", "error");
     }
+  }
+
+  function preventExpiredLink(event: MouseEvent<HTMLAnchorElement>) {
+    if (!isGeneratedTeacherLinkActive(activeGenerated)) event.preventDefault();
   }
 
   const activeSubjects = subjects.filter((s) => s.active);
@@ -191,24 +291,33 @@ export default function CouncilTeacherLinkModal({
         </div>
 
         {errorMsg && (
-          <div className="rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 text-rose-800 dark:text-rose-200 font-semibold">
-            {errorMsg}
+          <div className="rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 text-rose-800 dark:text-rose-200 font-semibold flex flex-wrap items-center justify-between gap-2">
+            <span>{errorMsg}</span>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void generateLink(selectedSubjectId, expiresInDays)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-300 dark:border-rose-700 bg-white dark:bg-rose-950 hover:bg-rose-100 dark:hover:bg-rose-900 font-bold text-rose-800 dark:text-rose-200 transition cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+              <span>{errorMsg === expiredTeacherLinkMessage ? "Gerar novo link" : "Tentar novamente"}</span>
+            </button>
           </div>
         )}
 
-        {loading && !generated && (
+        {loading && !activeGenerated && (
           <div className="py-8 text-center text-slate-500 font-semibold">
             Gerando link de acesso docente...
           </div>
         )}
 
-        {generated && (
+        {activeGenerated && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">
-              {generated.qrCodeDataUrl && (
+              {activeGenerated.qrCodeDataUrl && (
                 <div className="p-2 bg-white rounded-xl border border-slate-200 shrink-0">
                   <img
-                    src={generated.qrCodeDataUrl}
+                    src={activeGenerated.qrCodeDataUrl}
                     alt="QR Code de acesso para professores"
                     className="w-36 h-36 object-contain"
                   />
@@ -218,13 +327,13 @@ export default function CouncilTeacherLinkModal({
               <div className="flex-1 min-w-0 space-y-2.5 w-full">
                 <div>
                   <span className="block text-[11px] font-bold text-slate-500 uppercase">
-                    {generated.subjectName
-                      ? `Componente: ${generated.subjectName}`
+                    {activeGenerated.subjectName
+                      ? `Componente: ${activeGenerated.subjectName}`
                       : "Link geral da turma"}
                   </span>
                   <span className="text-[11px] text-slate-600 dark:text-slate-400">
                     Válido até{" "}
-                    {new Date(generated.expiresAt).toLocaleDateString("pt-BR")}
+                    {new Date(activeGenerated.expiresAt).toLocaleDateString("pt-BR")}
                   </span>
                 </div>
 
@@ -233,7 +342,7 @@ export default function CouncilTeacherLinkModal({
                     type="text"
                     readOnly
                     aria-label="Endereço do link para professores"
-                    value={generated.url}
+                    value={activeGenerated.url}
                     onFocus={(e) => e.target.select()}
                     className="flex-1 min-w-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-[11px] font-mono text-slate-800 dark:text-slate-200"
                   />
@@ -259,7 +368,8 @@ export default function CouncilTeacherLinkModal({
                   </button>
 
                   <a
-                    href={generated.url}
+                    href={activeGenerated.url}
+                    onClick={preventExpiredLink}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-slate-700 dark:text-slate-300 transition"
@@ -267,6 +377,19 @@ export default function CouncilTeacherLinkModal({
                     <ExternalLink className="w-3 h-3" />
                     <span>Abrir portal</span>
                   </a>
+
+                  {whatsappShareUrl && (
+                    <a
+                      href={whatsappShareUrl}
+                      onClick={preventExpiredLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold text-emerald-800 dark:text-emerald-200 transition"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                      <span>Enviar via WhatsApp</span>
+                    </a>
+                  )}
                 </div>
               </div>
             </div>

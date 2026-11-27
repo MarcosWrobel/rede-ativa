@@ -132,6 +132,50 @@ vi.mock("@/lib/prisma", () => {
   };
 
   const client: any = {
+    user: {
+      findUnique: vi.fn(async ({ where, select }: any) => {
+        if (select?.schools?.where?.schoolId) {
+          if (where?.email !== "pedagoga@escola-a.pr.gov.br") return null;
+          return {
+            active: true,
+            role: "PEDAGOGA",
+            schools: select.schools.where.schoolId === "school-a" ? [{ role: "PEDAGOGA" }] : [],
+          };
+        }
+        const u = hoisted.session?.user;
+        if (!u) return null;
+        return {
+          id: u.id || where?.id || "usr-mock",
+          email: u.email || where?.email || null,
+          active: u.active !== false,
+          role: u.role || "PEDAGOGA",
+          schoolId: u.schoolId ?? null,
+          schools: Array.isArray(u.schools)
+            ? u.schools.map((s: any) => ({
+                schoolId: s.schoolId || s.id || "",
+                role: s.role || u.role || "PEDAGOGA",
+                active: s.active !== false,
+                school: s.school || {
+                  id: s.schoolId || s.id || "",
+                  active: true,
+                  networkId: null,
+                },
+              }))
+            : [],
+          networks: Array.isArray(u.networks)
+            ? u.networks.map((n: any) =>
+                typeof n === "string"
+                  ? { networkId: n, active: true, network: { id: n, city: "Tibagi", active: true } }
+                  : {
+                      networkId: n.networkId || n.id || "",
+                      active: n.active !== false,
+                      network: n.network || { id: n.networkId || n.id || "", city: "Tibagi", active: true },
+                    }
+              )
+            : [],
+        };
+      }),
+    },
     $transaction: vi.fn(async (arg: any) => {
       if (typeof arg === "function") {
         return arg(client);
@@ -1978,6 +2022,50 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       { params: Promise.resolve({ boardId: "board-a1" }) }
     );
     expect(secBlocked.status).toBe(403);
+
+    // SUPERADMIN sem escola selecionada explicitamente recebe 403
+    hoisted.session = {
+      user: {
+        id: "usr-super",
+        name: "Super Admin",
+        email: "super@redeativa.app.br",
+        role: "SUPERADMIN",
+        active: true,
+        schoolId: null,
+        schools: [],
+      },
+    };
+    const superNoSchool = await postTeacherLinkRoute(
+      new Request("https://www.redeativa.app.br/api/conselho-classe/board-a1/teacher-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trimester: 1 }),
+      }),
+      { params: Promise.resolve({ boardId: "board-a1" }) }
+    );
+    expect(superNoSchool.status).toBe(403);
+
+    // SUPERADMIN com school-b selecionada tentando emitir para board-a1 (school-a) recebe 403
+    hoisted.session = {
+      user: {
+        id: "usr-super",
+        name: "Super Admin",
+        email: "super@redeativa.app.br",
+        role: "SUPERADMIN",
+        active: true,
+        schoolId: "school-b",
+        schools: [],
+      },
+    };
+    const superCrossSchool = await postTeacherLinkRoute(
+      new Request("https://www.redeativa.app.br/api/conselho-classe/board-a1/teacher-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trimester: 1 }),
+      }),
+      { params: Promise.resolve({ boardId: "board-a1" }) }
+    );
+    expect(superCrossSchool.status).toBe(403);
   });
 
   it("portal docente valida @escola.pr.gov.br, oculta selos de saúde/pareceres, vincula docente e preserva notas do BI", async () => {
@@ -1985,6 +2073,10 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
     process.env.ENABLE_DEV_AUTH = "true";
 
     try {
+      // Atribui Matemática (subj-a2) ao docente no servidor; subj-a1 permanece sem atribuição
+      const matSubjectSetup = hoisted.db.subjects.find((s) => s.id === "subj-a2");
+      matSubjectSetup.teacherEmail = "marcos.oliveira@escola.pr.gov.br";
+
       // Nota pré-existente importada do BI para stu-a1 em Matemática (subj-a2)
       hoisted.db.entries.push({
         id: "entry-bi-mat-a1",
@@ -2017,7 +2109,22 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       );
       expect(invalidDomainRes.status).toBe(401);
 
-      // 2. Autentica docente @escola.pr.gov.br e oculta estritamente selos clínicos e pareceres
+      // 1b. Conta @escola.pr.gov.br sem atribuição confirmada recebe 403 e nenhum dado estudantil
+      const unassignedRes = await postTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "dev-mock-token:sem.vinculo@escola.pr.gov.br" }),
+        }),
+        { params: Promise.resolve({ token }) }
+      );
+      expect(unassignedRes.status).toBe(403);
+      const unassignedBody = await unassignedRes.json();
+      expect(unassignedBody.council).toBeUndefined();
+      expect(JSON.stringify(unassignedBody)).not.toContain("Ana Clara");
+
+      // 2. Autentica docente @escola.pr.gov.br e retorna somente seu componente autorizado,
+      //    ocultando estritamente selos clínicos e pareceres
       const authRes = await postTeacherPortalRoute(
         new Request(`http://localhost/api/conselho-classe/teacher-portal/${token}`, {
           method: "POST",
@@ -2031,6 +2138,7 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       expect(authRes.status).toBe(200);
       const authBody = await authRes.json();
       expect(authBody.verifiedEmail).toBe("marcos.oliveira@escola.pr.gov.br");
+      expect(authBody.council.subjects.map((s: { id: string }) => s.id)).toEqual(["subj-a2"]);
       expect(authBody.council.students).toHaveLength(2);
 
       const serializedAuth = JSON.stringify(authBody);
@@ -3290,7 +3398,7 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
             subjectId: "subj-a2",
             subjectName: "Matemática",
             teacherName: "Prof. Marcos",
-            teacherEmail: null,
+            teacherEmail: "marcos.unificado@escola.pr.gov.br",
             monitoredStudentIds: [],
             monitoredStudentsNotes: "",
             agreements: "Pedagoga registrou combinado prévio",
@@ -3358,8 +3466,10 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       expect(crossTenantRes.status).toBe(400);
       expect(hoisted.db.entries.filter((e) => e.subjectId === "subj-a2")).toHaveLength(0);
 
-      // 3. Atomicidade: confirmAck: true em subj-a1 (ainda sem conversa nem combinados) falha com 400
-      //    e NÃO grava parcialmente entries na matriz nem reivindica subject.teacherEmail
+      // 3. Atomicidade: confirmAck: true em subj-a1 (atribuída a Helena, ainda sem conversa nem combinados) falha com 400
+      //    e NÃO grava parcialmente entries na matriz
+      const subjA1 = hoisted.db.subjects.find((s) => s.id === "subj-a1");
+      subjA1.teacherEmail = "helena@escola.pr.gov.br";
       const prematureAckRes = await putTeacherPortalRoute(
         new Request(`http://localhost/api/conselho-classe/teacher-portal/${teacherToken.token}`, {
           method: "PUT",
@@ -3379,7 +3489,9 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       );
       expect(prematureAckRes.status).toBe(400);
       expect(hoisted.db.entries.filter((e) => e.subjectId === "subj-a1")).toHaveLength(0);
-      expect(hoisted.db.subjects.find((s) => s.id === "subj-a1")?.teacherEmail).toBeNull();
+      expect(hoisted.db.subjects.find((s) => s.id === "subj-a1")?.teacherEmail).toBe(
+        "helena@escola.pr.gov.br"
+      );
 
       // 4. Salva matriz + observações prévias em subj-a2 sem apagar agreements/synthesis da pedagoga
       const saveOnlyRes = await putTeacherPortalRoute(
@@ -3798,7 +3910,7 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
             subjectId: "subj-a2",
             subjectName: "Matemática",
             teacherName: "Prof. Marcos",
-            teacherEmail: null,
+            teacherEmail: "marcos@escola.pr.gov.br",
             monitoredStudentIds: [],
             monitoredStudentsNotes: "",
             agreements: "Combinado de matemática",
@@ -3833,12 +3945,8 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
       expect(serializedPortal).not.toContain('"cgm":"1001"');
       expect(serializedPortal).not.toContain("Anotacao sigilosa da Helena");
       expect(serializedPortal).not.toContain("Combinado privado da Helena");
-      expect(
-        portalBody.council.preCouncil.conversationsBySubjectId["subj-a1"].monitoredStudentIds
-      ).toEqual([]);
-      expect(
-        portalBody.council.preCouncil.conversationsBySubjectId["subj-a1"].agreements
-      ).toBe("");
+      expect(portalBody.council.subjects.map((s: { id: string }) => s.id)).toEqual(["subj-a2"]);
+      expect(portalBody.council.preCouncil.conversationsBySubjectId["subj-a1"]).toBeUndefined();
       expect(
         portalBody.council.students.every((st: { subjectEntries: Array<{ subjectId: string }> }) =>
           st.subjectEntries.every((e) => e.subjectId !== "subj-a1")
@@ -3884,10 +3992,10 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
         }),
         { params: Promise.resolve({ token: teacherLink.token }) }
       );
-      expect(allOthersPortalRes.status).toBe(200);
+      expect(allOthersPortalRes.status).toBe(403);
       const allOthersPortalBody = await allOthersPortalRes.json();
-      expect(allOthersPortalBody.council.students).toEqual([]);
-      expect(allOthersPortalBody.council.preCouncil.synthesis.mainDifficulties).toBe("");
+      expect(allOthersPortalBody.council).toBeUndefined();
+      expect(JSON.stringify(allOthersPortalBody)).not.toContain("Ana Clara");
 
       const allOthersPreRes = await postPreCouncilPortalRoute(
         new Request(`http://localhost/api/conselho-classe/pre-council-portal/${preLink.token}`, {
@@ -4328,5 +4436,254 @@ describe("Módulo de Acompanhamento Trimestral e Conselho de Classe", () => {
     expect(html360).toContain("trimester=2");
     expect(html360).toContain("Ver todos (+1 sem alerta)");
     expect(html360).toContain("Matemática (4,5)");
+  });
+
+  it("poda studentId órfão previamente persistido em outro componente ao salvar Pré-Conselho, sincroniza cards ausentes e mantém bloqueio a IDs estrangeiros (400)", async () => {
+    hoisted.db.students.push({
+      id: "stu-a3",
+      name: "Daniela Lima",
+      cgm: "1003",
+      classGroupId: "cg-a1",
+      schoolId: "school-a",
+      active: true,
+      isSpecialNeeds: false,
+    });
+
+    const basePre = buildInitialPreCouncilData({
+      trimester: 1,
+      subjects: hoisted.db.subjects.filter((s) => s.boardId === "board-a1"),
+      responsiblePedagogueName: "Pedagoga Alpha",
+    });
+    basePre.conversations[0] = {
+      ...basePre.conversations[0],
+      monitoredStudentIds: ["stu-orphan-deleted", "stu-a1"],
+    };
+    hoisted.db.trimesters[0].preCouncilJson = JSON.stringify(basePre);
+
+    // 1. Injetar ID estrangeiro novo (stu-b1) ou órfão em outra conversa continua bloqueado (400)
+    const foreignRes = await patchTrimesterRoute(
+      new Request("http://localhost/api/conselho-classe/board-a1/trimesters", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trimester: 1,
+          preCouncil: {
+            ...basePre,
+            conversations: [
+              basePre.conversations[0],
+              {
+                ...basePre.conversations[1],
+                monitoredStudentIds: ["stu-b1"],
+              },
+            ],
+          },
+        }),
+      }),
+      { params: Promise.resolve({ boardId: "board-a1" }) }
+    );
+    expect(foreignRes.status).toBe(400);
+
+    // 2. Salvar com órfão já persistido em subj-a1 + novo estudante stu-a3 sem card prévio -> 200 OK e poda o órfão
+    const validSaveRes = await patchTrimesterRoute(
+      new Request("http://localhost/api/conselho-classe/board-a1/trimesters", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trimester: 1,
+          preCouncil: {
+            ...basePre,
+            conversations: [
+              basePre.conversations[0],
+              {
+                ...basePre.conversations[1],
+                monitoredStudentIds: ["stu-a3"],
+                agreements: "Acompanhar atividades semanais.",
+                conversationStatus: "COMPLETED",
+                conversationDate: "2026-11-24",
+              },
+            ],
+          },
+        }),
+      }),
+      { params: Promise.resolve({ boardId: "board-a1" }) }
+    );
+    expect(validSaveRes.status).toBe(200);
+    const savedBody = await validSaveRes.json();
+    const parsedSaved = parsePreCouncilData(savedBody.trimesterRecord.preCouncilJson)!;
+    expect(parsedSaved.conversations[0].monitoredStudentIds).toEqual(["stu-a1"]);
+    expect(parsedSaved.conversations[1].monitoredStudentIds).toEqual(["stu-a3"]);
+    expect(parsedSaved.conversations[1].conversationStatus).toBe("COMPLETED");
+  });
+
+  it("sincroniza teacherEmail entre Pré-Conselho e ClassCouncilSubject e preserva autoria docente em rascunho desatualizado", async () => {
+    const prevDevAuth = process.env.ENABLE_DEV_AUTH;
+    const prevVercelEnv = process.env.VERCEL_ENV;
+    process.env.ENABLE_DEV_AUTH = "true";
+    delete process.env.VERCEL_ENV;
+
+    try {
+      const basePre = buildInitialPreCouncilData({
+        trimester: 1,
+        subjects: hoisted.db.subjects.filter((s) => s.boardId === "board-a1"),
+        responsiblePedagogueName: "Pedagoga Alpha",
+      });
+
+      // 1. Pedagoga preenche teacherEmail e marca conversa realizada no Pré-Conselho -> sincroniza ClassCouncilSubject
+      const savePreRes = await patchTrimesterRoute(
+        new Request("http://localhost/api/conselho-classe/board-a1/trimesters", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 1,
+            preCouncil: {
+              ...basePre,
+              conversations: basePre.conversations.map((c) =>
+                c.subjectId === "subj-a2"
+                  ? {
+                      ...c,
+                      teacherName: "Prof. Marcos Novo",
+                      teacherEmail: "marcos.novo@escola.pr.gov.br",
+                      conversationStatus: "COMPLETED",
+                      conversationDate: "2026-11-24",
+                    }
+                  : c
+              ),
+            },
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "board-a1" }) }
+      );
+      expect(savePreRes.status).toBe(200);
+      expect(hoisted.db.subjects.find((s) => s.id === "subj-a2")?.teacherEmail).toBe(
+        "marcos.novo@escola.pr.gov.br"
+      );
+
+      // Portal docente reconhece o novo e-mail e libera ciência
+      const portalToken = createCouncilTeacherToken({
+        schoolId: "school-a",
+        boardId: "board-a1",
+        trimester: 1,
+        subjectId: "subj-a2",
+      });
+      const portalOkRes = await postTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${portalToken.token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "dev-mock-token:marcos.novo@escola.pr.gov.br" }),
+        }),
+        { params: Promise.resolve({ token: portalToken.token }) }
+      );
+      expect(portalOkRes.status).toBe(200);
+      const portalOkBody = await portalOkRes.json();
+      expect(
+        portalOkBody.council.preCouncil.conversationsBySubjectId["subj-a2"].canConfirmAck
+      ).toBe(true);
+
+      // 2. Pedagoga atualiza teacherEmail via PUT /subjects -> sincroniza preCouncilJson também
+      const putSubjRes = await putSubjectsRoute(
+        new Request("http://localhost/api/conselho-classe/board-a1/subjects", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjects: hoisted.db.subjects
+              .filter((s) => s.boardId === "board-a1")
+              .map((s) =>
+                s.id === "subj-a2"
+                  ? {
+                      id: s.id,
+                      name: s.name,
+                      teacherName: "Prof. Marcos Revisado",
+                      teacherEmail: "marcos.revisado@escola.pr.gov.br",
+                      displayOrder: s.displayOrder,
+                      active: true,
+                    }
+                  : {
+                      id: s.id,
+                      name: s.name,
+                      teacherName: s.teacherName,
+                      teacherEmail: s.teacherEmail,
+                      displayOrder: s.displayOrder,
+                      active: true,
+                    }
+              ),
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "board-a1" }) }
+      );
+      expect(putSubjRes.status).toBe(200);
+      const parsedAfterSubj = parsePreCouncilData(hoisted.db.trimesters[0].preCouncilJson)!;
+      expect(
+        parsedAfterSubj.conversations.find((c) => c.subjectId === "subj-a2")?.teacherEmail
+      ).toBe("marcos.revisado@escola.pr.gov.br");
+
+      const portalRevisedRes = await postTeacherPortalRoute(
+        new Request(`http://localhost/api/conselho-classe/teacher-portal/${portalToken.token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "dev-mock-token:marcos.revisado@escola.pr.gov.br",
+          }),
+        }),
+        { params: Promise.resolve({ token: portalToken.token }) }
+      );
+      expect(portalRevisedRes.status).toBe(200);
+      const portalRevisedBody = await portalRevisedRes.json();
+      expect(
+        portalRevisedBody.council.preCouncil.conversationsBySubjectId["subj-a2"].canConfirmAck
+      ).toBe(true);
+
+      // 3. Salvamento com rascunho desatualizado (hasUnseenTeacherSubmission) não apaga teacherEmail recém-enviado pelo docente
+      const currentPre = parsePreCouncilData(hoisted.db.trimesters[0].preCouncilJson)!;
+      currentPre.conversations = currentPre.conversations.map((c) =>
+        c.subjectId === "subj-a2"
+          ? {
+              ...c,
+              teacherEmail: "docente.envio@escola.pr.gov.br",
+              teacherName: "Prof. Envio",
+              teacherSubmittedAt: "2026-11-24T20:00:00.000Z",
+            }
+          : c
+      );
+      hoisted.db.trimesters[0].preCouncilJson = JSON.stringify(currentPre);
+
+      const staleRes = await patchTrimesterRoute(
+        new Request("http://localhost/api/conselho-classe/board-a1/trimesters", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 1,
+            preCouncil: {
+              ...basePre,
+              conversations: basePre.conversations.map((c) =>
+                c.subjectId === "subj-a2"
+                  ? {
+                      ...c,
+                      teacherName: "",
+                      teacherEmail: null,
+                      agreements: "Combinado registrado",
+                      conversationStatus: "COMPLETED",
+                      conversationDate: "2026-11-24",
+                      teacherSubmittedAt: null,
+                    }
+                  : c
+              ),
+            },
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "board-a1" }) }
+      );
+      expect(staleRes.status).toBe(200);
+      const parsedAfterStale = parsePreCouncilData(
+        (await staleRes.json()).trimesterRecord.preCouncilJson
+      )!;
+      const convA2 = parsedAfterStale.conversations.find((c) => c.subjectId === "subj-a2")!;
+      expect(convA2.teacherEmail).toBe("docente.envio@escola.pr.gov.br");
+      expect(convA2.teacherName).toBe("Prof. Envio");
+    } finally {
+      if (prevDevAuth === undefined) delete process.env.ENABLE_DEV_AUTH;
+      else process.env.ENABLE_DEV_AUTH = prevDevAuth;
+      if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = prevVercelEnv;
+    }
   });
 });

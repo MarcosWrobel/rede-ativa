@@ -185,7 +185,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     activeUnmounts.push(app.unmount);
 
     // Ativa Etapa 3 ("3. Envio e Ciência") para iniciar o polling automático
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
 
     expect(fetchMock).toHaveBeenCalledTimes(0);
@@ -257,7 +257,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     });
     activeUnmounts.push(app.unmount);
 
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
 
     // Poll 1: base 15s -> 429 com Retry-After: 45
@@ -344,7 +344,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(app.getText()).toContain("Rascunho local pendente de envio");
 
     // 2. Vai à Etapa 3, dispara poll pendente e troca de volta para Etapa 1 -> signal[0] abortado
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
     await vi.advanceTimersByTimeAsync(15_000);
     await app.flush();
@@ -352,7 +352,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
 
-    (app.findButton("1. Matriz do Componente").props.onClick as () => void)();
+    (app.findButton("1. Lançamento").props.onClick as () => void)();
     await app.flush();
     expect(signals[0].aborted).toBe(true);
 
@@ -387,7 +387,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     });
     activeUnmounts.push(app2.unmount);
 
-    (app2.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app2.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app2.flush();
     await vi.advanceTimersByTimeAsync(15_000);
     await app2.flush();
@@ -528,5 +528,275 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
 
     app.unmount();
     expect(pendingSignals[1].aborted).toBe(true);
+  });
+
+  it("ProfessorConselhoClient: verifica liberação imediatamente ao retornar à aba (visibilitychange) respeitando backoff 429", async () => {
+    let pollCount = 0;
+    const fetchMock = vi.fn(async () => {
+      pollCount++;
+      if (pollCount === 1) {
+        return new Response(JSON.stringify({ error: "Muitas requisições" }), {
+          status: 429,
+          headers: { "Retry-After": "30" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          council: buildCouncilContext({ canConfirmAck: true }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const app = mountReactComponent(ProfessorConselhoClient, {
+      token: "token-teste-visibility",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      preloadedSession: {
+        googleIdToken: "id-token-valido",
+        verifiedEmail: "prof@escola.pr.gov.br",
+        verifiedName: "Prof. Marcos",
+        council: buildCouncilContext({ canConfirmAck: false }),
+        suggestedSubjectId: "subj-mat",
+      },
+    });
+    activeUnmounts.push(app.unmount);
+
+    const emitVisibilityChange = () => {
+      for (const listener of shims.documentListeners.get("visibilitychange") || []) {
+        if (typeof listener === "function") listener(new Event("visibilitychange"));
+        else listener.handleEvent(new Event("visibilitychange"));
+      }
+    };
+
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+
+    // 1. Retorno imediato à aba (hidden -> false) dispara verificação sem aguardar 15s -> recebe 429 (Retry-After: 30)
+    shims.documentState.hidden = false;
+    emitVisibilityChange();
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 2. Durante os 30s de backoff, novo evento visibilitychange NÃO dispara fetch antecipado
+    await vi.advanceTimersByTimeAsync(10_000);
+    emitVisibilityChange();
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 3. Após expirar os 30s de backoff (+20s), visibilitychange dispara imediatamente e libera Confirmar ciência
+    await vi.advanceTimersByTimeAsync(20_000);
+    emitVisibilityChange();
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(app.findButton("Confirmar ciência")).toBeDefined();
+  });
+
+  it("ProfessorConselhoClient: alerta vínculo com outro docente quando preCouncil.teacherEmail diverge mesmo com subject.teacherEmail nulo", async () => {
+    const ctx = buildCouncilContext({ canConfirmAck: false });
+    ctx.subjects[0].teacherEmail = null;
+    ctx.subjects[0].teacherName = null;
+    ctx.preCouncil!.conversationsBySubjectId["subj-mat"].teacherEmail = "outro.docente@escola.pr.gov.br";
+    ctx.preCouncil!.conversationsBySubjectId["subj-mat"].teacherName = "Prof. Helena";
+
+    const app = mountReactComponent(ProfessorConselhoClient, {
+      token: "token-teste-owner",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      preloadedSession: {
+        googleIdToken: "id-token-valido",
+        verifiedEmail: "prof@escola.pr.gov.br",
+        verifiedName: "Prof. Marcos",
+        council: ctx,
+        suggestedSubjectId: "subj-mat",
+      },
+    });
+    activeUnmounts.push(app.unmount);
+
+    expect(app.getText()).toContain("Este componente curricular está vinculado a Prof. Helena");
+    expect(app.findButton("Enviar lançamento").props.disabled).toBe(true);
+  });
+
+  it("ProfessorPreConselhoClient: exibe feedback no clique manual de Verificar liberação e libera via visibilitychange", async () => {
+    let callStep = 0;
+    const fetchMock = vi.fn(async () => {
+      callStep++;
+      if (callStep === 1 || callStep === 2) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            verifiedEmail: "prof@escola.pr.gov.br",
+            verifiedName: "Prof. Marcos",
+            suggestedConversationId: "conv-mat",
+            preCouncil: buildPreCouncilPayload({ canConfirm: false }),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          verifiedEmail: "prof@escola.pr.gov.br",
+          verifiedName: "Prof. Marcos",
+          suggestedConversationId: "conv-mat",
+          preCouncil: buildPreCouncilPayload({ canConfirm: true }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const app = mountReactComponent(ProfessorPreConselhoClient, {
+      token: "pre-council-token-vis",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      enableDevAuth: true,
+    });
+    activeUnmounts.push(app.unmount);
+
+    (app.findButton("Entrar").props.onClick as () => void)();
+    await app.flush();
+    expect(app.findButton("Confirmar ciência").props.disabled).toBe(true);
+
+    // 1. Clique manual enquanto pendente mostra feedback explícito
+    (app.findButton("Verificar liberação").props.onClick as () => void)();
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(app.getText()).toContain("Ainda aguardando o registro da conversa ou combinados");
+
+    // 2. Passado o cooldown de 3s, retorno à aba via visibilitychange libera Confirmar ciência imediatamente
+    await vi.advanceTimersByTimeAsync(3_500);
+    shims.documentState.hidden = false;
+    for (const listener of shims.documentListeners.get("visibilitychange") || []) {
+      if (typeof listener === "function") listener(new Event("visibilitychange"));
+      else listener.handleEvent(new Event("visibilitychange"));
+    }
+    await app.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(app.findButton("Confirmar ciência").props.disabled).toBe(false);
+    expect(app.getText()).toContain("Assinatura liberada pela equipe pedagógica.");
+  });
+
+  it("ProfessorConselhoClient: unifica lançamento em 2 blocos, marca atenção por linha com acessibilidade >=40px, preserva rascunho, envia e confirma ciência", async () => {
+    const shims = installBrowserShims();
+    const ctx = buildCouncilContext({ canConfirmAck: true });
+    ctx.students[0].subjectEntries[0].grade = 4.5;
+
+    const putPayloads: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body || "{}"));
+        putPayloads.push(body);
+        const updatedCtx = buildCouncilContext({ canConfirmAck: true });
+        if (body.confirmAck) {
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckEmail =
+            "prof@escola.pr.gov.br";
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckName =
+            "Prof. Marcos";
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckAt =
+            "2026-04-20T12:00:00.000Z";
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, result: { updatedCount: 2 }, council: updatedCtx }),
+        } as Response;
+      })
+    );
+
+    const app = mountReactComponent(ProfessorConselhoClient, {
+      token: "token-teste-2blocos",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      preloadedSession: {
+        googleIdToken: "id-token-valido",
+        verifiedEmail: "prof@escola.pr.gov.br",
+        verifiedName: "Prof. Marcos",
+        council: ctx,
+        suggestedSubjectId: "subj-mat",
+      },
+    });
+    activeUnmounts.push(app.unmount);
+
+    // 1. Exibe exatamente os 2 blocos solicitados
+    expect(app.findButton("1. Lançamento")).toBeDefined();
+    expect(app.findButton("2. Ciência dos Combinados")).toBeDefined();
+    expect(app.getText()).toContain("Nota 4,5 • Abaixo da média");
+
+    // 2. Grupo de selos e botão "Em atenção" na mesma linha com alvo >=40px e aria-pressed
+    const sealBtn = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Ana Clara Souza — Dificuldade")
+    )[0];
+    expect(sealBtn).toBeDefined();
+    expect(String(sealBtn.props.className)).toContain("min-h-[40px]");
+    (sealBtn.props.onClick as () => void)();
+    await app.flush();
+
+    const attentionBtn = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Marcar Ana Clara Souza em atenção")
+    )[0];
+    expect(attentionBtn).toBeDefined();
+    expect(attentionBtn.props["aria-pressed"]).toBe(false);
+    expect(String(attentionBtn.props.className)).toContain("min-h-[40px]");
+    (attentionBtn.props.onClick as () => void)();
+    await app.flush();
+
+    const attentionBtnAfter = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Marcar Ana Clara Souza em atenção")
+    )[0];
+    expect(attentionBtnAfter.props["aria-pressed"]).toBe(true);
+    expect(window.localStorage.length).toBeGreaterThan(0);
+
+    // 3. Envio pelo botão "Enviar lançamento" na barra fixa
+    (app.findButton("Enviar lançamento").props.onClick as () => void)();
+    await app.flush();
+    expect(putPayloads).toHaveLength(1);
+    expect(putPayloads[0].confirmAck).toBe(false);
+    expect((putPayloads[0].preCouncil as { monitoredStudentIds: string[] }).monitoredStudentIds).toContain(
+      "stu-1"
+    );
+
+    // 4. Troca para "2. Ciência dos Combinados" e confirma ciência
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
+    await app.flush();
+    (app.findButton("Confirmar ciência").props.onClick as () => void)();
+    await app.flush();
+    expect(putPayloads).toHaveLength(2);
+    expect(putPayloads[1].confirmAck).toBe(true);
+    expect(app.getText()).toContain("Ciência registrada");
   });
 });

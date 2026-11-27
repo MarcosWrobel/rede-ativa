@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  canConversationConfirmDigitalAck,
   DEFAULT_PRE_COUNCIL_OBJECTIVE,
   formatPreCouncilDateTimePtBr,
   getTodayYmdSaoPaulo,
@@ -52,6 +53,7 @@ interface CouncilPreCouncilConversationsViewProps {
   onNotify: (message: string, kind?: "success" | "error") => void;
   alertsBundle: PreCouncilAlertsBundle;
   matrixStatsBySubjectId: Record<string, SubjectMatrixFillStats>;
+  savedConversationsById?: Map<string, PreCouncilSubjectConversation>;
   hideSensitiveTags: boolean;
   readOnly?: boolean;
 }
@@ -73,6 +75,7 @@ export default function CouncilPreCouncilConversationsView({
   onNotify,
   alertsBundle,
   matrixStatsBySubjectId,
+  savedConversationsById,
   hideSensitiveTags,
   readOnly = false,
 }: CouncilPreCouncilConversationsViewProps) {
@@ -128,6 +131,29 @@ export default function CouncilPreCouncilConversationsView({
     if (!selectedConversation) return -1;
     return draft.conversations.findIndex((c) => c.id === selectedConversation.id);
   }, [draft.conversations, selectedConversation]);
+
+  const validSelectedMonitoredIds = useMemo(() => {
+    if (!selectedConversation) return [];
+    return selectedConversation.monitoredStudentIds.filter((id) => studentCardById.has(id));
+  }, [selectedConversation, studentCardById]);
+
+  const ackReleaseNotice = useMemo<"save_pending" | "released" | null>(() => {
+    if (!savedConversationsById || readOnly || !selectedConversation || selectedConversation.digitalAckEmail) {
+      return null;
+    }
+    const savedConv =
+      savedConversationsById.get(selectedConversation.id) ??
+      (selectedConversation.subjectId
+        ? Array.from(savedConversationsById.values()).find(
+            (item) => item.subjectId === selectedConversation.subjectId
+          )
+        : undefined);
+    const draftReleases = canConversationConfirmDigitalAck(selectedConversation);
+    const savedReleases = canConversationConfirmDigitalAck(savedConv);
+    if (draftReleases && !savedReleases) return "save_pending";
+    if (savedReleases) return "released";
+    return null;
+  }, [savedConversationsById, readOnly, selectedConversation]);
 
   // Limpa edições inline não salvas ao trocar componente ou trimestre
   useEffect(() => {
@@ -370,6 +396,9 @@ export default function CouncilPreCouncilConversationsView({
                   : 0;
                 const isDone = conv.conversationStatus === "COMPLETED";
                 const stats = conv.subjectId ? matrixStatsBySubjectId[conv.subjectId] : undefined;
+                const validMonitoredCount = conv.monitoredStudentIds.filter((id) =>
+                  studentCardById.has(id)
+                ).length;
 
                 return (
                   <button
@@ -413,7 +442,7 @@ export default function CouncilPreCouncilConversationsView({
                           Matriz {stats.filledCount}/{stats.totalActiveCount}
                         </span>
                       )}
-                      <span>• {conv.monitoredStudentIds.length} em acomp.</span>
+                      <span>• {validMonitoredCount} em acomp.</span>
                       {subjectAlertsCount > 0 && (
                         <span className="text-rose-700 dark:text-rose-300">
                           • {subjectAlertsCount} alerta(s)
@@ -664,6 +693,21 @@ export default function CouncilPreCouncilConversationsView({
                 </div>
               </div>
 
+              {ackReleaseNotice === "save_pending" && (
+                <div
+                  role="status"
+                  className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-semibold text-amber-900 dark:text-amber-200"
+                >
+                  Salve o pré-conselho para liberar a ciência docente.
+                </div>
+              )}
+
+              {ackReleaseNotice === "released" && (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                  Ciência docente liberada no link do professor.
+                </div>
+              )}
+
               {/* Bloco Integrado: Matriz de Tags do Componente */}
               {selectedConversation.subjectId && selectedStats && (
                 <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 p-4 space-y-3">
@@ -830,7 +874,7 @@ export default function CouncilPreCouncilConversationsView({
                   <span className="text-xs font-extrabold text-slate-900 dark:text-white inline-flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-sky-600" />
                     <span>
-                      Estudantes em Acompanhamento ({selectedConversation.monitoredStudentIds.length})
+                      Estudantes em Acompanhamento ({validSelectedMonitoredIds.length})
                     </span>
                   </span>
                   {hideSensitiveTags && (
@@ -841,9 +885,9 @@ export default function CouncilPreCouncilConversationsView({
                 </div>
 
                 {/* Chips selecionados */}
-                {selectedConversation.monitoredStudentIds.length > 0 ? (
+                {validSelectedMonitoredIds.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {selectedConversation.monitoredStudentIds.map((stId) => {
+                    {validSelectedMonitoredIds.map((stId) => {
                       const card = studentCardById.get(stId);
                       if (!card) return null;
                       return (

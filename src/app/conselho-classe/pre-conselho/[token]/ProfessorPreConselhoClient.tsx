@@ -80,6 +80,8 @@ declare global {
   }
 }
 
+const PORTAL_FOCUS_COOLDOWN_MS = 3_000;
+
 export default function ProfessorPreConselhoClient({
   token,
   schoolName,
@@ -111,6 +113,12 @@ export default function ProfessorPreConselhoClient({
   const pollInFlightRef = useRef(false);
   const pollAbortRef = useRef<AbortController | null>(null);
   const pollDelayMsRef = useRef<number>(TEACHER_PORTAL_POLL_BASE_MS);
+  const nextAllowedPollAtMsRef = useRef<number>(0);
+  const lastPollCompletedAtMsRef = useRef<number>(0);
+  const selectedConversationIdRef = useRef<string>(selectedConversationId);
+  selectedConversationIdRef.current = selectedConversationId;
+
+  const hasPreCouncil = Boolean(preCouncil);
 
   const authenticateWithCredential = useCallback(
     async (credential: string) => {
@@ -119,6 +127,8 @@ export default function ProfessorPreConselhoClient({
       setSessionExpired(false);
       setSubmitFeedback(null);
       pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+      nextAllowedPollAtMsRef.current = 0;
+      lastPollCompletedAtMsRef.current = 0;
 
       try {
         const res = await fetch(
@@ -297,6 +307,13 @@ export default function ProfessorPreConselhoClient({
         preCouncil?: PreCouncilPortalContext;
       } = await res.json();
 
+      if (res.status === 401) {
+        setSessionExpired(true);
+        throw new Error(
+          data.error || "Sessão Google expirada. Entre novamente com sua conta @escola.pr.gov.br."
+        );
+      }
+
       if (!res.ok || !data.preCouncil || !data.ack) {
         throw new Error(data.error || "Não foi possível registrar a ciência docente.");
       }
@@ -324,9 +341,11 @@ export default function ProfessorPreConselhoClient({
     });
   }, [selectedConversation]);
 
+  const hasSelectedConversation = Boolean(selectedConversation);
+
   const refreshLegacyReleaseStatus = useCallback(
     async (manual = false): Promise<"ok" | "expired" | "rate_limited" | "error" | "skipped"> => {
-      if (!googleIdToken || !preCouncil || sessionExpired) return "skipped";
+      if (!googleIdToken || !hasPreCouncil || sessionExpired) return "skipped";
       if (!manual && pollInFlightRef.current) return "skipped";
 
       pollAbortRef.current?.abort();
@@ -368,11 +387,14 @@ export default function ProfessorPreConselhoClient({
         }
 
         if (res.status === 429) {
-          pollDelayMsRef.current = computePortalPollBackoffMs({
+          const backoffMs = computePortalPollBackoffMs({
             retryAfterHeader: res.headers.get("retry-after"),
             retryAfterBody: data.retryAfter,
             currentDelayMs: pollDelayMsRef.current,
           });
+          pollDelayMsRef.current = backoffMs;
+          nextAllowedPollAtMsRef.current = Date.now() + backoffMs;
+          lastPollCompletedAtMsRef.current = Date.now();
           if (manual) {
             setSubmitFeedback({
               type: "error",
@@ -383,6 +405,7 @@ export default function ProfessorPreConselhoClient({
         }
 
         if (!res.ok || !data.preCouncil) {
+          lastPollCompletedAtMsRef.current = Date.now();
           if (manual) {
             setSubmitFeedback({
               type: "error",
@@ -393,12 +416,51 @@ export default function ProfessorPreConselhoClient({
         }
 
         pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+        nextAllowedPollAtMsRef.current = 0;
+        lastPollCompletedAtMsRef.current = Date.now();
         setPreCouncil(data.preCouncil);
+
+        const targetConv =
+          data.preCouncil.conversations.find((c) => c.id === selectedConversationIdRef.current) ||
+          data.preCouncil.conversations[0] ||
+          null;
+        const released = Boolean(
+          targetConv &&
+            canConversationConfirmDigitalAck({
+              conversationStatus: targetConv.conversationStatus,
+              agreements: targetConv.agreements,
+            })
+        );
+
+        if (manual) {
+          if (released) {
+            setSubmitFeedback({
+              type: "success",
+              message: "Assinatura liberada pela equipe pedagógica.",
+            });
+          } else {
+            setSubmitFeedback({
+              type: "error",
+              message:
+                "Ainda aguardando o registro da conversa ou combinados pela equipe pedagógica.",
+            });
+          }
+        } else if (released) {
+          setSubmitFeedback((prev) =>
+            prev?.type === "error"
+              ? {
+                  type: "success",
+                  message: "Assinatura liberada pela equipe pedagógica.",
+                }
+              : prev
+          );
+        }
         return "ok";
       } catch (err) {
         if ((err as { name?: string })?.name === "AbortError") {
           return "skipped";
         }
+        lastPollCompletedAtMsRef.current = Date.now();
         if (manual) {
           setSubmitFeedback({
             type: "error",
@@ -407,24 +469,24 @@ export default function ProfessorPreConselhoClient({
         }
         return "error";
       } finally {
-        pollInFlightRef.current = false;
         if (pollAbortRef.current === controller) {
+          pollInFlightRef.current = false;
           pollAbortRef.current = null;
-        }
-        if (manual) {
-          setCheckingRelease(false);
+          if (manual) {
+            setCheckingRelease(false);
+          }
         }
       }
     },
-    [googleIdToken, preCouncil, token, sessionExpired]
+    [googleIdToken, hasPreCouncil, token, sessionExpired]
   );
 
   useEffect(() => {
     if (
       !googleIdToken ||
-      !preCouncil ||
+      !hasPreCouncil ||
       sessionExpired ||
-      !selectedConversation ||
+      !hasSelectedConversation ||
       isClaimedByOtherTeacher ||
       isAckByOtherTeacher ||
       isAckByCurrentTeacher ||
@@ -437,7 +499,7 @@ export default function ProfessorPreConselhoClient({
     let cancelled = false;
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    const scheduleNext = () => {
+    const scheduleNext = (delayOverrideMs?: number) => {
       if (cancelled) return;
       timerId = setTimeout(async () => {
         if (cancelled) return;
@@ -445,25 +507,53 @@ export default function ProfessorPreConselhoClient({
           scheduleNext();
           return;
         }
+        const remainingBackoffMs = nextAllowedPollAtMsRef.current - Date.now();
+        if (remainingBackoffMs > 0) {
+          scheduleNext(remainingBackoffMs);
+          return;
+        }
         const outcome = await refreshLegacyReleaseStatus(false);
         if (!cancelled && outcome !== "expired") {
           scheduleNext();
         }
-      }, pollDelayMsRef.current);
+      }, delayOverrideMs ?? pollDelayMsRef.current);
     };
+
+    const handleVisibilityOrFocus = () => {
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      const now = Date.now();
+      if (now < nextAllowedPollAtMsRef.current) return;
+      if (now - lastPollCompletedAtMsRef.current < PORTAL_FOCUS_COOLDOWN_MS) return;
+      if (pollInFlightRef.current) return;
+      void refreshLegacyReleaseStatus(false);
+    };
+
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("focus", handleVisibilityOrFocus);
+    }
 
     scheduleNext();
 
     return () => {
       cancelled = true;
       if (timerId) clearTimeout(timerId);
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      }
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+      }
       pollAbortRef.current?.abort();
     };
   }, [
     googleIdToken,
-    preCouncil,
+    hasPreCouncil,
     sessionExpired,
-    selectedConversation,
+    hasSelectedConversation,
     isClaimedByOtherTeacher,
     isAckByOtherTeacher,
     isAckByCurrentTeacher,
@@ -475,6 +565,8 @@ export default function ProfessorPreConselhoClient({
     pollAbortRef.current?.abort();
     pollInFlightRef.current = false;
     pollDelayMsRef.current = TEACHER_PORTAL_POLL_BASE_MS;
+    nextAllowedPollAtMsRef.current = 0;
+    lastPollCompletedAtMsRef.current = 0;
     setSessionExpired(false);
     setGoogleIdToken(null);
     setVerifiedEmail(null);

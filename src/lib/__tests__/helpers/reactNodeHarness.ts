@@ -353,6 +353,7 @@ export function mountReactComponent<P extends object>(
 export interface BrowserShimHandle {
   storageMap: Map<string, string>;
   windowListeners: Map<string, Set<EventListenerOrEventListenerObject>>;
+  documentListeners: Map<string, Set<EventListenerOrEventListenerObject>>;
   documentState: { hidden: boolean };
   restore: () => void;
 }
@@ -404,10 +405,20 @@ export function installBrowserShims(): BrowserShimHandle {
     },
   };
 
+  const documentListeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
   const documentState = { hidden: false };
   const documentShim = {
     get hidden() {
       return documentState.hidden;
+    },
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (!documentListeners.has(type)) {
+        documentListeners.set(type, new Set());
+      }
+      documentListeners.get(type)!.add(listener);
+    },
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      documentListeners.get(type)?.delete(listener);
     },
     getElementById: () => null,
     createElement: () => ({}),
@@ -421,6 +432,7 @@ export function installBrowserShims(): BrowserShimHandle {
   return {
     storageMap,
     windowListeners,
+    documentListeners,
     documentState,
     restore: () => {
       if (hadWindow) g.window = prevWindow;
