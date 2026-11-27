@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { withTenantContext } from "./rlsTenantContext";
 import { getSchoolContextByVerifiedId, UnauthorizedSchoolError } from "./currentSchool";
 import { REPLY_CATEGORY_LABELS, type ReplyCategory } from "./whatsappProvider";
 
@@ -33,16 +34,17 @@ export async function getReportsSummary(params: ReportsFilterParams = {}): Promi
     throw new UnauthorizedSchoolError();
   }
   const andFilters: any[] = [
-    { student: { schoolId: currentSchool.id } }
-  ];
-
-  if (segment && segment !== "TODOS") {
-    andFilters.push({
+    { OR: [{ schoolId: null }, { schoolId: currentSchool.id }] },
+    {
       student: {
-        classGroup: { segment },
+        schoolId: currentSchool.id,
+        classGroup: {
+          schoolId: currentSchool.id,
+          ...(segment && segment !== "TODOS" ? { segment } : {}),
+        },
       },
-    });
-  }
+    },
+  ];
 
   if (dateFrom || dateTo) {
     const sentAtRange: Record<string, Date> = {};
@@ -59,38 +61,55 @@ export async function getReportsSummary(params: ReportsFilterParams = {}): Promi
     }
   }
 
-  const where = andFilters.length > 0 ? { AND: andFilters } : {};
+  const where = { AND: andFilters };
 
-  const [total, replied, byReason, byPedagoga, byCategory, byDelivery] = await Promise.all([
-    prisma.messageLog.count({ where }),
-    prisma.messageLog.count({ where: { ...where, guardianReplied: true } }),
-    prisma.messageLog.groupBy({
-      by: ["reasonTitle"],
-      where,
-      _count: { _all: true },
-      orderBy: { _count: { reasonTitle: "desc" } },
-    }),
-    prisma.messageLog.groupBy({
-      by: ["sentByName"],
-      where,
-      _count: { _all: true },
-      orderBy: { _count: { sentByName: "desc" } },
-    }),
-    prisma.messageLog
-      .groupBy({
-        by: ["replyCategory"],
-        where: { ...where, guardianReplied: true, replyCategory: { not: null } },
-        _count: { _all: true },
-      })
-      .catch(() => [] as Array<{ replyCategory: string | null; _count: { _all: number } }>),
-    prisma.messageLog
-      .groupBy({
-        by: ["deliveryStatus"],
+  const { total, replied, byReason, byPedagoga, byCategory, byDelivery } =
+    await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const totalCount = await tx.messageLog.count({ where });
+      const repliedCount = await tx.messageLog.count({
+        where: { ...where, guardianReplied: true },
+      });
+      const reasonRows = await tx.messageLog.groupBy({
+        by: ["reasonTitle"],
         where,
         _count: { _all: true },
-      })
-      .catch(() => [] as Array<{ deliveryStatus: string; _count: { _all: number } }>),
-  ]);
+        orderBy: { _count: { reasonTitle: "desc" } },
+      });
+      const pedagogaRows = await tx.messageLog.groupBy({
+        by: ["sentByName"],
+        where,
+        _count: { _all: true },
+        orderBy: { _count: { sentByName: "desc" } },
+      });
+      let categoryRows: Array<{ replyCategory: string | null; _count: { _all: number } }> = [];
+      try {
+        categoryRows = await (tx.messageLog.groupBy as any)({
+          by: ["replyCategory"],
+          where: { ...where, guardianReplied: true, replyCategory: { not: null } },
+          _count: { _all: true },
+        });
+      } catch {
+        categoryRows = [];
+      }
+      let deliveryRows: Array<{ deliveryStatus: string; _count: { _all: number } }> = [];
+      try {
+        deliveryRows = await (tx.messageLog.groupBy as any)({
+          by: ["deliveryStatus"],
+          where,
+          _count: { _all: true },
+        });
+      } catch {
+        deliveryRows = [];
+      }
+      return {
+        total: totalCount,
+        replied: repliedCount,
+        byReason: reasonRows,
+        byPedagoga: pedagogaRows,
+        byCategory: categoryRows,
+        byDelivery: deliveryRows,
+      };
+    });
 
   const denom = total || 1;
   const pending = Math.max(0, total - replied);

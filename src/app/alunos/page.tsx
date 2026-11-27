@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import AlunosClient from "./AlunosClient";
@@ -19,36 +20,42 @@ export default async function AlunosPage() {
   let allContacts: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.student.findMany({
-        where: { schoolId, active: true },
-        include: {
-          classGroup: true,
-          _count: { select: { messageLogs: true } },
-        },
-        orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId },
-        orderBy: { name: "asc" },
-      }),
-      safeQueryList(() =>
-        prisma.absenceJustification.findMany({
+    await withTenantContext(prisma, schoolId, async (tx) => {
+      students =
+        (await tx.student.findMany({
+          where: {
+            schoolId,
+            active: true,
+            classGroup: { schoolId },
+          },
+          include: {
+            classGroup: true,
+            _count: {
+              select: {
+                messageLogs: { where: { OR: [{ schoolId: null }, { schoolId }] } },
+              },
+            },
+          },
+          orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
+        })) || [];
+      classGroups =
+        (await tx.classGroup.findMany({
+          where: { schoolId },
+          orderBy: { name: "asc" },
+        })) || [];
+      recentJustifications = await safeQueryList(() =>
+        tx.absenceJustification.findMany({
           where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
-      ),
-      safeQueryList(() =>
-        prisma.studentContact.findMany({
+      );
+      allContacts = await safeQueryList(() =>
+        tx.studentContact.findMany({
           where: { student: { schoolId } },
           select: { id: true, studentId: true, whatsappValid: true },
         })
-      ),
-    ]);
-    students = results[0] || [];
-    classGroups = results[1] || [];
-    recentJustifications = results[2] || [];
-    allContacts = results[3] || [];
+      );
+    });
   } catch (err) {
     console.error("[AlunosPage] Erro ao buscar registros:", err);
   }

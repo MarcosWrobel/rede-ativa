@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import HistoricoClient from "./HistoricoClient";
 
@@ -19,35 +20,42 @@ export default async function HistoricoPage() {
   let pedagogaRows: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.messageLog.findMany({
-        where: { student: { schoolId } },
-        take: INITIAL_PAGE_SIZE,
-        orderBy: { sentAt: "desc" },
-        include: {
-          student: {
-            include: { classGroup: true },
+    const scopedMessageWhere = {
+      OR: [{ schoolId: null }, { schoolId }],
+      student: {
+        schoolId,
+        classGroup: { schoolId },
+      },
+    };
+    await withTenantContext(prisma, schoolId, async (tx) => {
+      logs =
+        (await tx.messageLog.findMany({
+          where: scopedMessageWhere,
+          take: INITIAL_PAGE_SIZE,
+          orderBy: { sentAt: "desc" },
+          include: {
+            student: {
+              include: { classGroup: true },
+            },
           },
-        },
-      }),
-      prisma.messageLog.count({
-        where: { student: { schoolId } },
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId },
-        orderBy: { name: "asc" },
-      }),
-      prisma.messageLog.findMany({
-        where: { student: { schoolId } },
-        distinct: ["sentByName"],
-        select: { sentByName: true },
-        orderBy: { sentByName: "asc" },
-      }),
-    ]);
-    logs = results[0] || [];
-    totalCount = results[1] || 0;
-    classGroups = results[2] || [];
-    pedagogaRows = results[3] || [];
+        })) || [];
+      totalCount =
+        (await tx.messageLog.count({
+          where: scopedMessageWhere,
+        })) || 0;
+      classGroups =
+        (await tx.classGroup.findMany({
+          where: { schoolId },
+          orderBy: { name: "asc" },
+        })) || [];
+      pedagogaRows =
+        (await tx.messageLog.findMany({
+          where: scopedMessageWhere,
+          distinct: ["sentByName"],
+          select: { sentByName: true },
+          orderBy: { sentByName: "asc" },
+        })) || [];
+    });
   } catch (err) {
     console.error("[HistoricoPage] Erro ao carregar histórico:", err);
   }

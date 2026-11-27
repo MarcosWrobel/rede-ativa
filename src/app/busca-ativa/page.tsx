@@ -36,14 +36,15 @@ export default async function BuscaAtivaPage({
   let allContacts: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.classGroup.findMany({
-        where: { schoolId },
-        select: { id: true, name: true, segment: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-      withTenantContext(prisma, schoolId, async (tx) =>
-        tx.messageTemplate.findMany({
+    await withTenantContext(prisma, schoolId, async (tx) => {
+      classGroups =
+        (await tx.classGroup.findMany({
+          where: { schoolId },
+          select: { id: true, name: true, segment: true, shift: true },
+          orderBy: { name: "asc" },
+        })) || [];
+      templates =
+        (await tx.messageTemplate.findMany({
           where: { active: true, schoolId },
           select: {
             id: true,
@@ -54,66 +55,64 @@ export default async function BuscaAtivaPage({
             isAbsenceRelated: true,
           },
           orderBy: { title: "asc" },
-        })
-      ),
-      prisma.student.findMany({
-        where: { schoolId, active: true },
-        select: {
-          id: true,
-          cgm: true,
-          name: true,
-          guardianName: true,
-          phone: true,
-          isExchangeStudent: true,
-          isSpecialNeeds: true,
-          age: true,
-          classGroupId: true,
-          classGroup: {
-            select: { id: true, name: true, segment: true, shift: true },
+        })) || [];
+      rawStudents =
+        (await tx.student.findMany({
+          where: { schoolId, active: true, classGroup: { schoolId } },
+          select: {
+            id: true,
+            cgm: true,
+            name: true,
+            guardianName: true,
+            phone: true,
+            isExchangeStudent: true,
+            isSpecialNeeds: true,
+            age: true,
+            classGroupId: true,
+            classGroup: {
+              select: { id: true, name: true, segment: true, shift: true },
+            },
+            lowAttendanceRecord: {
+              select: { attendancePercent: true, actionsTaken: true, enrollmentDetail: true },
+            },
+            messageLogs: {
+              where: { OR: [{ schoolId: null }, { schoolId }] },
+              orderBy: { sentAt: "desc" },
+              take: 1,
+              select: { sentAt: true, reasonTitle: true, sentByName: true },
+            },
           },
-          lowAttendanceRecord: {
-            select: { attendancePercent: true, actionsTaken: true, enrollmentDetail: true },
+          orderBy: { name: "asc" },
+        })) || [];
+      recentLogs =
+        (await tx.messageLog.findMany({
+          where: {
+            OR: [{ schoolId: null }, { schoolId }],
+            student: { schoolId, classGroup: { schoolId } },
           },
-          messageLogs: {
-            orderBy: { sentAt: "desc" },
-            take: 1,
-            select: { sentAt: true, reasonTitle: true, sentByName: true },
+          take: 150,
+          orderBy: { sentAt: "desc" },
+          select: {
+            id: true,
+            studentId: true,
+            reasonTitle: true,
+            sentByName: true,
+            sentAt: true,
           },
-        },
-        orderBy: { name: "asc" },
-      }),
-      prisma.messageLog.findMany({
-        where: { student: { schoolId } },
-        take: 150,
-        orderBy: { sentAt: "desc" },
-        select: {
-          id: true,
-          studentId: true,
-          reasonTitle: true,
-          sentByName: true,
-          sentAt: true,
-        },
-      }),
-      safeQueryList(() =>
-        prisma.absenceJustification.findMany({
+        })) || [];
+      recentJustifications = await safeQueryList(() =>
+        tx.absenceJustification.findMany({
           where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
-      ),
-      safeQueryList(() =>
-        prisma.studentContact.findMany({
+      );
+      allContacts = await safeQueryList(() =>
+        tx.studentContact.findMany({
           where: { student: { schoolId } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         })
-      ),
-    ]);
-
-    classGroups = results[0] || [];
-    templates = results[1] || [];
-    rawStudents = results[2] || [];
-    recentLogs = results[3] || [];
-    recentJustifications = results[4] || [];
-    allContacts = results[5] || [];
+      );
+    });
   } catch (err) {
     console.error("[BuscaAtivaPage] Erro ao carregar dados do banco:", err);
   }

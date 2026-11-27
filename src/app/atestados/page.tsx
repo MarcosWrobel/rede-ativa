@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import AtestadosClient from "./AtestadosClient";
 
@@ -22,53 +23,55 @@ export default async function AtestadosPage() {
   let students: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.absenceJustification.findMany({
-        where: { student: { ...schoolCondition, active: true } },
-        take: 100,
-        orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
-        include: {
-          student: {
-            select: {
-              id: true,
-              name: true,
-              cgm: true,
-              phone: true,
-              guardianName: true,
-              classGroup: { select: { id: true, name: true, shift: true } },
+    await withTenantContext(prisma, school.id, async (tx) => {
+      justifications =
+        (await tx.absenceJustification.findMany({
+          where: { student: { ...schoolCondition, active: true, classGroup: { schoolId: school.id } } },
+          take: 100,
+          orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
+          include: {
+            student: {
+              select: {
+                id: true,
+                name: true,
+                cgm: true,
+                phone: true,
+                guardianName: true,
+                classGroup: { select: { id: true, name: true, shift: true } },
+              },
             },
           },
-        },
-      }),
-      prisma.absenceJustification.count({ where: { student: { ...schoolCondition, active: true } } }),
-      prisma.absenceJustification.count({
-        where: {
-          student: { ...schoolCondition, active: true },
-          endDate: { gte: startOfTodayBrasilia },
-        },
-      }),
-      prisma.classGroup.findMany({
-        where: school?.id ? { schoolId: school.id } : undefined,
-        select: { id: true, name: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-      prisma.student.findMany({
-        where: { ...schoolCondition, active: true },
-        select: {
-          id: true,
-          name: true,
-          cgm: true,
-          classGroupId: true,
-          classGroup: { select: { id: true, name: true } },
-        },
-        orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
-      }),
-    ]);
-    justifications = results[0] || [];
-    totalCount = results[1] || 0;
-    activeCount = results[2] || 0;
-    classes = results[3] || [];
-    students = results[4] || [];
+        })) || [];
+      totalCount =
+        (await tx.absenceJustification.count({
+          where: { student: { ...schoolCondition, active: true, classGroup: { schoolId: school.id } } },
+        })) || 0;
+      activeCount =
+        (await tx.absenceJustification.count({
+          where: {
+            student: { ...schoolCondition, active: true, classGroup: { schoolId: school.id } },
+            endDate: { gte: startOfTodayBrasilia },
+          },
+        })) || 0;
+      classes =
+        (await tx.classGroup.findMany({
+          where: { schoolId: school.id },
+          select: { id: true, name: true, shift: true },
+          orderBy: { name: "asc" },
+        })) || [];
+      students =
+        (await tx.student.findMany({
+          where: { ...schoolCondition, active: true, classGroup: { schoolId: school.id } },
+          select: {
+            id: true,
+            name: true,
+            cgm: true,
+            classGroupId: true,
+            classGroup: { select: { id: true, name: true } },
+          },
+          orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
+        })) || [];
+    });
   } catch (err) {
     console.error("[AtestadosPage] Erro ao carregar dados:", err);
   }

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 import EncaminhamentosClient from "./EncaminhamentosClient";
@@ -22,86 +23,87 @@ export default async function EncaminhamentosPage() {
   let classes: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.pedagogicalActionItem.findMany({
-        where: {
-          minute: {
-            schoolId: school.id,
-            status: { in: ["FINALIZED", "DRAFT"] },
+    const { rawItems, rawSummaryItems, rawClasses } = await withTenantContext(
+      prisma,
+      school.id,
+      async (tx) => {
+        const items = await tx.pedagogicalActionItem.findMany({
+          where: {
+            minute: {
+              schoolId: school.id,
+              status: { in: ["FINALIZED", "DRAFT"] },
+            },
           },
-        },
-        take: 150,
-        orderBy: [
-          { status: "asc" }, // PENDING primeiro
-          { dueDate: "asc" }, // Urgentes primeiro
-          { createdAt: "desc" },
-        ],
-        include: {
-          minute: {
-            select: {
-              id: true,
-              schoolId: true,
-              ataNumber: true,
-              year: true,
-              subject: true,
-              attendedAt: true,
-              finalizedAt: true,
-              status: true,
-              isConfidential: true,
-              authorId: true,
-              authorEmail: true,
-              students: {
-                select: {
-                  id: true,
-                  studentId: true,
-                  studentNameSnapshot: true,
-                  classNameSnapshot: true,
-                  cgmSnapshot: true,
-                  student: {
-                    select: {
-                      id: true,
-                      name: true,
-                      classGroup: { select: { id: true, name: true } },
+          take: 150,
+          orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+          include: {
+            minute: {
+              select: {
+                id: true,
+                schoolId: true,
+                ataNumber: true,
+                year: true,
+                subject: true,
+                attendedAt: true,
+                finalizedAt: true,
+                status: true,
+                isConfidential: true,
+                authorId: true,
+                authorEmail: true,
+                students: {
+                  select: {
+                    id: true,
+                    studentId: true,
+                    studentNameSnapshot: true,
+                    classNameSnapshot: true,
+                    cgmSnapshot: true,
+                    student: {
+                      select: {
+                        id: true,
+                        name: true,
+                        classGroup: { select: { id: true, name: true } },
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      }),
-      prisma.pedagogicalActionItem.findMany({
-        where: {
-          minute: { schoolId: school.id, status: { in: ["FINALIZED", "DRAFT"] } },
-        },
-        select: {
-          id: true,
-          status: true,
-          dueDate: true,
-          responsible: true,
-          minute: {
-            select: {
-              schoolId: true,
-              isConfidential: true,
-              authorId: true,
-              authorEmail: true,
+        });
+        const summaryItems = await tx.pedagogicalActionItem.findMany({
+          where: {
+            minute: { schoolId: school.id, status: { in: ["FINALIZED", "DRAFT"] } },
+          },
+          select: {
+            id: true,
+            status: true,
+            dueDate: true,
+            responsible: true,
+            minute: {
+              select: {
+                schoolId: true,
+                isConfidential: true,
+                authorId: true,
+                authorEmail: true,
+              },
             },
           },
-        },
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId: school.id },
-        select: { id: true, name: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-    ]);
-    actionItems = (results[0] || []).filter(
+        });
+        const cgList = await tx.classGroup.findMany({
+          where: { schoolId: school.id },
+          select: { id: true, name: true, shift: true },
+          orderBy: { name: "asc" },
+        });
+        return { rawItems: items, rawSummaryItems: summaryItems, rawClasses: cgList };
+      }
+    );
+    actionItems = (rawItems || []).filter(
       (item: any) => !item.minute || canAccessConfidentialMinute(item.minute, session)
     );
-    allSchoolActions = (results[1] || []).filter(
+    allSchoolActions = (rawSummaryItems || []).filter(
       (item: any) => !item.minute || canAccessConfidentialMinute(item.minute, session)
     );
-    classes = results[2] || [];
+    classes = rawClasses || [];
   } catch (err) {
     console.error("[EncaminhamentosPage] Erro ao carregar compromissos:", err);
   }

@@ -37,111 +37,119 @@ export default async function FaltasPage() {
   let recentSnapshots: any[] = [];
 
   try {
-    const results = await Promise.all([
-      prisma.messageLog.findMany({
-        take: 1000,
-        where: {
-          student: { schoolId },
-          OR: [
-            { template: { isAbsenceRelated: true } },
-            ...absenceKeywords.map((kw) => ({
-              templateId: null,
-              reasonTitle: { contains: kw, mode: "insensitive" as const },
-            })),
-            ...absenceKeywords.slice(0, 5).map((kw) => ({
-              reasonTitle: { contains: kw, mode: "insensitive" as const },
-            })),
-          ],
-        },
-        select: {
-          studentId: true,
-          sentAt: true,
-          student: {
-            select: {
-              id: true,
-              cgm: true,
-              name: true,
-              phone: true,
-              guardianName: true,
-              isExchangeStudent: true,
-              isSpecialNeeds: true,
-              age: true,
-              classGroupId: true,
-              classGroup: {
-                select: { id: true, name: true, segment: true, shift: true },
+    await withTenantContext(prisma, schoolId, async (tx) => {
+      absenceLogs =
+        (await tx.messageLog.findMany({
+          take: 1000,
+          where: {
+            AND: [
+              { OR: [{ schoolId: null }, { schoolId }] },
+              { student: { schoolId, classGroup: { schoolId } } },
+              {
+                OR: [
+                  { template: { isAbsenceRelated: true } },
+                  ...absenceKeywords.map((kw) => ({
+                    templateId: null,
+                    reasonTitle: { contains: kw, mode: "insensitive" as const },
+                  })),
+                  ...absenceKeywords.slice(0, 5).map((kw) => ({
+                    reasonTitle: { contains: kw, mode: "insensitive" as const },
+                  })),
+                ],
+              },
+            ],
+          },
+          select: {
+            studentId: true,
+            sentAt: true,
+            student: {
+              select: {
+                id: true,
+                cgm: true,
+                name: true,
+                phone: true,
+                guardianName: true,
+                isExchangeStudent: true,
+                isSpecialNeeds: true,
+                age: true,
+                classGroupId: true,
+                classGroup: {
+                  select: { id: true, name: true, segment: true, shift: true },
+                },
               },
             },
           },
-        },
-      }),
-      prisma.lowAttendanceRecord.findMany({
-        where: { student: { schoolId } },
-        select: {
-          id: true,
-          attendancePercent: true,
-          enrollmentDetail: true,
-          actionsTaken: true,
-          serpProtocol: true,
-          serpStatus: true,
-          serpOpenedAt: true,
-          serpDetails: true,
-          student: {
-            select: {
-              id: true,
-              cgm: true,
-              name: true,
-              phone: true,
-              guardianName: true,
-              isExchangeStudent: true,
-              isSpecialNeeds: true,
-              age: true,
-              classGroupId: true,
-              classGroup: {
-                select: { id: true, name: true, segment: true, shift: true },
-              },
-              messageLogs: {
-                orderBy: { sentAt: "desc" },
-                take: 1,
-                select: { sentAt: true, reasonTitle: true, sentByName: true },
+        })) || [];
+      lowAttendance =
+        (await tx.lowAttendanceRecord.findMany({
+          where: { student: { schoolId, classGroup: { schoolId } } },
+          select: {
+            id: true,
+            attendancePercent: true,
+            enrollmentDetail: true,
+            actionsTaken: true,
+            serpProtocol: true,
+            serpStatus: true,
+            serpOpenedAt: true,
+            serpDetails: true,
+            student: {
+              select: {
+                id: true,
+                cgm: true,
+                name: true,
+                phone: true,
+                guardianName: true,
+                isExchangeStudent: true,
+                isSpecialNeeds: true,
+                age: true,
+                classGroupId: true,
+                classGroup: {
+                  select: { id: true, name: true, segment: true, shift: true },
+                },
+                messageLogs: {
+                  where: { OR: [{ schoolId: null }, { schoolId }] },
+                  orderBy: { sentAt: "desc" },
+                  take: 1,
+                  select: { sentAt: true, reasonTitle: true, sentByName: true },
+                },
               },
             },
           },
-        },
-        orderBy: { attendancePercent: "asc" },
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId },
-        select: { id: true, name: true, segment: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-      withTenantContext(prisma, schoolId, async (tx) =>
-        tx.messageTemplate.findMany({
+          orderBy: { attendancePercent: "asc" },
+        })) || [];
+      classGroups =
+        (await tx.classGroup.findMany({
+          where: { schoolId },
+          select: { id: true, name: true, segment: true, shift: true },
+          orderBy: { name: "asc" },
+        })) || [];
+      templates =
+        (await tx.messageTemplate.findMany({
           where: { active: true, schoolId },
           orderBy: { title: "asc" },
           select: {
             id: true,
-          title: true,
-          segment: true,
-          prefixText: true,
-          suffixText: true,
+            title: true,
+            segment: true,
+            prefixText: true,
+            suffixText: true,
             isAbsenceRelated: true,
           },
-        })
-      ),
-      safeQueryList(() =>
-        prisma.absenceJustification.findMany({
+        })) || [];
+      recentJustifications = await safeQueryList(() =>
+        tx.absenceJustification.findMany({
           where: { student: { schoolId }, endDate: { gte: recentCutoff } },
           orderBy: { endDate: "desc" },
         })
-      ),
-      safeQueryList(() =>
-        prisma.studentContact.findMany({
+      );
+      allContacts = await safeQueryList(() =>
+        tx.studentContact.findMany({
           where: { student: { schoolId } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         })
-      ),
-      safeQueryList(() =>
-        prisma.attendanceSnapshot.findMany({
+      );
+      recentSnapshots = await safeQueryList(() =>
+        tx.attendanceSnapshot.findMany({
           where: { student: { schoolId } },
           take: 1000,
           select: {
@@ -152,16 +160,8 @@ export default async function FaltasPage() {
           },
           orderBy: { recordedAt: "desc" },
         })
-      ),
-    ]);
-
-    absenceLogs = results[0] || [];
-    lowAttendance = results[1] || [];
-    classGroups = results[2] || [];
-    templates = results[3] || [];
-    recentJustifications = results[4] || [];
-    allContacts = results[5] || [];
-    recentSnapshots = results[6] || [];
+      );
+    });
   } catch (err) {
     console.error("[FaltasPage] Erro ao consultar banco de dados:", err);
   }

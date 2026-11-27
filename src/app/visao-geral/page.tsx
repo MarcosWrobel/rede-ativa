@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { 
   Send, 
@@ -35,27 +36,33 @@ export default async function DashboardPage() {
   let totalMinutes = 0;
 
   try {
-    const results = await Promise.all([
-      prisma.student.count({ where: { schoolId, active: true } }),
-      prisma.messageLog.count({ where: { student: { schoolId } } }),
-      prisma.messageLog.count({ where: { student: { schoolId }, guardianReplied: true } }),
-      prisma.messageLog.findMany({
-        where: { student: { schoolId } },
+    const scopedMessageWhere = {
+      OR: [{ schoolId: null }, { schoolId }],
+      student: { schoolId, classGroup: { schoolId } },
+    };
+    await withTenantContext(prisma, schoolId, async (tx) => {
+      totalStudents = await tx.student.count({
+        where: { schoolId, active: true, classGroup: { schoolId } },
+      });
+      totalLogs = await tx.messageLog.count({ where: scopedMessageWhere });
+      totalReplied = await tx.messageLog.count({
+        where: { ...scopedMessageWhere, guardianReplied: true },
+      });
+      recentLogs = await tx.messageLog.findMany({
+        where: scopedMessageWhere,
         take: 6,
         orderBy: { sentAt: "desc" },
         include: {
           student: { include: { classGroup: true } },
         },
-      }),
-      prisma.lowAttendanceRecord.count({ where: { student: { schoolId } } }),
-      prisma.pedagogicalMinute.count({ where: { schoolId, status: "FINALIZED" } }),
-    ]);
-    totalStudents = results[0];
-    totalLogs = results[1];
-    totalReplied = results[2];
-    recentLogs = results[3];
-    lowAttendanceCount = results[4];
-    totalMinutes = results[5];
+      });
+      lowAttendanceCount = await tx.lowAttendanceRecord.count({
+        where: { student: { schoolId, classGroup: { schoolId } } },
+      });
+      totalMinutes = await tx.pedagogicalMinute.count({
+        where: { schoolId, status: "FINALIZED" },
+      });
+    });
   } catch (err) {
     console.error("[DashboardPage] Falha temporária ao carregar métricas:", err);
   }

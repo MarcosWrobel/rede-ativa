@@ -7,6 +7,11 @@ import {
   runRlsWave1Preflight,
 } from "@/lib/rlsWave1Preflight";
 
+vi.mock("next/headers", () => ({
+  headers: vi.fn(async () => new Headers()),
+  cookies: vi.fn(async () => ({ get: () => undefined })),
+}));
+
 const prismaRef = vi.hoisted(() => ({ current: null as unknown as PrismaClient }));
 const testAuthState = vi.hoisted(() => ({
   schoolId: "school-alpha" as string | undefined,
@@ -262,6 +267,16 @@ import {
   POST as createStudentJustificationHandler,
   DELETE as deleteStudentJustificationHandler,
 } from "@/app/api/students/[id]/justifications/route";
+import { GET as getReportsHandler } from "@/app/api/reports/route";
+import RelatoriosPage from "@/app/relatorios/page";
+import AlunosPage from "@/app/alunos/page";
+import ProntuarioPage from "@/app/alunos/[id]/page";
+import DossiePage from "@/app/alunos/[id]/dossie/page";
+import HistoricoPage from "@/app/historico/page";
+import GestaoPage from "@/app/gestao/page";
+import VisaoGeralPage from "@/app/visao-geral/page";
+import AtestadosPage from "@/app/atestados/page";
+import EncaminhamentosPage from "@/app/encaminhamentos/page";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -9593,6 +9608,268 @@ describe.skipIf(!SHOULD_RUN)(
       } finally {
         await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l2-alpha"] } } }).catch(() => {});
         await prisma.user.deleteMany({ where: { id: { in: ["user-l2-alpha"] } } }).catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
+
+    it("isola leituras SSR e relatórios (/api/reports, /relatorios, /alunos/**, /busca-ativa, /faltas, /historico, /gestao, /visao-geral, /atestados, /encaminhamentos) com withTenantContext", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      try {
+        await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l3-alpha"] } } });
+        await prisma.user.deleteMany({ where: { id: { in: ["user-l3-alpha"] } } });
+
+        await prisma.user.create({
+          data: {
+            id: "user-l3-alpha",
+            email: "l3-alpha@redeativa.local",
+            name: "Gestor Lote 3",
+            role: "GESTOR_ESCOLAR",
+            active: true,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-l3-alpha",
+            userId: "user-l3-alpha",
+            schoolId: "school-alpha",
+            role: "GESTOR_ESCOLAR",
+            active: true,
+          },
+        });
+
+        await prisma.student.create({
+          data: {
+            id: "stu-l3-cross",
+            schoolId: "school-alpha",
+            classGroupId: "cg-beta",
+            name: "Estudante Cross L3",
+            phone: "41999990003",
+          },
+        });
+
+        await prisma.lowAttendanceRecord.create({
+          data: { studentId: "stu-alpha", attendancePercent: 65 },
+        });
+        await prisma.lowAttendanceRecord.create({
+          data: { studentId: "stu-l3-cross", attendancePercent: 30 },
+        });
+        await prisma.lowAttendanceRecord.create({
+          data: { studentId: "stu-beta", attendancePercent: 40 },
+        });
+
+        await prisma.absenceJustification.create({
+          data: {
+            id: "just-l3-alpha",
+            studentId: "stu-alpha",
+            type: "ATESTADO_MEDICO",
+            startDate: new Date("2026-11-20T03:00:00.000Z"),
+            endDate: new Date("2099-12-31T23:59:59.000Z"),
+            createdByName: "Gestor Lote 3",
+            createdByEmail: "l3-alpha@redeativa.local",
+          },
+        });
+
+        await prisma.messageLog.createMany({
+          data: [
+            {
+              id: "msg-l3-own",
+              studentId: "stu-alpha",
+              schoolId: "school-alpha",
+              phoneUsed: "41999991111",
+              sentByName: "Gestor Lote 3",
+              reasonTitle: "Faltas consecutivas",
+              messageContent: "Msg L3 Own",
+              guardianReplied: true,
+            },
+            {
+              id: "msg-l3-legacy",
+              studentId: "stu-alpha",
+              schoolId: null,
+              phoneUsed: "41999991111",
+              sentByName: "Gestor Lote 3",
+              reasonTitle: "Atraso",
+              messageContent: "Msg L3 Legacy",
+              guardianReplied: false,
+            },
+            {
+              id: "msg-l3-div",
+              studentId: "stu-alpha",
+              schoolId: "school-beta",
+              phoneUsed: "41999991111",
+              sentByName: "Intruso Beta",
+              reasonTitle: "Faltas",
+              messageContent: "Msg L3 Divergente",
+              guardianReplied: true,
+            },
+            {
+              id: "msg-l3-cross",
+              studentId: "stu-l3-cross",
+              schoolId: "school-alpha",
+              phoneUsed: "41999990003",
+              sentByName: "Cross",
+              reasonTitle: "Faltas",
+              messageContent: "Msg L3 Cross",
+              guardianReplied: true,
+            },
+            {
+              id: "msg-l3-beta",
+              studentId: "stu-beta",
+              schoolId: "school-beta",
+              phoneUsed: "41999992222",
+              sentByName: "Beta",
+              reasonTitle: "Faltas",
+              messageContent: "Msg L3 Beta",
+              guardianReplied: true,
+            },
+          ],
+        });
+
+        testAuthState.pendingSessionUser = {
+          id: "user-l3-alpha",
+          email: "l3-alpha@redeativa.local",
+          name: "Gestor Lote 3",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "school-alpha",
+        };
+
+        // 1. GET /api/reports e /relatorios
+        tenantCalls.length = 0;
+        const rReports = await getReportsHandler(
+          new Request("http://127.0.0.1/api/reports?segment=TODOS")
+        );
+        expect(rReports.status).toBe(200);
+        const repBody = await rReports.json();
+        expect(repBody.total).toBe(2);
+        expect(repBody.replied).toBe(1);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        tenantCalls.length = 0;
+        const relEl = (await RelatoriosPage()) as unknown as {
+          props: { initialSummary: { total: number; replied: number } };
+        };
+        expect(relEl.props.initialSummary.total).toBe(2);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        // 2. /alunos, /alunos/[id], /alunos/[id]/dossie
+        tenantCalls.length = 0;
+        const alunosEl = (await AlunosPage()) as unknown as {
+          props: { initialStudents: Array<{ id: string }> };
+        };
+        expect(alunosEl.props.initialStudents.map((s) => s.id)).toEqual(["stu-alpha"]);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        tenantCalls.length = 0;
+        const prontEl = (await ProntuarioPage({
+          params: Promise.resolve({ id: "stu-alpha" }),
+        })) as unknown as {
+          props: { initialStudent: { id: string; messageLogs: Array<{ id: string }> } };
+        };
+        expect(prontEl.props.initialStudent.id).toBe("stu-alpha");
+        expect(prontEl.props.initialStudent.messageLogs.map((m) => m.id).sort()).toEqual([
+          "msg-l3-legacy",
+          "msg-l3-own",
+        ]);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        await expect(
+          ProntuarioPage({ params: Promise.resolve({ id: "stu-beta" }) })
+        ).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
+
+        tenantCalls.length = 0;
+        const dossieEl = (await DossiePage({
+          params: Promise.resolve({ id: "stu-alpha" }),
+        })) as unknown as {
+          props: { student: { id: string } };
+        };
+        expect(dossieEl.props.student.id).toBe("stu-alpha");
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        await expect(
+          DossiePage({ params: Promise.resolve({ id: "stu-beta" }) })
+        ).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
+
+        // 3. /busca-ativa, /faltas, /historico, /gestao, /visao-geral, /atestados, /encaminhamentos
+        tenantCalls.length = 0;
+        const buscaEl = (await BuscaAtivaPage({
+          searchParams: Promise.resolve({}),
+        })) as unknown as {
+          props: { initialStudents: Array<{ id: string }> };
+        };
+        expect(buscaEl.props.initialStudents.map((s) => s.id)).toEqual(["stu-alpha"]);
+
+        const faltasEl = (await FaltasPage()) as unknown as {
+          props: { lowAttendance: Array<{ student: { id: string } }> };
+        };
+        expect(faltasEl.props.lowAttendance.map((r) => r.student.id)).toEqual(["stu-alpha"]);
+
+        const histEl = (await HistoricoPage()) as unknown as {
+          props: { initialLogs: Array<{ id: string }>; initialTotal: number };
+        };
+        expect(histEl.props.initialTotal).toBe(2);
+        expect(histEl.props.initialLogs.map((l) => l.id).sort()).toEqual([
+          "msg-l3-legacy",
+          "msg-l3-own",
+        ]);
+
+        const gestaoEl = (await GestaoPage()) as unknown as {
+          props: { metrics: { totalStudents: number; totalClasses: number; messagesThisMonth: number } };
+        };
+        expect(gestaoEl.props.metrics.totalStudents).toBe(1);
+        expect(gestaoEl.props.metrics.totalClasses).toBe(1);
+        expect(gestaoEl.props.metrics.messagesThisMonth).toBe(2);
+
+        await VisaoGeralPage();
+
+        const atestadosEl = (await AtestadosPage()) as unknown as {
+          props: { initialMetrics: { total: number } };
+        };
+        expect(atestadosEl.props.initialMetrics.total).toBe(1);
+
+        await EncaminhamentosPage();
+
+        expect(tenantCalls.length).toBeGreaterThanOrEqual(7);
+        expect(tenantCalls.every((c) => c.schoolId === "school-alpha" && c.currentSetting === "school-alpha")).toBe(true);
+
+        // 4. Vínculo revogado -> 403 na API e redirect nas páginas sem abrir withTenantContext
+        await prisma.userSchool.update({
+          where: { id: "us-l3-alpha" },
+          data: { active: false },
+        });
+        tenantCalls.length = 0;
+        const rRevokedReports = await getReportsHandler(
+          new Request("http://127.0.0.1/api/reports?segment=TODOS")
+        );
+        expect(rRevokedReports.status).toBe(403);
+        await expect(AlunosPage()).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+      } finally {
+        await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l3-alpha"] } } }).catch(() => {});
+        await prisma.user.deleteMany({ where: { id: { in: ["user-l3-alpha"] } } }).catch(() => {});
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
         testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;

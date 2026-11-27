@@ -1,4 +1,6 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "./prisma";
+import { withTenantContext } from "./rlsTenantContext";
 import { withNeonWakeRetry } from "./neonWakeRetry";
 import { evaluateEffectivePhysicalProof } from "./ataRevision";
 
@@ -17,47 +19,65 @@ export async function safeQueryList<T>(fn: () => Promise<T[]>): Promise<T[]> {
   }
 }
 
-export async function loadStudent360Bundle(studentId: string) {
-  const [student, contacts, justifications, attendances, snapshots, minutes, councilCards] =
-    await Promise.all([
-    prisma.student.findUnique({
-      where: { id: studentId },
-      include: {
-        classGroup: true,
-        lowAttendanceRecord: true,
-        messageLogs: {
-          orderBy: { sentAt: "desc" },
-        },
+export async function loadStudent360Bundle(studentId: string, schoolId?: string) {
+  const runBundleQueries = async (
+    dbClient: PrismaClient | Prisma.TransactionClient,
+    scopedSchoolId?: string
+  ) => {
+    const studentInclude = {
+      classGroup: true,
+      lowAttendanceRecord: true,
+      messageLogs: {
+        ...(scopedSchoolId
+          ? { where: { OR: [{ schoolId: null }, { schoolId: scopedSchoolId }] } }
+          : {}),
+        orderBy: { sentAt: "desc" as const },
       },
-    }),
-    safeQueryList(() =>
-      prisma.studentContact.findMany({
+    };
+    const student =
+      scopedSchoolId && typeof dbClient.student?.findFirst === "function"
+        ? await dbClient.student.findFirst({
+            where: { id: studentId, schoolId: scopedSchoolId },
+            include: studentInclude,
+          })
+        : await dbClient.student.findUnique({
+            where: { id: studentId },
+            include: studentInclude,
+          });
+    if (!student) return null;
+    if (scopedSchoolId && student.schoolId && student.schoolId !== scopedSchoolId) {
+      return null;
+    }
+
+    const contacts = await safeQueryList(() =>
+      dbClient.studentContact.findMany({
         where: { studentId },
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       })
-    ),
-    safeQueryList(() =>
-      prisma.absenceJustification.findMany({
+    );
+    const justifications = await safeQueryList(() =>
+      dbClient.absenceJustification.findMany({
         where: { studentId },
         orderBy: { endDate: "desc" },
       })
-    ),
-    safeQueryList(() =>
-      prisma.inPersonAttendance.findMany({
+    );
+    const attendances = await safeQueryList(() =>
+      dbClient.inPersonAttendance.findMany({
         where: { studentId },
         orderBy: { attendedAt: "desc" },
       })
-    ),
-    safeQueryList(() =>
-      prisma.attendanceSnapshot.findMany({
+    );
+    const snapshots = await safeQueryList(() =>
+      dbClient.attendanceSnapshot.findMany({
         where: { studentId },
         orderBy: { recordedAt: "desc" },
         take: 24,
       })
-    ),
-    safeQueryList(() =>
-      prisma.pedagogicalMinute.findMany({
+    );
+    const minutes = await safeQueryList(() =>
+      dbClient.pedagogicalMinute.findMany({
         where: {
+          ...(scopedSchoolId ? { schoolId: scopedSchoolId } : {}),
           students: { some: { studentId } },
         },
         select: {
@@ -148,11 +168,14 @@ export async function loadStudent360Bundle(studentId: string) {
         },
         orderBy: [{ ataNumber: "desc" }, { attendedAt: "desc" }],
       })
-    ),
-    safeQueryList(() =>
-      typeof prisma.studentCouncilCard?.findMany === "function"
-        ? prisma.studentCouncilCard.findMany({
-            where: { studentId },
+    );
+    const councilCards = await safeQueryList<any>(() =>
+      typeof dbClient.studentCouncilCard?.findMany === "function"
+        ? dbClient.studentCouncilCard.findMany({
+            where: {
+              studentId,
+              ...(scopedSchoolId ? { schoolId: scopedSchoolId } : {}),
+            },
             include: {
               board: {
                 select: {
@@ -183,12 +206,9 @@ export async function loadStudent360Bundle(studentId: string) {
             orderBy: { board: { year: "desc" } },
           })
         : Promise.resolve([])
-    ),
-  ]);
+    );
 
-  if (!student) return null;
-
-  // Garante que atas vinculadas no prontuário/dossiê pertençam estritamente ao mesmo tenant do estudante
+    // Garante que atas vinculadas no prontuário/dossiê pertençam estritamente ao mesmo tenant do estudante
   const scopedMinutes = minutes
     .filter((m: any) => !student.schoolId || !m.schoolId || m.schoolId === student.schoolId)
     .map((m: any) => {
@@ -248,4 +268,10 @@ export async function loadStudent360Bundle(studentId: string) {
     minutes: scopedMinutes,
     councilCards: scopedCouncilCards,
   };
+  };
+
+  if (schoolId) {
+    return withTenantContext(prisma, schoolId, (tx) => runBundleQueries(tx, schoolId));
+  }
+  return runBundleQueries(prisma, undefined);
 }

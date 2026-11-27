@@ -1,5 +1,6 @@
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import GestaoClient from "./GestaoClient";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export default async function GestaoPage() {
   let criticalStudents: any[] = [];
 
   try {
-    const [
+    const {
       studentsCount,
       classesCount,
       lowRecords,
@@ -37,11 +38,13 @@ export default async function GestaoPage() {
       minutesCount,
       usersCount,
       classGroupsList,
-    ] = await Promise.all([
-      prisma.student.count({ where: { schoolId, active: true } }),
-      prisma.classGroup.count({ where: { schoolId } }),
-      prisma.lowAttendanceRecord.findMany({
-        where: { student: { schoolId, active: true } },
+    } = await withTenantContext(prisma, schoolId, async (tx) => {
+      const sCount = await tx.student.count({
+        where: { schoolId, active: true, classGroup: { schoolId } },
+      });
+      const cCount = await tx.classGroup.count({ where: { schoolId } });
+      const lRecords = await tx.lowAttendanceRecord.findMany({
+        where: { student: { schoolId, active: true, classGroup: { schoolId } } },
         select: {
           attendancePercent: true,
           student: {
@@ -55,28 +58,41 @@ export default async function GestaoPage() {
         },
         orderBy: { attendancePercent: "asc" },
         take: 50,
-      }),
-      prisma.messageLog.count({
-        where: { student: { schoolId }, sentAt: { gte: startOfMonth } },
-      }),
-      prisma.pedagogicalMinute.count({
+      });
+      const mCount = await tx.messageLog.count({
+        where: {
+          OR: [{ schoolId: null }, { schoolId }],
+          student: { schoolId, classGroup: { schoolId } },
+          sentAt: { gte: startOfMonth },
+        },
+      });
+      const minCount = await tx.pedagogicalMinute.count({
         where: { schoolId, status: "FINALIZED" },
-      }),
-      prisma.userSchool.count({
+      });
+      const uCount = await tx.userSchool.count({
         where: { schoolId, active: true },
-      }),
-      prisma.classGroup.findMany({
+      });
+      const cgList = await tx.classGroup.findMany({
         where: { schoolId },
         select: {
           id: true,
           name: true,
           segment: true,
           shift: true,
-          _count: { select: { students: { where: { active: true } } } },
+          _count: { select: { students: { where: { active: true, schoolId } } } },
         },
         orderBy: { name: "asc" },
-      }),
-    ]);
+      });
+      return {
+        studentsCount: sCount,
+        classesCount: cCount,
+        lowRecords: lRecords,
+        msgCount: mCount,
+        minutesCount: minCount,
+        usersCount: uCount,
+        classGroupsList: cgList,
+      };
+    });
 
     totalStudents = studentsCount;
     totalClasses = classesCount;

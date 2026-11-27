@@ -1,5 +1,7 @@
 import { getSchoolContextByVerifiedId, type SchoolContext } from "@/lib/currentSchool";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import { prisma } from "@/lib/prisma";
+import { checkIsSuperAdmin } from "@/lib/roles";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   buildRestrictedConfidentialMinuteSummary,
@@ -33,13 +35,23 @@ export default async function ProntuarioPage({
   const session = ctx.session;
 
   const { id } = await params;
-  const bundle = await loadStudent360Bundle(id);
+  const currentSchool = ctx.school;
+  let targetSchoolId = currentSchool.id;
+  if (checkIsSuperAdmin(session) && typeof (prisma as any)?.student?.findUnique === "function") {
+    const stuHeader = await prisma.student.findUnique({
+      where: { id },
+      select: { schoolId: true },
+    });
+    if (!stuHeader) notFound();
+    targetSchoolId = stuHeader.schoolId;
+  }
+
+  const bundle = await loadStudent360Bundle(id, targetSchoolId);
 
   if (!bundle) {
     notFound();
   }
 
-  const currentSchool = ctx.school;
   if (!assertTenantOwnership(bundle.student.schoolId, currentSchool.id, session)) {
     notFound();
   }
