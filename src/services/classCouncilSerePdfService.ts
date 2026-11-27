@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, type AuditUser } from "@/lib/audit";
 import { normalizeStudentName } from "@/lib/studentMatcher";
 import {
@@ -201,7 +202,9 @@ export async function previewCouncilSerePdfImport(params: {
   batch: MergedSereCouncilPdfBatch;
 }): Promise<CouncilSerePdfPreviewResult> {
   const { boardId, schoolId, batch } = params;
-  const board = await getCouncilBoardDetail(schoolId, boardId);
+  const board = await getCouncilBoardDetail(schoolId, boardId, undefined, {
+    skipImplicitWrites: true,
+  });
   if (!board) {
     throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
   }
@@ -365,100 +368,123 @@ export async function applyCouncilSerePdfImport(params: {
   summary: CouncilSerePdfApplySummary;
 }> {
   const { boardId, schoolId, batch, actor, req, confirmShiftUpdate = false } = params;
-  const board = await getCouncilBoardDetail(schoolId, boardId);
-  if (!board) {
-    throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
-  }
 
-  const subjectLookup = buildBoardSubjectLookup(board.subjects);
-  const studentLookup = buildBoardStudentLookup(board.studentCards);
+  const txOutcome = await withTenantContext(prisma, schoolId, async (tx) => {
+    const board = await getCouncilBoardDetail(schoolId, boardId, tx);
+    if (!board) {
+      throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
+    }
 
-  // 1. Garante que todas as disciplinas presentes no lote existam no quadro (sem apagar existentes)
-  let nextDisplayOrder =
-    board.subjects.reduce((max, s) => Math.max(max, s.displayOrder ?? 0), 0) + 1;
-  const resolvedSubjectByMatchKey = new Map<
-    string,
-    { id: string; name: string; displayOrder: number }
-  >();
-  let subjectsCreated = 0;
-  let subjectsMatched = 0;
+    const subjectLookup = buildBoardSubjectLookup(board.subjects);
+    const studentLookup = buildBoardStudentLookup(board.studentCards);
 
-  for (const subj of batch.subjects) {
-    const existing =
-      subjectLookup.get(subj.matchKey) ||
-      subjectLookup.get(toCouncilSubjectMatchKey(subj.rawHeader)) ||
-      null;
+    // 1. Garante que todas as disciplinas presentes no lote existam no quadro (sem apagar existentes)
+    let nextDisplayOrder =
+      board.subjects.reduce((max, s) => Math.max(max, s.displayOrder ?? 0), 0) + 1;
+    const resolvedSubjectByMatchKey = new Map<
+      string,
+      { id: string; name: string; displayOrder: number }
+    >();
+    let subjectsCreated = 0;
+    let subjectsMatched = 0;
 
-    if (existing) {
-      subjectsMatched += 1;
-      // Se estava inativa, reativa mantendo professor/e-mail existentes
-      if (!existing.active) {
-        await prisma.classCouncilSubject.update({
-          where: { id: existing.id },
-          data: { active: true },
+    for (const subj of batch.subjects) {
+      const existing =
+        subjectLookup.get(subj.matchKey) ||
+        subjectLookup.get(toCouncilSubjectMatchKey(subj.rawHeader)) ||
+        null;
+
+      if (existing) {
+        subjectsMatched += 1;
+        // Se estava inativa, reativa mantendo professor/e-mail existentes
+        if (!existing.active) {
+          await tx.classCouncilSubject.update({
+            where: { id: existing.id },
+            data: { active: true },
+          });
+        }
+        resolvedSubjectByMatchKey.set(subj.matchKey, {
+          id: existing.id,
+          name: existing.name,
+          displayOrder: existing.displayOrder,
         });
-      }
-      resolvedSubjectByMatchKey.set(subj.matchKey, {
-        id: existing.id,
-        name: existing.name,
-        displayOrder: existing.displayOrder,
-      });
-    } else {
-      try {
-        const created = await prisma.classCouncilSubject.create({
-          data: {
+      } else if (typeof (tx.classCouncilSubject as any).upsert === "function") {
+        const upserted = await (tx.classCouncilSubject as any).upsert({
+          where: { boardId_name: { boardId: board.id, name: subj.name } },
+          create: {
             schoolId,
             boardId: board.id,
             name: subj.name,
             displayOrder: nextDisplayOrder++,
             active: true,
           },
+          update: {
+            active: true,
+          },
           select: { id: true, name: true, displayOrder: true },
         });
         subjectsCreated += 1;
-        resolvedSubjectByMatchKey.set(subj.matchKey, created);
-        subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
-          ...created,
+        resolvedSubjectByMatchKey.set(subj.matchKey, upserted);
+        subjectLookup.set(toCouncilSubjectMatchKey(upserted.name), {
+          ...upserted,
           active: true,
         });
-      } catch (err) {
-        if ((err as { code?: string })?.code !== "P2002") {
-          throw err;
-        }
-        const conflicted =
-          (await prisma.classCouncilSubject.findUnique?.({
-            where: { boardId_name: { boardId: board.id, name: subj.name } },
-            select: { id: true, name: true, displayOrder: true, active: true },
-          })) ??
-          (await prisma.classCouncilSubject.findFirst?.({
-            where: { boardId: board.id, schoolId, name: subj.name },
-            select: { id: true, name: true, displayOrder: true, active: true },
-          })) ??
-          null;
+      } else {
+        try {
+          const created = await tx.classCouncilSubject.create({
+            data: {
+              schoolId,
+              boardId: board.id,
+              name: subj.name,
+              displayOrder: nextDisplayOrder++,
+              active: true,
+            },
+            select: { id: true, name: true, displayOrder: true },
+          });
+          subjectsCreated += 1;
+          resolvedSubjectByMatchKey.set(subj.matchKey, created);
+          subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
+            ...created,
+            active: true,
+          });
+        } catch (err) {
+          if ((err as { code?: string })?.code !== "P2002") {
+            throw err;
+          }
+          const conflicted =
+            (await tx.classCouncilSubject.findUnique?.({
+              where: { boardId_name: { boardId: board.id, name: subj.name } },
+              select: { id: true, name: true, displayOrder: true, active: true },
+            })) ??
+            (await tx.classCouncilSubject.findFirst?.({
+              where: { boardId: board.id, schoolId, name: subj.name },
+              select: { id: true, name: true, displayOrder: true, active: true },
+            })) ??
+            null;
 
-        if (!conflicted) {
-          throw err;
-        }
-        if (!conflicted.active) {
-          await prisma.classCouncilSubject.update({
-            where: { id: conflicted.id },
-            data: { active: true },
+          if (!conflicted) {
+            throw err;
+          }
+          if (!conflicted.active) {
+            await tx.classCouncilSubject.update({
+              where: { id: conflicted.id },
+              data: { active: true },
+            });
+          }
+          subjectsMatched += 1;
+          const resolvedConflicted = {
+            id: conflicted.id,
+            name: conflicted.name,
+            displayOrder: conflicted.displayOrder,
+          };
+          resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
+          subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
+            ...resolvedConflicted,
+            active: true,
           });
         }
-        subjectsMatched += 1;
-        const resolvedConflicted = {
-          id: conflicted.id,
-          name: conflicted.name,
-          displayOrder: conflicted.displayOrder,
-        };
-        resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
-        subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
-          ...resolvedConflicted,
-          active: true,
-        });
       }
     }
-  }
 
   // Mapa rápido de avaliações existentes por cardId -> `${subjectId}|${trimester}`
   const existingEvalByCardId = new Map<
@@ -558,36 +584,31 @@ export async function applyCouncilSerePdfImport(params: {
     }
   }
 
-  // Persiste avaliações em lotes seguros
-  for (let i = 0; i < evaluationUpserts.length; i += 100) {
-    const chunk = evaluationUpserts.slice(i, i + 100);
-    await prisma.$transaction(
-      chunk.map((item) =>
-        prisma.studentCouncilSubjectEntry.upsert({
-          where: {
-            cardId_subjectId_trimester: {
-              cardId: item.cardId,
-              subjectId: item.subjectId,
-              trimester: item.trimester,
-            },
-          },
-          create: {
-            schoolId,
-            cardId: item.cardId,
-            subjectId: item.subjectId,
-            trimester: item.trimester,
-            descriptorCodes: item.descriptorCodes,
-            grade: item.grade,
-            updatedByEmail: actor.email,
-          },
-          update: {
-            descriptorCodes: item.descriptorCodes,
-            grade: item.grade,
-            updatedByEmail: actor.email,
-          },
-        })
-      )
-    );
+  // Persiste avaliações sequencialmente no mesmo tx
+  for (const item of evaluationUpserts) {
+    await tx.studentCouncilSubjectEntry.upsert({
+      where: {
+        cardId_subjectId_trimester: {
+          cardId: item.cardId,
+          subjectId: item.subjectId,
+          trimester: item.trimester,
+        },
+      },
+      create: {
+        schoolId,
+        cardId: item.cardId,
+        subjectId: item.subjectId,
+        trimester: item.trimester,
+        descriptorCodes: item.descriptorCodes,
+        grade: item.grade,
+        updatedByEmail: actor.email,
+      },
+      update: {
+        descriptorCodes: item.descriptorCodes,
+        grade: item.grade,
+        updatedByEmail: actor.email,
+      },
+    });
   }
 
   // 3. Atualiza trimester{1,2,3}BelowAvgJson preservando itens manuais (!subjectId) e outras disciplinas já salvas
@@ -680,24 +701,19 @@ export async function applyCouncilSerePdfImport(params: {
     }
   }
 
-  for (let i = 0; i < cardUpdates.length; i += 100) {
-    const chunk = cardUpdates.slice(i, i + 100);
-    await prisma.$transaction(
-      chunk.map((cu) =>
-        prisma.studentCouncilCard.update({
-          where: { id: cu.cardId },
-          data: cu.data,
-        })
-      )
-    );
+  for (const cu of cardUpdates) {
+    await tx.studentCouncilCard.update({
+      where: { id: cu.cardId },
+      data: cu.data,
+    });
   }
 
   const resolvedPdfShift = resolveConsistentPdfShift(batch.files);
   const currentBoardShift = normalizeShiftToken(board.classGroup.shift);
   let shiftUpdatedTo: string | null = null;
   if (confirmShiftUpdate && resolvedPdfShift && resolvedPdfShift !== currentBoardShift) {
-    if (typeof prisma.classGroup?.updateMany === "function") {
-      const updated = await prisma.classGroup.updateMany({
+    if (typeof tx.classGroup?.updateMany === "function") {
+      const updated = await tx.classGroup.updateMany({
         where: { id: board.classGroup.id, schoolId },
         data: { shift: resolvedPdfShift },
       });
@@ -724,44 +740,61 @@ export async function applyCouncilSerePdfImport(params: {
     ),
   ];
 
-  // Auditoria sem PII (apenas contadores agregados e schoolId na raiz)
+  const refreshedBoard = await getCouncilBoardDetail(schoolId, board.id, tx);
+
+  return {
+    boardId: board.id,
+    boardYear: board.year,
+    subjectsCreated,
+    subjectsMatched,
+    studentsMatched,
+    studentsUnmatched,
+    evaluationsUpserted: evaluationUpserts.length,
+    cardsUpdated: cardUpdates.length,
+    belowAverageGrades,
+    trimestersTouched,
+    shiftUpdatedTo,
+    warnings,
+    refreshedBoard,
+  };
+  });
+
+  // Auditoria sem PII (apenas contadores agregados e schoolId na raiz) após commit
   await logAudit({
     action: "IMPORT_COUNCIL_SERE_PDF",
     entityType: "ClassCouncilBoard",
-    entityId: board.id,
+    entityId: txOutcome.boardId,
     schoolId,
     user: actor,
     req,
     details: {
-      year: board.year,
+      year: txOutcome.boardYear,
       filesCount: batch.files.length,
-      subjectsCreated,
-      subjectsMatched,
-      studentsMatched,
-      studentsUnmatched,
-      evaluationsUpserted: evaluationUpserts.length,
-      cardsUpdated: cardUpdates.length,
-      belowAverageGrades,
-      trimestersTouched,
-      ...(shiftUpdatedTo ? { shiftUpdatedTo } : {}),
+      subjectsCreated: txOutcome.subjectsCreated,
+      subjectsMatched: txOutcome.subjectsMatched,
+      studentsMatched: txOutcome.studentsMatched,
+      studentsUnmatched: txOutcome.studentsUnmatched,
+      evaluationsUpserted: txOutcome.evaluationsUpserted,
+      cardsUpdated: txOutcome.cardsUpdated,
+      belowAverageGrades: txOutcome.belowAverageGrades,
+      trimestersTouched: txOutcome.trimestersTouched,
+      ...(txOutcome.shiftUpdatedTo ? { shiftUpdatedTo: txOutcome.shiftUpdatedTo } : {}),
     },
   });
 
-  const refreshedBoard = await getCouncilBoardDetail(schoolId, board.id);
-
   return {
-    board: refreshedBoard,
+    board: txOutcome.refreshedBoard,
     summary: {
       filesCount: batch.files.length,
-      subjectsCreated,
-      subjectsMatched,
-      studentsMatched,
-      studentsUnmatched,
-      evaluationsUpserted: evaluationUpserts.length,
-      cardsUpdated: cardUpdates.length,
-      belowAverageGrades,
-      trimestersTouched,
-      warnings,
+      subjectsCreated: txOutcome.subjectsCreated,
+      subjectsMatched: txOutcome.subjectsMatched,
+      studentsMatched: txOutcome.studentsMatched,
+      studentsUnmatched: txOutcome.studentsUnmatched,
+      evaluationsUpserted: txOutcome.evaluationsUpserted,
+      cardsUpdated: txOutcome.cardsUpdated,
+      belowAverageGrades: txOutcome.belowAverageGrades,
+      trimestersTouched: txOutcome.trimestersTouched,
+      warnings: txOutcome.warnings,
     },
   };
 }

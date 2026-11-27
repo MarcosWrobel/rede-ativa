@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { councilTeacherLinkCreateSchema, formatZodError } from "@/lib/schemas";
 import { createCouncilTeacherToken } from "@/lib/councilTeacherToken";
 import { generateQrCodeDataUrl, getTrustedAppOrigin } from "@/lib/qrCode";
@@ -100,15 +101,17 @@ export async function POST(
 
     let matchedSubject: { id: string; name: string } | null = null;
     if (parsed.data.subjectId) {
-      const foundSubjects = await prisma.classCouncilSubject.findMany({
-        where: {
-          id: { in: [parsed.data.subjectId] },
-          boardId,
-          schoolId: school.id,
-          active: true,
-        },
-        select: { id: true, name: true },
-      });
+      const foundSubjects = await withTenantContext(prisma, school.id, (tx) =>
+        tx.classCouncilSubject.findMany({
+          where: {
+            id: { in: [parsed.data.subjectId!] },
+            boardId,
+            schoolId: school.id,
+            active: true,
+          },
+          select: { id: true, name: true },
+        })
+      );
       matchedSubject = foundSubjects[0] || null;
       if (!matchedSubject) {
         return NextResponse.json(

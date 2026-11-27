@@ -10,6 +10,7 @@ import {
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
+  resolveExplicitSelectedSchoolForCouncil,
   updateCouncilBoardMetadata,
 } from "@/services/classCouncilService";
 
@@ -24,13 +25,23 @@ export async function GET(
     if (!authCheck.ok) return authCheck.response;
 
     const { boardId } = await params;
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    if (!school) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { status: 403 }
+      );
+    }
+
     const ownership = await findCouncilBoardOwnershipRecord(boardId);
     if (!ownership) {
       return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
     }
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
+    if (
+      !isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session) ||
+      (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+    ) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -59,22 +70,29 @@ export async function PATCH(
     if (!authCheck.ok) return authCheck.response;
 
     const { boardId } = await params;
+    const school = await resolveExplicitSelectedSchoolForCouncil(
+      authCheck.session,
+      undefined,
+      authCheck.snapshot
+    );
+    if (!school || !canMutateSchoolCouncil(authCheck.session, school.id)) {
+      return NextResponse.json(
+        { error: "Perfil em modo somente leitura para esta instituição escolar." },
+        { status: 403 }
+      );
+    }
+
     const ownership = await findCouncilBoardOwnershipRecord(boardId);
     if (!ownership) {
       return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
     }
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
+    if (
+      !isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session) ||
+      (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+    ) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
-    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
-      return NextResponse.json(
-        { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
       );
     }

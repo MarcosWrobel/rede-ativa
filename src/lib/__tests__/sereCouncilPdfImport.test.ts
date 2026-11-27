@@ -444,14 +444,19 @@ vi.mock("@/lib/permissions", () => ({
   requireAuth: mockRequireAuth,
 }));
 
-vi.mock("@/lib/currentSchool", () => ({
-  getCurrentSchool: mockGetCurrentSchool,
-  getAuthorizedCurrentSchool: mockGetCurrentSchool,
-  requireAuthorizedSchool: vi.fn(async () => ({
-    ok: true,
-    school: await mockGetCurrentSchool(),
-  })),
-}));
+vi.mock("@/lib/currentSchool", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/currentSchool")>();
+  return {
+    ...actual,
+    getCurrentSchool: mockGetCurrentSchool,
+    getAuthorizedCurrentSchool: mockGetCurrentSchool,
+    requireAuthorizedSchool: vi.fn(async () => ({
+      ok: true,
+      school: await mockGetCurrentSchool(),
+    })),
+    hasExplicitSuperAdminSchoolSelection: vi.fn(async () => true),
+  };
+});
 
 vi.mock("@/lib/tenantGuard", () => ({
   assertTenantOwnership: mockAssertTenantOwnership,
@@ -478,6 +483,7 @@ vi.mock("@/lib/prisma", () => ({
     classGroup: {
       updateMany: mockClassGroupUpdateMany,
     },
+    $executeRaw: vi.fn(async () => 1),
     $transaction: mockTransaction,
   },
 }));
@@ -604,7 +610,29 @@ describe("POST /api/conselho-classe/[boardId]/import-pdf — segurança, RBAC e 
       name: data.name,
       displayOrder: data.displayOrder,
     }));
-    mockTransaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    mockTransaction.mockImplementation(async (arg: unknown) => {
+      if (typeof arg === "function") {
+        return arg({
+          classCouncilSubject: {
+            create: mockSubjectCreate,
+            findUnique: mockSubjectFindUnique,
+            findFirst: mockSubjectFindFirst,
+            update: mockSubjectUpdate,
+          },
+          studentCouncilSubjectEntry: {
+            upsert: mockEvalUpsert,
+          },
+          studentCouncilCard: {
+            update: mockCardUpdate,
+          },
+          classGroup: {
+            updateMany: mockClassGroupUpdateMany,
+          },
+          $executeRaw: vi.fn(async () => 1),
+        });
+      }
+      return Promise.all(arg as Promise<unknown>[]);
+    });
     mockSubjectFindUnique.mockResolvedValue(null);
     mockSubjectFindFirst.mockResolvedValue(null);
     mockSubjectUpdate.mockResolvedValue({});

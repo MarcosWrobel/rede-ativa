@@ -40,15 +40,15 @@ export default async function ConselhoTurmaPage({
     searchParams ? searchParams : Promise.resolve<{ trimestre?: string }>({}),
   ]);
   const initialTrimester = parseTrimesterParam(sp?.trimestre);
-  const ownership = await findCouncilBoardOwnershipRecord(boardId);
-  if (!ownership) {
-    notFound();
-  }
-
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
   const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session)) {
+  const ownership = await findCouncilBoardOwnershipRecord(boardId);
+  if (
+    !ownership ||
+    !isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session) ||
+    (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+  ) {
     notFound();
   }
 

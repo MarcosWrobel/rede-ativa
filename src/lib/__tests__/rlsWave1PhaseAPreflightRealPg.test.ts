@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { jsPDF } from "jspdf";
 import { PrismaClient } from "@prisma/client";
 import {
   reconcileMessageLogSchoolId,
@@ -11290,6 +11291,640 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
+  it("Commit 2 Conselho e SERE PDF: isola vínculo revogado, papel leitura, SUPERADMIN sem seleção, IDs cruzados e preview sem escrita em PG16", async () => {
+    const { NextResponse } = await import("next/server");
+    const { cookies } = await import("next/headers");
+    const { logAudit } = await import("@/lib/audit");
+    const { GET: getBoardsRoute, POST: postBoardRoute } = await import(
+      "@/app/api/conselho-classe/route"
+    );
+    const { GET: getBoardRoute, PATCH: patchBoardRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/route"
+    );
+    const { PUT: putSubjectsRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/subjects/route"
+    );
+    const { PUT: putMatrixRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/matrix/route"
+    );
+    const { PATCH: patchTrimestersRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/trimesters/route"
+    );
+    const { PATCH: patchStudentCardRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/students/[studentId]/route"
+    );
+    const { POST: postGenerateMinuteRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/generate-minute/route"
+    );
+    const { POST: postPreCouncilLinkRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/pre-council-link/route"
+    );
+    const { POST: postTeacherLinkRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/teacher-link/route"
+    );
+    const { POST: postImportPdfRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/import-pdf/route"
+    );
+
+    const buildMiniSerePdf = (studentName: string): Uint8Array => {
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const yFromBottom = (pdfY: number) => doc.internal.pageSize.getHeight() - pdfY;
+      doc.setFontSize(8);
+      doc.text("GOVERNO DO ESTADO DO PARANÁ", 28.3, yFromBottom(573.5));
+      doc.text("DATA: 18/11/2026", 748, yFromBottom(573.5));
+      doc.text("SECRETARIA DE ESTADO DA EDUCAÇÃO - SEED", 28.3, yFromBottom(562.5));
+      doc.text("SISTEMA ESCOLA", 743.5, yFromBottom(562.5));
+      doc.text("ESCOLA SINTÉTICA", 28.3, yFromBottom(539.5));
+      doc.text("2026", 802, yFromBottom(539.5));
+      doc.text("Curso: ENSINO FUNDAMENTAL", 28.3, yFromBottom(528.5));
+      doc.text("Seriação: 6º Ano", 247.7, yFromBottom(528.5));
+      doc.text("Turno: Manhã", 359.5, yFromBottom(528.5));
+      doc.text("Turma: A", 783.5, yFromBottom(528.5));
+      doc.setFontSize(10);
+      doc.text("RELATÓRIO DE ACOMPANHAMENTO TRIMESTRAL", 318.3, yFromBottom(503));
+      doc.setFontSize(7);
+      doc.text("Disciplinas", 300, yFromBottom(475));
+      doc.text("Nro.", 31.1, yFromBottom(453.5));
+      doc.text("Nome", 48.4, yFromBottom(453.5));
+      doc.text("MATEMATICA", 169.2, yFromBottom(458));
+      doc.text("T1", 164.2, yFromBottom(445));
+      doc.text("T2", 182.6, yFromBottom(445));
+      doc.text("T3", 201.0, yFromBottom(445));
+      doc.text("1", 31.4, yFromBottom(432));
+      doc.text(studentName, 48.4, yFromBottom(432));
+      doc.text("5.5", 162.2, yFromBottom(432));
+      doc.text("--", 180.6, yFromBottom(432));
+      doc.text("--", 199.0, yFromBottom(432));
+      doc.text("--", 220.8, yFromBottom(432));
+      return new Uint8Array(doc.output("arraybuffer"));
+    };
+
+    const makePdfRequest = (boardId: string, mode: "preview" | "apply", studentName: string) => {
+      const pdfBytes = buildMiniSerePdf(studentName);
+      const fd = new FormData();
+      fd.set("mode", mode);
+      fd.set(
+        "files",
+        new File([Buffer.from(pdfBytes)], "sere.pdf", { type: "application/pdf" })
+      );
+      return new Request(`http://127.0.0.1/api/conselho-classe/${boardId}/import-pdf`, {
+        method: "POST",
+        body: fd,
+      });
+    };
+
+    // Criar turmas homônimas, estudantes, boards, disciplinas e usuários sintéticos em A e B
+    await prisma.classGroup.createMany({
+      data: [
+        {
+          id: "cc-cg-alpha",
+          schoolId: "school-alpha",
+          name: "6º Ano Conselho",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "cc-cg-beta",
+          schoolId: "school-beta",
+          name: "6º Ano Conselho",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.student.createMany({
+      data: [
+        {
+          id: "cc-stu-alpha",
+          schoolId: "school-alpha",
+          classGroupId: "cc-cg-alpha",
+          cgm: "9900011",
+          name: "ESTUDANTE CONSELHO ALPHA",
+          phone: "41999990011",
+          active: true,
+        },
+        {
+          id: "cc-stu-beta",
+          schoolId: "school-beta",
+          classGroupId: "cc-cg-beta",
+          cgm: "9900022",
+          name: "ESTUDANTE CONSELHO BETA",
+          phone: "41999990022",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilBoard.createMany({
+      data: [
+        {
+          id: "cc-board-alpha",
+          schoolId: "school-alpha",
+          classGroupId: "cc-cg-alpha",
+          year: 2026,
+        },
+        {
+          id: "cc-board-beta",
+          schoolId: "school-beta",
+          classGroupId: "cc-cg-beta",
+          year: 2026,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilSubject.createMany({
+      data: [
+        {
+          id: "cc-sub-alpha",
+          schoolId: "school-alpha",
+          boardId: "cc-board-alpha",
+          name: "Língua Portuguesa",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "cc-sub-beta",
+          schoolId: "school-beta",
+          boardId: "cc-board-beta",
+          name: "Língua Portuguesa",
+          displayOrder: 1,
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilTrimester.createMany({
+      data: [
+        {
+          id: "cc-tri-alpha-1",
+          schoolId: "school-alpha",
+          boardId: "cc-board-alpha",
+          trimester: 1,
+          preCouncilJson: JSON.stringify({
+            trimester: 1,
+            periodLabel: "1º Trimestre",
+            objective: "Acompanhar aprendizagem",
+            responsiblePedagogueName: "Pedagoga Alpha",
+            responsiblePedagogueRole: "Pedagoga",
+            conversations: [
+              {
+                id: "conv-alpha-1",
+                subjectId: "cc-sub-alpha",
+                subjectName: "Língua Portuguesa",
+                teacherName: "Prof. Alpha",
+                teacherEmail: "prof.alpha@redeativa.local",
+                notes: "Observação registrada",
+                monitoredStudentIds: ["cc-stu-alpha"],
+                updatedAt: new Date().toISOString(),
+                updatedBy: "Pedagoga Alpha",
+              },
+            ],
+            synthesis: "Síntese Alpha",
+            acknowledgements: [],
+          }),
+        },
+        {
+          id: "cc-tri-beta-1",
+          schoolId: "school-beta",
+          boardId: "cc-board-beta",
+          trimester: 1,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.studentCouncilCard.createMany({
+      data: [
+        {
+          id: "cc-card-alpha",
+          schoolId: "school-alpha",
+          boardId: "cc-board-alpha",
+          studentId: "cc-stu-alpha",
+        },
+        {
+          id: "cc-card-beta",
+          schoolId: "school-beta",
+          boardId: "cc-board-beta",
+          studentId: "cc-stu-beta",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.user.createMany({
+      data: [
+        {
+          id: "cc-usr-revoked",
+          email: "cc.revoked@redeativa.local",
+          name: "Vínculo Revogado",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+          active: true,
+        },
+        {
+          id: "cc-usr-sec",
+          email: "cc.sec@redeativa.local",
+          name: "Secretaria Leitura",
+          role: "GESTAO_SECRETARIA",
+          active: true,
+        },
+        {
+          id: "cc-usr-super",
+          email: "cc.super@redeativa.local",
+          name: "Superadmin Conselho",
+          role: "SUPERADMIN",
+          active: true,
+        },
+        {
+          id: "cc-usr-ped-a",
+          email: "cc.ped.a@redeativa.local",
+          name: "Pedagoga Alpha",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.userSchool.createMany({
+      data: [
+        {
+          id: "cc-us-revoked",
+          userId: "cc-usr-revoked",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: false,
+        },
+        {
+          id: "cc-us-ped-a",
+          userId: "cc-usr-ped-a",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    const alphaSchoolRow = await prisma.school.findUnique({
+      where: { id: "school-alpha" },
+      select: { networkId: true },
+    });
+    const alphaNetId = alphaSchoolRow?.networkId || "cc-net-alpha";
+    if (!alphaSchoolRow?.networkId) {
+      await prisma.educationNetwork.upsert({
+        where: { id: alphaNetId },
+        create: { id: alphaNetId, name: "Rede Alpha Sintética", shortName: "Rede A", city: "Curitiba" },
+        update: {},
+      });
+      await prisma.school.update({
+        where: { id: "school-alpha" },
+        data: { networkId: alphaNetId },
+      });
+    }
+    await prisma.userNetwork.createMany({
+      data: [
+        {
+          id: "cc-un-sec",
+          userId: "cc-usr-sec",
+          networkId: alphaNetId,
+          role: "GESTAO_SECRETARIA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    testAuthState.useRealPermissions = true;
+    testAuthState.useRealCurrentSchool = true;
+
+    try {
+      // 1. Vínculo revogado (active: false) -> 403
+      testAuthState.pendingSessionUser = {
+        id: "cc-usr-revoked",
+        email: "cc.revoked@redeativa.local",
+        schoolId: "school-alpha",
+        active: true,
+      };
+      const rRevokedGet = await getBoardRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha"),
+        { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+      );
+      expect(rRevokedGet.status).toBe(403);
+
+      // 2. Papel leitura (GESTAO_SECRETARIA sem vínculo local) -> lê A, 403 em mutações
+      testAuthState.pendingSessionUser = {
+        id: "cc-usr-sec",
+        email: "cc.sec@redeativa.local",
+        networkId: alphaNetId,
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) =>
+          name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+      } as never);
+      expect(
+        (
+          await getBoardsRoute(
+            new Request("http://127.0.0.1/api/conselho-classe?year=2026")
+          )
+        ).status
+      ).toBe(200);
+      expect(
+        (
+          await patchBoardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ peerLeaderStudentId: "cc-stu-alpha" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(403);
+
+      // 3. SUPERADMIN sem seleção explícita -> 403 em mutações
+      testAuthState.pendingSessionUser = {
+        id: "cc-usr-super",
+        email: "cc.super@redeativa.local",
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      vi.mocked(logAudit).mockClear();
+
+      expect(
+        (
+          await postBoardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ classGroupId: "cc-cg-alpha", year: 2026 }),
+            })
+          )
+        ).status
+      ).toBe(403);
+      expect(
+        (
+          await patchBoardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ peerLeaderStudentId: "cc-stu-alpha" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(403);
+      expect(
+        (
+          await postImportPdfRoute(
+            makePdfRequest("cc-board-alpha", "apply", "ESTUDANTE CONSELHO ALPHA"),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(403);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 4. IDs cruzados (boardId, sourceBoardId, studentId, subjectId, leaderStudentId)
+      testAuthState.pendingSessionUser = {
+        id: "cc-usr-ped-a",
+        email: "cc.ped.a@redeativa.local",
+        schoolId: "school-alpha",
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) =>
+          name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+      } as never);
+      vi.mocked(logAudit).mockClear();
+
+      // boardId de B
+      expect(
+        (
+          await getBoardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-beta"),
+            { params: Promise.resolve({ boardId: "cc-board-beta" }) }
+          )
+        ).status
+      ).toBe(403);
+      // sourceBoardId de B em PUT /subjects
+      expect(
+        (
+          await putSubjectsRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha/subjects", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sourceBoardId: "cc-board-beta" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(403);
+      // studentId/subjectId de B em PUT /matrix
+      expect(
+        (
+          await putMatrixRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha/matrix", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                trimester: 1,
+                entries: [
+                  {
+                    studentId: "cc-stu-beta",
+                    subjectId: "cc-sub-beta",
+                    grade: 7.5,
+                  },
+                ],
+              }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(400);
+      // peerLeaderStudentId de B em PATCH /conselho-classe/[boardId]
+      expect(
+        (
+          await patchBoardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ peerLeaderStudentId: "cc-stu-beta" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(400);
+      // studentId de B em PATCH /students/[studentId]
+      expect(
+        (
+          await patchStudentCardRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha/students/cc-stu-beta", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ trimester: 1, observations: "Invasão" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha", studentId: "cc-stu-beta" }) }
+          )
+        ).status
+      ).toBe(404);
+      // subjectId de B em POST /teacher-link
+      expect(
+        (
+          await postTeacherLinkRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-alpha/teacher-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ trimester: 1, subjectId: "cc-sub-beta" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+          )
+        ).status
+      ).toBe(404);
+      expect(
+        (
+          await postGenerateMinuteRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-beta/generate-minute", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ source: "PRE_COUNCIL", trimester: 1 }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-beta" }) }
+          )
+        ).status
+      ).toBe(403);
+      expect(
+        (
+          await postPreCouncilLinkRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-beta/pre-council-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ trimester: 1 }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-beta" }) }
+          )
+        ).status
+      ).toBe(403);
+      expect(
+        (
+          await patchTrimestersRoute(
+            new Request("http://127.0.0.1/api/conselho-classe/cc-board-beta/trimesters", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ trimester: 1, status: "CLOSED" }),
+            }),
+            { params: Promise.resolve({ boardId: "cc-board-beta" }) }
+          )
+        ).status
+      ).toBe(403);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 5. SERE PDF preview sem escrita no banco vs apply autorizado em school-alpha
+      const subjectsCountBeforePreview = await prisma.classCouncilSubject.count({
+        where: { boardId: "cc-board-alpha" },
+      });
+      const rPreview = await postImportPdfRoute(
+        makePdfRequest("cc-board-alpha", "preview", "ESTUDANTE CONSELHO ALPHA"),
+        { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+      );
+      expect(rPreview.status).toBe(200);
+      expect(
+        await prisma.classCouncilSubject.count({ where: { boardId: "cc-board-alpha" } })
+      ).toBe(subjectsCountBeforePreview);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      const rApply = await postImportPdfRoute(
+        makePdfRequest("cc-board-alpha", "apply", "ESTUDANTE CONSELHO ALPHA"),
+        { params: Promise.resolve({ boardId: "cc-board-alpha" }) }
+      );
+      expect(rApply.status).toBe(200);
+      expect(
+        await prisma.classCouncilSubject.count({ where: { boardId: "cc-board-alpha" } })
+      ).toBeGreaterThan(subjectsCountBeforePreview);
+      expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schoolId: "school-alpha",
+          entityId: "cc-board-alpha",
+        })
+      );
+
+      // 6. Fluxo legítimo após troca para school-beta por SUPERADMIN com seleção explícita
+      testAuthState.pendingSessionUser = {
+        id: "cc-usr-super",
+        email: "cc.super@redeativa.local",
+        schoolId: "school-beta",
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) =>
+          name === "active_school_id" ? { name, value: "school-beta" } : undefined,
+      } as never);
+      const rBetaPatch = await patchBoardRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc-board-beta", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ peerLeaderStudentId: "cc-stu-beta" }),
+        }),
+        { params: Promise.resolve({ boardId: "cc-board-beta" }) }
+      );
+      expect(rBetaPatch.status).toBe(200);
+      expect(
+        (await prisma.classCouncilBoard.findUnique({ where: { id: "cc-board-beta" } }))
+          ?.peerLeaderStudentId
+      ).toBe("cc-stu-beta");
+    } finally {
+      testAuthState.useRealPermissions = false;
+      testAuthState.useRealCurrentSchool = false;
+      testAuthState.pendingSessionUser = null;
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.userNetwork.deleteMany({ where: { id: "cc-un-sec" } }).catch(() => {});
+      await prisma.userSchool
+        .deleteMany({ where: { id: { in: ["cc-us-revoked", "cc-us-ped-a"] } } })
+        .catch(() => {});
+      await prisma.user
+        .deleteMany({
+          where: { id: { in: ["cc-usr-revoked", "cc-usr-sec", "cc-usr-super", "cc-usr-ped-a"] } },
+        })
+        .catch(() => {});
+      await prisma.studentCouncilSubjectEntry
+        .deleteMany({ where: { cardId: { in: ["cc-card-alpha", "cc-card-beta"] } } })
+        .catch(() => {});
+      await prisma.studentCouncilCard
+        .deleteMany({ where: { id: { in: ["cc-card-alpha", "cc-card-beta"] } } })
+        .catch(() => {});
+      await prisma.classCouncilTrimester
+        .deleteMany({ where: { id: { in: ["cc-tri-alpha-1", "cc-tri-beta-1"] } } })
+        .catch(() => {});
+      await prisma.classCouncilSubject
+        .deleteMany({ where: { boardId: { in: ["cc-board-alpha", "cc-board-beta"] } } })
+        .catch(() => {});
+      await prisma.classCouncilBoard
+        .deleteMany({ where: { id: { in: ["cc-board-alpha", "cc-board-beta"] } } })
+        .catch(() => {});
+      await prisma.student
+        .deleteMany({ where: { id: { in: ["cc-stu-alpha", "cc-stu-beta"] } } })
+        .catch(() => {});
+      await prisma.classGroup
+        .deleteMany({ where: { id: { in: ["cc-cg-alpha", "cc-cg-beta"] } } })
+        .catch(() => {});
+      if (!alphaSchoolRow?.networkId) {
+        await prisma.school
+          .update({ where: { id: "school-alpha" }, data: { networkId: null } })
+          .catch(() => {});
+        await prisma.educationNetwork
+          .deleteMany({ where: { id: "cc-net-alpha" } })
+          .catch(() => {});
+      }
+      void NextResponse;
+    }
+  });
+
   }
 );
 
@@ -11544,4 +12179,5 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       testAuthState.inepCode = prevInep;
     }
   });
+
 });

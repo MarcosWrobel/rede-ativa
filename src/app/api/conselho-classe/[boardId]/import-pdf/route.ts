@@ -15,6 +15,7 @@ import {
   isCouncilBoardAuthorizedInActiveSchool,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
+  resolveExplicitSelectedSchoolForCouncil,
 } from "@/services/classCouncilService";
 import {
   applyCouncilSerePdfImport,
@@ -32,6 +33,15 @@ export async function POST(
     if (!authCheck.ok) return authCheck.response;
 
     const { boardId } = await params;
+    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+
+    if (!school || !canMutateSchoolCouncil(authCheck.session, school.id)) {
+      return NextResponse.json(
+        { error: "Perfil em modo somente leitura para esta instituição escolar." },
+        { status: 403 }
+      );
+    }
+
     const ownership = await findCouncilBoardOwnershipRecord(boardId);
     if (!ownership) {
       return NextResponse.json(
@@ -40,17 +50,12 @@ export async function POST(
       );
     }
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
+    if (
+      !isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session) ||
+      (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+    ) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
-    if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
-      return NextResponse.json(
-        { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
       );
     }
@@ -71,6 +76,20 @@ export async function POST(
         { error: "Modo de importação inválido. Utilize prévia ou aplicação." },
         { status: 400 }
       );
+    }
+
+    if (rawMode === "apply") {
+      const explicitSchool = await resolveExplicitSelectedSchoolForCouncil(
+        authCheck.session,
+        undefined,
+        authCheck.snapshot
+      );
+      if (!explicitSchool || explicitSchool.id !== school.id) {
+        return NextResponse.json(
+          { error: "Selecione explicitamente uma instituição escolar autorizada para aplicar a importação." },
+          { status: 403 }
+        );
+      }
     }
 
     const rawEntries = [...formData.getAll("files"), ...formData.getAll("file")];

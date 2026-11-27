@@ -121,6 +121,7 @@ vi.mock("@/lib/prisma", () => {
   };
 
   const client: any = {
+    $executeRaw: vi.fn(async () => 1),
     $transaction: vi.fn(async (arg: any) => (typeof arg === "function" ? arg(client) : Promise.all(arg))),
     classCouncilBoard: {
       findUnique: vi.fn(async ({ where, include }: any) => {

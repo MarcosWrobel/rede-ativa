@@ -10,6 +10,7 @@ import {
   readSafeJsonBody,
   resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
+  resolveExplicitSelectedSchoolForCouncil,
 } from "@/services/classCouncilService";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ export async function GET(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    const school = await resolveAuthorizedSchoolForCouncil(
+      authCheck.session,
+      authCheck.schoolId
+    );
     if (!school) {
       return NextResponse.json(
         { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
@@ -52,10 +56,14 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
+    const school = await resolveExplicitSelectedSchoolForCouncil(
+      authCheck.session,
+      undefined,
+      authCheck.snapshot
+    );
     if (!school) {
       return NextResponse.json(
-        { error: "Nenhuma instituição escolar autorizada vinculada à sessão atual." },
+        { error: "Selecione explicitamente uma instituição escolar autorizada para continuar." },
         { status: 403 }
       );
     }

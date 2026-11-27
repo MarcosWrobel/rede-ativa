@@ -7,8 +7,8 @@ import {
   findCouncilBoardOwnershipRecord,
   isCouncilBoardAuthorizedInActiveSchool,
   readSafeJsonBody,
-  resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
+  resolveExplicitSelectedSchoolForCouncil,
   saveOrCloneCouncilSubjects,
 } from "@/services/classCouncilService";
 
@@ -23,15 +23,14 @@ export async function PUT(
     if (!authCheck.ok) return authCheck.response;
 
     const { boardId } = await params;
-    const ownership = await findCouncilBoardOwnershipRecord(boardId);
-    if (!ownership) {
-      return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
-    }
-
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session)) {
+    const school = await resolveExplicitSelectedSchoolForCouncil(
+      authCheck.session,
+      undefined,
+      authCheck.snapshot
+    );
+    if (!school) {
       return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { error: "Selecione explicitamente uma instituição escolar autorizada para continuar." },
         { status: 403 }
       );
     }
@@ -39,6 +38,21 @@ export async function PUT(
     if (!canMutateSchoolCouncil(authCheck.session, school.id)) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
+        { status: 403 }
+      );
+    }
+
+    const ownership = await findCouncilBoardOwnershipRecord(boardId);
+    if (!ownership) {
+      return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
+    }
+
+    if (
+      !isCouncilBoardAuthorizedInActiveSchool(ownership, school, authCheck.session) ||
+      (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+    ) {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }

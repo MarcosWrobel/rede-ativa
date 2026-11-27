@@ -41,15 +41,15 @@ export default async function ConselhoPrintPage({
   }
 
   const { boardId } = await params;
-  const ownership = await findCouncilBoardOwnershipRecord(boardId);
-  if (!ownership) {
-    notFound();
-  }
-
   const sessionSchoolId = (session.user as { schoolId?: string | null })?.schoolId;
   const currentSchool = await resolveAuthorizedSchoolForCouncil(session, sessionSchoolId);
 
-  if (!isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session)) {
+  const ownership = await findCouncilBoardOwnershipRecord(boardId);
+  if (
+    !ownership ||
+    !isCouncilBoardAuthorizedInActiveSchool(ownership, currentSchool, session) ||
+    (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId)
+  ) {
     notFound();
   }
 

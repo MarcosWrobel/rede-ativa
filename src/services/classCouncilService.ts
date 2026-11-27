@@ -2,8 +2,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { generateVerificationCode } from "@/lib/ataCrypto";
 import * as currentSchoolModule from "@/lib/currentSchool";
+import type { ServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 import { checkIsSuperAdmin, type AuthSessionLike } from "@/lib/roles";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
@@ -262,6 +264,20 @@ export async function resolveExplicitSelectedSchoolForCouncil(
   return resolved && resolved.id === targetId ? resolved : null;
 }
 
+async function runCouncilTenantTx<T>(
+  schoolId: string,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  txClient?: Prisma.TransactionClient | PrismaClient
+): Promise<T> {
+  if (txClient) {
+    return fn(txClient as Prisma.TransactionClient);
+  }
+  if (typeof prisma.$transaction === "function") {
+    return withTenantContext(prisma, schoolId, fn);
+  }
+  return fn(prisma as unknown as Prisma.TransactionClient);
+}
+
 export function parseBelowAverageJson(raw: string | null | undefined): CouncilBelowAvgItem[] {
   if (!raw || !raw.trim()) return [];
   try {
@@ -312,7 +328,8 @@ async function resolveValidatedLeaderStudents(
   peerLeaderStudentId?: string | null,
   teacherLeaderStudentId?: string | null,
   peerLeaderName?: string | null,
-  teacherLeaderName?: string | null
+  teacherLeaderName?: string | null,
+  db: Prisma.TransactionClient | PrismaClient = prisma
 ) {
   const peerId = peerLeaderStudentId?.trim() || null;
   const teacherId = teacherLeaderStudentId?.trim() || null;
@@ -320,7 +337,7 @@ async function resolveValidatedLeaderStudents(
 
   let matchedMap = new Map<string, string>();
   if (distinctIds.length > 0) {
-    const matched = await prisma.student.findMany({
+    const matched = await db.student.findMany({
       where: {
         id: { in: distinctIds },
         schoolId,
@@ -392,16 +409,14 @@ async function syncMissingStudentCardsForBoard(
   boardId: string,
   classGroupId: string
 ): Promise<boolean> {
-  const [students, existingCards] = await Promise.all([
-    client.student.findMany({
-      where: { schoolId, classGroupId },
-      select: { id: true, active: true, isSpecialNeeds: true },
-    }),
-    client.studentCouncilCard.findMany({
-      where: { boardId, schoolId },
-      select: { studentId: true },
-    }),
-  ]);
+  const students = await client.student.findMany({
+    where: { schoolId, classGroupId },
+    select: { id: true, active: true, isSpecialNeeds: true },
+  });
+  const existingCards = await client.studentCouncilCard.findMany({
+    where: { boardId, schoolId },
+    select: { studentId: true },
+  });
 
   const existingStudentIds = new Set(existingCards.map((c) => c.studentId));
   const missingStudents = students.filter((s) => !existingStudentIds.has(s.id));
@@ -421,8 +436,12 @@ async function syncMissingStudentCardsForBoard(
   return true;
 }
 
-export async function findCouncilBoardOwnershipRecord(boardId: string) {
-  return prisma.classCouncilBoard.findUnique({
+export async function findCouncilBoardOwnershipRecord(
+  boardId: string,
+  txClient?: Prisma.TransactionClient | PrismaClient
+) {
+  const db = txClient ?? prisma;
+  return db.classCouncilBoard.findUnique({
     where: { id: boardId },
     select: {
       id: true,
@@ -445,109 +464,134 @@ export async function findCouncilBoardOwnershipRecord(boardId: string) {
   });
 }
 
-export async function listSchoolCouncilBoards(schoolId: string, year: number) {
-  const [classGroups, boards] = await Promise.all([
-    prisma.classGroup.findMany({
-      where: { schoolId },
-      orderBy: { name: "asc" },
-      include: {
-        _count: {
-          select: {
-            students: { where: { active: true } },
+export async function listSchoolCouncilBoards(
+  schoolId: string,
+  year: number,
+  txClient?: Prisma.TransactionClient | PrismaClient
+) {
+  return runCouncilTenantTx(
+    schoolId,
+    async (tx) => {
+      const classGroups = await tx.classGroup.findMany({
+        where: { schoolId },
+        orderBy: { name: "asc" },
+        include: {
+          _count: {
+            select: {
+              students: { where: { active: true } },
+            },
           },
         },
-      },
-    }),
-    prisma.classCouncilBoard.findMany({
-      where: { schoolId, year },
-      orderBy: { classGroup: { name: "asc" } },
-      include: {
-        classGroup: {
-          select: { id: true, name: true, segment: true, shift: true },
-        },
-        trimesters: {
-          orderBy: { trimester: "asc" },
-          select: {
-            id: true,
-            trimester: true,
-            status: true,
-            linkedMinuteId: true,
-            postCouncilHeldAt: true,
-            updatedAt: true,
+      });
+      const boards = await tx.classCouncilBoard.findMany({
+        where: { schoolId, year, classGroup: { schoolId } },
+        orderBy: { classGroup: { name: "asc" } },
+        include: {
+          classGroup: {
+            select: { id: true, name: true, segment: true, shift: true },
+          },
+          trimesters: {
+            orderBy: { trimester: "asc" },
+            select: {
+              id: true,
+              trimester: true,
+              status: true,
+              linkedMinuteId: true,
+              postCouncilHeldAt: true,
+              updatedAt: true,
+            },
+          },
+          _count: {
+            select: {
+              subjects: { where: { active: true } },
+              studentCards: true,
+            },
           },
         },
-        _count: {
-          select: {
-            subjects: { where: { active: true } },
-            studentCards: true,
-          },
-        },
-      },
-    }),
-  ]);
+      });
 
-  return {
-    year,
-    classGroups,
-    boards,
-  };
+      return {
+        year,
+        classGroups,
+        boards,
+      };
+    },
+    txClient
+  );
 }
 
 export async function getCouncilBoardDetail(
   schoolId: string,
   boardId: string,
-  txClient?: Prisma.TransactionClient | PrismaClient
+  txClient?: Prisma.TransactionClient | PrismaClient,
+  options?: { skipImplicitWrites?: boolean }
 ) {
-  const db = txClient ?? prisma;
-  const boardHeader = await db.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    select: { id: true, schoolId: true, classGroupId: true },
-  });
+  return runCouncilTenantTx(
+    schoolId,
+    async (db) => {
+      const boardHeader = await db.classCouncilBoard.findUnique({
+        where: { id: boardId },
+        select: {
+          id: true,
+          schoolId: true,
+          classGroupId: true,
+          classGroup: { select: { schoolId: true } },
+        },
+      });
 
-  if (!boardHeader || boardHeader.schoolId !== schoolId) {
-    return null;
-  }
+      if (
+        !boardHeader ||
+        boardHeader.schoolId !== schoolId ||
+        (boardHeader.classGroup && boardHeader.classGroup.schoolId !== schoolId)
+      ) {
+        return null;
+      }
 
-  await ensureTrimestersForBoard(db, schoolId, boardId);
-  await syncMissingStudentCardsForBoard(db, schoolId, boardId, boardHeader.classGroupId);
+      if (!options?.skipImplicitWrites) {
+        await ensureTrimestersForBoard(db, schoolId, boardId);
+        await syncMissingStudentCardsForBoard(db, schoolId, boardId, boardHeader.classGroupId);
+      }
 
-  return db.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    include: {
-      classGroup: {
-        select: { id: true, name: true, segment: true, shift: true },
-      },
-      subjects: {
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      },
-      trimesters: {
-        orderBy: { trimester: "asc" },
-      },
-      studentCards: {
-        orderBy: { student: { name: "asc" } },
+          return db.classCouncilBoard.findUnique({
+        where: { id: boardId },
         include: {
-          student: {
-            select: {
-              id: true,
-              name: true,
-              cgm: true,
-              active: true,
-              isSpecialNeeds: true,
-              isExchangeStudent: true,
-              age: true,
-              lowAttendanceRecord: {
-                select: { attendancePercent: true },
+          classGroup: {
+            select: { id: true, name: true, segment: true, shift: true },
+          },
+          subjects: {
+            orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+          },
+          trimesters: {
+            orderBy: { trimester: "asc" },
+          },
+          studentCards: {
+            orderBy: { student: { name: "asc" } },
+            include: {
+              student: {
+                select: {
+                  id: true,
+                  name: true,
+                  cgm: true,
+                  active: true,
+                  isSpecialNeeds: true,
+                  isExchangeStudent: true,
+                  age: true,
+                  lowAttendanceRecord: {
+                    select: { attendancePercent: true },
+                  },
+                },
+              },
+              subjectEntries: {
+                where: { schoolId },
+                orderBy: [{ trimester: "asc" }],
               },
             },
           },
-          subjectEntries: {
-            where: { schoolId },
-            orderBy: [{ trimester: "asc" }],
-          },
         },
-      },
+      });
     },
-  });
+    txClient
+  );
 }
 
 export async function ensureOrUpsertCouncilBoard(
@@ -560,97 +604,98 @@ export async function ensureOrUpsertCouncilBoard(
   txClient?: Prisma.TransactionClient | PrismaClient
 ) {
   const { schoolId, payload, authorName, authorEmail } = params;
-  const db = txClient ?? prisma;
 
-  const classGroup = await db.classGroup.findFirst({
-    where: { id: payload.classGroupId, schoolId },
-    select: { id: true, schoolId: true, name: true },
-  });
-
-  if (!classGroup) {
-    throw new CouncilDomainError("Turma não encontrada nesta instituição escolar.", 404);
-  }
-
-  const leaders = await resolveValidatedLeaderStudents(
+  return runCouncilTenantTx(
     schoolId,
-    classGroup.id,
-    payload.peerLeaderStudentId,
-    payload.teacherLeaderStudentId,
-    payload.peerLeaderName,
-    payload.teacherLeaderName
-  );
+    async (tx) => {
+      const classGroup = await tx.classGroup.findFirst({
+        where: { id: payload.classGroupId, schoolId },
+        select: { id: true, schoolId: true, name: true },
+      });
 
-  const upsertWithTx = async (tx: Prisma.TransactionClient | PrismaClient) => {
-    const upserted = await tx.classCouncilBoard.upsert({
-      where: {
-        schoolId_classGroupId_year: {
+      if (!classGroup) {
+        throw new CouncilDomainError("Turma não encontrada nesta instituição escolar.", 404);
+      }
+
+      const leaders = await resolveValidatedLeaderStudents(
+        schoolId,
+        classGroup.id,
+        payload.peerLeaderStudentId,
+        payload.teacherLeaderStudentId,
+        payload.peerLeaderName,
+        payload.teacherLeaderName,
+        tx
+      );
+
+      const upserted = await tx.classCouncilBoard.upsert({
+        where: {
+          schoolId_classGroupId_year: {
+            schoolId,
+            classGroupId: classGroup.id,
+            year: payload.year,
+          },
+        },
+        create: {
           schoolId,
           classGroupId: classGroup.id,
           year: payload.year,
+          peerLeaderStudentId: leaders.peerLeaderStudentId,
+          peerLeaderName: leaders.peerLeaderName ?? null,
+          teacherLeaderStudentId: leaders.teacherLeaderStudentId,
+          teacherLeaderName: leaders.teacherLeaderName ?? null,
+          externalEvalEd1Percent: payload.externalEvalEd1Percent ?? null,
+          externalEvalEd2Percent: payload.externalEvalEd2Percent ?? null,
+          externalEvalEd3Percent: payload.externalEvalEd3Percent ?? null,
+          seatingMapMode: payload.seatingMapMode ?? "REVEZAMENTO_MENSAL",
+          seatingMapNotes: payload.seatingMapNotes?.trim() || null,
         },
-      },
-      create: {
-        schoolId,
-        classGroupId: classGroup.id,
-        year: payload.year,
-        peerLeaderStudentId: leaders.peerLeaderStudentId,
-        peerLeaderName: leaders.peerLeaderName ?? null,
-        teacherLeaderStudentId: leaders.teacherLeaderStudentId,
-        teacherLeaderName: leaders.teacherLeaderName ?? null,
-        externalEvalEd1Percent: payload.externalEvalEd1Percent ?? null,
-        externalEvalEd2Percent: payload.externalEvalEd2Percent ?? null,
-        externalEvalEd3Percent: payload.externalEvalEd3Percent ?? null,
-        seatingMapMode: payload.seatingMapMode ?? "REVEZAMENTO_MENSAL",
-        seatingMapNotes: payload.seatingMapNotes?.trim() || null,
-      },
-      update: {
-        ...(payload.peerLeaderStudentId !== undefined
-          ? { peerLeaderStudentId: leaders.peerLeaderStudentId }
-          : {}),
-        ...(leaders.peerLeaderName !== undefined ? { peerLeaderName: leaders.peerLeaderName } : {}),
-        ...(payload.teacherLeaderStudentId !== undefined
-          ? { teacherLeaderStudentId: leaders.teacherLeaderStudentId }
-          : {}),
-        ...(leaders.teacherLeaderName !== undefined
-          ? { teacherLeaderName: leaders.teacherLeaderName }
-          : {}),
-        ...(payload.externalEvalEd1Percent !== undefined
-          ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
-          : {}),
-        ...(payload.externalEvalEd2Percent !== undefined
-          ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
-          : {}),
-        ...(payload.externalEvalEd3Percent !== undefined
-          ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
-          : {}),
-        ...(payload.seatingMapMode !== undefined ? { seatingMapMode: payload.seatingMapMode } : {}),
-        ...(payload.seatingMapNotes !== undefined
-          ? { seatingMapNotes: payload.seatingMapNotes?.trim() || null }
-          : {}),
-      },
-    });
+        update: {
+          ...(payload.peerLeaderStudentId !== undefined
+            ? { peerLeaderStudentId: leaders.peerLeaderStudentId }
+            : {}),
+          ...(leaders.peerLeaderName !== undefined
+            ? { peerLeaderName: leaders.peerLeaderName }
+            : {}),
+          ...(payload.teacherLeaderStudentId !== undefined
+            ? { teacherLeaderStudentId: leaders.teacherLeaderStudentId }
+            : {}),
+          ...(leaders.teacherLeaderName !== undefined
+            ? { teacherLeaderName: leaders.teacherLeaderName }
+            : {}),
+          ...(payload.externalEvalEd1Percent !== undefined
+            ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
+            : {}),
+          ...(payload.externalEvalEd2Percent !== undefined
+            ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
+            : {}),
+          ...(payload.externalEvalEd3Percent !== undefined
+            ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
+            : {}),
+          ...(payload.seatingMapMode !== undefined
+            ? { seatingMapMode: payload.seatingMapMode }
+            : {}),
+          ...(payload.seatingMapNotes !== undefined
+            ? { seatingMapNotes: payload.seatingMapNotes?.trim() || null }
+            : {}),
+        },
+      });
 
-    await ensureTrimestersForBoard(tx, schoolId, upserted.id, authorName, authorEmail);
-    await syncMissingStudentCardsForBoard(tx, schoolId, upserted.id, classGroup.id);
+      await ensureTrimestersForBoard(tx, schoolId, upserted.id, authorName, authorEmail);
+      await syncMissingStudentCardsForBoard(tx, schoolId, upserted.id, classGroup.id);
 
-    return upserted;
-  };
-
-  if (txClient) {
-    const board = await upsertWithTx(txClient);
-    return getCouncilBoardDetail(schoolId, board.id, txClient);
-  }
-
-  const board = await prisma.$transaction(async (tx) => upsertWithTx(tx));
-  return getCouncilBoardDetail(schoolId, board.id);
+      return getCouncilBoardDetail(schoolId, upserted.id, tx);
+    },
+    txClient
+  );
 }
 
 async function validateAndSerializeSeatingMapLayout(params: {
   schoolId: string;
   boardId: string;
   layout: z.infer<typeof councilSeatingMapLayoutSchema> | null;
+  db?: Prisma.TransactionClient | PrismaClient;
 }): Promise<string | null> {
-  const { schoolId, boardId, layout } = params;
+  const { schoolId, boardId, layout, db = prisma } = params;
   if (layout === null) {
     return null;
   }
@@ -698,7 +743,7 @@ async function validateAndSerializeSeatingMapLayout(params: {
 
   if (allStudentIds.size > 0) {
     const requestedIds = Array.from(allStudentIds);
-    const matched = await prisma.studentCouncilCard.findMany({
+    const matched = await db.studentCouncilCard.findMany({
       where: {
         boardId,
         schoolId,
@@ -735,67 +780,83 @@ export async function updateCouncilBoardMetadata(params: {
 }) {
   const { schoolId, boardId, payload } = params;
 
-  const existing = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    select: { id: true, schoolId: true, classGroupId: true },
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const existing = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      select: {
+        id: true,
+        schoolId: true,
+        classGroupId: true,
+        classGroup: { select: { schoolId: true } },
+      },
+    });
+
+    if (!existing) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (
+      existing.schoolId !== schoolId ||
+      (existing.classGroup && existing.classGroup.schoolId !== schoolId)
+    ) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    const leaders = await resolveValidatedLeaderStudents(
+      schoolId,
+      existing.classGroupId,
+      payload.peerLeaderStudentId,
+      payload.teacherLeaderStudentId,
+      payload.peerLeaderName,
+      payload.teacherLeaderName,
+      tx
+    );
+
+    const seatingMapLayoutJson =
+      payload.seatingMapLayout !== undefined
+        ? await validateAndSerializeSeatingMapLayout({
+            schoolId,
+            boardId,
+            layout: payload.seatingMapLayout,
+            db: tx,
+          })
+        : undefined;
+
+    await tx.classCouncilBoard.update({
+      where: { id: boardId },
+      data: {
+        ...(payload.peerLeaderStudentId !== undefined
+          ? { peerLeaderStudentId: leaders.peerLeaderStudentId }
+          : {}),
+        ...(leaders.peerLeaderName !== undefined
+          ? { peerLeaderName: leaders.peerLeaderName }
+          : {}),
+        ...(payload.teacherLeaderStudentId !== undefined
+          ? { teacherLeaderStudentId: leaders.teacherLeaderStudentId }
+          : {}),
+        ...(leaders.teacherLeaderName !== undefined
+          ? { teacherLeaderName: leaders.teacherLeaderName }
+          : {}),
+        ...(payload.externalEvalEd1Percent !== undefined
+          ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
+          : {}),
+        ...(payload.externalEvalEd2Percent !== undefined
+          ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
+          : {}),
+        ...(payload.externalEvalEd3Percent !== undefined
+          ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
+          : {}),
+        ...(payload.seatingMapMode !== undefined
+          ? { seatingMapMode: payload.seatingMapMode }
+          : {}),
+        ...(payload.seatingMapNotes !== undefined
+          ? { seatingMapNotes: payload.seatingMapNotes?.trim() || null }
+          : {}),
+        ...(seatingMapLayoutJson !== undefined ? { seatingMapLayoutJson } : {}),
+      },
+    });
+
+    return getCouncilBoardDetail(schoolId, boardId, tx);
   });
-
-  if (!existing) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (existing.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-
-  const leaders = await resolveValidatedLeaderStudents(
-    schoolId,
-    existing.classGroupId,
-    payload.peerLeaderStudentId,
-    payload.teacherLeaderStudentId,
-    payload.peerLeaderName,
-    payload.teacherLeaderName
-  );
-
-  const seatingMapLayoutJson =
-    payload.seatingMapLayout !== undefined
-      ? await validateAndSerializeSeatingMapLayout({
-          schoolId,
-          boardId,
-          layout: payload.seatingMapLayout,
-        })
-      : undefined;
-
-  await prisma.classCouncilBoard.update({
-    where: { id: boardId },
-    data: {
-      ...(payload.peerLeaderStudentId !== undefined
-        ? { peerLeaderStudentId: leaders.peerLeaderStudentId }
-        : {}),
-      ...(leaders.peerLeaderName !== undefined ? { peerLeaderName: leaders.peerLeaderName } : {}),
-      ...(payload.teacherLeaderStudentId !== undefined
-        ? { teacherLeaderStudentId: leaders.teacherLeaderStudentId }
-        : {}),
-      ...(leaders.teacherLeaderName !== undefined
-        ? { teacherLeaderName: leaders.teacherLeaderName }
-        : {}),
-      ...(payload.externalEvalEd1Percent !== undefined
-        ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
-        : {}),
-      ...(payload.externalEvalEd2Percent !== undefined
-        ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
-        : {}),
-      ...(payload.externalEvalEd3Percent !== undefined
-        ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
-        : {}),
-      ...(payload.seatingMapMode !== undefined ? { seatingMapMode: payload.seatingMapMode } : {}),
-      ...(payload.seatingMapNotes !== undefined
-        ? { seatingMapNotes: payload.seatingMapNotes?.trim() || null }
-        : {}),
-      ...(seatingMapLayoutJson !== undefined ? { seatingMapLayoutJson } : {}),
-    },
-  });
-
-  return getCouncilBoardDetail(schoolId, boardId);
 }
 
 export async function saveOrCloneCouncilSubjects(params: {
@@ -805,58 +866,61 @@ export async function saveOrCloneCouncilSubjects(params: {
 }) {
   const { schoolId, boardId, payload } = params;
 
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    select: { id: true, schoolId: true },
-  });
-
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-
-  if (payload.sourceBoardId) {
-    if (payload.sourceBoardId === boardId) {
-      throw new CouncilDomainError(
-        "Selecione uma turma diferente da atual para importar componentes curriculares.",
-        400
-      );
-    }
-
-    const sourceBoard = await prisma.classCouncilBoard.findUnique({
-      where: { id: payload.sourceBoardId },
-      select: {
-        id: true,
-        schoolId: true,
-        classGroup: { select: { name: true } },
-      },
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      select: { id: true, schoolId: true, classGroup: { select: { schoolId: true } } },
     });
 
-    if (!sourceBoard) {
-      throw new CouncilDomainError("Turma de origem não encontrada.", 404);
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
     }
-    if (sourceBoard.schoolId !== schoolId) {
-      throw new CouncilDomainError(
-        "Acesso negado: a turma de origem pertence a outra instituição escolar.",
-        403
-      );
+    if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
     }
 
-    const sourceSubjects = await prisma.classCouncilSubject.findMany({
-      where: { boardId: sourceBoard.id, schoolId, active: true },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    });
+    if (payload.sourceBoardId) {
+      if (payload.sourceBoardId === boardId) {
+        throw new CouncilDomainError(
+          "Selecione uma turma diferente da atual para importar componentes curriculares.",
+          400
+        );
+      }
 
-    if (sourceSubjects.length === 0) {
-      throw new CouncilDomainError(
-        "A turma selecionada não possui componentes curriculares ativos para importar.",
-        400
-      );
-    }
+      const sourceBoard = await tx.classCouncilBoard.findUnique({
+        where: { id: payload.sourceBoardId },
+        select: {
+          id: true,
+          schoolId: true,
+          classGroup: { select: { name: true, schoolId: true } },
+        },
+      });
 
-    const cloned = await prisma.$transaction(async (tx) => {
+      if (!sourceBoard) {
+        throw new CouncilDomainError("Turma de origem não encontrada.", 404);
+      }
+      if (
+        sourceBoard.schoolId !== schoolId ||
+        (sourceBoard.classGroup && sourceBoard.classGroup.schoolId !== schoolId)
+      ) {
+        throw new CouncilDomainError(
+          "Acesso negado: a turma de origem pertence a outra instituição escolar.",
+          403
+        );
+      }
+
+      const sourceSubjects = await tx.classCouncilSubject.findMany({
+        where: { boardId: sourceBoard.id, schoolId, active: true },
+        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      });
+
+      if (sourceSubjects.length === 0) {
+        throw new CouncilDomainError(
+          "A turma selecionada não possui componentes curriculares ativos para importar.",
+          400
+        );
+      }
+
       for (const s of sourceSubjects) {
         await tx.classCouncilSubject.upsert({
           where: { boardId_name: { boardId, name: s.name } },
@@ -878,50 +942,48 @@ export async function saveOrCloneCouncilSubjects(params: {
         });
       }
 
-      return tx.classCouncilSubject.findMany({
+      const cloned = await tx.classCouncilSubject.findMany({
         where: { boardId, schoolId },
         orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
       });
-    });
 
-    return {
-      mode: "CLONED" as const,
-      sourceClassName: sourceBoard.classGroup?.name || null,
-      subjects: cloned,
-    };
-  }
-
-  const incomingSubjects = payload.subjects || [];
-  const normalizedNames = new Set<string>();
-  for (const item of incomingSubjects) {
-    const key = item.name.trim().toLowerCase();
-    if (normalizedNames.has(key)) {
-      throw new CouncilDomainError(
-        "Existem componentes curriculares com nomes duplicados na lista.",
-        400
-      );
+      return {
+        mode: "CLONED" as const,
+        sourceClassName: sourceBoard.classGroup?.name || null,
+        subjects: cloned,
+      };
     }
-    normalizedNames.add(key);
-  }
 
-  const providedIds = Array.from(
-    new Set(incomingSubjects.map((s) => s.id).filter((id): id is string => Boolean(id)))
-  );
-
-  if (providedIds.length > 0) {
-    const matched = await prisma.classCouncilSubject.findMany({
-      where: { id: { in: providedIds }, boardId, schoolId },
-      select: { id: true },
-    });
-    if (matched.length !== providedIds.length) {
-      throw new CouncilDomainError(
-        "Um ou mais componentes informados não pertencem a esta turma ou instituição.",
-        403
-      );
+    const incomingSubjects = payload.subjects || [];
+    const normalizedNames = new Set<string>();
+    for (const item of incomingSubjects) {
+      const key = item.name.trim().toLowerCase();
+      if (normalizedNames.has(key)) {
+        throw new CouncilDomainError(
+          "Existem componentes curriculares com nomes duplicados na lista.",
+          400
+        );
+      }
+      normalizedNames.add(key);
     }
-  }
 
-  const updated = await prisma.$transaction(async (tx) => {
+    const providedIds = Array.from(
+      new Set(incomingSubjects.map((s) => s.id).filter((id): id is string => Boolean(id)))
+    );
+
+    if (providedIds.length > 0) {
+      const matched = await tx.classCouncilSubject.findMany({
+        where: { id: { in: providedIds }, boardId, schoolId },
+        select: { id: true },
+      });
+      if (matched.length !== providedIds.length) {
+        throw new CouncilDomainError(
+          "Um ou mais componentes informados não pertencem a esta turma ou instituição.",
+          403
+        );
+      }
+    }
+
     const existingSubjects = await tx.classCouncilSubject.findMany({
       where: { boardId, schoolId },
       select: { id: true, name: true, active: true, teacherEmail: true, teacherName: true },
@@ -1061,17 +1123,17 @@ export async function saveOrCloneCouncilSubjects(params: {
       }
     }
 
-    return tx.classCouncilSubject.findMany({
+    const updated = await tx.classCouncilSubject.findMany({
       where: { boardId, schoolId },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     });
-  });
 
-  return {
-    mode: "UPDATED" as const,
-    sourceClassName: null,
-    subjects: updated,
-  };
+    return {
+      mode: "UPDATED" as const,
+      sourceClassName: null,
+      subjects: updated,
+    };
+  });
 }
 
 export async function updateCouncilTrimester(params: {
@@ -1082,18 +1144,6 @@ export async function updateCouncilTrimester(params: {
   userEmail: string;
 }) {
   const { schoolId, boardId, payload, userName, userEmail } = params;
-
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    select: { id: true, schoolId: true, classGroupId: true },
-  });
-
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
 
   let parsedHeldAt: Date | null | undefined = undefined;
   if (payload.postCouncilHeldAt !== undefined) {
@@ -1120,17 +1170,37 @@ export async function updateCouncilTrimester(params: {
         )
       : undefined;
 
-  if (
-    payload.preCouncil !== undefined &&
-    payload.preCouncil !== null &&
-    board.classGroupId &&
-    typeof prisma.student?.findMany === "function" &&
-    typeof prisma.studentCouncilCard?.findMany === "function"
-  ) {
-    await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, board.classGroupId);
-  }
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      select: {
+        id: true,
+        schoolId: true,
+        classGroupId: true,
+        classGroup: { select: { schoolId: true } },
+      },
+    });
 
-  return prisma.$transaction(async (tx) => {
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (
+      board.schoolId !== schoolId ||
+      (board.classGroup && board.classGroup.schoolId !== schoolId)
+    ) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    if (
+      payload.preCouncil !== undefined &&
+      payload.preCouncil !== null &&
+      board.classGroupId &&
+      typeof tx.student?.findMany === "function" &&
+      typeof tx.studentCouncilCard?.findMany === "function"
+    ) {
+      await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
+    }
+
     let serializedPreCouncil: string | null | undefined = undefined;
     if (payload.preCouncil !== undefined) {
       serializedPreCouncil = await validateAndSerializePreCouncilData({
@@ -1649,21 +1719,21 @@ export async function saveCouncilMatrixBatch(params: {
 }) {
   const { schoolId, boardId, payload, userEmail } = params;
 
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    select: { id: true, schoolId: true },
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      select: { id: true, schoolId: true, classGroup: { select: { schoolId: true } } },
+    });
+
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    return saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail });
   });
-
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-
-  return prisma.$transaction((tx) =>
-    saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail })
-  );
 }
 
 export async function updateStudentCouncilCard(params: {
@@ -1673,20 +1743,6 @@ export async function updateStudentCouncilCard(params: {
   payload: z.infer<typeof councilStudentCardUpdateSchema>;
 }) {
   const { schoolId, boardId, studentId, payload } = params;
-
-  const card = await prisma.studentCouncilCard.findUnique({
-    where: { boardId_studentId: { boardId, studentId } },
-    include: {
-      student: { select: { id: true, schoolId: true } },
-    },
-  });
-
-  if (!card) {
-    throw new CouncilDomainError("Ficha do estudante não encontrada neste conselho de turma.", 404);
-  }
-  if (card.schoolId !== schoolId || card.student.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
 
   if (
     (payload.qualitativeOpinion !== undefined || payload.belowAverageSubjects !== undefined) &&
@@ -1698,87 +1754,103 @@ export async function updateStudentCouncilCard(params: {
     );
   }
 
-  if (payload.belowAverageSubjects && payload.belowAverageSubjects.length > 0) {
-    const subjectIds = Array.from(
-      new Set(
-        payload.belowAverageSubjects
-          .map((item) => item.subjectId)
-          .filter((id): id is string => Boolean(id && id.trim()))
-      )
-    );
-    if (subjectIds.length > 0) {
-      const matchedSubjects = await prisma.classCouncilSubject.findMany({
-        where: { id: { in: subjectIds }, boardId, schoolId },
-        select: { id: true },
-      });
-      if (matchedSubjects.length !== subjectIds.length) {
-        throw new CouncilDomainError(
-          "Um ou mais componentes abaixo da média não pertencem a esta turma ou instituição.",
-          400
-        );
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const card = await tx.studentCouncilCard.findUnique({
+      where: { boardId_studentId: { boardId, studentId } },
+      include: {
+        student: { select: { id: true, schoolId: true } },
+      },
+    });
+
+    if (!card) {
+      throw new CouncilDomainError("Ficha do estudante não encontrada neste conselho de turma.", 404);
+    }
+    if (card.schoolId !== schoolId || card.student.schoolId !== schoolId) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    if (payload.belowAverageSubjects && payload.belowAverageSubjects.length > 0) {
+      const subjectIds = Array.from(
+        new Set(
+          payload.belowAverageSubjects
+            .map((item) => item.subjectId)
+            .filter((id): id is string => Boolean(id && id.trim()))
+        )
+      );
+      if (subjectIds.length > 0) {
+        const matchedSubjects = await tx.classCouncilSubject.findMany({
+          where: { id: { in: subjectIds }, boardId, schoolId },
+          select: { id: true },
+        });
+        if (matchedSubjects.length !== subjectIds.length) {
+          throw new CouncilDomainError(
+            "Um ou mais componentes abaixo da média não pertencem a esta turma ou instituição.",
+            400
+          );
+        }
       }
     }
-  }
 
-  const nextTags = payload.tags !== undefined ? Array.from(new Set(payload.tags)) : undefined;
-  const opinionField = payload.trimester ? getOpinionFieldName(payload.trimester) : null;
-  const belowAvgField = payload.trimester ? getBelowAvgFieldName(payload.trimester) : null;
+    const nextTags = payload.tags !== undefined ? Array.from(new Set(payload.tags)) : undefined;
+    const opinionField = payload.trimester ? getOpinionFieldName(payload.trimester) : null;
+    const belowAvgField = payload.trimester ? getBelowAvgFieldName(payload.trimester) : null;
 
-  return prisma.studentCouncilCard.update({
-    where: { id: card.id },
-    data: {
-      ...(payload.enrollmentStatus !== undefined
-        ? { enrollmentStatus: payload.enrollmentStatus }
-        : {}),
-      ...(payload.externalEvalEd1Percent !== undefined
-        ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
-        : {}),
-      ...(payload.externalEvalEd2Percent !== undefined
-        ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
-        : {}),
-      ...(payload.externalEvalEd3Percent !== undefined
-        ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
-        : {}),
-      ...(nextTags !== undefined
-        ? {
-            tags: nextTags,
-            hasSensitiveHealthTag: computeHasSensitiveHealthTag(nextTags),
-          }
-        : {}),
-      ...(opinionField && payload.qualitativeOpinion !== undefined
-        ? { [opinionField]: payload.qualitativeOpinion?.trim() || null }
-        : {}),
-      ...(belowAvgField && payload.belowAverageSubjects !== undefined
-        ? {
-            [belowAvgField]:
-              payload.belowAverageSubjects.length > 0
-                ? JSON.stringify(
-                    payload.belowAverageSubjects.map((item) => ({
-                      subjectId: item.subjectId || null,
-                      subjectName: item.subjectName.trim(),
-                      grade: item.grade ?? null,
-                    }))
-                  )
-                : null,
-          }
-        : {}),
-    },
-    include: {
-      student: {
-        select: {
-          id: true,
-          name: true,
-          cgm: true,
-          active: true,
-          isSpecialNeeds: true,
-          isExchangeStudent: true,
-          age: true,
+    return tx.studentCouncilCard.update({
+      where: { id: card.id },
+      data: {
+        ...(payload.enrollmentStatus !== undefined
+          ? { enrollmentStatus: payload.enrollmentStatus }
+          : {}),
+        ...(payload.externalEvalEd1Percent !== undefined
+          ? { externalEvalEd1Percent: payload.externalEvalEd1Percent }
+          : {}),
+        ...(payload.externalEvalEd2Percent !== undefined
+          ? { externalEvalEd2Percent: payload.externalEvalEd2Percent }
+          : {}),
+        ...(payload.externalEvalEd3Percent !== undefined
+          ? { externalEvalEd3Percent: payload.externalEvalEd3Percent }
+          : {}),
+        ...(nextTags !== undefined
+          ? {
+              tags: nextTags,
+              hasSensitiveHealthTag: computeHasSensitiveHealthTag(nextTags),
+            }
+          : {}),
+        ...(opinionField && payload.qualitativeOpinion !== undefined
+          ? { [opinionField]: payload.qualitativeOpinion?.trim() || null }
+          : {}),
+        ...(belowAvgField && payload.belowAverageSubjects !== undefined
+          ? {
+              [belowAvgField]:
+                payload.belowAverageSubjects.length > 0
+                  ? JSON.stringify(
+                      payload.belowAverageSubjects.map((item) => ({
+                        subjectId: item.subjectId || null,
+                        subjectName: item.subjectName.trim(),
+                        grade: item.grade ?? null,
+                      }))
+                    )
+                  : null,
+            }
+          : {}),
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+            cgm: true,
+            active: true,
+            isSpecialNeeds: true,
+            isExchangeStudent: true,
+            age: true,
+          },
+        },
+        subjectEntries: {
+          orderBy: [{ trimester: "asc" }],
         },
       },
-      subjectEntries: {
-        orderBy: [{ trimester: "asc" }],
-      },
-    },
+    });
   });
 }
 
@@ -1827,62 +1899,63 @@ export async function generateMinuteDraftFromCouncil(params: {
   const { schoolId, boardId, payload, authorId, authorName, authorEmail, authorRole, authorIp } =
     params;
 
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    include: {
-      classGroup: { select: { id: true, name: true, segment: true, shift: true } },
-      subjects: {
-        where: { active: true },
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      },
-      trimesters: {
-        where: { trimester: payload.trimester },
-      },
-      studentCards: {
-        include: {
-          student: {
-            select: { id: true, name: true, cgm: true, schoolId: true },
-          },
-          subjectEntries: {
-            where: { trimester: payload.trimester },
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      include: {
+        classGroup: { select: { id: true, name: true, segment: true, shift: true, schoolId: true } },
+        subjects: {
+          where: { active: true },
+          orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+        },
+        trimesters: {
+          where: { trimester: payload.trimester },
+        },
+        studentCards: {
+          include: {
+            student: {
+              select: { id: true, name: true, cgm: true, schoolId: true },
+            },
+            subjectEntries: {
+              where: { trimester: payload.trimester },
+            },
           },
         },
       },
-    },
-  });
-
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-
-  const uniqueStudentIds = Array.from(new Set(payload.studentIds || []));
-  const cardByStudentId = new Map(board.studentCards.map((c) => [c.studentId, c]));
-  const matchedCards = uniqueStudentIds
-    .map((id) => cardByStudentId.get(id))
-    .filter((card): card is NonNullable<typeof card> => Boolean(card));
-
-  if (matchedCards.length !== uniqueStudentIds.length) {
-    throw new CouncilDomainError(
-      "Um ou mais estudantes informados não pertencem a esta turma ou instituição escolar.",
-      400
-    );
-  }
-
-  if (uniqueStudentIds.length > 0) {
-    const dbStudents = await prisma.student.findMany({
-      where: { id: { in: uniqueStudentIds }, schoolId },
-      select: { id: true },
     });
-    if (dbStudents.length !== uniqueStudentIds.length) {
+
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    const uniqueStudentIds = Array.from(new Set(payload.studentIds || []));
+    const cardByStudentId = new Map(board.studentCards.map((c) => [c.studentId, c]));
+    const matchedCards = uniqueStudentIds
+      .map((id) => cardByStudentId.get(id))
+      .filter((card): card is NonNullable<typeof card> => Boolean(card));
+
+    if (matchedCards.length !== uniqueStudentIds.length) {
       throw new CouncilDomainError(
-        "Um ou mais estudantes informados não pertencem a esta instituição escolar.",
+        "Um ou mais estudantes informados não pertencem a esta turma ou instituição escolar.",
         400
       );
     }
-  }
+
+    if (uniqueStudentIds.length > 0) {
+      const dbStudents = await tx.student.findMany({
+        where: { id: { in: uniqueStudentIds }, schoolId },
+        select: { id: true },
+      });
+      if (dbStudents.length !== uniqueStudentIds.length) {
+        throw new CouncilDomainError(
+          "Um ou mais estudantes informados não pertencem a esta instituição escolar.",
+          400
+        );
+      }
+    }
 
   const trimesterRecord = board.trimesters[0] || null;
   const subjectNameById = new Map(board.subjects.map((s) => [s.id, s.name]));
@@ -1961,8 +2034,7 @@ export async function generateMinuteDraftFromCouncil(params: {
 
     const minuteSubject = `Reunião de Pós-Conselho — ${board.classGroup.name} (${payload.trimester}º Trimestre/${board.year})`;
 
-    return prisma.$transaction(async (tx) => {
-      const created = await tx.pedagogicalMinute.create({
+    const created = await tx.pedagogicalMinute.create({
         data: {
           schoolId,
           year: board.year,
@@ -2024,7 +2096,6 @@ export async function generateMinuteDraftFromCouncil(params: {
       });
 
       return created;
-    });
   }
 
   // source === "STUDENT_DELIBERATION"
@@ -2078,7 +2149,7 @@ export async function generateMinuteDraftFromCouncil(params: {
       ? `Deliberação do Conselho de Classe — ${matchedCards[0].student.name} (${board.classGroup.name} · ${payload.trimester}º Trim./${board.year})`
       : `Deliberação do Conselho de Classe — ${board.classGroup.name} (${matchedCards.length} estudantes · ${payload.trimester}º Trim./${board.year})`;
 
-  return prisma.pedagogicalMinute.create({
+  return tx.pedagogicalMinute.create({
     data: {
       schoolId,
       year: board.year,
@@ -2110,6 +2181,7 @@ export async function generateMinuteDraftFromCouncil(params: {
       participants: true,
       actionItems: true,
     },
+  });
   });
 }
 
@@ -2948,10 +3020,12 @@ export async function getSavedPreCouncilForLink(params: {
 }> {
   const { schoolId, boardId, trimester, conversationId } = params;
 
-  const trimesters = await prisma.classCouncilTrimester.findMany({
-    where: { boardId, schoolId },
-    select: { id: true, trimester: true, preCouncilJson: true },
-  });
+  const trimesters = await runCouncilTenantTx(schoolId, (tx) =>
+    tx.classCouncilTrimester.findMany({
+      where: { boardId, schoolId },
+      select: { id: true, trimester: true, preCouncilJson: true },
+    })
+  );
   const trimesterRecord = trimesters.find((t) => t.trimester === trimester) || null;
   const parsed = parsePreCouncilData(trimesterRecord?.preCouncilJson);
 
