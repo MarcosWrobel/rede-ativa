@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { formatZodError } from "@/lib/schemas";
 import {
   canMutateSchoolCouncil,
@@ -36,23 +37,6 @@ export async function PATCH(
       );
     }
 
-    const existing = await prisma.classGroup.findUnique({
-      where: { id },
-      select: { id: true, schoolId: true, name: true, segment: true, shift: true },
-    });
-
-    if (!existing || !assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json({ error: "Turma não encontrada." }, { status: 404 });
-    }
-
-    const targetSchoolId = existing.schoolId || currentSchool.id;
-    if (!canMutateSchoolCouncil(authCheck.session, targetSchoolId)) {
-      return NextResponse.json(
-        { error: "Sem permissão para alterar o turno desta turma." },
-        { status: 403 }
-      );
-    }
-
     const rawBody = await readSafeJsonBody(req);
     const parsed = updateClassShiftSchema.safeParse(rawBody);
     if (!parsed.success) {
@@ -60,29 +44,81 @@ export async function PATCH(
     }
 
     const nextShift = parsed.data.shift;
-    if (existing.shift === nextShift) {
+
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const existing = await tx.classGroup.findUnique({
+        where: { id },
+        select: { id: true, schoolId: true, name: true, segment: true, shift: true },
+      });
+
+      if (!existing || !assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
+        return { errorStatus: 404 as const, error: "Turma não encontrada." };
+      }
+
+      const targetSchoolId = existing.schoolId || currentSchool.id;
+      if (!canMutateSchoolCouncil(authCheck.session, targetSchoolId)) {
+        return {
+          errorStatus: 403 as const,
+          error: "Sem permissão para alterar o turno desta turma.",
+        };
+      }
+
+      if (existing.shift === nextShift) {
+        return {
+          unchanged: true as const,
+          targetSchoolId,
+          existing,
+          classGroup: {
+            id: existing.id,
+            name: existing.name,
+            segment: existing.segment,
+            shift: existing.shift,
+          },
+        };
+      }
+
+      const updatedCount = await tx.classGroup.updateMany({
+        where: { id: existing.id, schoolId: targetSchoolId },
+        data: { shift: nextShift },
+      });
+      if (updatedCount.count === 0) {
+        return { errorStatus: 404 as const, error: "Turma não encontrada." };
+      }
+
+      const updated = await tx.classGroup.findFirst({
+        where: { id: existing.id, schoolId: targetSchoolId },
+        select: { id: true, name: true, segment: true, shift: true },
+      });
+      if (!updated) {
+        return { errorStatus: 404 as const, error: "Turma não encontrada." };
+      }
+
+      return {
+        unchanged: false as const,
+        targetSchoolId,
+        existing,
+        classGroup: updated,
+      };
+    });
+
+    if ("error" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+
+    if (txResult.unchanged) {
       return NextResponse.json({
         success: true,
-        classGroup: {
-          id: existing.id,
-          name: existing.name,
-          segment: existing.segment,
-          shift: existing.shift,
-        },
+        classGroup: txResult.classGroup,
       });
     }
 
-    const updated = await prisma.classGroup.update({
-      where: { id: existing.id },
-      data: { shift: nextShift },
-      select: { id: true, name: true, segment: true, shift: true },
-    });
+    const updated = txResult.classGroup;
 
     await logAudit({
       action: "UPDATE_CLASS_GROUP_SHIFT",
       entityType: "ClassGroup",
       entityId: updated.id,
-      schoolId: targetSchoolId,
+      schoolId: txResult.targetSchoolId,
       user: {
         id: authCheck.userId,
         name: authCheck.userName,
@@ -90,7 +126,7 @@ export async function PATCH(
       },
       req,
       details: {
-        previousShift: existing.shift,
+        previousShift: txResult.existing.shift,
         nextShift: updated.shift,
       },
     });

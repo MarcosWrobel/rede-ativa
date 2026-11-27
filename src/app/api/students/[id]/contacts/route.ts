@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit } from "@/lib/audit";
 import {
   formatZodError,
@@ -31,32 +32,30 @@ export async function POST(
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (!student || student.schoolId !== currentSchool.id) {
-      return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
-    }
-
     const cleanPhone = parsed.data.phone.replace(/\D/g, "");
     const { name, kinship, isPrimary, whatsappValid, notes } = parsed.data;
 
-    const batchOps: any[] = [];
-    if (isPrimary) {
-      batchOps.push(
-        prisma.studentContact.updateMany({
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const student = await tx.student.findFirst({
+        where: { id: studentId, schoolId: currentSchool.id },
+      });
+      if (!student) return null;
+
+      if (isPrimary) {
+        await tx.studentContact.updateMany({
           where: { studentId },
           data: { isPrimary: false },
-        }),
-        prisma.student.update({
-          where: { id: studentId },
+        });
+        await tx.student.updateMany({
+          where: { id: studentId, schoolId: currentSchool.id },
           data: {
             phone: cleanPhone,
             guardianName: name,
           },
-        })
-      );
-    }
-    batchOps.push(
-      prisma.studentContact.create({
+        });
+      }
+
+      const created = await tx.studentContact.create({
         data: {
           studentId,
           name,
@@ -66,11 +65,14 @@ export async function POST(
           whatsappValid,
           notes: notes || null,
         },
-      })
-    );
+      });
+      return { student, created };
+    });
 
-    const txResults = await prisma.$transaction(batchOps);
-    const created = txResults[txResults.length - 1];
+    if (!txResult) {
+      return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
+    }
+    const { student, created } = txResult;
 
     await logAudit({
       action: "CREATE_STUDENT_CONTACT",
@@ -127,36 +129,32 @@ export async function PUT(
     const currentSchool = schoolRes.school;
     const { contactId, name, kinship, phone, isPrimary, whatsappValid, notes } = parsed.data;
 
-    const existing = await prisma.studentContact.findFirst({
-      where: { id: contactId, studentId },
-      include: { student: { select: { name: true, schoolId: true } } },
-    });
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const existing = await tx.studentContact.findFirst({
+        where: { id: contactId, studentId, student: { schoolId: currentSchool.id } },
+        include: { student: { select: { name: true, schoolId: true } } },
+      });
 
-    if (!existing || existing.student.schoolId !== currentSchool.id) {
-      return NextResponse.json({ error: "Contato não encontrado nesta unidade escolar." }, { status: 404 });
-    }
+      if (!existing) return null;
 
-    const cleanPhone = phone ? phone.replace(/\D/g, "") : existing.phone;
-    const nextName = name !== undefined ? name : existing.name;
+      const cleanPhone = phone ? phone.replace(/\D/g, "") : existing.phone;
+      const nextName = name !== undefined ? name : existing.name;
 
-    const updateOps: any[] = [];
-    if (isPrimary === true) {
-      updateOps.push(
-        prisma.studentContact.updateMany({
+      if (isPrimary === true) {
+        await tx.studentContact.updateMany({
           where: { studentId, id: { not: contactId } },
           data: { isPrimary: false },
-        }),
-        prisma.student.update({
-          where: { id: studentId },
+        });
+        await tx.student.updateMany({
+          where: { id: studentId, schoolId: currentSchool.id },
           data: {
             phone: cleanPhone,
             guardianName: nextName,
           },
-        })
-      );
-    }
-    updateOps.push(
-      prisma.studentContact.update({
+        });
+      }
+
+      const updated = await tx.studentContact.update({
         where: { id: contactId },
         data: {
           name: nextName,
@@ -166,11 +164,14 @@ export async function PUT(
           whatsappValid: whatsappValid !== undefined ? whatsappValid : existing.whatsappValid,
           notes: notes !== undefined ? notes || null : existing.notes,
         },
-      })
-    );
+      });
+      return { existing, updated };
+    });
 
-    const updateResults = await prisma.$transaction(updateOps);
-    const updated = updateResults[updateResults.length - 1];
+    if (!txResult) {
+      return NextResponse.json({ error: "Contato não encontrado nesta unidade escolar." }, { status: 404 });
+    }
+    const { existing, updated } = txResult;
 
     await logAudit({
       action: "UPDATE_STUDENT_CONTACT",
@@ -225,16 +226,20 @@ export async function DELETE(
       return NextResponse.json({ error: "contactId é obrigatório." }, { status: 400 });
     }
 
-    const existing = await prisma.studentContact.findFirst({
-      where: { id: contactId, studentId },
-      include: { student: { select: { name: true, schoolId: true } } },
+    const existing = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const found = await tx.studentContact.findFirst({
+        where: { id: contactId, studentId, student: { schoolId: currentSchool.id } },
+        include: { student: { select: { name: true, schoolId: true } } },
+      });
+      if (!found) return null;
+
+      await tx.studentContact.delete({ where: { id: contactId } });
+      return found;
     });
 
-    if (!existing || existing.student.schoolId !== currentSchool.id) {
+    if (!existing) {
       return NextResponse.json({ error: "Contato não encontrado nesta unidade escolar." }, { status: 404 });
     }
-
-    await prisma.studentContact.delete({ where: { id: contactId } });
 
     await logAudit({
       action: "DELETE_STUDENT_CONTACT",

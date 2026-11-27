@@ -239,6 +239,29 @@ import { GET as listTemplatesHandler, POST as createTemplateHandler, PUT as upda
 import ModelosPage from "@/app/modelos/page";
 import BuscaAtivaPage from "@/app/busca-ativa/page";
 import FaltasPage from "@/app/faltas/page";
+import { GET as listClassesHandler, POST as createClassHandler } from "@/app/api/classes/route";
+import { PATCH as patchClassHandler } from "@/app/api/classes/[id]/route";
+import { GET as listLowAttHandler, POST as upsertLowAttHandler } from "@/app/api/low-attendance/route";
+import {
+  GET as listStudentsHandler,
+  POST as createStudentHandler,
+  PUT as updateStudentHandler,
+  DELETE as deleteStudentHandler,
+} from "@/app/api/students/route";
+import { POST as importStudentsHandler } from "@/app/api/students/import/route";
+import {
+  POST as createAttendanceHandler,
+  DELETE as deleteAttendanceHandler,
+} from "@/app/api/students/[id]/attendances/route";
+import {
+  POST as createContactHandler,
+  PUT as updateContactHandler,
+  DELETE as deleteContactHandler,
+} from "@/app/api/students/[id]/contacts/route";
+import {
+  POST as createStudentJustificationHandler,
+  DELETE as deleteStudentJustificationHandler,
+} from "@/app/api/students/[id]/justifications/route";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -9158,6 +9181,418 @@ describe.skipIf(!SHOULD_RUN)(
           .$executeRawUnsafe(`ALTER TABLE "MessageTemplate" ALTER COLUMN "schoolId" SET NOT NULL`)
           .catch(() => {});
         await prisma.school.deleteMany({ where: { id: { in: ["default-leopoldina"] } } }).catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
+
+    it("isola /api/classes/**, /api/low-attendance e /api/students/** (incl. import e subrotas) por escola com withTenantContext", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      try {
+        await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l2-alpha"] } } });
+        await prisma.user.deleteMany({ where: { id: { in: ["user-l2-alpha"] } } });
+
+        await prisma.user.create({
+          data: {
+            id: "user-l2-alpha",
+            email: "l2-alpha@redeativa.local",
+            name: "Gestor Lote 2",
+            role: "GESTOR_ESCOLAR",
+            active: true,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-l2-alpha",
+            userId: "user-l2-alpha",
+            schoolId: "school-alpha",
+            role: "GESTOR_ESCOLAR",
+            active: true,
+          },
+        });
+
+        await prisma.student.update({
+          where: { id: "stu-beta" },
+          data: { cgm: "88800099" },
+        });
+
+        // Estudante com turma cruzada em school-alpha (deve ficar fora de GET /api/classes e GET /api/students)
+        await prisma.student.create({
+          data: {
+            id: "stu-l2-cross",
+            schoolId: "school-alpha",
+            classGroupId: "cg-beta",
+            name: "Estudante Cross L2",
+            phone: "41999990000",
+          },
+        });
+
+        testAuthState.pendingSessionUser = {
+          id: "user-l2-alpha",
+          email: "l2-alpha@redeativa.local",
+          name: "Gestor Lote 2",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "school-alpha",
+        };
+
+        // 1. /api/classes e /api/classes/[id]
+        tenantCalls.length = 0;
+        const rPostClass = await createClassHandler(
+          new Request("http://127.0.0.1/api/classes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "7º Ano B", segment: "FUNDAMENTAL", shift: "TARDE" }),
+          })
+        );
+        expect(rPostClass.status).toBe(201);
+        const createdClass = await rPostClass.json();
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        const rDupClass = await createClassHandler(
+          new Request("http://127.0.0.1/api/classes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "7º ano b", segment: "FUNDAMENTAL", shift: "TARDE" }),
+          })
+        );
+        expect(rDupClass.status).toBe(409);
+
+        tenantCalls.length = 0;
+        const rGetClasses = await listClassesHandler(new Request("http://127.0.0.1/api/classes"));
+        expect(rGetClasses.status).toBe(200);
+        const classesList = await rGetClasses.json();
+        expect(classesList.find((c: { id: string }) => c.id === "cg-alpha")?.studentsCount).toBe(1);
+        expect(classesList.some((c: { id: string }) => c.id === "cg-beta")).toBe(false);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        tenantCalls.length = 0;
+        const rPatchClass = await patchClassHandler(
+          new Request(`http://127.0.0.1/api/classes/${createdClass.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shift: "NOITE" }),
+          }),
+          { params: Promise.resolve({ id: createdClass.id }) }
+        );
+        expect(rPatchClass.status).toBe(200);
+        expect((await rPatchClass.json()).classGroup.shift).toBe("NOITE");
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        const rPatchBetaClass = await patchClassHandler(
+          new Request("http://127.0.0.1/api/classes/cg-beta", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shift: "NOITE" }),
+          }),
+          { params: Promise.resolve({ id: "cg-beta" }) }
+        );
+        expect(rPatchBetaClass.status).toBe(404);
+
+        // 2. /api/students (GET, POST, PUT, DELETE)
+        const rPostCrossTurma = await createStudentHandler(
+          new Request("http://127.0.0.1/api/students", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: "Aluno Turma Beta",
+              phone: "41999998888",
+              classGroupId: "cg-beta",
+            }),
+          })
+        );
+        expect(rPostCrossTurma.status).toBe(400);
+
+        const rPostCgmCollision = await createStudentHandler(
+          new Request("http://127.0.0.1/api/students", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cgm: "88800099",
+              name: "Aluno CGM Beta",
+              phone: "41999998888",
+              classGroupId: "cg-alpha",
+            }),
+          })
+        );
+        expect(rPostCgmCollision.status).toBe(409);
+
+        tenantCalls.length = 0;
+        const rPostStudent = await createStudentHandler(
+          new Request("http://127.0.0.1/api/students", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cgm: "77700011",
+              name: "Aluno Novo Alpha",
+              guardianName: "Responsável Alpha",
+              phone: "41999997777",
+              classGroupId: "cg-alpha",
+            }),
+          })
+        );
+        expect(rPostStudent.status).toBe(200);
+        const createdStudent = await rPostStudent.json();
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        tenantCalls.length = 0;
+        const rGetStudents = await listStudentsHandler(new Request("http://127.0.0.1/api/students"));
+        expect(rGetStudents.status).toBe(200);
+        const studentsList = await rGetStudents.json();
+        const studentIds = studentsList.map((s: { id: string }) => s.id);
+        expect(studentIds).toContain("stu-alpha");
+        expect(studentIds).toContain(createdStudent.id);
+        expect(studentIds).not.toContain("stu-l2-cross");
+        expect(studentIds).not.toContain("stu-beta");
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        const rPutStudent = await updateStudentHandler(
+          new Request("http://127.0.0.1/api/students", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: createdStudent.id,
+              name: "Aluno Novo Alpha Editado",
+              classGroupId: createdClass.id,
+            }),
+          })
+        );
+        expect(rPutStudent.status).toBe(200);
+
+        const rPutBetaStudent = await updateStudentHandler(
+          new Request("http://127.0.0.1/api/students", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "stu-beta", name: "Invasão Beta" }),
+          })
+        );
+        expect(rPutBetaStudent.status).toBe(404);
+
+        // 3. /api/low-attendance
+        const rUpsertBetaLowAtt = await upsertLowAttHandler(
+          new Request("http://127.0.0.1/api/low-attendance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ studentId: "stu-beta", attendancePercent: 55 }),
+          })
+        );
+        expect(rUpsertBetaLowAtt.status).toBe(404);
+
+        tenantCalls.length = 0;
+        const rUpsertAlphaLowAtt = await upsertLowAttHandler(
+          new Request("http://127.0.0.1/api/low-attendance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ studentId: createdStudent.id, attendancePercent: 62 }),
+          })
+        );
+        expect(rUpsertAlphaLowAtt.status).toBe(200);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        const rGetLowAtt = await listLowAttHandler();
+        expect(rGetLowAtt.status).toBe(200);
+        const lowAttRows = await rGetLowAtt.json();
+        expect(lowAttRows.map((r: { studentId: string }) => r.studentId)).toEqual([createdStudent.id]);
+
+        // 4. Subrotas /api/students/[id]/{attendances,contacts,justifications}
+        const rAttBeta = await createAttendanceHandler(
+          new Request("http://127.0.0.1/api/students/stu-beta/attendances", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              attendedAt: "2026-11-26",
+              guardianPresent: "Mãe Responsável",
+              subject: "Assunto Beta",
+              summary: "Resumo detalhado do atendimento presencial",
+            }),
+          }),
+          { params: Promise.resolve({ id: "stu-beta" }) }
+        );
+        expect(rAttBeta.status).toBe(404);
+
+        const rAttAlpha = await createAttendanceHandler(
+          new Request(`http://127.0.0.1/api/students/${createdStudent.id}/attendances`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              attendedAt: "2026-11-26",
+              guardianPresent: "Mãe Responsável",
+              subject: "Assunto Alpha",
+              summary: "Resumo detalhado do atendimento presencial",
+            }),
+          }),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rAttAlpha.status).toBe(201);
+        const attCreated = await rAttAlpha.json();
+
+        const rDelAtt = await deleteAttendanceHandler(
+          new Request(
+            `http://127.0.0.1/api/students/${createdStudent.id}/attendances?attendanceId=${attCreated.id}`,
+            { method: "DELETE" }
+          ),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rDelAtt.status).toBe(200);
+
+        const rContactAlpha = await createContactHandler(
+          new Request(`http://127.0.0.1/api/students/${createdStudent.id}/contacts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: "Mãe Alpha",
+              kinship: "MAE",
+              phone: "41999996666",
+              isPrimary: true,
+              whatsappValid: true,
+            }),
+          }),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rContactAlpha.status).toBe(201);
+        const contactCreated = await rContactAlpha.json();
+        expect(
+          (await prisma.student.findUnique({ where: { id: createdStudent.id } }))?.phone
+        ).toBe("41999996666");
+
+        const rPutContact = await updateContactHandler(
+          new Request(`http://127.0.0.1/api/students/${createdStudent.id}/contacts`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contactId: contactCreated.id,
+              name: "Mãe Alpha Atualizada",
+              isPrimary: true,
+            }),
+          }),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rPutContact.status).toBe(200);
+
+        const rDelContact = await deleteContactHandler(
+          new Request(
+            `http://127.0.0.1/api/students/${createdStudent.id}/contacts?contactId=${contactCreated.id}`,
+            { method: "DELETE" }
+          ),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rDelContact.status).toBe(200);
+
+        const rJustAlpha = await createStudentJustificationHandler(
+          new Request(`http://127.0.0.1/api/students/${createdStudent.id}/justifications`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "ATESTADO_MEDICO",
+              startDate: "2026-11-25",
+              endDate: "2026-11-26",
+            }),
+          }),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rJustAlpha.status).toBe(201);
+        const justCreated = await rJustAlpha.json();
+
+        const rDelJust = await deleteStudentJustificationHandler(
+          new Request(
+            `http://127.0.0.1/api/students/${createdStudent.id}/justifications?justificationId=${justCreated.id}`,
+            { method: "DELETE" }
+          ),
+          { params: Promise.resolve({ id: createdStudent.id }) }
+        );
+        expect(rDelJust.status).toBe(200);
+
+        const rDelStudent = await deleteStudentHandler(
+          new Request(`http://127.0.0.1/api/students?id=${createdStudent.id}`, { method: "DELETE" })
+        );
+        expect(rDelStudent.status).toBe(200);
+
+        // 5. POST /api/students/import (bloqueio updateSchoolInfo, importação isolada, CGM collision e lista fresca)
+        const rImportForbid = await importStudentsHandler(
+          new Request("http://127.0.0.1/api/students/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              turmas: [{ tempId: "t1", name: "8º Ano A", segment: "FUNDAMENTAL", shift: "MANHA" }],
+              students: [
+                { name: "Aluno Importado", phone: "41999995555", turmaTempId: "t1", cgm: "55500011" },
+              ],
+              transferredStudents: [],
+              options: {
+                updateExisting: true,
+                deactivateTransferred: false,
+                updateSchoolInfo: true,
+              },
+            }),
+          })
+        );
+        expect(rImportForbid.status).toBe(403);
+
+        tenantCalls.length = 0;
+        const rImportOk = await importStudentsHandler(
+          new Request("http://127.0.0.1/api/students/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              turmas: [{ tempId: "t1", name: "8º Ano A", segment: "FUNDAMENTAL", shift: "MANHA" }],
+              students: [
+                { name: "Aluno Importado", phone: "41999995555", turmaTempId: "t1", cgm: "55500011" },
+                { name: "Aluno CGM Beta", phone: "41999994444", turmaTempId: "t1", cgm: "88800099" },
+              ],
+              transferredStudents: [],
+              options: {
+                updateExisting: true,
+                deactivateTransferred: false,
+                updateSchoolInfo: false,
+              },
+            }),
+          })
+        );
+        expect(rImportOk.status).toBe(200);
+        const importBody = await rImportOk.json();
+        expect(importBody.success).toBe(true);
+        expect(importBody.summary.createdCount).toBe(2);
+        expect(importBody.students.some((s: { name: string }) => s.name === "ALUNO IMPORTADO")).toBe(
+          true
+        );
+        expect(importBody.students.some((s: { id: string }) => s.id === "stu-l2-cross")).toBe(false);
+        expect(tenantCalls.every((c) => c.schoolId === "school-alpha" && c.currentSetting === "school-alpha")).toBe(true);
+
+        // 6. Vínculo revogado -> 403 com 0 chamadas a withTenantContext
+        await prisma.userSchool.update({
+          where: { id: "us-l2-alpha" },
+          data: { active: false },
+        });
+        tenantCalls.length = 0;
+        const rRevokedClasses = await listClassesHandler(new Request("http://127.0.0.1/api/classes"));
+        expect(rRevokedClasses.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+      } finally {
+        await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l2-alpha"] } } }).catch(() => {});
+        await prisma.user.deleteMany({ where: { id: { in: ["user-l2-alpha"] } } }).catch(() => {});
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
         testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;

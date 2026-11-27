@@ -24,14 +24,27 @@ vi.mock("@/lib/audit", () => ({
   logAudit: (...args: unknown[]) => mockLogAudit(...args),
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  let lastUpdatedClassGroup: unknown = null;
+  const prismaObj: any = {
+    $executeRaw: vi.fn(async () => 0),
     classGroup: {
-      findUnique: (...args: unknown[]) => mockClassGroupFindUnique(...args),
+      findUnique: (...args: unknown[]) => {
+        lastUpdatedClassGroup = null;
+        return mockClassGroupFindUnique(...args);
+      },
+      findFirst: (...args: unknown[]) =>
+        lastUpdatedClassGroup ?? mockClassGroupFindUnique(...args),
       update: (...args: unknown[]) => mockClassGroupUpdate(...args),
+      updateMany: async ({ where, data }: any) => {
+        lastUpdatedClassGroup = await mockClassGroupUpdate({ where, data });
+        return { count: 1 };
+      },
     },
-  },
-}));
+    $transaction: async (arg: any) => (typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)),
+  };
+  return { prisma: prismaObj };
+});
 
 vi.mock("@/components/conselho/CouncilSerePdfImportModal", () => ({
   default: () => null,

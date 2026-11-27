@@ -271,19 +271,50 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
       if (typeof arg === "function") {
         return arg({
           $executeRaw: vi.fn(async () => 0),
+          absenceJustification: {
+            findMany: vi.fn(async () => []),
+          },
+          studentContact: {
+            findMany: vi.fn(async () => []),
+          },
           student: {
             findUnique: hoisted.studentFindUnique,
+            findFirst: vi.fn(async ({ where }: any) => {
+              return (
+                hoisted.db.students.find(
+                  (s) =>
+                    (!where?.id || s.id === where.id) &&
+                    (!where?.schoolId || s.schoolId === where.schoolId)
+                ) || null
+              );
+            }),
             findMany: hoisted.studentFindMany,
             create: hoisted.studentCreate,
             createMany: hoisted.studentCreateMany,
             update: hoisted.studentUpdate,
+            updateMany: vi.fn(async ({ where, data }: any) => {
+              await hoisted.studentUpdate({ where, data });
+              return { count: 1 };
+            }),
           },
           classGroup: {
+            findMany: hoisted.classGroupFindMany,
+            findFirst: vi.fn(async ({ where }: any) => {
+              return (
+                hoisted.db.classGroups.find(
+                  (cg) =>
+                    (!where?.id || cg.id === where.id) &&
+                    (!where?.schoolId || cg.schoolId === where.schoolId)
+                ) || null
+              );
+            }),
             findUnique: vi.fn(async ({ where }: any) => ({
               id: where.id,
               schoolId: hoisted.currentSchool.id,
               name: "6º Ano A",
             })),
+            create: vi.fn(async ({ data }: any) => ({ id: "cg-new", ...data })),
+            update: vi.fn(async ({ where, data }: any) => ({ id: where.id, ...data })),
           },
           messageTemplate: {
             findMany: hoisted.templateFindMany,

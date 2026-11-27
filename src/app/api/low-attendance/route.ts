@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { parseAttendancePercent } from "@/lib/studentMatcher";
 
 export async function GET() {
@@ -15,17 +16,22 @@ export async function GET() {
     if (!schoolCheck.ok) return schoolCheck.response;
     const currentSchool = schoolCheck.school;
 
-    const records = await prisma.lowAttendanceRecord.findMany({
-      where: {
-        student: { schoolId: currentSchool.id },
-      },
-      include: {
-        student: {
-          include: { classGroup: true },
+    const records = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.lowAttendanceRecord.findMany({
+        where: {
+          student: {
+            schoolId: currentSchool.id,
+            classGroup: { schoolId: currentSchool.id },
+          },
         },
-      },
-      orderBy: { attendancePercent: "asc" },
-    });
+        include: {
+          student: {
+            include: { classGroup: true },
+          },
+        },
+        orderBy: { attendancePercent: "asc" },
+      })
+    );
     return NextResponse.json(records);
   } catch (error: any) {
     console.error("Erro ao consultar registros de infrequência:", error);
@@ -46,31 +52,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Aluno obrigatório" }, { status: 400 });
     }
 
-    const targetStudent = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { id: true, schoolId: true },
-    });
-    if (!targetStudent || !assertTenantOwnership(targetStudent.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json({ error: "Estudante não encontrado na instituição atual." }, { status: 404 });
-    }
-
     const clampedPercent = parseAttendancePercent(attendancePercent) ?? 0;
 
-    const record = await prisma.lowAttendanceRecord.upsert({
-      where: { studentId },
-      update: {
-        attendancePercent: clampedPercent,
-        enrollmentDetail,
-        actionsTaken,
-      },
-      create: {
-        studentId,
-        attendancePercent: clampedPercent,
-        enrollmentDetail,
-        actionsTaken,
-      },
-      include: { student: { include: { classGroup: true } } },
+    const record = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const targetStudent = await tx.student.findUnique({
+        where: { id: studentId },
+        select: { id: true, schoolId: true },
+      });
+      if (!targetStudent || !assertTenantOwnership(targetStudent.schoolId, currentSchool.id, authCheck.session)) {
+        return null;
+      }
+
+      return tx.lowAttendanceRecord.upsert({
+        where: { studentId },
+        update: {
+          attendancePercent: clampedPercent,
+          enrollmentDetail,
+          actionsTaken,
+        },
+        create: {
+          studentId,
+          attendancePercent: clampedPercent,
+          enrollmentDetail,
+          actionsTaken,
+        },
+        include: { student: { include: { classGroup: true } } },
+      });
     });
+
+    if (!record) {
+      return NextResponse.json({ error: "Estudante não encontrado na instituição atual." }, { status: 404 });
+    }
 
     await logAudit({
       action: "UPDATE_LOW_ATTENDANCE",

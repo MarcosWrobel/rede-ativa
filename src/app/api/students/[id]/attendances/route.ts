@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit } from "@/lib/audit";
 import { formatZodError, inPersonAttendanceCreateSchema } from "@/lib/schemas";
 
@@ -27,29 +28,39 @@ export async function POST(
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (!student || student.schoolId !== currentSchool.id) {
-      return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
-    }
-
     const { attendedAt, guardianPresent, subject, summary, agreements } = parsed.data;
     const parsedDate =
       attendedAt.length === 10
         ? new Date(`${attendedAt}T12:00:00.000-03:00`)
         : new Date(attendedAt);
 
-    const created = await prisma.inPersonAttendance.create({
-      data: {
-        studentId,
-        attendedAt: isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
-        guardianPresent,
-        subject,
-        summary,
-        agreements: agreements || null,
-        recordedByName: authCheck.userName,
-        recordedByEmail: authCheck.email,
-      },
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const student = await tx.student.findFirst({
+        where: { id: studentId, schoolId: currentSchool.id },
+      });
+      if (!student) {
+        return null;
+      }
+
+      const created = await tx.inPersonAttendance.create({
+        data: {
+          studentId,
+          attendedAt: isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
+          guardianPresent,
+          subject,
+          summary,
+          agreements: agreements || null,
+          recordedByName: authCheck.userName,
+          recordedByEmail: authCheck.email,
+        },
+      });
+      return { student, created };
     });
+
+    if (!txResult) {
+      return NextResponse.json({ error: "Aluno não encontrado nesta unidade escolar." }, { status: 404 });
+    }
+    const { student, created } = txResult;
 
     await logAudit({
       action: "CREATE_IN_PERSON_ATTENDANCE",
@@ -102,16 +113,20 @@ export async function DELETE(
       return NextResponse.json({ error: "attendanceId é obrigatório." }, { status: 400 });
     }
 
-    const existing = await prisma.inPersonAttendance.findFirst({
-      where: { id: attendanceId, studentId },
-      include: { student: { select: { name: true, schoolId: true } } },
+    const existing = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const found = await tx.inPersonAttendance.findFirst({
+        where: { id: attendanceId, studentId, student: { schoolId: currentSchool.id } },
+        include: { student: { select: { name: true, schoolId: true } } },
+      });
+      if (!found) return null;
+
+      await tx.inPersonAttendance.delete({ where: { id: attendanceId } });
+      return found;
     });
 
-    if (!existing || existing.student.schoolId !== currentSchool.id) {
+    if (!existing) {
       return NextResponse.json({ error: "Registro presencial não encontrado nesta unidade escolar." }, { status: 404 });
     }
-
-    await prisma.inPersonAttendance.delete({ where: { id: attendanceId } });
 
     await logAudit({
       action: "DELETE_IN_PERSON_ATTENDANCE",

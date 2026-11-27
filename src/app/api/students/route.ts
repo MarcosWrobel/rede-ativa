@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/permissions";
 import { formatZodError, studentCreateSchema, studentUpdateSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export async function GET(req: Request) {
   try {
@@ -20,9 +21,15 @@ export async function GET(req: Request) {
     const pageParam = searchParams.get("page");
     const pageSizeParam = searchParams.get("pageSize");
 
-    const where: any = { active: true, schoolId: currentSchool.id };
+    const where: any = {
+      active: true,
+      schoolId: currentSchool.id,
+      classGroup: {
+        schoolId: currentSchool.id,
+        ...(segment ? { segment } : {}),
+      },
+    };
     if (classGroupId) where.classGroupId = classGroupId;
-    if (segment) where.classGroup = { segment };
     if (search) {
       where.name = { contains: search.toUpperCase() };
     }
@@ -32,16 +39,18 @@ export async function GET(req: Request) {
     const take = pageSize;
     const skip = page && pageSize ? (page - 1) * pageSize : undefined;
 
-    const students = await prisma.student.findMany({
-      where,
-      include: {
-        classGroup: true,
-        _count: { select: { messageLogs: true } },
-      },
-      orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
-      ...(take ? { take } : {}),
-      ...(skip ? { skip } : {}),
-    });
+    const students = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.student.findMany({
+        where,
+        include: {
+          classGroup: true,
+          _count: { select: { messageLogs: { where: { OR: [{ schoolId: null }, { schoolId: currentSchool.id }] } } } },
+        },
+        orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
+        ...(take ? { take } : {}),
+        ...(skip ? { skip } : {}),
+      })
+    );
 
     return NextResponse.json(students);
   } catch (error: any) {
@@ -65,21 +74,6 @@ export async function POST(req: Request) {
 
     const { cgm, name, guardianName, phone, classGroupId } = parsed.data;
 
-    // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa (tolerante a turmas legadas apenas para a escola piloto)
-    const classGroup = await prisma.classGroup.findFirst({
-      where: {
-        id: classGroupId,
-        schoolId: currentSchool.id,
-      },
-    });
-
-    if (!classGroup) {
-      return NextResponse.json(
-        { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
-        { status: 400 }
-      );
-    }
-
     const cleanDigits = phone.replace(/\D/g, "");
     const cleanCgm = cgm ? cgm.replace(/\D/g, "") || null : null;
     const formattedName = name.toUpperCase();
@@ -97,17 +91,40 @@ export async function POST(req: Request) {
       }
     }
 
-    const student = await prisma.student.create({
-      data: {
-        cgm: cleanCgm,
-        name: formattedName,
-        guardianName: guardianName?.trim() || "Responsável",
-        phone: cleanDigits,
-        classGroupId,
-        schoolId: currentSchool.id,
-      },
-      include: { classGroup: true },
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      // Prevenção Cross-Tenant Relation Traversal: valida se a turma pertence à instituição ativa
+      const classGroup = await tx.classGroup.findFirst({
+        where: {
+          id: classGroupId,
+          schoolId: currentSchool.id,
+        },
+      });
+
+      if (!classGroup) {
+        return {
+          errorStatus: 400 as const,
+          error: "A turma selecionada não foi encontrada nesta instituição escolar.",
+        };
+      }
+
+      const student = await tx.student.create({
+        data: {
+          cgm: cleanCgm,
+          name: formattedName,
+          guardianName: guardianName?.trim() || "Responsável",
+          phone: cleanDigits,
+          classGroupId,
+          schoolId: currentSchool.id,
+        },
+        include: { classGroup: true },
+      });
+      return { student };
     });
+
+    if ("error" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+    const student = txResult.student;
 
     await logAudit({
       action: "CREATE_STUDENT",
@@ -159,45 +176,12 @@ export async function PUT(req: Request) {
 
     const { id, cgm, name, guardianName, phone, classGroupId } = parsed.data;
 
-    const previous = await prisma.student.findUnique({
-      where: { id },
-      include: { classGroup: true },
-    });
+    const cleanCgmRequested =
+      cgm !== undefined ? (cgm ? cgm.replace(/\D/g, "") || null : null) : undefined;
 
-    if (!previous || previous.schoolId !== currentSchool.id) {
-      return NextResponse.json(
-        { error: "Estudante não encontrado nesta unidade escolar" },
-        { status: 404 }
-      );
-    }
-
-    if (classGroupId && classGroupId !== previous.classGroupId) {
-      const classGroup = await prisma.classGroup.findFirst({
-        where: {
-          id: classGroupId,
-          schoolId: currentSchool.id,
-        },
-      });
-      if (!classGroup) {
-        return NextResponse.json(
-          { error: "A turma selecionada não foi encontrada nesta instituição escolar." },
-          { status: 400 }
-        );
-      }
-    }
-
-    const cleanDigits = phone !== undefined ? phone.replace(/\D/g, "") : previous?.phone;
-    const cleanCgm =
-      cgm !== undefined ? (cgm ? cgm.replace(/\D/g, "") || null : null) : previous?.cgm;
-    const formattedName = name ? name.toUpperCase() : previous?.name;
-
-    if (
-      cleanCgm &&
-      cleanCgm !== previous.cgm &&
-      typeof (prisma as any).student?.findUnique === "function"
-    ) {
+    if (cleanCgmRequested && typeof (prisma as any).student?.findUnique === "function") {
       const existingCgm = await prisma.student.findUnique({
-        where: { cgm: cleanCgm },
+        where: { cgm: cleanCgmRequested },
         select: { id: true },
       });
       if (existingCgm && existingCgm.id !== id) {
@@ -208,18 +192,65 @@ export async function PUT(req: Request) {
       }
     }
 
-    const student = await prisma.student.update({
-      where: { id },
-      data: {
-        cgm: cleanCgm,
-        name: formattedName,
-        guardianName:
-          guardianName !== undefined ? (guardianName ? guardianName.trim() : null) : previous?.guardianName,
-        phone: cleanDigits,
-        classGroupId: classGroupId || previous?.classGroupId,
-      },
-      include: { classGroup: true },
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const previous = await tx.student.findFirst({
+        where: { id, schoolId: currentSchool.id },
+        include: { classGroup: true },
+      });
+
+      if (!previous) {
+        return { errorStatus: 404 as const, error: "Estudante não encontrado nesta unidade escolar" };
+      }
+
+      if (classGroupId && classGroupId !== previous.classGroupId) {
+        const classGroup = await tx.classGroup.findFirst({
+          where: {
+            id: classGroupId,
+            schoolId: currentSchool.id,
+          },
+        });
+        if (!classGroup) {
+          return {
+            errorStatus: 400 as const,
+            error: "A turma selecionada não foi encontrada nesta instituição escolar.",
+          };
+        }
+      }
+
+      const cleanDigits = phone !== undefined ? phone.replace(/\D/g, "") : previous.phone;
+      const cleanCgm = cleanCgmRequested !== undefined ? cleanCgmRequested : previous.cgm;
+      const formattedName = name ? name.toUpperCase() : previous.name;
+
+      const updatedCount = await tx.student.updateMany({
+        where: { id, schoolId: currentSchool.id },
+        data: {
+          cgm: cleanCgm,
+          name: formattedName,
+          guardianName:
+            guardianName !== undefined ? (guardianName ? guardianName.trim() : null) : previous.guardianName,
+          phone: cleanDigits,
+          classGroupId: classGroupId || previous.classGroupId,
+        },
+      });
+      if (updatedCount.count === 0) {
+        return { errorStatus: 404 as const, error: "Estudante não encontrado nesta unidade escolar" };
+      }
+
+      const student = await tx.student.findFirst({
+        where: { id, schoolId: currentSchool.id },
+        include: { classGroup: true },
+      });
+      if (!student) {
+        return { errorStatus: 404 as const, error: "Estudante não encontrado nesta unidade escolar" };
+      }
+
+      return { previous, student };
     });
+
+    if ("error" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+    const { previous, student } = txResult;
 
     await logAudit({
       action: "UPDATE_STUDENT",
@@ -266,23 +297,31 @@ export async function DELETE(req: Request) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "ID ausente" }, { status: 400 });
 
-    const previous = await prisma.student.findUnique({
-      where: { id },
-      include: { classGroup: true },
+    const student = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const previous = await tx.student.findFirst({
+        where: { id, schoolId: currentSchool.id },
+        include: { classGroup: true },
+      });
+      if (!previous) return null;
+
+      const updatedCount = await tx.student.updateMany({
+        where: { id, schoolId: currentSchool.id },
+        data: { active: false },
+      });
+      if (updatedCount.count === 0) return null;
+
+      return tx.student.findFirst({
+        where: { id, schoolId: currentSchool.id },
+        include: { classGroup: true },
+      });
     });
 
-    if (!previous || previous.schoolId !== currentSchool.id) {
+    if (!student) {
       return NextResponse.json(
         { error: "Estudante não encontrado nesta unidade escolar" },
         { status: 404 }
       );
     }
-
-    const student = await prisma.student.update({
-      where: { id },
-      data: { active: false },
-      include: { classGroup: true },
-    });
 
     await logAudit({
       action: "DELETE_STUDENT",

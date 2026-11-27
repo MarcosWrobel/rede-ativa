@@ -8,6 +8,7 @@ import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone } from "@/lib/sereParser";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   normalizeClassGroupDisplayName,
   normalizeClassGroupKey,
@@ -65,58 +66,11 @@ export async function POST(req: Request) {
     const schoolId: string = schoolRecord?.id || currentSchool.id;
     const schoolFilter = { schoolId };
 
-    // 2. Sincroniza Turmas (ClassGroups) isoladas por escola
-    const existingClassGroups = await prisma.classGroup.findMany({
-      where: schoolFilter,
-    });
-    const existingByName = new Map(
-      existingClassGroups.map((cg) => [normalizeClassGroupKey(cg.name), cg])
-    );
-
+    // 2. Sincroniza Turmas (ClassGroups) e carrega alunos existentes isolados por escola em withTenantContext
     const tempIdToClassId = new Map<string, string>();
     let turmasCreated = 0;
     let turmasUpdated = 0;
 
-    for (const t of turmas) {
-      const cleanName = normalizeClassGroupDisplayName(t.name);
-      const upperKey = normalizeClassGroupKey(cleanName);
-      const found = existingByName.get(upperKey);
-
-      if (found) {
-        if (
-          found.segment !== t.segment ||
-          found.shift !== t.shift ||
-          (!found.schoolId && schoolId)
-        ) {
-          const updatedCg = await prisma.classGroup.update({
-            where: { id: found.id },
-            data: {
-              segment: t.segment,
-              shift: t.shift,
-              ...(schoolId && !found.schoolId ? { schoolId } : {}),
-            },
-          });
-          existingByName.set(upperKey, updatedCg);
-          turmasUpdated++;
-        }
-        tempIdToClassId.set(t.tempId, found.id);
-      } else {
-        const createdCg = await prisma.classGroup.create({
-          data: {
-            name: cleanName,
-            segment: t.segment,
-            shift: t.shift,
-            schoolId,
-          },
-        });
-        existingByName.set(upperKey, createdCg);
-        tempIdToClassId.set(t.tempId, createdCg.id);
-        turmasCreated++;
-      }
-    }
-
-    // 3. Carrega alunos existentes ISOLADOS por esta instituição de ensino
-    // e apenas os CGMs do lote recebido que já estejam cadastrados para prevenir colisão de chave única (@unique cgm)
     const incomingCgms = Array.from(
       new Set(
         students
@@ -126,19 +80,67 @@ export async function POST(req: Request) {
     );
 
     const [existingSchoolStudents, globalCgmRows] = await Promise.all([
-      prisma.student.findMany({
-        where: schoolFilter,
-        select: {
-          id: true,
-          cgm: true,
-          name: true,
-          guardianName: true,
-          phone: true,
-          classGroupId: true,
-          schoolId: true,
-          active: true,
-        },
+      withTenantContext(prisma, schoolId, async (tx) => {
+        const existingClassGroups = await tx.classGroup.findMany({
+          where: schoolFilter,
+        });
+        const existingByName = new Map(
+          existingClassGroups.map((cg) => [normalizeClassGroupKey(cg.name), cg])
+        );
+
+        for (const t of turmas) {
+          const cleanName = normalizeClassGroupDisplayName(t.name);
+          const upperKey = normalizeClassGroupKey(cleanName);
+          const found = existingByName.get(upperKey);
+
+          if (found) {
+            if (
+              found.segment !== t.segment ||
+              found.shift !== t.shift ||
+              (!found.schoolId && schoolId)
+            ) {
+              const updatedCg = await tx.classGroup.update({
+                where: { id: found.id },
+                data: {
+                  segment: t.segment,
+                  shift: t.shift,
+                  ...(schoolId && !found.schoolId ? { schoolId } : {}),
+                },
+              });
+              existingByName.set(upperKey, updatedCg);
+              turmasUpdated++;
+            }
+            tempIdToClassId.set(t.tempId, found.id);
+          } else {
+            const createdCg = await tx.classGroup.create({
+              data: {
+                name: cleanName,
+                segment: t.segment,
+                shift: t.shift,
+                schoolId,
+              },
+            });
+            existingByName.set(upperKey, createdCg);
+            tempIdToClassId.set(t.tempId, createdCg.id);
+            turmasCreated++;
+          }
+        }
+
+        return tx.student.findMany({
+          where: schoolFilter,
+          select: {
+            id: true,
+            cgm: true,
+            name: true,
+            guardianName: true,
+            phone: true,
+            classGroupId: true,
+            schoolId: true,
+            active: true,
+          },
+        });
       }),
+      // Exceção explícita da Fase A: consulta global mínima apenas de CGMs ocupados (@unique cgm)
       incomingCgms.length > 0
         ? prisma.student.findMany({
             where: { cgm: { in: incomingCgms } },
@@ -303,10 +305,12 @@ export async function POST(req: Request) {
     const CREATE_CHUNK = 250;
     for (let i = 0; i < toCreate.length; i += CREATE_CHUNK) {
       const slice = toCreate.slice(i, i + CREATE_CHUNK);
-      const res = await prisma.student.createMany({
-        data: slice,
-        skipDuplicates: true,
-      });
+      const res = await withTenantContext(prisma, schoolId, async (tx) =>
+        tx.student.createMany({
+          data: slice,
+          skipDuplicates: true,
+        })
+      );
       createdCount += res.count;
     }
 
@@ -314,19 +318,19 @@ export async function POST(req: Request) {
     const UPDATE_CHUNK = 100;
     for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK) {
       const slice = toUpdate.slice(i, i + UPDATE_CHUNK);
-      await prisma.$transaction(
-        slice.map((u) =>
-          prisma.student.update({
-            where: { id: u.id },
+      await withTenantContext(prisma, schoolId, async (tx) => {
+        for (const u of slice) {
+          await tx.student.updateMany({
+            where: { id: u.id, schoolId },
             data: u.data,
-          })
-        )
-      );
+          });
+        }
+      });
     }
 
     // 6b. Vinculação resiliente de CGMs pendentes (blindada contra colisão concorrente P2002)
     if (pendingCgmUpdates.size > 0) {
-      cgmsBound = await applyPendingCgmUpdatesSafely(prisma as any, pendingCgmUpdates);
+      cgmsBound = await applyPendingCgmUpdatesSafely(prisma as any, pendingCgmUpdates, schoolId);
     }
 
     // 7. Inativação opcional de alunos Transferidos / Desistentes no SERE
@@ -354,13 +358,15 @@ export async function POST(req: Request) {
       }
 
       if (idsToDeactivate.size > 0) {
-        const res = await prisma.student.updateMany({
-          where: {
-            id: { in: Array.from(idsToDeactivate) },
-            ...(schoolId ? { schoolId } : {}),
-          },
-          data: { active: false },
-        });
+        const res = await withTenantContext(prisma, schoolId, async (tx) =>
+          tx.student.updateMany({
+            where: {
+              id: { in: Array.from(idsToDeactivate) },
+              schoolId,
+            },
+            data: { active: false },
+          })
+        );
         deactivatedTransferredCount = res.count;
       }
     }
@@ -396,36 +402,50 @@ export async function POST(req: Request) {
 
     // 9. Retorna listas atualizadas prontas para hidratar a tela /alunos sem reload (ISOLADAS POR ESCOLA)
     const recentCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    const [freshStudents, freshClassGroups, recentJustifications, allContacts] =
-      await Promise.all([
-        prisma.student.findMany({
-          where: { active: true, ...(schoolFilter ? schoolFilter : {}) },
+    const { freshStudents, freshClassGroups, recentJustifications, allContacts } =
+      await withTenantContext(prisma, schoolId, async (tx) => {
+        const sRows = await tx.student.findMany({
+          where: {
+            active: true,
+            schoolId,
+            classGroup: { schoolId },
+          },
           include: {
             classGroup: true,
-            _count: { select: { messageLogs: true } },
+            _count: {
+              select: {
+                messageLogs: { where: { OR: [{ schoolId: null }, { schoolId }] } },
+              },
+            },
           },
           orderBy: [{ classGroup: { name: "asc" } }, { name: "asc" }],
-        }),
-        prisma.classGroup.findMany({
+        });
+        const cgRows = await tx.classGroup.findMany({
           where: schoolFilter,
           orderBy: { name: "asc" },
-        }),
-        safeQueryList(() =>
-          prisma.absenceJustification.findMany({
+        });
+        const justRows = await safeQueryList(() =>
+          tx.absenceJustification.findMany({
             where: {
               endDate: { gte: recentCutoff },
-              ...(schoolId ? { student: { schoolId } } : {}),
+              student: { schoolId },
             },
             orderBy: { endDate: "desc" },
           })
-        ),
-        safeQueryList(() =>
-          prisma.studentContact.findMany({
-            where: schoolId ? { student: { schoolId } } : undefined,
+        );
+        const contactRows = await safeQueryList(() =>
+          tx.studentContact.findMany({
+            where: { student: { schoolId } },
             select: { id: true, studentId: true, whatsappValid: true },
           })
-        ),
-      ]);
+        );
+        return {
+          freshStudents: sRows,
+          freshClassGroups: cgRows,
+          recentJustifications: justRows,
+          allContacts: contactRows,
+        };
+      });
 
     const justMap = new Map<string, any[]>();
     recentJustifications.forEach((j: any) => {

@@ -43,8 +43,9 @@ vi.mock("next/navigation", () => ({
   redirect: (url: string) => mockRedirect(url),
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaObj: any = {
+    $executeRaw: vi.fn(async () => 0),
     school: {
       findUnique: vi.fn(async ({ where }: any) => {
         return mockState.db.schools.find((s) => s.id === where.id) || null;
@@ -128,6 +129,16 @@ vi.mock("@/lib/prisma", () => ({
         if (found) Object.assign(found, data);
         return found;
       }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const st of mockState.db.students) {
+          if (where?.id && st.id !== where.id) continue;
+          if (where?.schoolId !== undefined && st.schoolId !== where.schoolId) continue;
+          Object.assign(st, data);
+          count++;
+        }
+        return { count };
+      }),
     },
     pedagogicalMinute: {
       findUnique: vi.fn(async ({ where }: any) => {
@@ -151,8 +162,12 @@ vi.mock("@/lib/prisma", () => ({
     absenceJustification: { findMany: vi.fn(async () => []) },
     studentContact: { findMany: vi.fn(async () => []) },
     auditLog: { create: vi.fn(async () => ({})) },
-  },
-}));
+    $transaction: vi.fn(async (arg: any) =>
+      typeof arg === "function" ? arg(prismaObj) : Promise.all(arg)
+    ),
+  };
+  return { prisma: prismaObj };
+});
 
 describe("Milestone M1: Multi-Tenant Core & Inviolability Test Suite", () => {
   beforeEach(() => {
