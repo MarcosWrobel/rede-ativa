@@ -3,13 +3,14 @@
  * Compartilhadas entre src/proxy.ts e os testes automatizados
  */
 
-export const PUBLIC_PATHS = ["/", "/login", "/impacto", "/preview-landing"];
+export const PUBLIC_PATHS = ["/", "/login", "/impacto", "/preview-landing", "/conselho-classe/vincular"];
 
 export const PUBLIC_PREFIXES = [
   "/validar/ata/",
   "/assinar/ata/",
   "/conselho-classe/professor/",
   "/conselho-classe/pre-conselho/",
+  "/conselho-classe/vincular/",
 ];
 
 export const SELF_AUTH_API_PREFIXES = [
@@ -19,6 +20,8 @@ export const SELF_AUTH_API_PREFIXES = [
   "/api/conselho-classe/sync",
   "/api/conselho-classe/teacher-portal/",
   "/api/conselho-classe/pre-council-portal/",
+  "/api/conselho-classe/teacher-invite/claim",
+  "/api/conselho-classe/google-gsi-callback",
   "/api/messages/pending",
   "/api/atas/public/",
   "/api/atas/sign-token/",

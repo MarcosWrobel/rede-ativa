@@ -10,7 +10,9 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
+  Copy,
   FileText,
+  KeyRound,
   LogOut,
   RefreshCw,
   RotateCcw,
@@ -40,6 +42,15 @@ import {
   saveTeacherPortalLocalDraft,
   TEACHER_PORTAL_POLL_BASE_MS,
 } from "@/components/conselho/preCouncilUtils";
+import type { TeacherInviteBoardGroup } from "@/services/classCouncilService";
+import {
+  consumeRedirectGsiCredential,
+  getSafeGsiButtonWidth,
+  isInAppWebViewUserAgent,
+  isMobileBrowserUserAgent,
+  prepareGsiRedirectReturnCookie,
+  readGsiRedirectErrorFromUrl,
+} from "@/lib/googleGsiMobile";
 
 export interface TeacherPortalSubjectOption {
   id: string;
@@ -304,6 +315,16 @@ export default function ProfessorConselhoClient({
     savedAt: string;
   } | null>(null);
   const [devEmail, setDevEmail] = useState("docente.teste@escola.pr.gov.br");
+  const [pendingInviteCredential, setPendingInviteCredential] = useState<string | null>(null);
+  const [inlineInviteCode, setInlineInviteCode] = useState("");
+  const [inlineInviteBoards, setInlineInviteBoards] = useState<TeacherInviteBoardGroup[] | null>(
+    null
+  );
+  const [inlineSelectedSubjectIds, setInlineSelectedSubjectIds] = useState<string[]>([]);
+  const [inlineInviteLoading, setInlineInviteLoading] = useState(false);
+  const [inlineInviteError, setInlineInviteError] = useState<string | null>(null);
+  const [isWebView, setIsWebView] = useState(false);
+  const [copiedCurrentUrl, setCopiedCurrentUrl] = useState(false);
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
   const checkedDraftKeysRef = useRef<Set<string>>(new Set());
   const pollInFlightRef = useRef(false);
@@ -342,11 +363,22 @@ export default function ProfessorConselhoClient({
         } = await res.json();
 
         if (!res.ok || !data.council || !data.verifiedEmail) {
+          if (res.status === 403) {
+            setPendingInviteCredential(credential);
+            setInlineInviteError(null);
+            setInlineInviteBoards(null);
+            setInlineSelectedSubjectIds([]);
+          }
           throw new Error(
             data.error || "Não foi possível validar sua conta @escola.pr.gov.br."
           );
         }
 
+        setPendingInviteCredential(null);
+        setInlineInviteCode("");
+        setInlineInviteBoards(null);
+        setInlineSelectedSubjectIds([]);
+        setInlineInviteError(null);
         checkedDraftKeysRef.current.clear();
         setRestoredDraftInfo(null);
         setGoogleIdToken(credential);
@@ -371,6 +403,22 @@ export default function ProfessorConselhoClient({
     [portalApiBase, token]
   );
 
+  // Detecta WebView interno e consome credencial retornada por ux_mode: "redirect" no mobile
+  useEffect(() => {
+    if (typeof window === "undefined" || council || preloadedSession) return;
+    setIsWebView(isInAppWebViewUserAgent(navigator.userAgent));
+    const urlError = readGsiRedirectErrorFromUrl();
+    if (urlError) {
+      setAuthError(urlError);
+      return;
+    }
+    void consumeRedirectGsiCredential().then((cred) => {
+      if (cred) {
+        void authenticateWithCredential(cred);
+      }
+    });
+  }, [council, preloadedSession, authenticateWithCredential]);
+
   // Carrega Google Identity Services somente enquanto não houver docente autenticado
   useEffect(() => {
     if (!googleClientId || council) return;
@@ -380,13 +428,25 @@ export default function ProfessorConselhoClient({
     const initGsi = () => {
       if (typeof window === "undefined" || !window.google?.accounts?.id) return;
       try {
+        const isMobile = isMobileBrowserUserAgent(navigator.userAgent);
+        if (isMobile) {
+          prepareGsiRedirectReturnCookie(window.location.pathname + window.location.search);
+        }
+
         window.google.accounts.id.initialize({
           client_id: googleClientId,
           hosted_domain: "escola.pr.gov.br",
-          callback: async (response: any) => {
-            if (!isMounted || !response?.credential) return;
-            await authenticateWithCredential(response.credential);
-          },
+          ...(isMobile
+            ? {
+                ux_mode: "redirect",
+                login_uri: `${window.location.origin}/api/conselho-classe/google-gsi-callback`,
+              }
+            : {
+                callback: async (response: any) => {
+                  if (!isMounted || !response?.credential) return;
+                  await authenticateWithCredential(response.credential);
+                },
+              }),
           auto_select: false,
           cancel_on_tap_outside: true,
         });
@@ -400,7 +460,7 @@ export default function ProfessorConselhoClient({
             text: "signin_with",
             shape: "pill",
             logo_alignment: "left",
-            width: "100%",
+            width: getSafeGsiButtonWidth(googleBtnContainerRef.current),
           });
         }
       } catch {
@@ -1187,6 +1247,91 @@ export default function ProfessorConselhoClient({
     preloadedSession?.onLogout?.();
   }
 
+  async function handleInlineInviteLookup() {
+    if (!pendingInviteCredential || !inlineInviteCode.trim()) return;
+    setInlineInviteLoading(true);
+    setInlineInviteError(null);
+    try {
+      const res = await fetch("/api/conselho-classe/teacher-invite/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          googleIdToken: pendingInviteCredential,
+          portalToken: token,
+          inviteCode: inlineInviteCode.trim(),
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        boards?: TeacherInviteBoardGroup[];
+      };
+      if (!res.ok) {
+        throw new Error(data.error || "Código de convite inválido.");
+      }
+      const boardsList = data.boards || [];
+      setInlineInviteBoards(boardsList);
+
+      // Se for link exclusivo de um componente disponível, pré-seleciona automaticamente
+      const allSubjects = boardsList.flatMap((b) => b.subjects);
+      if (lockedSubjectName) {
+        const matched = allSubjects.find(
+          (s) =>
+            s.status === "AVAILABLE" &&
+            s.name.trim().toLowerCase() === lockedSubjectName.trim().toLowerCase()
+        );
+        if (matched) {
+          setInlineSelectedSubjectIds([matched.id]);
+        }
+      }
+    } catch (err: unknown) {
+      setInlineInviteError(
+        err instanceof Error ? err.message : "Não foi possível validar o código da escola."
+      );
+    } finally {
+      setInlineInviteLoading(false);
+    }
+  }
+
+  async function handleInlineInviteClaim() {
+    if (!pendingInviteCredential || inlineSelectedSubjectIds.length === 0) return;
+    setInlineInviteLoading(true);
+    setInlineInviteError(null);
+    try {
+      const res = await fetch("/api/conselho-classe/teacher-invite/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          googleIdToken: pendingInviteCredential,
+          portalToken: token,
+          inviteCode: inlineInviteCode.trim(),
+          subjectIds: inlineSelectedSubjectIds,
+        }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Não foi possível vincular os componentes.");
+      }
+      await authenticateWithCredential(pendingInviteCredential);
+    } catch (err: unknown) {
+      setInlineInviteError(
+        err instanceof Error ? err.message : "Não foi possível vincular os componentes."
+      );
+    } finally {
+      setInlineInviteLoading(false);
+    }
+  }
+
+  async function handleCopyCurrentUrl() {
+    if (typeof window === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedCurrentUrl(true);
+      setTimeout(() => setCopiedCurrentUrl(false), 2500);
+    } catch {
+      // ignora erro de clipboard
+    }
+  }
+
   // Tela de Identificação Docente @escola.pr.gov.br
   if (!council) {
     return (
@@ -1219,10 +1364,116 @@ export default function ProfessorConselhoClient({
               </p>
             </div>
 
+            {isWebView && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 space-y-2">
+                <p className="font-semibold">
+                  Navegador interno detectado. Para evitar falhas após selecionar seu e-mail Google,
+                  abra este link no <strong>Chrome</strong> ou <strong>Safari</strong>.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyCurrentUrl()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-400 bg-white font-bold text-amber-950 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{copiedCurrentUrl ? "Endereço copiado" : "Copiar endereço"}</span>
+                </button>
+              </div>
+            )}
+
             {authError && (
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <span>{authError}</span>
+              </div>
+            )}
+
+            {pendingInviteCredential && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50/90 p-3.5 space-y-2.5 text-xs text-amber-950">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <KeyRound className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Possui o código de convite da escola?</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  Informe o código compartilhado pela equipe pedagógica para vincular seu e-mail aos
+                  componentes vagos desta turma.
+                </p>
+
+                {inlineInviteError && (
+                  <p className="text-[11px] font-bold text-rose-700">{inlineInviteError}</p>
+                )}
+
+                {!inlineInviteBoards ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      aria-label="Código de convite da escola"
+                      placeholder="Ex.: A7K9-M2P4"
+                      value={inlineInviteCode}
+                      onChange={(e) => setInlineInviteCode(e.target.value)}
+                      className="flex-1 min-w-0 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-mono uppercase text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      disabled={inlineInviteLoading || !inlineInviteCode.trim()}
+                      onClick={() => void handleInlineInviteLookup()}
+                      className="px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white font-bold cursor-pointer shrink-0"
+                    >
+                      {inlineInviteLoading ? "Validando..." : "Validar código"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {inlineInviteBoards.flatMap((b) =>
+                      b.subjects.map((subj) => {
+                        const available = subj.status === "AVAILABLE";
+                        const checked = inlineSelectedSubjectIds.includes(subj.id);
+                        return (
+                          <label
+                            key={subj.id}
+                            className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border text-xs ${
+                              available
+                                ? "border-amber-300 bg-white text-slate-900 cursor-pointer"
+                                : "border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                disabled={!available}
+                                checked={subj.status === "MINE" || checked}
+                                onChange={() =>
+                                  setInlineSelectedSubjectIds((prev) =>
+                                    prev.includes(subj.id)
+                                      ? prev.filter((id) => id !== subj.id)
+                                      : [...prev, subj.id]
+                                  )
+                                }
+                              />
+                              <span className="truncate font-semibold">{subj.name}</span>
+                            </span>
+                            <span className="text-[10px] font-bold">
+                              {subj.status === "MINE"
+                                ? "Seu"
+                                : subj.status === "CLAIMED_OTHER"
+                                ? "Ocupado"
+                                : "Disponível"}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={inlineInviteLoading || inlineSelectedSubjectIds.length === 0}
+                      onClick={() => void handleInlineInviteClaim()}
+                      className="w-full min-h-[40px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold cursor-pointer"
+                    >
+                      {inlineInviteLoading ? "Vinculando..." : "Vincular e entrar"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

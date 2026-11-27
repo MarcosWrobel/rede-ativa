@@ -8,11 +8,13 @@ import {
   Calendar,
   ClipboardList,
   FileUp,
+  KeyRound,
   Loader2,
   Search,
   Users,
 } from "lucide-react";
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
+import CouncilTeacherInviteModal from "@/components/conselho/CouncilTeacherInviteModal";
 import {
   formatSegmentLabel,
   formatShiftLabel,
@@ -64,6 +66,7 @@ export default function ConselhoIndexClient({
     boardId: string;
     classNameLabel: string;
   } | null>(null);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -263,6 +266,16 @@ export default function ConselhoIndexClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setInviteModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-xs font-bold text-sky-900 dark:text-sky-200 transition cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Código de Vínculo Docente</span>
+            </button>
+          )}
           {canUseBiScraper && (
             <Link
               href="/gestao"
@@ -508,6 +521,14 @@ export default function ConselhoIndexClient({
           boardId={sereModalTarget.boardId}
           classNameLabel={sereModalTarget.classNameLabel}
           onBoardUpdated={handleBoardUpdatedFromSere}
+          onNotify={notify}
+        />
+      )}
+
+      {canEdit && (
+        <CouncilTeacherInviteModal
+          open={inviteModalOpen}
+          onClose={() => setInviteModalOpen(false)}
           onNotify={notify}
         />
       )}

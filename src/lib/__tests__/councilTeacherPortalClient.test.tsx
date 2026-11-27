@@ -799,4 +799,113 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(putPayloads[1].confirmAck).toBe(true);
     expect(app.getText()).toContain("Ciência registrada");
   });
+
+  it("ProfessorConselhoClient: exibe aviso de WebView e fluxo inline de código da escola após 403 até liberar o portal", async () => {
+    installBrowserShims();
+    Object.defineProperty(globalThis.navigator, "userAgent", {
+      value: "Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 WhatsApp/2.24.1",
+      configurable: true,
+    });
+
+    const ctx = buildCouncilContext({ canConfirmAck: false });
+    let claimDone = false;
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/conselho-classe/google-gsi-callback")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ credential: null }),
+        } as Response;
+      }
+      if (url.includes("/api/conselho-classe/teacher-invite/claim")) {
+        claimDone = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            boards: [
+              {
+                boardId: "board-portal-1",
+                year: 2026,
+                classGroupId: "cg-1",
+                className: "6º Ano A",
+                segment: "FUNDAMENTAL",
+                shift: "MANHA",
+                subjects: [{ id: "subj-mat", name: "Matemática", status: "AVAILABLE" }],
+              },
+            ],
+            claimResult: { claimedIds: ["subj-mat"], alreadyMineIds: [], skippedClaimedByOtherIds: [] },
+          }),
+        } as Response;
+      }
+      if (!claimDone) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({
+            error: "Seu e-mail institucional não está atribuído a este componente curricular.",
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          verifiedEmail: "prof@escola.pr.gov.br",
+          verifiedName: "Prof. Marcos",
+          suggestedSubjectId: "subj-mat",
+          council: ctx,
+        }),
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = mountReactComponent(ProfessorConselhoClient, {
+      token: "token-teste-inline-invite",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      enableDevAuth: true,
+    });
+    activeUnmounts.push(app.unmount);
+    await app.flush();
+
+    // 1. WebView detectado no celular
+    expect(app.getText()).toContain("Navegador interno detectado");
+    expect(app.findButton("Copiar endereço")).toBeDefined();
+
+    // 2. Tentativa inicial recebe 403 e abre formulário inline de código da escola
+    (app.findButton("Entrar").props.onClick as () => void)();
+    await app.flush();
+    expect(app.getText()).toContain("Possui o código de convite da escola?");
+
+    const codeInput = app.findAll(
+      (el) =>
+        el.type === "input" &&
+        el.props["aria-label"] === "Código de convite da escola"
+    )[0];
+    expect(codeInput).toBeDefined();
+    (codeInput.props.onChange as (e: { target: { value: string } }) => void)({
+      target: { value: "A7K9-M2P4" },
+    });
+    await app.flush();
+
+    (app.findButton("Validar código").props.onClick as () => void)();
+    await app.flush();
+    expect(app.findButton("Vincular e entrar")).toBeDefined();
+
+    (app.findButton("Vincular e entrar").props.onClick as () => void)();
+    await app.flush();
+
+    // 3. Após vincular, reautentica e abre o lançamento
+    expect(app.findButton("1. Lançamento")).toBeDefined();
+  });
 });

@@ -17,6 +17,13 @@ import {
   formatPreCouncilDateTimePtBr,
   TEACHER_PORTAL_POLL_BASE_MS,
 } from "@/components/conselho/preCouncilUtils";
+import {
+  consumeRedirectGsiCredential,
+  getSafeGsiButtonWidth,
+  isMobileBrowserUserAgent,
+  prepareGsiRedirectReturnCookie,
+  readGsiRedirectErrorFromUrl,
+} from "@/lib/googleGsiMobile";
 import type {
   CouncilTrimesterNumber,
   PreCouncilSynthesis,
@@ -174,6 +181,20 @@ export default function ProfessorPreConselhoClient({
     [token]
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined" || preCouncil || googleIdToken) return;
+    const urlError = readGsiRedirectErrorFromUrl();
+    if (urlError) {
+      setAuthError(urlError);
+      return;
+    }
+    void consumeRedirectGsiCredential().then((cred) => {
+      if (cred) {
+        void authenticateWithCredential(cred);
+      }
+    });
+  }, [preCouncil, googleIdToken, authenticateWithCredential]);
+
   // Carrega Google Identity Services somente enquanto não houver docente autenticado
   useEffect(() => {
     if (!googleClientId || preCouncil) return;
@@ -183,13 +204,25 @@ export default function ProfessorPreConselhoClient({
     const initGsi = () => {
       if (typeof window === "undefined" || !window.google?.accounts?.id) return;
       try {
+        const isMobile = isMobileBrowserUserAgent(navigator.userAgent);
+        if (isMobile) {
+          prepareGsiRedirectReturnCookie(window.location.pathname + window.location.search);
+        }
+
         window.google.accounts.id.initialize({
           client_id: googleClientId,
           hosted_domain: "escola.pr.gov.br",
-          callback: async (response: any) => {
-            if (!isMounted || !response?.credential) return;
-            await authenticateWithCredential(response.credential);
-          },
+          ...(isMobile
+            ? {
+                ux_mode: "redirect",
+                login_uri: `${window.location.origin}/api/conselho-classe/google-gsi-callback`,
+              }
+            : {
+                callback: async (response: any) => {
+                  if (!isMounted || !response?.credential) return;
+                  await authenticateWithCredential(response.credential);
+                },
+              }),
           auto_select: false,
           cancel_on_tap_outside: true,
         });
@@ -203,7 +236,7 @@ export default function ProfessorPreConselhoClient({
             text: "signin_with",
             shape: "pill",
             logo_alignment: "left",
-            width: "100%",
+            width: getSafeGsiButtonWidth(googleBtnContainerRef.current),
           });
         }
       } catch {

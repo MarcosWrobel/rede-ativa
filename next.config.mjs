@@ -19,11 +19,18 @@ const nextConfig = {
         ],
       },
       {
+        source: "/conselho-classe/:path*",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+        ],
+      },
+      {
         source: "/assinar/:path*",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "no-referrer" },
           { key: "Cache-Control", value: "no-store, max-age=0" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
         ],
       },
     ];

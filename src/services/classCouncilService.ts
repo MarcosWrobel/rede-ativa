@@ -3301,3 +3301,209 @@ export async function confirmPreCouncilTeacherAck(params: {
     };
   });
 }
+
+export interface TeacherInviteSubjectOption {
+  id: string;
+  name: string;
+  status: "AVAILABLE" | "MINE" | "CLAIMED_OTHER";
+}
+
+export interface TeacherInviteBoardGroup {
+  boardId: string;
+  year: number;
+  classGroupId: string;
+  className: string;
+  segment: string;
+  shift: string;
+  subjects: TeacherInviteSubjectOption[];
+}
+
+/**
+ * Lista turmas e componentes curriculares ativos da escola para autovínculo docente.
+ * Não expõe dados estudantis nem nome/e-mail de outros professores.
+ */
+export async function listAvailableSubjectsForTeacherInvite(params: {
+  schoolId: string;
+  year?: number;
+  verifiedEmail: string;
+  boardId?: string | null;
+}): Promise<{
+  schoolName: string;
+  boards: TeacherInviteBoardGroup[];
+}> {
+  const cleanEmail = params.verifiedEmail.trim().toLowerCase();
+  const targetYear = params.year ?? new Date().getFullYear();
+
+  const [school, boards] = await Promise.all([
+    prisma.school.findUnique({
+      where: { id: params.schoolId },
+      select: { id: true, name: true, active: true },
+    }),
+    prisma.classCouncilBoard.findMany({
+      where: {
+        schoolId: params.schoolId,
+        ...(params.boardId ? { id: params.boardId } : { year: targetYear }),
+      },
+      include: {
+        classGroup: {
+          select: { id: true, name: true, segment: true, shift: true, schoolId: true },
+        },
+        subjects: {
+          where: { active: true, schoolId: params.schoolId },
+          orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+          select: { id: true, name: true, teacherEmail: true },
+        },
+      },
+    }),
+  ]);
+
+  if (!school || !school.active) {
+    throw new CouncilDomainError("Instituição de ensino não encontrada ou inativa.", 404);
+  }
+
+  const normalizedBoards: TeacherInviteBoardGroup[] = boards
+    .filter((b) => b.classGroup && b.classGroup.schoolId === params.schoolId)
+    .sort((a, b) => a.classGroup.name.localeCompare(b.classGroup.name, "pt-BR"))
+    .map((b) => ({
+      boardId: b.id,
+      year: b.year,
+      classGroupId: b.classGroup.id,
+      className: b.classGroup.name,
+      segment: b.classGroup.segment,
+      shift: b.classGroup.shift,
+      subjects: b.subjects.map((s) => {
+        const owner = (s.teacherEmail || "").trim().toLowerCase();
+        const status: TeacherInviteSubjectOption["status"] = !owner
+          ? "AVAILABLE"
+          : owner === cleanEmail
+          ? "MINE"
+          : "CLAIMED_OTHER";
+        return {
+          id: s.id,
+          name: s.name,
+          status,
+        };
+      }),
+    }));
+
+  return {
+    schoolName: school.name,
+    boards: normalizedBoards,
+  };
+}
+
+/**
+ * Vincula o e-mail institucional @escola.pr.gov.br do docente aos componentes vagos selecionados.
+ * Componentes já atribuídos a outro professor não são sobrescritos.
+ */
+export async function claimSubjectsWithTeacherInvite(params: {
+  schoolId: string;
+  verifiedEmail: string;
+  verifiedName: string;
+  subjectIds: string[];
+}): Promise<{
+  claimedIds: string[];
+  alreadyMineIds: string[];
+  skippedClaimedByOtherIds: string[];
+}> {
+  const cleanEmail = params.verifiedEmail.trim().toLowerCase();
+  const cleanName = params.verifiedName.trim() || cleanEmail.split("@")[0];
+  const uniqueIds = Array.from(new Set(params.subjectIds.map((id) => id.trim()).filter(Boolean)));
+
+  if (uniqueIds.length === 0) {
+    throw new CouncilDomainError("Selecione ao menos um componente curricular.", 400);
+  }
+  if (uniqueIds.length > 60) {
+    throw new CouncilDomainError("Limite de 60 componentes por solicitação.", 400);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const subjects = await tx.classCouncilSubject.findMany({
+      where: {
+        id: { in: uniqueIds },
+        schoolId: params.schoolId,
+        active: true,
+      },
+      select: {
+        id: true,
+        boardId: true,
+        name: true,
+        teacherEmail: true,
+        teacherName: true,
+      },
+    });
+
+    if (subjects.length !== uniqueIds.length) {
+      throw new CouncilDomainError(
+        "Um ou mais componentes selecionados não pertencem a esta instituição ou estão inativos.",
+        400
+      );
+    }
+
+    const claimedIds: string[] = [];
+    const alreadyMineIds: string[] = [];
+    const skippedClaimedByOtherIds: string[] = [];
+    const claimedByBoard = new Map<string, Set<string>>();
+
+    for (const subj of subjects) {
+      const currentOwner = (subj.teacherEmail || "").trim().toLowerCase();
+      if (!currentOwner) {
+        await tx.classCouncilSubject.update({
+          where: { id: subj.id },
+          data: {
+            teacherEmail: cleanEmail,
+            teacherName: subj.teacherName?.trim() || cleanName,
+          },
+        });
+        claimedIds.push(subj.id);
+        const set = claimedByBoard.get(subj.boardId) || new Set<string>();
+        set.add(subj.id);
+        claimedByBoard.set(subj.boardId, set);
+      } else if (currentOwner === cleanEmail) {
+        alreadyMineIds.push(subj.id);
+      } else {
+        skippedClaimedByOtherIds.push(subj.id);
+      }
+    }
+
+    // Sincroniza conversas abertas de Pré-Conselho nos boards afetados sem alterar combinados/ciência
+    for (const [boardId, subjIdSet] of claimedByBoard.entries()) {
+      const trimesters = await tx.classCouncilTrimester.findMany({
+        where: { boardId, schoolId: params.schoolId },
+        select: { id: true, preCouncilJson: true },
+      });
+      for (const tri of trimesters) {
+        const parsed = parsePreCouncilData(tri.preCouncilJson);
+        if (!parsed) continue;
+        let changed = false;
+        const nextConversations = parsed.conversations.map((conv) => {
+          if (!conv.subjectId || !subjIdSet.has(conv.subjectId)) return conv;
+          if ((conv.teacherEmail || "").trim()) return conv;
+          changed = true;
+          return {
+            ...conv,
+            teacherEmail: cleanEmail,
+            teacherName: conv.teacherName.trim() || cleanName,
+          };
+        });
+        if (changed) {
+          await tx.classCouncilTrimester.update({
+            where: { id: tri.id },
+            data: {
+              preCouncilJson: JSON.stringify({
+                ...parsed,
+                conversations: nextConversations,
+              }),
+            },
+          });
+        }
+      }
+    }
+
+    return {
+      claimedIds,
+      alreadyMineIds,
+      skippedClaimedByOtherIds,
+    };
+  });
+}

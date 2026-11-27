@@ -50,6 +50,12 @@ export const RATE_LIMIT_POLICIES = {
     windowMs: 15 * 60 * 1000, // 10 erros em 15 min
     failMode: "closed" as const,
   },
+  TEACHER_INVITE_CLAIM: {
+    name: "TEACHER_INVITE_CLAIM",
+    limit: 20,
+    windowMs: 15 * 60 * 1000, // 20 tentativas em 15 min
+    failMode: "closed" as const,
+  },
   MESSAGE_REPLY: {
     name: "MESSAGE_REPLY",
     limit: 60,

@@ -219,6 +219,7 @@ export default function CouncilTeacherLinkModal({
   }
 
   const activeSubjects = subjects.filter((s) => s.active);
+  const unassignedCount = activeSubjects.filter((s) => !(s.teacherEmail || "").trim()).length;
 
   return (
     <ModalDialog
@@ -236,6 +237,18 @@ export default function CouncilTeacherLinkModal({
             após a conversa. Selos de saúde e pareceres permanecem ocultos.
           </p>
         </div>
+
+        {unassignedCount > 0 && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/40 p-3 text-amber-950 dark:text-amber-200 leading-relaxed">
+            <strong>{unassignedCount}</strong>{" "}
+            {unassignedCount === 1
+              ? "componente ainda não possui e-mail docente vinculado."
+              : "componentes ainda não possuem e-mail docente vinculado."}{" "}
+            O professor pode se vincular usando o <strong>Código de Vínculo Docente</strong> da
+            escola (em Conselho de Classe) ou você pode informar o e-mail em{" "}
+            <strong>Configurar &gt; Componentes</strong>.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-2 space-y-1">
