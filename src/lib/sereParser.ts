@@ -1292,6 +1292,9 @@ export interface TurmaSelectionConfig {
   customName: string;
   targetClassGroupId?: string;
   confirmCreateNew?: boolean;
+  draftName?: string;
+  draftSegment?: SchoolSegment;
+  draftShift?: SchoolShift;
   segment: SchoolSegment;
   shift: SchoolShift;
   isComplementary?: boolean;
@@ -1494,6 +1497,27 @@ export interface SereTurmaMatchResult {
 }
 
 /**
+ * Extrai a série numérica e o código posicional da turma no formato esperado do nome
+ * (ex.: "1º 3", "1º 3 Noturno", "1ª Série 3", "1º 2 Projeto 3" -> { grade: "1", code: "2" }).
+ * Números em descrições ou sufixos livres ("Projeto 3") não são aceitos como código.
+ */
+function extractPositionalGradeAndCode(name: string): {
+  grade: string | null;
+  code: string | null;
+} {
+  const key = normalizeClassGroupKey(name);
+  const m = key.match(/^(\d{1,2})\s*(?:\u00BA\s*)?(?:SERIE\s+)?([A-Z0-9]+)?/);
+  if (!m) return { grade: null, code: null };
+  const grade = m[1] || null;
+  const token = (m[2] || "").trim();
+  const isValidCode = /^\d{1,2}$/.test(token) || /^[A-Z]$/.test(token);
+  return {
+    grade,
+    code: isValidCode ? token : null,
+  };
+}
+
+/**
  * Resolve de forma determinística se uma turma do SERE corresponde inequivocamente
  * a uma turma já existente na escola (nome canônico no mesmo turno, indício de CGMs
  * compatível ou legado noturno único), se é uma turma nova, ou se há ambiguidade/sinal
@@ -1560,19 +1584,12 @@ export function resolveSereTurmaMatch(params: {
   }
 
   // 3. Candidatos da mesma série no turno noturno (legado "Nº Série" ou turma renomeada)
+  const parsedTarget = extractPositionalGradeAndCode(name);
   const gradeFromSource = sourceIdentity?.split("|")[1]?.match(/^(\d+)/)?.[1];
-  const gradeFromName = name.trim().match(/^(\d+)/)?.[1];
-  const gradeNum = gradeFromSource || gradeFromName;
+  const gradeNum = gradeFromSource || parsedTarget.grade;
 
   const codeFromSource = sourceIdentity?.split("|")[3]?.trim().toUpperCase() || "";
-  const codeFromName =
-    name
-      .trim()
-      .replace(/^\d+\s*[º°ª]?\s*(?:s[ée]rie\s*)?/i, "")
-      .trim()
-      .split(/\s+/)[0]
-      ?.toUpperCase() || "";
-  const turmaCode = codeFromSource || codeFromName;
+  const turmaCode = codeFromSource || parsedTarget.code || "";
 
   let nightGradeClasses: ExistingClassGroupCandidate[] = [];
   let legacyMatches: ExistingClassGroupCandidate[] = [];
@@ -1601,13 +1618,12 @@ export function resolveSereTurmaMatch(params: {
       shift === "NOITE" &&
       Boolean(gradeNum) &&
       candKey === normalizeClassGroupKey(`${gradeNum}º Série`);
-    const hasGradeMatch =
-      !gradeNum || new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(candKey);
+    const candPositional = extractPositionalGradeAndCode(cand.name);
+    const hasGradeMatch = !gradeNum || candPositional.grade === gradeNum;
     const hasTurmaCodeMatch =
-      !turmaCode ||
-      new RegExp(`(?:^|\\s|\\u00BA)${turmaCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`).test(
-        candKey
-      );
+      Boolean(turmaCode) &&
+      candPositional.code !== null &&
+      candPositional.code === turmaCode;
 
     if (
       otherShiftOverlapIds.size === 0 &&

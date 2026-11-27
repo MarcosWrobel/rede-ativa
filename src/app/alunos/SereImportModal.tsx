@@ -84,6 +84,9 @@ export function buildInitialTurmaPreviewState(params: {
       selected: t.selectedByDefault,
       customName: matchedExisting ? matchedExisting.name : t.suggestedName,
       ...(matchedExisting ? { targetClassGroupId: matchedExisting.id } : {}),
+      draftName: t.suggestedName,
+      draftSegment: t.segment,
+      draftShift: t.shift,
       segment: (matchedExisting?.segment as SchoolSegment) || t.segment,
       shift: (matchedExisting?.shift as SchoolShift) || t.shift,
       isComplementary: t.isComplementary,
@@ -109,10 +112,17 @@ export function applyTurmaTargetSelection(params: {
     ? existingClassGroups.find((cg) => cg.id === nextId)
     : undefined;
 
+  const draftName = current.draftName ?? current.customName;
+  const draftSegment = current.draftSegment ?? current.segment;
+  const draftShift = current.draftShift ?? current.shift;
+
   return {
     ...prevConfigs,
     [tempId]: {
       ...current,
+      draftName,
+      draftSegment,
+      draftShift,
       targetClassGroupId: nextId,
       confirmCreateNew: isCreateNew || undefined,
       ...(chosen
@@ -121,7 +131,11 @@ export function applyTurmaTargetSelection(params: {
             segment: chosen.segment as SchoolSegment,
             shift: (chosen.shift || current.shift) as SchoolShift,
           }
-        : {}),
+        : {
+            customName: draftName,
+            segment: draftSegment,
+            shift: draftShift,
+          }),
     },
   };
 }
@@ -139,10 +153,14 @@ export function reopenAmbiguousTurmasFrom409(params: {
   const configs = { ...params.prevConfigs };
   for (const tid of affectedIds) {
     if (configs[tid]) {
+      const curr = configs[tid];
       configs[tid] = {
-        ...configs[tid],
+        ...curr,
         targetClassGroupId: undefined,
         confirmCreateNew: undefined,
+        customName: curr.draftName ?? curr.customName,
+        segment: curr.draftSegment ?? curr.segment,
+        shift: curr.draftShift ?? curr.shift,
       };
     }
   }
@@ -402,13 +420,21 @@ export default function SereImportModal({
     field: K,
     value: TurmaSelectionConfig[K]
   ) => {
-    setTurmaConfigs((prev) => ({
-      ...prev,
-      [tempId]: {
-        ...prev[tempId],
-        [field]: value,
-      },
-    }));
+    setTurmaConfigs((prev) => {
+      const curr = prev[tempId];
+      if (!curr) return prev;
+      const isEditingDraft = !curr.targetClassGroupId;
+      return {
+        ...prev,
+        [tempId]: {
+          ...curr,
+          [field]: value,
+          ...(isEditingDraft && field === "customName" ? { draftName: value as string } : {}),
+          ...(isEditingDraft && field === "segment" ? { draftSegment: value as SchoolSegment } : {}),
+          ...(isEditingDraft && field === "shift" ? { draftShift: value as SchoolShift } : {}),
+        },
+      };
+    });
   };
 
   const handleConfirmImport = async () => {

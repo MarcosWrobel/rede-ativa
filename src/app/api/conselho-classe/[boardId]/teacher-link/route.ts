@@ -26,9 +26,13 @@ export async function POST(
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const explicitServerSchoolId = authCheck.snapshot
+      ? authCheck.snapshot.schoolId
+      : authCheck.schoolId;
     const school = await resolveExplicitSelectedSchoolForCouncil(
       authCheck.session,
-      authCheck.schoolId
+      explicitServerSchoolId,
+      authCheck.snapshot
     );
     if (!school) {
       return NextResponse.json(

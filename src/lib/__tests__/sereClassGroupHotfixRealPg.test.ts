@@ -60,6 +60,7 @@ vi.mock("@/lib/auth", () => ({
 import { PATCH as patchClass } from "@/app/api/classes/[id]/route";
 import { POST as postClass } from "@/app/api/classes/route";
 import { POST as importStudents } from "@/app/api/students/import/route";
+import { POST as postTeacherLink } from "@/app/api/conselho-classe/[boardId]/teacher-link/route";
 import { parseSereFiles, consolidateSelectedStudents } from "@/lib/sereParser";
 
 describe.skipIf(!SHOULD_RUN)(
@@ -82,7 +83,7 @@ describe.skipIf(!SHOULD_RUN)(
 
     beforeEach(async () => {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "AuditLog", "Student", "ClassGroup", "UserSchool", "User", "School" RESTART IDENTITY CASCADE;'
+        'TRUNCATE TABLE "AuditLog", "ClassCouncilSubject", "ClassCouncilBoard", "Student", "ClassGroup", "UserSchool", "User", "School" RESTART IDENTITY CASCADE;'
       );
 
       const schoolA = await prisma.school.create({
@@ -698,6 +699,131 @@ describe.skipIf(!SHOULD_RUN)(
       );
       expect(rImport200.status).toBe(200);
       expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(1);
+    });
+
+    it("1º 3 com único CGM em comum em 1º 2 Projeto 3 retorna 409 (número em sufixo livre não conta como código)", async () => {
+      const cgProj = await prisma.classGroup.create({
+        data: { name: "1º 2 Projeto 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
+      });
+      await prisma.student.create({
+        data: {
+          cgm: "8700000001",
+          name: "ALUNO PROJETO 3",
+          phone: "41999997001",
+          classGroupId: cgProj.id,
+          schoolId: schoolAId,
+          active: true,
+        },
+      });
+
+      const res409 = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            turmas: [
+              {
+                tempId: "t-13",
+                name: "1º 3",
+                sourceIdentity: "NOTURNO|1ª SÉRIE|NOITE|3",
+                segment: "NOTURNO",
+                shift: "NOITE",
+              },
+            ],
+            students: [
+              {
+                cgm: "8700000001",
+                name: "ALUNO PROJETO 3",
+                phone: "41999997001",
+                turmaTempId: "t-13",
+              },
+            ],
+            transferredStudents: [],
+            options: { updateExisting: true, deactivateTransferred: true },
+          }),
+        })
+      );
+      expect(res409.status).toBe(409);
+      const body = await res409.json();
+      expect(body.code).toBe("AMBIGUOUS_CLASS_GROUP");
+      expect((await prisma.classGroup.findUnique({ where: { id: cgProj.id } }))?.name).toBe("1º 2 Projeto 3");
+    });
+
+    it("teacher-link exige seleção explícita do SUPERADMIN com vínculo ativo, emite após seleção e recusa conselho de outra escola", async () => {
+      const cgA = await prisma.classGroup.create({
+        data: { name: "1º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
+      });
+      const cgB = await prisma.classGroup.create({
+        data: { name: "1º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolBId },
+      });
+      const boardA = await prisma.classCouncilBoard.create({
+        data: { schoolId: schoolAId, classGroupId: cgA.id, year: 2026 },
+      });
+      const boardB = await prisma.classCouncilBoard.create({
+        data: { schoolId: schoolBId, classGroupId: cgB.id, year: 2026 },
+      });
+      const subjA = await prisma.classCouncilSubject.create({
+        data: { boardId: boardA.id, schoolId: schoolAId, name: "Matemática" },
+      });
+      const subjB = await prisma.classCouncilSubject.create({
+        data: { boardId: boardB.id, schoolId: schoolBId, name: "Matemática" },
+      });
+
+      // SUPERADMIN com vínculo ativo em A, sem cookie e sem seleção explícita -> 403
+      authContext.email = "super@redeativa.local";
+      authContext.cookieSchoolId = undefined;
+      authContext.explicitSchoolId = undefined;
+
+      const rNoSchool = await postTeacherLink(
+        new Request(`http://localhost/api/conselho-classe/${boardA.id}/teacher-link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjectId: subjA.id,
+            trimester: 1,
+            teacherName: "Prof Teste",
+          }),
+        }),
+        { params: Promise.resolve({ boardId: boardA.id }) }
+      );
+      expect(rNoSchool.status).toBe(403);
+      expect(await prisma.auditLog.count()).toBe(0);
+
+      // Seleciona validamente escola A -> emite link (200) e grava auditoria
+      authContext.cookieSchoolId = schoolAId;
+      const rOk = await postTeacherLink(
+        new Request(`http://localhost/api/conselho-classe/${boardA.id}/teacher-link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjectId: subjA.id,
+            trimester: 1,
+            teacherName: "Prof Teste",
+          }),
+        }),
+        { params: Promise.resolve({ boardId: boardA.id }) }
+      );
+      expect(rOk.status).toBe(200);
+      const okBody = await rOk.json();
+      expect(okBody.success).toBe(true);
+      expect(okBody.url).toContain("/conselho-classe/professor/");
+      expect(await prisma.auditLog.count()).toBe(1);
+
+      // Com escola A selecionada, tenta emitir para conselho da escola B -> 403
+      const rOtherSchool = await postTeacherLink(
+        new Request(`http://localhost/api/conselho-classe/${boardB.id}/teacher-link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subjectId: subjB.id,
+            trimester: 1,
+            teacherName: "Prof Teste",
+          }),
+        }),
+        { params: Promise.resolve({ boardId: boardB.id }) }
+      );
+      expect(rOtherSchool.status).toBe(403);
+      expect(await prisma.auditLog.count()).toBe(1);
     });
   }
 );
