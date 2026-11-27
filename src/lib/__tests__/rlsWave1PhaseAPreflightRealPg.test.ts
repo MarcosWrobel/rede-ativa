@@ -8561,6 +8561,7 @@ describe.skipIf(!SHOULD_RUN)(
     it("isola MessageTemplate em GET/POST/PUT /api/templates e /modelos, /busca-ativa e /faltas com exceção global do SuperAdmin", async () => {
       const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
       const originalWithTenant = rlsTenantContext.withTenantContext;
+      let captureSqlHook: ((sql: string) => void) | null = null;
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
         .mockImplementation(async (client, schoolId, callback) => {
@@ -8572,7 +8573,26 @@ describe.skipIf(!SHOULD_RUN)(
               schoolId,
               currentSetting: rows[0]?.sid ?? null,
             });
-            return callback(tx);
+            const hook = captureSqlHook;
+            if (!hook) {
+              return callback(tx);
+            }
+            const origQueryRaw = tx.$queryRaw.bind(tx);
+            const wrappedTx = new Proxy(tx, {
+              get(target, prop) {
+                if (prop === "$queryRaw") {
+                  return (...args: unknown[]) => {
+                    const first = args[0];
+                    if (Array.isArray(first)) {
+                      hook(first.join("?"));
+                    }
+                    return (origQueryRaw as (...a: unknown[]) => unknown)(...args);
+                  };
+                }
+                return Reflect.get(target, prop);
+              },
+            });
+            return callback(wrappedTx);
           });
         });
 
@@ -8876,8 +8896,10 @@ describe.skipIf(!SHOULD_RUN)(
         expect(updatedAlpha.schoolId).toBe("school-alpha");
         expect(logAuditMock).toHaveBeenCalledTimes(1);
 
-        // Negativa: school-alpha tentando editar modelo da Escola Piloto -> 403 e sem auditoria
+        // Negativa: school-alpha tentando editar modelo da Escola Piloto -> 403, sem consultar conteúdo e sem auditoria
         logAuditMock.mockClear();
+        const inspectedSql: string[] = [];
+        captureSqlHook = (sql) => inspectedSql.push(sql);
         const rPutCross = await updateTemplateHandler(
           new Request("http://127.0.0.1/api/templates", {
             method: "PUT",
@@ -8891,7 +8913,12 @@ describe.skipIf(!SHOULD_RUN)(
             }),
           })
         );
+        captureSqlHook = null;
         expect(rPutCross.status).toBe(403);
+        expect(inspectedSql).toHaveLength(1);
+        expect(inspectedSql[0]).not.toContain("prefixText");
+        expect(inspectedSql[0]).not.toContain("suffixText");
+        expect(inspectedSql[0]).not.toContain("title");
         expect(logAuditMock).not.toHaveBeenCalled();
         expect(
           (await prisma.messageTemplate.findUnique({ where: { id: "tpl-piloto-own" } }))?.title
@@ -9063,6 +9090,45 @@ describe.skipIf(!SHOULD_RUN)(
           { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
         ]);
         expect(logAuditMock).toHaveBeenCalledTimes(1);
+
+        // Duas edições concorrentes em campos distintos do mesmo modelo global persistem ambas
+        const [rConcTitle, rConcSuffix] = await Promise.all([
+          updateTemplateHandler(
+            new Request("http://127.0.0.1/api/templates", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: "tpl-global-legacy",
+                title: "Título Concorrente Global",
+              }),
+            })
+          ),
+          updateTemplateHandler(
+            new Request("http://127.0.0.1/api/templates", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: "tpl-global-legacy",
+                suffixText: "Rodapé Concorrente Global",
+              }),
+            })
+          ),
+        ]);
+        expect(rConcTitle.status).toBe(200);
+        expect(rConcSuffix.status).toBe(200);
+        const finalGlobalRows = await prisma.$queryRaw<
+          Array<{ title: string; prefixText: string; suffixText: string; schoolId: string | null }>
+        >`
+          SELECT "title", "prefixText", "suffixText", "schoolId"
+          FROM "MessageTemplate"
+          WHERE "id" = 'tpl-global-legacy'
+        `;
+        expect(finalGlobalRows[0]).toEqual({
+          title: "TÍTULO CONCORRENTE GLOBAL",
+          prefixText: "Global Novo",
+          suffixText: "Rodapé Concorrente Global",
+          schoolId: null,
+        });
       } finally {
         await prisma.userSchool
           .deleteMany({ where: { id: { in: ["us-tpl-alpha", "us-tpl-piloto"] } } })

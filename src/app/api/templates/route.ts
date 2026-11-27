@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
@@ -162,20 +163,14 @@ export async function PUT(req: Request) {
     const isSuper = checkIsSuperAdmin(authCheck.session);
 
     const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      // Consulta inicial estritamente limitada aos metadados de propriedade (sem conteúdo textual)
       const existingRows = await tx.$queryRaw<
         Array<{
           id: string;
-          title: string;
-          segment: string;
-          prefixText: string;
-          suffixText: string;
-          isAbsenceRelated: boolean;
-          active: boolean;
           schoolId: string | null;
-          createdAt: Date;
         }>
       >`
-        SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+        SELECT "id", "schoolId"
         FROM "MessageTemplate"
         WHERE "id" = ${id}
         LIMIT 1
@@ -209,64 +204,95 @@ export async function PUT(req: Request) {
         active,
       };
 
-      let updatedCount = 0;
       if (existing.schoolId) {
         const updated = await tx.messageTemplate.updateMany({
           where: { id, schoolId: currentSchool.id },
           data: updateData,
         });
-        updatedCount = updated.count;
-      } else {
-        const nextTitle = updateData.title ?? existing.title;
-        const nextSegment = updateData.segment ?? existing.segment;
-        const nextPrefix = updateData.prefixText ?? existing.prefixText;
-        const nextSuffix = updateData.suffixText ?? existing.suffixText;
-        const nextAbsence =
-          typeof updateData.isAbsenceRelated === "boolean"
-            ? updateData.isAbsenceRelated
-            : existing.isAbsenceRelated;
-        const nextActive =
-          typeof updateData.active === "boolean" ? updateData.active : existing.active;
-        updatedCount = await tx.$executeRaw`
-          UPDATE "MessageTemplate"
-          SET "title" = ${nextTitle},
-              "segment" = ${nextSegment},
-              "prefixText" = ${nextPrefix},
-              "suffixText" = ${nextSuffix},
-              "isAbsenceRelated" = ${nextAbsence},
-              "active" = ${nextActive}
-          WHERE "id" = ${id} AND "schoolId" IS NULL
-        `;
+
+        if (updated.count === 0) {
+          return {
+            errorStatus: 403 as const,
+            error: "Acesso negado a modelo de outra instituição de ensino.",
+          };
+        }
+
+        const template = await tx.messageTemplate.findFirst({
+          where: { id, schoolId: currentSchool.id },
+        });
+        if (!template) {
+          return { errorStatus: 404 as const, error: "Modelo de mensagem não encontrado" };
+        }
+
+        return { template };
       }
 
-      if (updatedCount === 0) {
+      // Exceção explícita da Fase A: atualização parcial apenas dos campos enviados para modelo global legado (schoolId IS NULL)
+      const setClauses: Prisma.Sql[] = [];
+      if (updateData.title !== undefined) {
+        setClauses.push(Prisma.sql`"title" = ${updateData.title}`);
+      }
+      if (updateData.segment !== undefined) {
+        setClauses.push(Prisma.sql`"segment" = ${updateData.segment}`);
+      }
+      if (updateData.prefixText !== undefined) {
+        setClauses.push(Prisma.sql`"prefixText" = ${updateData.prefixText}`);
+      }
+      if (updateData.suffixText !== undefined) {
+        setClauses.push(Prisma.sql`"suffixText" = ${updateData.suffixText}`);
+      }
+      if (typeof updateData.isAbsenceRelated === "boolean") {
+        setClauses.push(Prisma.sql`"isAbsenceRelated" = ${updateData.isAbsenceRelated}`);
+      }
+      if (typeof updateData.active === "boolean") {
+        setClauses.push(Prisma.sql`"active" = ${updateData.active}`);
+      }
+
+      const globalRows =
+        setClauses.length > 0
+          ? await tx.$queryRaw<
+              Array<{
+                id: string;
+                title: string;
+                segment: string;
+                prefixText: string;
+                suffixText: string;
+                isAbsenceRelated: boolean;
+                active: boolean;
+                schoolId: string | null;
+                createdAt: Date;
+              }>
+            >(Prisma.sql`
+              UPDATE "MessageTemplate"
+              SET ${Prisma.join(setClauses, ", ")}
+              WHERE "id" = ${id} AND "schoolId" IS NULL
+              RETURNING "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+            `)
+          : await tx.$queryRaw<
+              Array<{
+                id: string;
+                title: string;
+                segment: string;
+                prefixText: string;
+                suffixText: string;
+                isAbsenceRelated: boolean;
+                active: boolean;
+                schoolId: string | null;
+                createdAt: Date;
+              }>
+            >`
+              SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+              FROM "MessageTemplate"
+              WHERE "id" = ${id} AND "schoolId" IS NULL
+              LIMIT 1
+            `;
+
+      const template = globalRows[0] ?? null;
+      if (!template) {
         return {
           errorStatus: 403 as const,
           error: "Acesso negado a modelo de outra instituição de ensino.",
         };
-      }
-
-      const updatedRows = await tx.$queryRaw<
-        Array<{
-          id: string;
-          title: string;
-          segment: string;
-          prefixText: string;
-          suffixText: string;
-          isAbsenceRelated: boolean;
-          active: boolean;
-          schoolId: string | null;
-          createdAt: Date;
-        }>
-      >`
-        SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
-        FROM "MessageTemplate"
-        WHERE "id" = ${id}
-        LIMIT 1
-      `;
-      const template = updatedRows[0] ?? null;
-      if (!template) {
-        return { errorStatus: 404 as const, error: "Modelo de mensagem não encontrado" };
       }
 
       return { template };
