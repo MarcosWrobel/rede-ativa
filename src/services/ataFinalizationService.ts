@@ -261,7 +261,8 @@ export async function executeMinuteFinalization(
   const runTx =
     typeof prisma.$transaction === "function"
       ? schoolId
-        ? (fn: (txClient: any) => Promise<any>) => withTenantContext(prisma, schoolId, fn)
+        ? (fn: (txClient: any) => Promise<any>) =>
+            withTenantContext(prisma, schoolId, fn, { maxWait: 10000, timeout: 20000 })
         : prisma.$transaction.bind(prisma)
       : async (fn: (txClient: any) => Promise<any>) => fn(prisma);
 

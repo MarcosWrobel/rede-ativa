@@ -53,7 +53,8 @@ export async function POST(
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -83,7 +84,10 @@ export async function POST(
         throw new Error("NOT_FOUND:Ata pedagógica não encontrada.");
       }
 
-      if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
+      if (
+        minute.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)
+      ) {
         throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
       }
 

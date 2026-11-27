@@ -10240,6 +10240,439 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
+
+    it("bloqueia SUPERADMIN com escola A selecionada ao usar IDs de escola B em Justificativas e Atas e preserva fluxos legítimos de A e B", async () => {
+      const rlsTenantModule = await import("@/lib/rlsTenantContext");
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenantContext = rlsTenantModule.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantModule, "withTenantContext")
+        .mockImplementation(async (client: any, schoolId: string, fn: any, options?: any) => {
+          return originalWithTenantContext(
+            client,
+            schoolId,
+            async (tx: any) => {
+              const rows = await tx.$queryRaw<Array<{ current_school_id: string | null }>>`
+                SELECT current_setting('app.current_school_id', true) AS current_school_id
+              `;
+              tenantCalls.push({
+                schoolId,
+                currentSetting: rows[0]?.current_school_id ?? null,
+              });
+              return fn(tx);
+            },
+            options
+          );
+        });
+
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const createdIds: {
+        justIds: string[];
+        minuteIds: string[];
+        studentIds: string[];
+      } = { justIds: [], minuteIds: [], studentIds: [] };
+
+      try {
+        testAuthState.useRealCurrentSchool = true;
+        testAuthState.useRealPermissions = true;
+
+        const { hashPin } = await import("@/lib/signingPin");
+        const pinHash = await hashPin("4829");
+
+        await prisma.user.create({
+          data: {
+            id: "user-super-l4-strict",
+            email: "super-l4@redeativa.local",
+            name: "SuperAdmin L4",
+            role: "SUPERADMIN",
+            active: true,
+            schoolId: "school-alpha",
+            signingPinHash: pinHash,
+          },
+        });
+
+        const alphaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-alpha", active: true },
+          select: { id: true, classGroupId: true },
+        });
+        const betaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-beta", active: true },
+          select: { id: true, classGroupId: true },
+        });
+        const betaClass = await prisma.classGroup.findFirst({
+          where: { schoolId: "school-beta" },
+          select: { id: true },
+        });
+        expect(alphaStudent?.id).toBeTruthy();
+        expect(betaStudent?.id).toBeTruthy();
+        expect(betaClass?.id).toBeTruthy();
+
+        // Estudante pertencente a school-alpha mas com turma cruzada em school-beta
+        const crossClassStudent = await prisma.student.create({
+          data: {
+            name: "Aluno Alpha Turma Beta L4",
+            cgm: `CGM-L4-${Date.now()}`,
+            phone: "42999998888",
+            schoolId: "school-alpha",
+            classGroupId: betaClass!.id,
+            active: true,
+          },
+        });
+        createdIds.studentIds.push(crossClassStudent.id);
+
+        const crossClassJust = await prisma.absenceJustification.create({
+          data: {
+            studentId: crossClassStudent.id,
+            type: "ATESTADO_MEDICO",
+            startDate: new Date("2026-04-10T00:00:00.000-03:00"),
+            endDate: new Date("2026-04-11T23:59:59.999-03:00"),
+            notes: "Justificativa turma cruzada",
+            createdByName: "Equipe",
+            createdByEmail: "super-l4@redeativa.local",
+          },
+        });
+        createdIds.justIds.push(crossClassJust.id);
+
+        const betaJust = await prisma.absenceJustification.create({
+          data: {
+            studentId: betaStudent!.id,
+            type: "ATESTADO_MEDICO",
+            startDate: new Date("2026-04-10T00:00:00.000-03:00"),
+            endDate: new Date("2026-04-11T23:59:59.999-03:00"),
+            notes: "Justificativa sigilosa beta",
+            createdByName: "Equipe Beta",
+            createdByEmail: "beta@escola-beta.local",
+          },
+        });
+        createdIds.justIds.push(betaJust.id);
+
+        const betaDraftMinute = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-beta",
+            year: 2026,
+            status: "DRAFT",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date(),
+            subject: "Assunto Secreto Beta Draft",
+            summary:
+              "Resumo sigiloso da escola beta com mais de cinquenta caracteres para validação estrita.",
+            authorId: "user-beta-owner",
+            authorName: "Autor Beta",
+            authorEmail: "autor@escola-beta.local",
+            authorRole: "PEDAGOGA",
+            students: {
+              create: [{ studentId: betaStudent!.id, studentNameSnapshot: "Aluno Beta" }],
+            },
+            participants: {
+              create: [{ role: "SERVIDOR", name: "Autor Beta" }],
+            },
+          },
+          include: { participants: true },
+        });
+        createdIds.minuteIds.push(betaDraftMinute.id);
+
+        // Ata FINALIZED legada sem verificationCode em beta para provar que GET /api/atas/[id] não gera efeito colateral
+        const betaLegacyFinalized = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-beta",
+            year: 2026,
+            ataNumber: 901,
+            status: "FINALIZED",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date(),
+            subject: "Ata Finalizada Beta Legada",
+            summary:
+              "Resumo finalizado da escola beta com mais de cinquenta caracteres para validação de legado.",
+            authorId: "user-beta-owner",
+            authorName: "Autor Beta",
+            authorEmail: "autor@escola-beta.local",
+            authorRole: "PEDAGOGA",
+            verificationCode: null,
+            students: {
+              create: [{ studentId: betaStudent!.id, studentNameSnapshot: "Aluno Beta" }],
+            },
+          },
+        });
+        createdIds.minuteIds.push(betaLegacyFinalized.id);
+
+        testAuthState.pendingSessionUser = {
+          id: "user-super-l4-strict",
+          email: "super-l4@redeativa.local",
+          name: "SuperAdmin L4",
+          role: "SUPERADMIN",
+          schoolId: "school-alpha",
+        };
+
+        const { GET: getJust, POST: postJust } = await import("@/app/api/justifications/route");
+        const { DELETE: delJust } = await import("@/app/api/justifications/[id]/route");
+        const { POST: postAta } = await import("@/app/api/atas/route");
+        const {
+          GET: getAta,
+          PATCH: patchAta,
+          DELETE: delAta,
+        } = await import("@/app/api/atas/[id]/route");
+        const { POST: finalizeAta } = await import("@/app/api/atas/[id]/finalize/route");
+        const { POST: reopenAta } = await import("@/app/api/atas/[id]/reopen/route");
+        const { POST: signScreenAta } = await import("@/app/api/atas/[id]/sign-screen/route");
+        const { GET: pdfaAta } = await import("@/app/api/atas/[id]/pdfa/route");
+        const { GET: getCandidates } = await import(
+          "@/app/api/atas/participant-candidates/route"
+        );
+        const { POST: formalizeAta } = await import("@/app/api/ai/formalize-ata/route");
+
+        const auditBefore = await prisma.auditLog.count();
+
+        // 1. SUPERADMIN com school-alpha selecionada tenta acessar/mutar IDs de school-beta e turma cruzada
+        const rGetJust = await getJust(new Request("http://127.0.0.1/api/justifications"));
+        expect(rGetJust.status).toBe(200);
+        const jGetJust = await rGetJust.json();
+        expect(jGetJust.justifications.some((j: any) => j.id === crossClassJust.id)).toBe(false);
+        expect(jGetJust.justifications.some((j: any) => j.id === betaJust.id)).toBe(false);
+
+        const rPostJustBeta = await postJust(
+          new Request("http://127.0.0.1/api/justifications", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              studentId: betaStudent!.id,
+              type: "ATESTADO_MEDICO",
+              startDate: "2026-04-12",
+              endDate: "2026-04-13",
+            }),
+          })
+        );
+        expect(rPostJustBeta.status).toBe(403);
+
+        const rPostJustCrossClass = await postJust(
+          new Request("http://127.0.0.1/api/justifications", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              studentId: crossClassStudent.id,
+              type: "ATESTADO_MEDICO",
+              startDate: "2026-04-12",
+              endDate: "2026-04-13",
+            }),
+          })
+        );
+        expect(rPostJustCrossClass.status).toBe(403);
+
+        const rDelJustBeta = await delJust(
+          new Request(`http://127.0.0.1/api/justifications/${betaJust.id}`, { method: "DELETE" }),
+          { params: Promise.resolve({ id: betaJust.id }) }
+        );
+        expect(rDelJustBeta.status).toBe(403);
+
+        const rDelJustCrossClass = await delJust(
+          new Request(`http://127.0.0.1/api/justifications/${crossClassJust.id}`, {
+            method: "DELETE",
+          }),
+          { params: Promise.resolve({ id: crossClassJust.id }) }
+        );
+        expect(rDelJustCrossClass.status).toBe(403);
+
+        const rGetAtaPoll = await getAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}?poll=1`),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rGetAtaPoll.status).toBe(403);
+
+        const rGetAtaLegacy = await getAta(
+          new Request(`http://127.0.0.1/api/atas/${betaLegacyFinalized.id}`),
+          { params: Promise.resolve({ id: betaLegacyFinalized.id }) }
+        );
+        expect(rGetAtaLegacy.status).toBe(403);
+        const bodyGetLegacy = await rGetAtaLegacy.text();
+        expect(bodyGetLegacy).not.toContain("Ata Finalizada Beta Legada");
+
+        const rPatchBeta = await patchAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ subject: "Alterado por SuperAdmin A" }),
+          }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rPatchBeta.status).toBe(403);
+
+        const rDelBeta = await delAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}`, { method: "DELETE" }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rDelBeta.status).toBe(403);
+
+        const rFinBeta = await finalizeAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}/finalize`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ signingPin: "4829" }),
+          }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rFinBeta.status).toBe(403);
+
+        const rReopenBeta = await reopenAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}/reopen`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ confirmReopen: true, expectedRevision: 1 }),
+          }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rReopenBeta.status).toBe(403);
+
+        const rSignBeta = await signScreenAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}/sign-screen`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              participantId: betaDraftMinute.participants[0].id,
+              expectedRevision: 1,
+              signatureData:
+                "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            }),
+          }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rSignBeta.status).toBe(403);
+
+        const rPdfaBeta = await pdfaAta(
+          new Request(`http://127.0.0.1/api/atas/${betaLegacyFinalized.id}/pdfa`),
+          { params: Promise.resolve({ id: betaLegacyFinalized.id }) }
+        );
+        expect(rPdfaBeta.status).toBe(403);
+
+        const rCandBeta = await getCandidates(
+          new Request(
+            `http://127.0.0.1/api/atas/participant-candidates?minuteId=${betaDraftMinute.id}`
+          )
+        );
+        expect(rCandBeta.status).toBe(403);
+
+        const rFormalizeBeta = await formalizeAta(
+          new Request("http://127.0.0.1/api/ai/formalize-ata", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              minuteId: betaDraftMinute.id,
+              rawNotes: "Notas sintéticas de teste",
+            }),
+          })
+        );
+        expect([403, 404]).toContain(rFormalizeBeta.status);
+
+        // Confirma nenhuma mutação, nenhum verificationCode gerado e nenhum AuditLog de sucesso
+        const betaDraftAfter = await prisma.pedagogicalMinute.findUnique({
+          where: { id: betaDraftMinute.id },
+        });
+        expect(betaDraftAfter?.status).toBe("DRAFT");
+        expect(betaDraftAfter?.subject).toBe("Assunto Secreto Beta Draft");
+        const betaLegacyAfter = await prisma.pedagogicalMinute.findUnique({
+          where: { id: betaLegacyFinalized.id },
+        });
+        expect(betaLegacyAfter?.verificationCode).toBeNull();
+        const betaJustAfter = await prisma.absenceJustification.findUnique({
+          where: { id: betaJust.id },
+        });
+        expect(betaJustAfter).not.toBeNull();
+        const auditAfterRejects = await prisma.auditLog.count();
+        expect(auditAfterRejects).toBe(auditBefore);
+
+        // 2. Caminho legítimo em A (school-alpha selecionada)
+        tenantCalls.length = 0;
+        const rPostAtaAlpha = await postAta(
+          new Request("http://127.0.0.1/api/atas", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              subject: "Ata Legitima SuperAdmin Alpha",
+              attendedAt: new Date().toISOString(),
+              summary:
+                "Texto oficial sintético com mais de cinquenta caracteres para validação de lavratura em Alpha.",
+              studentIds: [alphaStudent!.id],
+              participants: [{ role: "SERVIDOR", name: "SuperAdmin L4" }],
+            }),
+          })
+        );
+        expect(rPostAtaAlpha.status).toBe(201);
+        const alphaMinuteId = (await rPostAtaAlpha.json()).minute.id as string;
+        createdIds.minuteIds.push(alphaMinuteId);
+
+        const rFinAlpha = await finalizeAta(
+          new Request(`http://127.0.0.1/api/atas/${alphaMinuteId}/finalize`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ signingPin: "4829", expectedRevision: 1 }),
+          }),
+          { params: Promise.resolve({ id: alphaMinuteId }) }
+        );
+        expect(rFinAlpha.status).toBe(200);
+        expect(
+          tenantCalls.every(
+            (c) => c.schoolId === "school-alpha" && c.currentSetting === "school-alpha"
+          )
+        ).toBe(true);
+
+        // 3. Troca explícita de seleção para school-beta -> caminhos legítimos de B funcionam com app.current_school_id = school-beta
+        await prisma.user.update({
+          where: { id: "user-super-l4-strict" },
+          data: { schoolId: "school-beta" },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "user-super-l4-strict",
+          email: "super-l4@redeativa.local",
+          name: "SuperAdmin L4",
+          role: "SUPERADMIN",
+          schoolId: "school-beta",
+        };
+        tenantCalls.length = 0;
+
+        const rFinBetaAllowed = await finalizeAta(
+          new Request(`http://127.0.0.1/api/atas/${betaDraftMinute.id}/finalize`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ signingPin: "4829", expectedRevision: 1 }),
+          }),
+          { params: Promise.resolve({ id: betaDraftMinute.id }) }
+        );
+        expect(rFinBetaAllowed.status).toBe(200);
+
+        const rDelJustBetaAllowed = await delJust(
+          new Request(`http://127.0.0.1/api/justifications/${betaJust.id}`, { method: "DELETE" }),
+          { params: Promise.resolve({ id: betaJust.id }) }
+        );
+        expect(rDelJustBetaAllowed.status).toBe(200);
+        expect(
+          tenantCalls.every(
+            (c) => c.schoolId === "school-beta" && c.currentSetting === "school-beta"
+          )
+        ).toBe(true);
+      } finally {
+        for (const mId of createdIds.minuteIds) {
+          await prisma.pedagogicalMinute.deleteMany({ where: { id: mId } }).catch(() => {});
+        }
+        for (const jId of createdIds.justIds) {
+          await prisma.absenceJustification.deleteMany({ where: { id: jId } }).catch(() => {});
+        }
+        for (const sId of createdIds.studentIds) {
+          await prisma.student.deleteMany({ where: { id: sId } }).catch(() => {});
+        }
+        await prisma.auditLog
+          .deleteMany({ where: { userEmail: "super-l4@redeativa.local" } })
+          .catch(() => {});
+        await prisma.user
+          .deleteMany({ where: { id: { in: ["user-super-l4-strict"] } } })
+          .catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
   }
 );
 

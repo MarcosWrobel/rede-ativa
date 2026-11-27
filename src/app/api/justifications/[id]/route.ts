@@ -20,7 +20,8 @@ export async function DELETE(
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
@@ -29,7 +30,15 @@ export async function DELETE(
       const justification = await tx.absenceJustification.findUnique({
         where: { id },
         include: {
-          student: { select: { id: true, name: true, schoolId: true } },
+          student: {
+            select: {
+              id: true,
+              name: true,
+              schoolId: true,
+              classGroupId: true,
+              classGroup: { select: { schoolId: true } },
+            },
+          },
         },
       });
 
@@ -37,8 +46,21 @@ export async function DELETE(
         return { errorStatus: 404 as const, error: "Justificativa não encontrada." };
       }
 
-      if (!assertTenantOwnership(justification.student.schoolId, school.id, authCheck.session)) {
+      if (
+        justification.student.schoolId !== school.id ||
+        !assertTenantOwnership(justification.student.schoolId, school.id, authCheck.session)
+      ) {
         return { errorStatus: 403 as const, error: "Acesso negado a registro de outra instituição de ensino." };
+      }
+
+      if (
+        justification.student.classGroupId &&
+        justification.student.classGroup?.schoolId !== school.id
+      ) {
+        return {
+          errorStatus: 403 as const,
+          error: "Estudante vinculado a turma de outra instituição de ensino.",
+        };
       }
 
       await tx.absenceJustification.delete({

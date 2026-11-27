@@ -207,7 +207,10 @@ export async function GET(req: Request) {
           return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada." };
         }
 
-        if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
+        if (
+          minute.schoolId !== currentSchool.id ||
+          !assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)
+        ) {
           return {
             errorStatus: 403 as const,
             error: "Acesso negado a registro de outra instituição de ensino.",

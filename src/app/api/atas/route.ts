@@ -360,7 +360,8 @@ export async function POST(req: Request) {
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;

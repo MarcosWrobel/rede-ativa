@@ -48,9 +48,10 @@ export async function GET(req: Request) {
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
     const startOfTodayBrasilia = new Date(`${todayStr}T00:00:00.000-03:00`);
 
-    const schoolCondition = school?.id
-      ? { schoolId: school.id }
-      : {};
+    const schoolCondition = {
+      schoolId: school.id,
+      classGroup: { schoolId: school.id },
+    };
 
     const where: any = {
       student: {
@@ -154,7 +155,8 @@ export async function POST(req: Request) {
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
@@ -173,8 +175,18 @@ export async function POST(req: Request) {
         return { errorStatus: 404 as const, error: "Estudante não encontrado nesta instituição." };
       }
 
-      if (!assertTenantOwnership(student.schoolId, school.id, authCheck.session)) {
+      if (
+        student.schoolId !== school.id ||
+        !assertTenantOwnership(student.schoolId, school.id, authCheck.session)
+      ) {
         return { errorStatus: 403 as const, error: "Acesso negado a registro de outra instituição de ensino." };
+      }
+
+      if (student.classGroupId && student.classGroup?.schoolId !== school.id) {
+        return {
+          errorStatus: 403 as const,
+          error: "Estudante vinculado a turma de outra instituição de ensino.",
+        };
       }
 
       const created = await tx.absenceJustification.create({

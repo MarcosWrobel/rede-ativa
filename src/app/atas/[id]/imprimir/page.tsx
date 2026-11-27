@@ -127,7 +127,9 @@ export default async function AtaPrintPage({ params }: Props) {
     if (!row) return null;
 
     // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
-    const isOwner = assertTenantOwnership(row.schoolId, currentSchool.id, session);
+    const isOwner =
+      row.schoolId === currentSchool.id &&
+      assertTenantOwnership(row.schoolId, currentSchool.id, session);
     if (!isOwner || !canAccessConfidentialMinute(row, session)) {
       return "FORBIDDEN" as const;
     }

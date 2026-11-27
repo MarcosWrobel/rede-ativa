@@ -752,4 +752,61 @@ describe("ataFinalizationService - Regras de Lavratura e Fuso America/Sao_Paulo"
     expect(clearedRefusal[0].refusalReason).toBeNull();
     expect(clearedRefusal[0].witnessName).toBeNull();
   });
+
+  it("executeMinuteFinalization encaminha maxWait: 10000 e timeout: 20000 ao prisma.$transaction quando schoolId está presente e preserva chamadores sem opções", async () => {
+    const finalizedMinute = {
+      id: "ata-tx-opts",
+      schoolId: "sch-1",
+      year: 2026,
+      status: "FINALIZED",
+      ataNumber: 1,
+      attendedAt: new Date("2026-11-15T12:00:00Z"),
+      category: "ACOMPANHAMENTO_PEDAGOGICO",
+      isConfidential: false,
+      subject: "Assunto",
+      summary: "Texto completo de ata pedagógica com mais de cinquenta caracteres para validação.",
+      agreementsSummary: null,
+      authorEmail: "ped@escola.pr.gov.br",
+      students: [],
+      participants: [],
+      actionItems: [],
+    };
+
+    const txClient = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      pedagogicalMinute: {
+        findUnique: vi.fn().mockResolvedValue(finalizedMinute),
+      },
+    };
+    const txSpy = vi.fn(async (fn: any, _opts?: any) => fn(txClient));
+    const mockPrisma: any = {
+      $transaction: txSpy,
+    };
+
+    await executeMinuteFinalization({
+      prisma: mockPrisma,
+      minuteId: "ata-tx-opts",
+      schoolId: "sch-1",
+      rawBody: {},
+      author: {
+        userId: "u-1",
+        userName: "Pedagoga",
+        email: "ped@escola.pr.gov.br",
+        role: "PEDAGOGA",
+      },
+      verifyTenantOwnership: () => true,
+    });
+
+    expect(txSpy).toHaveBeenCalledTimes(1);
+    expect(txSpy.mock.calls[0]?.[1]).toEqual({ maxWait: 10000, timeout: 20000 });
+    expect(txClient.$executeRaw).toHaveBeenCalledTimes(2);
+
+    // Chamador direto de withTenantContext sem options preserva chamada com 1 argumento
+    const { withTenantContext } = await import("@/lib/rlsTenantContext");
+    txSpy.mockClear();
+    await withTenantContext(mockPrisma, "sch-1", async () => "ok");
+
+    expect(txSpy).toHaveBeenCalledTimes(1);
+    expect(txSpy.mock.calls[0]?.length).toBe(1);
+  });
 });

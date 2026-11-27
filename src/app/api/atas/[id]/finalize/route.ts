@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { verifyServerSigningPin } from "@/lib/signingPin";
@@ -36,7 +37,8 @@ export async function POST(
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -82,6 +84,32 @@ export async function POST(
     // PIN validado com sucesso: reseta eventuais falhas anteriores
     await resetRateLimit(pinLockKey);
 
+    // Confirma existência e posse estrita na escola ativa antes de adquirir locks de escrita
+    const minuteHeader = await (typeof prisma.$transaction === "function"
+      ? withTenantContext(prisma, currentSchool.id, (tx) =>
+          tx.pedagogicalMinute.findUnique({
+            where: { id },
+            select: { id: true, schoolId: true },
+          })
+        )
+      : prisma.pedagogicalMinute.findUnique({
+          where: { id },
+          select: { id: true, schoolId: true },
+        }));
+
+    if (!minuteHeader) {
+      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    }
+    if (
+      minuteHeader.schoolId !== currentSchool.id ||
+      !assertTenantOwnership(minuteHeader.schoolId, currentSchool.id, effectiveSession)
+    ) {
+      return NextResponse.json(
+        { error: "Acesso negado a registro de outra instituição de ensino." },
+        { status: 403 }
+      );
+    }
+
     const { minute: finalized, alreadyFinalized } = await executeMinuteFinalization({
       prisma,
       minuteId: id,
@@ -95,6 +123,7 @@ export async function POST(
         ip,
       },
       verifyTenantOwnership: (minuteSchoolId) =>
+        minuteSchoolId === currentSchool.id &&
         assertTenantOwnership(minuteSchoolId, currentSchool.id, effectiveSession),
       session: effectiveSession,
     });

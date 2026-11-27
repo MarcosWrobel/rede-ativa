@@ -159,7 +159,10 @@ export async function GET(
         return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
       }
 
-      if (!assertTenantOwnership(pollMinute.schoolId, currentSchool.id, effectiveSession)) {
+      if (
+        pollMinute.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(pollMinute.schoolId, currentSchool.id, effectiveSession)
+      ) {
         return NextResponse.json(
           { error: "Acesso negado a registro de outra instituição de ensino." },
           { status: 403 }
@@ -230,7 +233,10 @@ export async function GET(
         return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
       }
 
-      if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
+      if (
+        minute.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)
+      ) {
         return {
           errorStatus: 403 as const,
           error: "Acesso negado a registro de outra instituição de ensino.",
@@ -325,7 +331,8 @@ export async function PATCH(
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -349,7 +356,10 @@ export async function PATCH(
       return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
     }
 
-    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, effectiveSession)) {
+    if (
+      existing.schoolId !== currentSchool.id ||
+      !assertTenantOwnership(existing.schoolId, currentSchool.id, effectiveSession)
+    ) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
@@ -416,7 +426,10 @@ export async function PATCH(
         throw new Error("NOT_FOUND:Ata não encontrada");
       }
 
-      if (!assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, effectiveSession)) {
+      if (
+        lockedMinute.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(lockedMinute.schoolId, currentSchool.id, effectiveSession)
+      ) {
         throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
       }
 
@@ -755,7 +768,8 @@ export async function DELETE(
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -770,7 +784,10 @@ export async function DELETE(
         return { errorStatus: 404 as const, error: "Ata não encontrada" };
       }
 
-      if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
+      if (
+        existing.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)
+      ) {
         return {
           errorStatus: 403 as const,
           error: "Acesso negado a registro de outra instituição de ensino.",
