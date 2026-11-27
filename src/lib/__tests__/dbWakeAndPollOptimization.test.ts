@@ -137,7 +137,7 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
 
   describe("GET /api/atas/[id]?poll=1", () => {
     it("seleciona apenas campos mínimos persistidos (sem binários ou tokens) e devolve estado reduzido", async () => {
-      hoisted.minuteFindUnique.mockResolvedValueOnce({
+      hoisted.minuteFindUnique.mockResolvedValue({
         id: "ata-1",
         schoolId: "school-1",
         status: "DRAFT",
@@ -169,7 +169,7 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
       const res = await getAtaById(req, { params: Promise.resolve({ id: "ata-1" }) });
       expect(res.status).toBe(200);
 
-      const queryArgs = (hoisted.minuteFindUnique as any).mock.calls[0][0];
+      const queryArgs = (hoisted.minuteFindUnique as any).mock.calls[1][0];
       expect(queryArgs.include).toBeUndefined();
       expect(queryArgs.select.physicalSignedScanData).toBeUndefined();
       expect(queryArgs.select.school).toBeUndefined();
@@ -220,7 +220,7 @@ describe("Otimizações de Wake-up no RootLayout e Polling Enxuto de Atas", () =
       });
       expect(resCross.status).toBe(403);
 
-      hoisted.minuteFindUnique.mockResolvedValueOnce({
+      hoisted.minuteFindUnique.mockResolvedValue({
         id: "ata-sigilosa",
         schoolId: "school-1",
         status: "DRAFT",

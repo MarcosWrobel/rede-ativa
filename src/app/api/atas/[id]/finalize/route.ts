@@ -38,7 +38,10 @@ export async function POST(
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;

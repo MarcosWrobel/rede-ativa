@@ -523,7 +523,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       );
       expect(getBeforeRes.status).toBe(200);
 
-      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValueOnce({
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
         id: "min-1",
         schoolId: "school-a",
         status: "DRAFT",
@@ -566,7 +566,7 @@ describe("Reabertura de assinatura desenhada, validade de token QR e proteção 
       );
       expect(postExactRes.status).toBe(410);
 
-      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValueOnce({
+      mockPrisma.pedagogicalMinute.findUnique.mockResolvedValue({
         id: "min-1",
         schoolId: "school-a",
         status: "DRAFT",

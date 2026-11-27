@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
-import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import {
+  hasExplicitSuperAdminSchoolSelection,
+  requireAuthorizedSchool,
+} from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import {
@@ -241,8 +244,11 @@ export async function GET(req: Request) {
         },
       });
 
-      // Assegura verificationCode para atas finalizadas legadas
-      const missingCodes = rows.filter((m) => m.status === "FINALIZED" && !m.verificationCode);
+      // Assegura verificationCode para atas finalizadas legadas (apenas quando há autorização explícita de escrita)
+      const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(authCheck.snapshot);
+      const missingCodes = canAutoHealWrite
+        ? rows.filter((m) => m.status === "FINALIZED" && !m.verificationCode)
+        : [];
       for (const m of missingCodes) {
         const code = generateVerificationCode();
         m.verificationCode = code;
@@ -361,7 +367,10 @@ export async function POST(req: Request) {
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;

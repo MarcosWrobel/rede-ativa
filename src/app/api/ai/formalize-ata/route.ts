@@ -213,7 +213,11 @@ export async function POST(req: Request) {
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
-      authCheck.snapshot
+      authCheck.snapshot,
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;

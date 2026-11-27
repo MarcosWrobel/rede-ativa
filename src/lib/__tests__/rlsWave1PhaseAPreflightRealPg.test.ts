@@ -10673,6 +10673,399 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
+
+    it("exige seleção explícita de SUPERADMIN nas mutações/efeitos GET e recusa reopen/sign-screen sem esperar quando lock de escola B está ocupado", async () => {
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      let alphaMinId: string | null = null;
+      let alphaLegacyId: string | null = null;
+      let alphaJustId: string | null = null;
+      let betaMinId: string | null = null;
+
+      try {
+        testAuthState.useRealCurrentSchool = true;
+        testAuthState.useRealPermissions = true;
+
+        const { hashPin } = await import("@/lib/signingPin");
+        const { acquireMinuteWriteLock } = await import("@/lib/minuteLock");
+        const pinHash = await hashPin("4829");
+
+        // SUPERADMIN com vínculo ativo em school-alpha (UserSchool), mas SEM schoolId no perfil e SEM cookie active_school_id
+        await prisma.user.create({
+          data: {
+            id: "user-super-no-sel",
+            email: "super-nosel@redeativa.local",
+            name: "SuperAdmin Sem Seleção",
+            role: "SUPERADMIN",
+            active: true,
+            schoolId: null,
+            signingPinHash: pinHash,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-super-no-sel-alpha",
+            userId: "user-super-no-sel",
+            schoolId: "school-alpha",
+            role: "SUPERADMIN",
+            active: true,
+          },
+        });
+
+        const alphaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-alpha", active: true },
+          select: { id: true },
+        });
+        const betaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-beta", active: true },
+          select: { id: true },
+        });
+        expect(alphaStudent?.id).toBeTruthy();
+        expect(betaStudent?.id).toBeTruthy();
+
+        const alphaJust = await prisma.absenceJustification.create({
+          data: {
+            studentId: alphaStudent!.id,
+            type: "ATESTADO_MEDICO",
+            startDate: new Date("2026-04-10T00:00:00.000-03:00"),
+            endDate: new Date("2026-04-11T23:59:59.999-03:00"),
+            notes: "Justificativa Alpha",
+            createdByName: "Equipe",
+            createdByEmail: "super-nosel@redeativa.local",
+          },
+        });
+        alphaJustId = alphaJust.id;
+
+        const alphaMin = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-alpha",
+            year: 2026,
+            status: "DRAFT",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date(),
+            subject: "Ata Alpha Sem Selecao",
+            summary:
+              "Resumo oficial da ata em Alpha com mais de cinquenta caracteres para teste de seleção explícita.",
+            authorId: "user-super-no-sel",
+            authorName: "SuperAdmin Sem Seleção",
+            authorEmail: "super-nosel@redeativa.local",
+            authorRole: "SUPERADMIN",
+            students: {
+              create: [{ studentId: alphaStudent!.id, studentNameSnapshot: "Aluno Alpha" }],
+            },
+            participants: {
+              create: [{ role: "SERVIDOR", name: "SuperAdmin Sem Seleção" }],
+            },
+          },
+          include: { participants: true },
+        });
+        alphaMinId = alphaMin.id;
+
+        const alphaLegacy = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-alpha",
+            year: 2026,
+            ataNumber: 902,
+            status: "FINALIZED",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date(),
+            subject: "Ata Finalizada Alpha Legada",
+            summary:
+              "Resumo finalizado em Alpha com mais de cinquenta caracteres para validar GET sem escrita implícita.",
+            authorId: "user-super-no-sel",
+            authorName: "SuperAdmin Sem Seleção",
+            authorEmail: "super-nosel@redeativa.local",
+            authorRole: "SUPERADMIN",
+            verificationCode: null,
+          },
+        });
+        alphaLegacyId = alphaLegacy.id;
+
+        const betaMin = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-beta",
+            year: 2026,
+            status: "DRAFT",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date(),
+            subject: "Ata Beta Lock Test",
+            summary:
+              "Resumo da escola beta com mais de cinquenta caracteres para teste determinístico de lock ocupado.",
+            authorId: "user-beta-owner",
+            authorName: "Autor Beta",
+            authorEmail: "autor@escola-beta.local",
+            authorRole: "PEDAGOGA",
+            students: {
+              create: [{ studentId: betaStudent!.id, studentNameSnapshot: "Aluno Beta" }],
+            },
+            participants: {
+              create: [{ role: "SERVIDOR", name: "Autor Beta" }],
+            },
+          },
+          include: { participants: true },
+        });
+        betaMinId = betaMin.id;
+
+        testAuthState.pendingSessionUser = {
+          id: "user-super-no-sel",
+          email: "super-nosel@redeativa.local",
+          name: "SuperAdmin Sem Seleção",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+
+        const { POST: postJust } = await import("@/app/api/justifications/route");
+        const { DELETE: delJust } = await import("@/app/api/justifications/[id]/route");
+        const { GET: getAtas, POST: postAta } = await import("@/app/api/atas/route");
+        const {
+          GET: getAta,
+          PATCH: patchAta,
+          DELETE: delAta,
+        } = await import("@/app/api/atas/[id]/route");
+        const { POST: finalizeAta } = await import("@/app/api/atas/[id]/finalize/route");
+        const { POST: reopenAta } = await import("@/app/api/atas/[id]/reopen/route");
+        const { POST: signScreenAta } = await import("@/app/api/atas/[id]/sign-screen/route");
+        const { POST: formalizeAta } = await import("@/app/api/ai/formalize-ata/route");
+
+        const auditBefore = await prisma.auditLog.count();
+
+        // 1. Todas as mutações retornam 403 mesmo com vínculo ativo em A (sem cookie e sem schoolId no perfil)
+        expect(
+          (
+            await postJust(
+              new Request("http://127.0.0.1/api/justifications", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  studentId: alphaStudent!.id,
+                  type: "ATESTADO_MEDICO",
+                  startDate: "2026-04-12",
+                  endDate: "2026-04-13",
+                }),
+              })
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await delJust(
+              new Request(`http://127.0.0.1/api/justifications/${alphaJust.id}`, {
+                method: "DELETE",
+              }),
+              { params: Promise.resolve({ id: alphaJust.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await postAta(
+              new Request("http://127.0.0.1/api/atas", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  subject: "Tentativa Sem Seleção",
+                  studentIds: [alphaStudent!.id],
+                }),
+              })
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await patchAta(
+              new Request(`http://127.0.0.1/api/atas/${alphaMin.id}`, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ subject: "Tentativa" }),
+              }),
+              { params: Promise.resolve({ id: alphaMin.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await delAta(
+              new Request(`http://127.0.0.1/api/atas/${alphaMin.id}`, { method: "DELETE" }),
+              { params: Promise.resolve({ id: alphaMin.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await finalizeAta(
+              new Request(`http://127.0.0.1/api/atas/${alphaMin.id}/finalize`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ signingPin: "4829" }),
+              }),
+              { params: Promise.resolve({ id: alphaMin.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await reopenAta(
+              new Request(`http://127.0.0.1/api/atas/${alphaMin.id}/reopen`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ confirmReopen: true, expectedRevision: 1 }),
+              }),
+              { params: Promise.resolve({ id: alphaMin.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await signScreenAta(
+              new Request(`http://127.0.0.1/api/atas/${alphaMin.id}/sign-screen`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  participantId: alphaMin.participants[0].id,
+                  expectedRevision: 1,
+                  signatureData:
+                    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+                }),
+              }),
+              { params: Promise.resolve({ id: alphaMin.id }) }
+            )
+          ).status
+        ).toBe(403);
+
+        expect(
+          (
+            await formalizeAta(
+              new Request("http://127.0.0.1/api/ai/formalize-ata", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  minuteId: alphaMin.id,
+                  rawNotes: "Anotação sintética",
+                }),
+              })
+            )
+          ).status
+        ).toBe(403);
+
+        // 2. Leituras via fallback preservadas, mas sem efeito de escrita (verificationCode continua null)
+        const rGetList = await getAtas(new Request("http://127.0.0.1/api/atas"));
+        expect(rGetList.status).toBe(200);
+        const rGetSingle = await getAta(
+          new Request(`http://127.0.0.1/api/atas/${alphaLegacy.id}`),
+          { params: Promise.resolve({ id: alphaLegacy.id }) }
+        );
+        expect(rGetSingle.status).toBe(200);
+        const legacyAfterGet = await prisma.pedagogicalMinute.findUnique({
+          where: { id: alphaLegacy.id },
+          select: { verificationCode: true },
+        });
+        expect(legacyAfterGet?.verificationCode).toBeNull();
+        expect(await prisma.auditLog.count()).toBe(auditBefore);
+
+        // 3. Seleciona explicitamente school-alpha e mantém lock de B ocupado em conexão separada:
+        //    reopen e sign-screen para ata de B recusam com 403 imediatamente enquanto o lock de B está ocupado
+        await prisma.user.update({
+          where: { id: "user-super-no-sel" },
+          data: { schoolId: "school-alpha" },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "user-super-no-sel",
+          email: "super-nosel@redeativa.local",
+          name: "SuperAdmin Sem Seleção",
+          role: "SUPERADMIN",
+          schoolId: "school-alpha",
+        };
+
+        let resolveLockAcquired!: () => void;
+        const lockAcquired = new Promise<void>((res) => {
+          resolveLockAcquired = res;
+        });
+        let releaseLock!: () => void;
+        const waitReleaseLock = new Promise<void>((res) => {
+          releaseLock = res;
+        });
+
+        const lockHolderTx = prisma.$transaction(
+          async (tx) => {
+            await acquireMinuteWriteLock(tx, betaMin.id);
+            resolveLockAcquired();
+            await waitReleaseLock;
+          },
+          { maxWait: 5000, timeout: 10000 }
+        );
+
+        await lockAcquired;
+        try {
+          const rReopenWhileLocked = await reopenAta(
+            new Request(`http://127.0.0.1/api/atas/${betaMin.id}/reopen`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ confirmReopen: true, expectedRevision: 1 }),
+            }),
+            { params: Promise.resolve({ id: betaMin.id }) }
+          );
+          expect(rReopenWhileLocked.status).toBe(403);
+
+          const rSignWhileLocked = await signScreenAta(
+            new Request(`http://127.0.0.1/api/atas/${betaMin.id}/sign-screen`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                participantId: betaMin.participants[0].id,
+                expectedRevision: 1,
+                signatureData:
+                  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+              }),
+            }),
+            { params: Promise.resolve({ id: betaMin.id }) }
+          );
+          expect(rSignWhileLocked.status).toBe(403);
+        } finally {
+          releaseLock();
+          await lockHolderTx;
+        }
+
+        const betaAfter = await prisma.pedagogicalMinute.findUnique({
+          where: { id: betaMin.id },
+          include: { participants: true },
+        });
+        expect(betaAfter?.contentRevision).toBe(1);
+        expect(betaAfter?.participants[0]?.hasSignature).toBe(false);
+        expect(await prisma.auditLog.count()).toBe(auditBefore);
+      } finally {
+        for (const mId of [alphaMinId, alphaLegacyId, betaMinId].filter(Boolean) as string[]) {
+          await prisma.pedagogicalMinute.deleteMany({ where: { id: mId } }).catch(() => {});
+        }
+        if (alphaJustId) {
+          await prisma.absenceJustification
+            .deleteMany({ where: { id: alphaJustId } })
+            .catch(() => {});
+        }
+        await prisma.auditLog
+          .deleteMany({ where: { userEmail: "super-nosel@redeativa.local" } })
+          .catch(() => {});
+        await prisma.userSchool
+          .deleteMany({ where: { id: { in: ["us-super-no-sel-alpha"] } } })
+          .catch(() => {});
+        await prisma.user
+          .deleteMany({ where: { id: { in: ["user-super-no-sel"] } } })
+          .catch(() => {});
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
   }
 );
 

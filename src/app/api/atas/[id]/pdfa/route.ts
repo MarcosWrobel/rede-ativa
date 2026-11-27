@@ -30,8 +30,24 @@ export async function GET(
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
 
-    const minute = await withTenantContext(prisma, currentSchool.id, (tx) =>
-      tx.pedagogicalMinute.findUnique({
+    const minuteResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const header = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+        select: { id: true, schoolId: true },
+      });
+      if (!header) {
+        return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+      }
+      if (
+        header.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(header.schoolId, currentSchool.id, authCheck.session)
+      ) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+      const minute = await tx.pedagogicalMinute.findUnique({
         where: { id },
         include: {
           school: true,
@@ -44,22 +60,14 @@ export async function GET(
             orderBy: { createdAt: "asc" },
           },
         },
-      })
-    );
+      });
+      return minute ? { minute } : { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+    });
 
-    if (!minute) {
-      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    if ("errorStatus" in minuteResult) {
+      return NextResponse.json({ error: minuteResult.error }, { status: minuteResult.errorStatus });
     }
-
-    if (
-      minute.schoolId !== currentSchool.id ||
-      !assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)
-    ) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
+    const minute = minuteResult.minute;
 
     if (minute.status === "DRAFT") {
       return NextResponse.json(

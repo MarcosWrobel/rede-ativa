@@ -190,6 +190,25 @@ export async function GET(req: Request) {
       let allowedInactiveStudentIds = new Set<string>();
 
       if (minuteId) {
+        const minuteHeader = await tx.pedagogicalMinute.findUnique({
+          where: { id: minuteId },
+          select: { id: true, schoolId: true },
+        });
+
+        if (!minuteHeader) {
+          return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada." };
+        }
+
+        if (
+          minuteHeader.schoolId !== currentSchool.id ||
+          !assertTenantOwnership(minuteHeader.schoolId, currentSchool.id, effectiveSession)
+        ) {
+          return {
+            errorStatus: 403 as const,
+            error: "Acesso negado a registro de outra instituição de ensino.",
+          };
+        }
+
         const minute = await tx.pedagogicalMinute.findUnique({
           where: { id: minuteId },
           select: {
@@ -205,16 +224,6 @@ export async function GET(req: Request) {
 
         if (!minute) {
           return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada." };
-        }
-
-        if (
-          minute.schoolId !== currentSchool.id ||
-          !assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)
-        ) {
-          return {
-            errorStatus: 403 as const,
-            error: "Acesso negado a registro de outra instituição de ensino.",
-          };
         }
 
         if (!canAccessConfidentialMinute(minute, effectiveSession)) {

@@ -196,7 +196,7 @@ describe("JUR-08: Preservação Arquivística Binária PDF/A-1b (ISO 19005-1 Lev
   });
 
   it("GET /api/atas/[id]/pdfa rejeita rascunhos DRAFT com status 400", async () => {
-    vi.spyOn(prisma.pedagogicalMinute, "findUnique").mockResolvedValueOnce({
+    vi.spyOn(prisma.pedagogicalMinute, "findUnique").mockResolvedValue({
       ...dummyMinute,
       status: "DRAFT",
     } as any);

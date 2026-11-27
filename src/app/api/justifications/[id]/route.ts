@@ -21,7 +21,10 @@ export async function DELETE(
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;

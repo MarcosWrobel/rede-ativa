@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import { hasExplicitSuperAdminSchoolSelection } from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
@@ -118,7 +119,24 @@ export default async function AtaPrintPage({ params }: Props) {
   const session = ctx.session;
   const currentSchool = ctx.school;
 
+  const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(ctx.snapshot);
+
   let minute: any = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+    const header = await tx.pedagogicalMinute.findUnique({
+      where: { id },
+      select: { id: true, schoolId: true },
+    });
+
+    if (!header) return null;
+
+    // Validação estrita de isolamento multi-tenant (Ponto 2) antes de carregar dados sensíveis
+    const isHeaderOwner =
+      header.schoolId === currentSchool.id &&
+      assertTenantOwnership(header.schoolId, currentSchool.id, session);
+    if (!isHeaderOwner) {
+      return "FORBIDDEN" as const;
+    }
+
     let row: any = await tx.pedagogicalMinute.findUnique({
       where: { id },
       select: PRINT_MINUTE_SELECT,
@@ -126,18 +144,14 @@ export default async function AtaPrintPage({ params }: Props) {
 
     if (!row) return null;
 
-    // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
-    const isOwner =
-      row.schoolId === currentSchool.id &&
-      assertTenantOwnership(row.schoolId, currentSchool.id, session);
-    if (!isOwner || !canAccessConfidentialMinute(row, session)) {
+    if (!canAccessConfidentialMinute(row, session)) {
       return "FORBIDDEN" as const;
     }
 
     // Auto-healing: Se a ata está FINALIZED mas não tem verificationCode (legado ou importado),
     // assegura a geração atômica e salva no banco para garantir a fé pública e o QR Code.
     // Executado estritamente APÓS validação de tenant autorizada.
-    if (row.status === "FINALIZED" && !row.verificationCode) {
+    if (canAutoHealWrite && row.status === "FINALIZED" && !row.verificationCode) {
       const newCode = generateVerificationCode();
       try {
         row = await tx.pedagogicalMinute.update({

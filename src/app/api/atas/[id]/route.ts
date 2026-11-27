@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
-import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import {
+  hasExplicitSuperAdminSchoolSelection,
+  requireAuthorizedSchool,
+} from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
@@ -121,8 +124,25 @@ export async function GET(
       : authCheck.session;
 
     if (isPollMode) {
-      const pollMinute = await withTenantContext(prisma, currentSchool.id, async (tx) =>
-        tx.pedagogicalMinute.findUnique({
+      const pollResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+        const header = await tx.pedagogicalMinute.findUnique({
+          where: { id },
+          select: { id: true, schoolId: true },
+        });
+        if (!header) {
+          return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+        }
+        if (
+          header.schoolId !== currentSchool.id ||
+          !assertTenantOwnership(header.schoolId, currentSchool.id, effectiveSession)
+        ) {
+          return {
+            errorStatus: 403 as const,
+            error: "Acesso negado a registro de outra instituição de ensino.",
+          };
+        }
+
+        const pollMinute = await tx.pedagogicalMinute.findUnique({
           where: { id },
           select: {
             id: true,
@@ -152,22 +172,16 @@ export async function GET(
               },
             },
           },
-        })
-      );
+        });
+        return pollMinute
+          ? { pollMinute }
+          : { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+      });
 
-      if (!pollMinute) {
-        return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+      if ("errorStatus" in pollResult) {
+        return NextResponse.json({ error: pollResult.error }, { status: pollResult.errorStatus });
       }
-
-      if (
-        pollMinute.schoolId !== currentSchool.id ||
-        !assertTenantOwnership(pollMinute.schoolId, currentSchool.id, effectiveSession)
-      ) {
-        return NextResponse.json(
-          { error: "Acesso negado a registro de outra instituição de ensino." },
-          { status: 403 }
-        );
-      }
+      const pollMinute = pollResult.pollMinute;
 
       if (!canAccessConfidentialMinute(pollMinute, effectiveSession)) {
         return NextResponse.json(
@@ -207,7 +221,28 @@ export async function GET(
       });
     }
 
+    const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(authCheck.snapshot);
+
     const getTxResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const header = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+        select: { id: true, schoolId: true },
+      });
+
+      if (!header) {
+        return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+      }
+
+      if (
+        header.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(header.schoolId, currentSchool.id, effectiveSession)
+      ) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
       const minute = await tx.pedagogicalMinute.findUnique({
         where: { id },
         include: {
@@ -233,16 +268,6 @@ export async function GET(
         return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
       }
 
-      if (
-        minute.schoolId !== currentSchool.id ||
-        !assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)
-      ) {
-        return {
-          errorStatus: 403 as const,
-          error: "Acesso negado a registro de outra instituição de ensino.",
-        };
-      }
-
       if (!canAccessConfidentialMinute(minute, effectiveSession)) {
         return {
           errorStatus: 403 as const,
@@ -250,8 +275,8 @@ export async function GET(
         };
       }
 
-      // Assegura verificationCode para ata finalizada legada
-      if (minute.status === "FINALIZED" && !minute.verificationCode) {
+      // Assegura verificationCode para ata finalizada legada (apenas com autorização explícita de escrita)
+      if (canAutoHealWrite && minute.status === "FINALIZED" && !minute.verificationCode) {
         const code = generateVerificationCode();
         minute.verificationCode = code;
         try {
@@ -332,7 +357,10 @@ export async function PATCH(
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -344,12 +372,26 @@ export async function PATCH(
       ? withTenantContext(prisma, currentSchool.id, (tx) =>
           tx.pedagogicalMinute.findUnique({
             where: { id },
-            include: { students: true, participants: true, actionItems: true },
+            select: {
+              id: true,
+              schoolId: true,
+              status: true,
+              isConfidential: true,
+              authorId: true,
+              authorEmail: true,
+            },
           })
         )
       : prisma.pedagogicalMinute.findUnique({
           where: { id },
-          include: { students: true, participants: true, actionItems: true },
+          select: {
+            id: true,
+            schoolId: true,
+            status: true,
+            isConfidential: true,
+            authorId: true,
+            authorEmail: true,
+          },
         }));
 
     if (!existing) {
@@ -769,7 +811,10 @@ export async function DELETE(
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;

@@ -71,7 +71,10 @@ export async function POST(
       authCheck.session,
       authCheck.schoolId,
       authCheck.snapshot,
-      { allowSuperAdminReadOnlyFallback: false }
+      {
+        allowSuperAdminReadOnlyFallback: false,
+        requireExplicitSuperAdminSelection: true,
+      }
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
@@ -89,6 +92,22 @@ export async function POST(
         : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
 
     const txResult = await runTx(async (tx) => {
+      const preCheck = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+        select: { id: true, schoolId: true },
+      });
+
+      if (!preCheck) {
+        throw new Error("NOT_FOUND:Ata pedagógica não encontrada.");
+      }
+
+      if (
+        preCheck.schoolId !== currentSchool.id ||
+        !assertTenantOwnership(preCheck.schoolId, currentSchool.id, effectiveSession)
+      ) {
+        throw new Error("FORBIDDEN:Acesso negado a registro de outra instituição de ensino.");
+      }
+
       await acquireMinuteWriteLock(tx, id);
 
       const minute = await tx.pedagogicalMinute.findUnique({

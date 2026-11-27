@@ -225,6 +225,25 @@ export async function getSchoolContextByVerifiedId(
  */
 export interface AuthorizedSchoolOptions {
   allowSuperAdminReadOnlyFallback?: boolean;
+  requireExplicitSuperAdminSelection?: boolean;
+}
+
+export async function hasExplicitSuperAdminSchoolSelection(
+  preloadedSnapshot?: ServerUserAuthSnapshot | null
+): Promise<boolean> {
+  if (!preloadedSnapshot || !isSnapshotSuperAdmin(preloadedSnapshot)) {
+    return true;
+  }
+
+  let cookieVal: string | null = null;
+  try {
+    const cookieStore = await cookies();
+    cookieVal = cookieStore.get("active_school_id")?.value?.trim() || null;
+  } catch {
+    // Fora do ciclo de requisição HTTP
+  }
+
+  return Boolean(cookieVal || preloadedSnapshot.schoolId?.trim());
 }
 
 export async function getAuthorizedCurrentSchool(
@@ -249,11 +268,19 @@ export async function getAuthorizedCurrentSchool(
   }
 
   // Candidatos de seleção (nunca concedem autorização por si sós)
-  const selectionCandidates = [
-    { source: "cookie" as const, id: cookieVal },
-    { source: "explicit" as const, id: explicitSchoolId?.trim() || null },
-    { source: "profile" as const, id: snapshot.schoolId?.trim() || null },
-  ];
+  // Em mutações de SUPERADMIN (requireExplicitSuperAdminSelection), ignora explicitSchoolId
+  // pois buildSessionFromSnapshot pode derivar schoolId do primeiro vínculo ativo (fallback).
+  const selectionCandidates =
+    isSuper && options?.requireExplicitSuperAdminSelection
+      ? [
+          { source: "cookie" as const, id: cookieVal },
+          { source: "profile" as const, id: snapshot.schoolId?.trim() || null },
+        ]
+      : [
+          { source: "cookie" as const, id: cookieVal },
+          { source: "explicit" as const, id: explicitSchoolId?.trim() || null },
+          { source: "profile" as const, id: snapshot.schoolId?.trim() || null },
+        ];
 
   const checkedIds = new Set<string>();
   for (const candidate of selectionCandidates) {
@@ -280,6 +307,10 @@ export async function getAuthorizedCurrentSchool(
         `[currentSchool] Seleção não autorizada via cookie active_school_id descartada para usuário ${snapshot.email}`
       );
     }
+  }
+
+  if (isSuper && options?.requireExplicitSuperAdminSelection) {
+    return null;
   }
 
   // Fallback exclusivo para vínculos ativos reais do próprio usuário
