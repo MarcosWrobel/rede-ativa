@@ -5822,8 +5822,35 @@ describe.skipIf(!SHOULD_RUN)(
       const originalWithTenantContext = rlsTenantContext.withTenantContext;
       let failStarterTemplate = false;
       let failAuditStrictCreate = false;
+      let lastCleanupPid: number | null = null;
       let beforeTxHook: (() => Promise<void>) | null = null;
       let beforeDeleteHook: (() => Promise<void>) | null = null;
+      const waitForPgLockOnPid = async (blockedPid: number, expectedBlockerPid: number) => {
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline) {
+          const rows = await prisma.$queryRaw<
+            Array<{ waitEventType: string | null; blockingPids: number[] }>
+          >`
+            SELECT
+              a.wait_event_type AS "waitEventType",
+              pg_blocking_pids(a.pid) AS "blockingPids"
+            FROM pg_stat_activity a
+            WHERE a.pid = ${blockedPid}
+          `;
+          const row = rows[0];
+          if (
+            row?.waitEventType === "Lock" &&
+            Array.isArray(row.blockingPids) &&
+            row.blockingPids.includes(expectedBlockerPid)
+          ) {
+            return row;
+          }
+          await new Promise((r) => setTimeout(r, 15));
+        }
+        throw new Error(
+          `Timeout aguardando bloqueio PostgreSQL de pid=${blockedPid} por blocker=${expectedBlockerPid}`
+        );
+      };
       const withTenantSpy = vi
         .spyOn(rlsTenantContext, "withTenantContext")
         .mockImplementation((client, schoolId, fn) =>
@@ -5833,9 +5860,12 @@ describe.skipIf(!SHOULD_RUN)(
               beforeTxHook = null;
               await hook();
             }
-            const [{ val }] = await tx.$queryRaw<Array<{ val: string | null }>>`
-              SELECT current_setting('app.current_school_id', true) AS val
+            const [{ val, pid }] = await tx.$queryRaw<Array<{ val: string | null; pid: number }>>`
+              SELECT
+                current_setting('app.current_school_id', true) AS val,
+                pg_backend_pid() AS pid
             `;
+            lastCleanupPid = pid;
             capturedContextSchools.push(val);
             if (failStarterTemplate) {
               let count = 0;
@@ -6645,7 +6675,46 @@ describe.skipIf(!SHOULD_RUN)(
         expect(await prisma.school.findUnique({ where: { id: "school-conc-rebind" } })).toBeNull();
 
         // 11. Concorrência no Conselho durante POST /api/schools/[id]/sanitize:
-        //     FOR UPDATE em ClassCouncilBoard/Subject/Card bloqueia inserção concorrente de nota divergente até o fim do saneamento
+        //     FOR UPDATE em ClassCouncilBoard/Subject/Card bloqueia inserção concorrente de nota divergente (pg_blocking_pids)
+        //     e preserva escola, modelos, equipe e school-beta intactos
+        await prisma.classCouncilBoard.create({
+          data: {
+            id: "board-beta-pres",
+            schoolId: "school-beta",
+            classGroupId: "cg-beta",
+            year: 2026,
+          },
+        });
+        await prisma.classCouncilSubject.create({
+          data: {
+            id: "sub-beta-pres",
+            schoolId: "school-beta",
+            boardId: "board-beta-pres",
+            name: "MATEMATICA",
+            displayOrder: 1,
+            active: true,
+          },
+        });
+        await prisma.studentCouncilCard.create({
+          data: {
+            id: "card-beta-pres",
+            schoolId: "school-beta",
+            boardId: "board-beta-pres",
+            studentId: "stu-lc-b1",
+          },
+        });
+        await prisma.studentCouncilSubjectEntry.create({
+          data: {
+            id: "entry-beta-pres",
+            schoolId: "school-beta",
+            cardId: "card-beta-pres",
+            subjectId: "sub-beta-pres",
+            trimester: 1,
+            descriptorCodes: [1],
+            grade: 7.5,
+          },
+        });
+
         await prisma.school.create({
           data: {
             id: "school-conc-council",
@@ -6655,6 +6724,26 @@ describe.skipIf(!SHOULD_RUN)(
             state: "PR",
             nre: "NRE Teste",
             network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.messageTemplate.create({
+          data: {
+            id: "tpl-conc-council",
+            schoolId: "school-conc-council",
+            title: "Modelo Preservado Sanitize",
+            segment: "TODOS",
+            prefixText: "Olá",
+            suffixText: "Fim",
+            active: true,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-conc-council",
+            userId: "lc-ped",
+            schoolId: "school-conc-council",
+            role: "PEDAGOGA",
             active: true,
           },
         });
@@ -6723,34 +6812,44 @@ describe.skipIf(!SHOULD_RUN)(
           { params: Promise.resolve({ id: "school-conc-council" }) }
         );
         await councilLockPromise;
+        const sanitizeBlockerPid = lastCleanupPid!;
+        expect(sanitizeBlockerPid).toBeGreaterThan(0);
 
-        let councilInsertSettled = false;
-        const concurrentCouncilEntryPromise = prisma.studentCouncilSubjectEntry
-          .create({
-            data: {
-              id: "entry-conc-div",
-              schoolId: "school-beta",
-              cardId: "card-conc-council",
-              subjectId: "sub-conc-council",
-              trimester: 1,
-              descriptorCodes: [2],
-              grade: 4.0,
-            },
+        let sanWriterPidResolve!: (pid: number) => void;
+        const sanWriterPidPromise = new Promise<number>((res) => {
+          sanWriterPidResolve = res;
+        });
+        const concurrentCouncilEntryPromise = prisma
+          .$transaction(async (tx2) => {
+            const [{ pid }] = await tx2.$queryRaw<Array<{ pid: number }>>`
+              SELECT pg_backend_pid() AS pid
+            `;
+            sanWriterPidResolve(pid);
+            return tx2.studentCouncilSubjectEntry.create({
+              data: {
+                id: "entry-conc-div",
+                schoolId: "school-beta",
+                cardId: "card-conc-council",
+                subjectId: "sub-conc-council",
+                trimester: 1,
+                descriptorCodes: [2],
+                grade: 4.0,
+              },
+            });
           })
           .then(
-            () => {
-              councilInsertSettled = true;
-              return "committed";
-            },
-            () => {
-              councilInsertSettled = true;
-              return "rejected";
-            }
+            () => "committed",
+            () => "rejected"
           );
 
-        await new Promise((r) => setTimeout(r, 80));
-        expect(councilInsertSettled).toBe(false);
-        releaseCouncilSanitize();
+        try {
+          const sanWriterPid = await sanWriterPidPromise;
+          const sanLockObs = await waitForPgLockOnPid(sanWriterPid, sanitizeBlockerPid);
+          expect(sanLockObs.waitEventType).toBe("Lock");
+          expect(sanLockObs.blockingPids).toContain(sanitizeBlockerPid);
+        } finally {
+          releaseCouncilSanitize();
+        }
 
         const [rSanConcCouncil, councilInsertOutcome] = await Promise.all([
           sanCouncilPromise,
@@ -6761,7 +6860,242 @@ describe.skipIf(!SHOULD_RUN)(
         expect(
           await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-conc-div" } })
         ).toBeNull();
-        expect(await prisma.school.findUnique({ where: { id: "school-beta" } })).not.toBeNull();
+        expect(await prisma.school.findUnique({ where: { id: "school-conc-council" } })).not.toBeNull();
+        expect(await prisma.messageTemplate.findUnique({ where: { id: "tpl-conc-council" } })).not.toBeNull();
+        expect(await prisma.userSchool.findUnique({ where: { id: "us-conc-council" } })).not.toBeNull();
+        expect(await prisma.student.count({ where: { schoolId: "school-conc-council" } })).toBe(0);
+        expect(await prisma.classCouncilBoard.count({ where: { schoolId: "school-conc-council" } })).toBe(0);
+        expect(await prisma.studentCouncilCard.count({ where: { schoolId: "school-conc-council" } })).toBe(0);
+        expect(await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-beta-pres" } })).not.toBeNull();
+
+        // 12. Concorrência no Conselho durante DELETE /api/schools/[id]:
+        //     (a) DELETE adquire FOR UPDATE primeiro -> escritor divergente aguarda blocker PID (pg_blocking_pids),
+        //         falha após commit, escola/Conselho removidos, school-beta preservada e 1 DELETE_SCHOOL no AuditLog real
+        await prisma.school.create({
+          data: {
+            id: "school-conc-del-council",
+            inepCode: "99000886",
+            name: "Escola Concorrência Delete Conselho",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.classGroup.create({
+          data: {
+            id: "cg-conc-del-council",
+            name: "1º Ano D",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-conc-del-council",
+          },
+        });
+        await prisma.student.create({
+          data: {
+            id: "stu-conc-del-council",
+            name: "Aluno Delete Conselho",
+            cgm: "980000101",
+            phone: "41999999801",
+            schoolId: "school-conc-del-council",
+            classGroupId: "cg-conc-del-council",
+            active: true,
+          },
+        });
+        await prisma.classCouncilBoard.create({
+          data: {
+            id: "board-conc-del-council",
+            schoolId: "school-conc-del-council",
+            classGroupId: "cg-conc-del-council",
+            year: 2026,
+          },
+        });
+        await prisma.classCouncilSubject.create({
+          data: {
+            id: "sub-conc-del-council",
+            schoolId: "school-conc-del-council",
+            boardId: "board-conc-del-council",
+            name: "HISTORIA",
+            displayOrder: 1,
+            active: true,
+          },
+        });
+        await prisma.studentCouncilCard.create({
+          data: {
+            id: "card-conc-del-council",
+            schoolId: "school-conc-del-council",
+            boardId: "board-conc-del-council",
+            studentId: "stu-conc-del-council",
+          },
+        });
+
+        let delCouncilLockResolve!: () => void;
+        const delCouncilLockPromise = new Promise<void>((res) => {
+          delCouncilLockResolve = res;
+        });
+        let releaseDelCouncil!: () => void;
+        const releaseDelCouncilPromise = new Promise<void>((res) => {
+          releaseDelCouncil = res;
+        });
+        beforeDeleteHook = async () => {
+          delCouncilLockResolve();
+          await releaseDelCouncilPromise;
+        };
+
+        const delCouncilPromise = deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-del-council", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-conc-del-council" }) }
+        );
+        await delCouncilLockPromise;
+        const deleteBlockerPid = lastCleanupPid!;
+        expect(deleteBlockerPid).toBeGreaterThan(0);
+
+        let delWriterPidResolve!: (pid: number) => void;
+        const delWriterPidPromise = new Promise<number>((res) => {
+          delWriterPidResolve = res;
+        });
+        const concurrentDelCouncilEntryPromise = prisma
+          .$transaction(async (tx2) => {
+            const [{ pid }] = await tx2.$queryRaw<Array<{ pid: number }>>`
+              SELECT pg_backend_pid() AS pid
+            `;
+            delWriterPidResolve(pid);
+            return tx2.studentCouncilSubjectEntry.create({
+              data: {
+                id: "entry-del-conc-div",
+                schoolId: "school-beta",
+                cardId: "card-conc-del-council",
+                subjectId: "sub-conc-del-council",
+                trimester: 1,
+                descriptorCodes: [2],
+                grade: 4.5,
+              },
+            });
+          })
+          .then(
+            () => "committed",
+            () => "rejected"
+          );
+
+        try {
+          const delWriterPid = await delWriterPidPromise;
+          const delLockObs = await waitForPgLockOnPid(delWriterPid, deleteBlockerPid);
+          expect(delLockObs.waitEventType).toBe("Lock");
+          expect(delLockObs.blockingPids).toContain(deleteBlockerPid);
+        } finally {
+          releaseDelCouncil();
+        }
+
+        const [rDelConcCouncil, delCouncilOutcome] = await Promise.all([
+          delCouncilPromise,
+          concurrentDelCouncilEntryPromise,
+        ]);
+        expect(rDelConcCouncil.status).toBe(200);
+        expect(delCouncilOutcome).toBe("rejected");
+        expect(await prisma.school.findUnique({ where: { id: "school-conc-del-council" } })).toBeNull();
+        expect(await prisma.classCouncilBoard.count({ where: { schoolId: "school-conc-del-council" } })).toBe(0);
+        expect(await prisma.studentCouncilCard.count({ where: { schoolId: "school-conc-del-council" } })).toBe(0);
+        expect(
+          await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-del-conc-div" } })
+        ).toBeNull();
+        expect(await prisma.classCouncilBoard.findUnique({ where: { id: "board-beta-pres" } })).not.toBeNull();
+        expect(await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-beta-pres" } })).not.toBeNull();
+        expect(
+          await prisma.auditLog.count({
+            where: { action: "DELETE_SCHOOL", entityId: "school-conc-del-council" },
+          })
+        ).toBe(1);
+
+        //     (b) Ordem inversa: vínculo divergente do Conselho confirma antes do DELETE -> 409, rollback integral e 0 AuditLog
+        await prisma.school.create({
+          data: {
+            id: "school-conc-del-inv",
+            inepCode: "99000887",
+            name: "Escola Concorrência Delete Inversa",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: true,
+          },
+        });
+        await prisma.classGroup.create({
+          data: {
+            id: "cg-conc-del-inv",
+            name: "1º Ano I",
+            segment: "EM",
+            shift: "MANHA",
+            schoolId: "school-conc-del-inv",
+          },
+        });
+        await prisma.student.create({
+          data: {
+            id: "stu-conc-del-inv",
+            name: "Aluno Delete Inversa",
+            cgm: "980000201",
+            phone: "41999999802",
+            schoolId: "school-conc-del-inv",
+            classGroupId: "cg-conc-del-inv",
+            active: true,
+          },
+        });
+        await prisma.classCouncilBoard.create({
+          data: {
+            id: "board-conc-del-inv",
+            schoolId: "school-conc-del-inv",
+            classGroupId: "cg-conc-del-inv",
+            year: 2026,
+          },
+        });
+        await prisma.classCouncilSubject.create({
+          data: {
+            id: "sub-conc-del-inv",
+            schoolId: "school-conc-del-inv",
+            boardId: "board-conc-del-inv",
+            name: "GEOGRAFIA",
+            displayOrder: 1,
+            active: true,
+          },
+        });
+        await prisma.studentCouncilCard.create({
+          data: {
+            id: "card-conc-del-inv",
+            schoolId: "school-conc-del-inv",
+            boardId: "board-conc-del-inv",
+            studentId: "stu-conc-del-inv",
+          },
+        });
+
+        beforeTxHook = async () => {
+          await prisma.studentCouncilSubjectEntry.create({
+            data: {
+              id: "entry-del-inv-div",
+              schoolId: "school-beta",
+              cardId: "card-conc-del-inv",
+              subjectId: "sub-conc-del-inv",
+              trimester: 1,
+              descriptorCodes: [2],
+              grade: 3.8,
+            },
+          });
+        };
+
+        const rDelInv = await deleteSchoolHandler(
+          new Request("http://127.0.0.1/api/schools/school-conc-del-inv", { method: "DELETE" }),
+          { params: Promise.resolve({ id: "school-conc-del-inv" }) }
+        );
+        expect(rDelInv.status).toBe(409);
+        expect((await rDelInv.json()).code).toBe("SCHOOL_DELETE_INTEGRITY_CONFLICT");
+        expect(await prisma.school.findUnique({ where: { id: "school-conc-del-inv" } })).not.toBeNull();
+        expect(
+          await prisma.studentCouncilSubjectEntry.findUnique({ where: { id: "entry-del-inv-div" } })
+        ).not.toBeNull();
+        expect(
+          await prisma.auditLog.count({
+            where: { action: "DELETE_SCHOOL", entityId: "school-conc-del-inv" },
+          })
+        ).toBe(0);
       } finally {
         beforeTxHook = null;
         beforeDeleteHook = null;
