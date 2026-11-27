@@ -1291,6 +1291,7 @@ export interface TurmaSelectionConfig {
   selected: boolean;
   customName: string;
   targetClassGroupId?: string;
+  confirmCreateNew?: boolean;
   segment: SchoolSegment;
   shift: SchoolShift;
   isComplementary?: boolean;
@@ -1301,6 +1302,7 @@ export interface ConsolidatedImportPreview {
     tempId: string;
     name: string;
     targetClassGroupId?: string;
+    confirmCreateNew?: boolean;
     sourceIdentity?: string;
     segment: SchoolSegment;
     shift: SchoolShift;
@@ -1384,6 +1386,7 @@ export function consolidateSelectedStudents(
       tempId: t.tempId,
       name: cleanTurmaName,
       ...(cfg.targetClassGroupId ? { targetClassGroupId: cfg.targetClassGroupId } : {}),
+      ...(cfg.confirmCreateNew ? { confirmCreateNew: true } : {}),
       ...(t.sourceIdentity ? { sourceIdentity: t.sourceIdentity } : {}),
       segment: cfg.segment,
       shift: cfg.shift,
@@ -1484,6 +1487,7 @@ export interface SereTurmaMatchResult {
     | "canonical_name"
     | "student_overlap"
     | "legacy_night_name"
+    | "ambiguous_shift_mismatch"
     | "ambiguous_student_overlap"
     | "ambiguous_legacy_night";
   candidates: ExistingClassGroupCandidate[];
@@ -1491,8 +1495,12 @@ export interface SereTurmaMatchResult {
 
 /**
  * Resolve de forma determinística se uma turma do SERE corresponde inequivocamente
- * a uma turma já existente na escola (nome canônico, sobreposição de CGMs ou legado noturno),
- * se é uma turma nova, ou se há ambiguidade que exige seleção explícita antes da gravação.
+ * a uma turma já existente na escola (nome canônico no mesmo turno, indício de CGMs
+ * compatível ou legado noturno único), se é uma turma nova, ou se há ambiguidade/sinal
+ * incompatível que exige confirmação explícita antes da gravação.
+ *
+ * CGMs em comum são tratados apenas como indício: transferências entre turnos (ex.: diurno -> noturno)
+ * nunca reaproveitam turma de outro turno.
  */
 export function resolveSereTurmaMatch(params: {
   name: string;
@@ -1519,84 +1527,119 @@ export function resolveSereTurmaMatch(params: {
     (cg) => normalizeClassGroupKey(cg.name) === targetKey
   );
   if (canonicalMatch) {
+    if (canonicalMatch.shift === shift) {
+      return {
+        status: "matched",
+        matchedClassGroupId: canonicalMatch.id,
+        reason: "canonical_name",
+        candidates: [canonicalMatch],
+      };
+    }
     return {
-      status: "matched",
-      matchedClassGroupId: canonicalMatch.id,
-      reason: "canonical_name",
+      status: "ambiguous",
+      reason: "ambiguous_shift_mismatch",
       candidates: [canonicalMatch],
     };
   }
 
-  // 2. Correspondência por estudantes já matriculados (CGM) na mesma escola
-  const overlapIds = new Set<string>();
+  // 2. Indício por estudantes já matriculados (CGM) — separado por compatibilidade de turno
+  const sameShiftOverlapIds = new Set<string>();
+  const otherShiftOverlapIds = new Set<string>();
   for (const rawCgm of studentCgms) {
     const cleanCgm = rawCgm.replace(/\D/g, "").trim();
     if (!cleanCgm) continue;
     const matchedStudent = existingStudentsByCgm.get(cleanCgm);
-    if (matchedStudent && byId.has(matchedStudent.classGroupId)) {
-      overlapIds.add(matchedStudent.classGroupId);
+    if (!matchedStudent) continue;
+    const cg = byId.get(matchedStudent.classGroupId);
+    if (!cg) continue;
+    if (cg.shift === shift) {
+      sameShiftOverlapIds.add(cg.id);
+    } else {
+      otherShiftOverlapIds.add(cg.id);
     }
   }
 
-  if (overlapIds.size === 1) {
-    const onlyId = Array.from(overlapIds)[0];
-    const matched = byId.get(onlyId)!;
-    return {
-      status: "matched",
-      matchedClassGroupId: matched.id,
-      reason: "student_overlap",
-      candidates: [matched],
-    };
+  // 3. Candidatos da mesma série no turno noturno (legado "Nº Série" ou turma renomeada)
+  const gradeFromSource = sourceIdentity?.split("|")[1]?.match(/^(\d+)/)?.[1];
+  const gradeFromName = name.trim().match(/^(\d+)/)?.[1];
+  const gradeNum = gradeFromSource || gradeFromName;
+
+  let nightGradeClasses: ExistingClassGroupCandidate[] = [];
+  let legacyMatches: ExistingClassGroupCandidate[] = [];
+
+  if (shift === "NOITE" && gradeNum) {
+    const legacyKey = normalizeClassGroupKey(`${gradeNum}º Série`);
+    nightGradeClasses = existingClassGroups.filter((cg) => {
+      if (cg.shift !== "NOITE") return false;
+      const cgKey = normalizeClassGroupKey(cg.name);
+      return (
+        cgKey === legacyKey ||
+        new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(cgKey)
+      );
+    });
+    legacyMatches = nightGradeClasses.filter(
+      (cg) => normalizeClassGroupKey(cg.name) === legacyKey
+    );
   }
 
-  if (overlapIds.size > 1) {
-    const candidates = Array.from(overlapIds)
-      .map((id) => byId.get(id))
-      .filter((cg): cg is ExistingClassGroupCandidate => Boolean(cg));
+  // 4. Combinação dos indícios sem nunca reaproveitar turma de outro turno
+  if (sameShiftOverlapIds.size === 1) {
+    const onlyId = Array.from(sameShiftOverlapIds)[0];
+    const cand = byId.get(onlyId)!;
+    const hasGradeCompatibility =
+      !gradeNum ||
+      nightGradeClasses.some((n) => n.id === cand.id) ||
+      new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(normalizeClassGroupKey(cand.name));
+
+    if (otherShiftOverlapIds.size === 0 && hasGradeCompatibility) {
+      return {
+        status: "matched",
+        matchedClassGroupId: cand.id,
+        reason: "student_overlap",
+        candidates: [cand],
+      };
+    }
+
+    const candidateMap = new Map<string, ExistingClassGroupCandidate>();
+    candidateMap.set(cand.id, cand);
+    for (const ng of nightGradeClasses) candidateMap.set(ng.id, ng);
     return {
       status: "ambiguous",
       reason: "ambiguous_student_overlap",
-      candidates,
+      candidates: Array.from(candidateMap.values()),
     };
   }
 
-  // 3. Fallback legado do turno noturno ("1º Série", "2º Série", "3º Série")
-  if (shift === "NOITE") {
-    const gradeFromSource = sourceIdentity?.split("|")[1]?.match(/^(\d+)/)?.[1];
-    const gradeFromName = name.trim().match(/^(\d+)/)?.[1];
-    const gradeNum = gradeFromSource || gradeFromName;
-
-    if (gradeNum) {
-      const legacyKey = normalizeClassGroupKey(`${gradeNum}º Série`);
-      const nightGradeClasses = existingClassGroups.filter((cg) => {
-        if (cg.shift !== "NOITE") return false;
-        const cgKey = normalizeClassGroupKey(cg.name);
-        return (
-          cgKey === legacyKey ||
-          new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(cgKey)
-        );
-      });
-      const legacyMatches = nightGradeClasses.filter(
-        (cg) => normalizeClassGroupKey(cg.name) === legacyKey
-      );
-
-      if (legacyMatches.length === 1 && nightGradeClasses.length <= 1) {
-        return {
-          status: "matched",
-          matchedClassGroupId: legacyMatches[0].id,
-          reason: "legacy_night_name",
-          candidates: [legacyMatches[0]],
-        };
-      }
-
-      if (nightGradeClasses.length > 1) {
-        return {
-          status: "ambiguous",
-          reason: "ambiguous_legacy_night",
-          candidates: nightGradeClasses,
-        };
-      }
+  if (sameShiftOverlapIds.size > 1) {
+    const candidateMap = new Map<string, ExistingClassGroupCandidate>();
+    for (const id of sameShiftOverlapIds) {
+      const cg = byId.get(id);
+      if (cg) candidateMap.set(cg.id, cg);
     }
+    for (const ng of nightGradeClasses) candidateMap.set(ng.id, ng);
+    return {
+      status: "ambiguous",
+      reason: "ambiguous_student_overlap",
+      candidates: Array.from(candidateMap.values()),
+    };
+  }
+
+  // Sem alunos em comum no mesmo turno (inclui transferências de outro turno -> turma noturna)
+  if (shift === "NOITE" && nightGradeClasses.length > 0) {
+    if (legacyMatches.length === 1 && nightGradeClasses.length === 1) {
+      return {
+        status: "matched",
+        matchedClassGroupId: legacyMatches[0].id,
+        reason: "legacy_night_name",
+        candidates: [legacyMatches[0]],
+      };
+    }
+
+    return {
+      status: "ambiguous",
+      reason: "ambiguous_legacy_night",
+      candidates: nightGradeClasses,
+    };
   }
 
   return {

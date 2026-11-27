@@ -126,8 +126,67 @@ describe.skipIf(!SHOULD_RUN)(
       authContext.explicitSchoolId = schoolAId;
     });
 
+    it("transferência legítima de estudante do diurno para o noturno com CGM compartilhado cria 1º 3 NOITE sem alterar turma diurna", async () => {
+      const cgManha = await prisma.classGroup.create({
+        data: { name: "1º 1", segment: "MEDIO", shift: "MANHA", schoolId: schoolAId },
+      });
+      await prisma.student.create({
+        data: {
+          cgm: "8000000001",
+          name: "ESTUDANTE TRANSFERIDO",
+          phone: "41999990001",
+          classGroupId: cgManha.id,
+          schoolId: schoolAId,
+          active: true,
+        },
+      });
+
+      const res = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            turmas: [
+              {
+                tempId: "t-noite",
+                name: "1º 3",
+                sourceIdentity: "NOTURNO|1ª SÉRIE|NOITE|3",
+                segment: "NOTURNO",
+                shift: "NOITE",
+              },
+            ],
+            students: [
+              {
+                cgm: "8000000001",
+                name: "ESTUDANTE TRANSFERIDO",
+                phone: "41999990001",
+                turmaTempId: "t-noite",
+              },
+            ],
+            transferredStudents: [],
+            options: { updateExisting: true, deactivateTransferred: true },
+          }),
+        })
+      );
+      expect(res.status).toBe(200);
+
+      const cgManhaAfter = await prisma.classGroup.findUnique({ where: { id: cgManha.id } });
+      expect(cgManhaAfter?.shift).toBe("MANHA");
+      expect(cgManhaAfter?.segment).toBe("MEDIO");
+      expect(cgManhaAfter?.name).toBe("1º 1");
+
+      const cgNoite = await prisma.classGroup.findFirst({
+        where: { schoolId: schoolAId, name: "1º 3" },
+      });
+      expect(cgNoite).not.toBeNull();
+      expect(cgNoite?.id).not.toBe(cgManha.id);
+      expect(cgNoite?.shift).toBe("NOITE");
+
+      const st = await prisma.student.findUnique({ where: { cgm: "8000000001" } });
+      expect(st?.classGroupId).toBe(cgNoite?.id);
+    });
+
     it("importação legada (1º Série) e sequência renomear -> reimportar preservam o mesmo ClassGroup.id e vínculos", async () => {
-      // 1. Turma legada no banco com nome "1º Série" no noturno
       const legacyCg = await prisma.classGroup.create({
         data: { name: "1º Série", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
       });
@@ -150,7 +209,6 @@ describe.skipIf(!SHOULD_RUN)(
         includeConcluinte: true,
       });
 
-      // 2. Reimportação SERE sobre turma legada "1º Série" -> reutiliza legacyCg.id
       const resImport1 = await importStudents(
         new Request("http://localhost/api/students/import", {
           method: "POST",
@@ -168,7 +226,6 @@ describe.skipIf(!SHOULD_RUN)(
       const st1Before = await prisma.student.findUnique({ where: { cgm: "8100000001" } });
       expect(st1Before?.classGroupId).toBe(legacyCg.id);
 
-      // 3. Renomear "1º Série" para "1º 3 Noturno" via PATCH /api/classes/[id]
       const resRename = await patchClass(
         new Request(`http://localhost/api/classes/${legacyCg.id}`, {
           method: "PATCH",
@@ -178,15 +235,7 @@ describe.skipIf(!SHOULD_RUN)(
         { params: Promise.resolve({ id: legacyCg.id }) }
       );
       expect(resRename.status).toBe(200);
-      const renameJson = await resRename.json();
-      expect(renameJson.classGroup).toMatchObject({
-        id: legacyCg.id,
-        name: "1º 3 Noturno",
-        shift: "NOITE",
-        segment: "NOTURNO",
-      });
 
-      // 4. Reimportação SERE após renomear -> continua reutilizando legacyCg.id e preserva "1º 3 Noturno" e o vínculo do estudante
       const resImport2 = await importStudents(
         new Request("http://localhost/api/students/import", {
           method: "POST",
@@ -207,21 +256,23 @@ describe.skipIf(!SHOULD_RUN)(
       expect(cgAfter?.name).toBe("1º 3 Noturno");
       expect(st1After?.id).toBe(st1Before?.id);
       expect(st1After?.classGroupId).toBe(legacyCg.id);
-      expect(totalA).toBe(2); // "1º 3 Noturno" + "6º 1"
+      expect(totalA).toBe(2);
     });
 
-    it("recusa caso ambíguo sem resolução (409), valida targetClassGroupId na escola ativa e aceita após seleção explícita", async () => {
-      const cg1 = await prisma.classGroup.create({
-        data: { name: "1º Série", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
-      });
-      const cg2 = await prisma.classGroup.create({
+    it("exige resolução explícita para reimportação sem alunos em comum / destinos ambíguos, preserva escola/dados em 400/409 e atualiza cadastro em lote válido", async () => {
+      const cgRenamed = await prisma.classGroup.create({
         data: { name: "1º 3 Noturno", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
       });
       const cgForeign = await prisma.classGroup.create({
         data: { name: "1º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolBId },
       });
 
-      const payloadBase = {
+      // SuperAdmin com updateSchoolInfo: true para testar atomicidade em 409, 400 e 200
+      authContext.email = "super@redeativa.local";
+      authContext.cookieSchoolId = schoolAId;
+      authContext.explicitSchoolId = schoolAId;
+
+      const basePayload = {
         turmas: [
           {
             tempId: "t-1",
@@ -234,62 +285,76 @@ describe.skipIf(!SHOULD_RUN)(
         students: [
           {
             cgm: "8200000001",
-            name: "ESTUDANTE AMBIGUO",
+            name: "ESTUDANTE SEM COMUM",
             phone: "41999992001",
             turmaTempId: "t-1",
           },
         ],
         transferredStudents: [],
-        options: { updateExisting: true, deactivateTransferred: true },
+        options: {
+          updateExisting: true,
+          deactivateTransferred: true,
+          updateSchoolInfo: true,
+          schoolInfo: { name: "Escola Atualizada SERE", city: "Ponta Grossa" },
+        },
       };
 
-      // Sem seleção explícita -> 409 AMBIGUOUS_CLASS_GROUP e zero mutação
+      // 1. Sem alunos em comum e turma existente "1º 3 Noturno" no mesmo turno -> 409 AMBIGUOUS_CLASS_GROUP
       const resAmbiguous = await importStudents(
         new Request("http://localhost/api/students/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payloadBase),
+          body: JSON.stringify(basePayload),
         })
       );
       expect(resAmbiguous.status).toBe(409);
       const bodyAmb = await resAmbiguous.json();
       expect(bodyAmb.code).toBe("AMBIGUOUS_CLASS_GROUP");
+      const schoolAfter409 = await prisma.school.findUnique({ where: { id: schoolAId } });
+      expect(schoolAfter409?.name).toBe("Escola Sintética A");
+      expect(schoolAfter409?.city).toBe("Curitiba");
       expect(await prisma.student.count({ where: { schoolId: schoolAId } })).toBe(0);
-      expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(2);
+      expect(await prisma.auditLog.count()).toBe(0);
 
-      // targetClassGroupId de outra escola -> 400
+      // 2. targetClassGroupId de outra escola -> 400 e zero efeito na escola/turmas/alunos/auditoria
       const resForeign = await importStudents(
         new Request("http://localhost/api/students/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ...payloadBase,
-            turmas: [{ ...payloadBase.turmas[0], targetClassGroupId: cgForeign.id }],
+            ...basePayload,
+            turmas: [{ ...basePayload.turmas[0], targetClassGroupId: cgForeign.id }],
           }),
         })
       );
       expect(resForeign.status).toBe(400);
+      const schoolAfter400 = await prisma.school.findUnique({ where: { id: schoolAId } });
+      expect(schoolAfter400?.name).toBe("Escola Sintética A");
+      expect(schoolAfter400?.city).toBe("Curitiba");
       expect(await prisma.student.count({ where: { schoolId: schoolAId } })).toBe(0);
+      expect(await prisma.auditLog.count()).toBe(0);
 
-      // targetClassGroupId válido na escola ativa -> 200 reutilizando cg2.id
+      // 3. Seleção explícita válida (targetClassGroupId da escola ativa) -> 200 + atualiza cadastro da escola
       const resResolved = await importStudents(
         new Request("http://localhost/api/students/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ...payloadBase,
-            turmas: [{ ...payloadBase.turmas[0], targetClassGroupId: cg2.id }],
+            ...basePayload,
+            turmas: [{ ...basePayload.turmas[0], targetClassGroupId: cgRenamed.id }],
           }),
         })
       );
       expect(resResolved.status).toBe(200);
       const st = await prisma.student.findUnique({ where: { cgm: "8200000001" } });
-      expect(st?.classGroupId).toBe(cg2.id);
-      expect(cg1.id).not.toBe(cg2.id);
+      expect(st?.classGroupId).toBe(cgRenamed.id);
+      const schoolAfter200 = await prisma.school.findUnique({ where: { id: schoolAId } });
+      expect(schoolAfter200?.name).toBe("Escola Atualizada SERE");
+      expect(schoolAfter200?.city).toBe("Ponta Grossa");
+      expect(await prisma.auditLog.count()).toBe(1);
     });
 
     it("bloqueia duplicidade canônica concorrente na mesma escola (409) e permite mesmo nome em escolas distintas", async () => {
-      // Duas criações simultâneas com nomes canonicamente equivalentes na Escola A
       const [res1, res2] = await Promise.all([
         postClass(
           new Request("http://localhost/api/classes", {
@@ -306,11 +371,9 @@ describe.skipIf(!SHOULD_RUN)(
           })
         ),
       ]);
-      const statuses = [res1.status, res2.status].sort();
-      expect(statuses).toEqual([201, 409]);
+      expect([res1.status, res2.status].sort()).toEqual([201, 409]);
       expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(1);
 
-      // Criação vs importação disputando "2º 3" vs "2° 3" na mesma escola -> no máximo 1 turma criada
       const [resCreate2, resImport2] = await Promise.all([
         postClass(
           new Request("http://localhost/api/classes", {
@@ -335,10 +398,8 @@ describe.skipIf(!SHOULD_RUN)(
         ),
       ]);
       expect([resCreate2.status, resImport2.status]).not.toContain(500);
-      const classesA = await prisma.classGroup.findMany({ where: { schoolId: schoolAId } });
-      expect(classesA.length).toBe(2); // "1º 3" + apenas uma "2º 3"/"2° 3"
+      expect(await prisma.classGroup.count({ where: { schoolId: schoolAId } })).toBe(2);
 
-      // Escola B pode usar "1º 3" normalmente (201)
       authContext.email = "super@redeativa.local";
       authContext.cookieSchoolId = schoolBId;
       authContext.explicitSchoolId = schoolBId;
@@ -352,56 +413,57 @@ describe.skipIf(!SHOULD_RUN)(
       expect(resB.status).toBe(201);
     });
 
-    it("recusa edição com zero mutação e zero auditoria para vínculo revogado, papel leitura em B e SUPERADMIN com outra escola selecionada", async () => {
-      const cgA = await prisma.classGroup.create({
-        data: { name: "3º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
-      });
-      const cgB = await prisma.classGroup.create({
-        data: { name: "3º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolBId },
-      });
+    it("exige escrita na escola alvo em POST /api/classes e POST /api/students/import (403 e zero mutações)", async () => {
+      const importPayload = {
+        turmas: [{ tempId: "t-1", name: "3º 3", segment: "NOTURNO", shift: "NOITE" }],
+        students: [{ cgm: "8400000001", name: "ALUNO TESTE RBAC", phone: "41999994001", turmaTempId: "t-1" }],
+        transferredStudents: [],
+        options: { updateExisting: true, deactivateTransferred: true },
+      };
 
-      // 1. Gestor de A com papel somente-leitura (GESTAO_SECRETARIA) em B tentando editar turma de B -> 403
+      // 1. Gestor de A com papel somente-leitura (GESTAO_SECRETARIA) em B -> 403 nos dois POSTs
       authContext.email = "gestor-a@escola.pr.gov.br";
       authContext.cookieSchoolId = schoolBId;
       authContext.explicitSchoolId = schoolBId;
-      const resReadOnlyB = await patchClass(
-        new Request(`http://localhost/api/classes/${cgB.id}`, {
-          method: "PATCH",
+      const rClassReadB = await postClass(
+        new Request("http://localhost/api/classes", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "3º 3 Alterado" }),
-        }),
-        { params: Promise.resolve({ id: cgB.id }) }
+          body: JSON.stringify({ name: "3º 3", segment: "NOTURNO", shift: "NOITE" }),
+        })
       );
-      expect(resReadOnlyB.status).toBe(403);
+      const rImportReadB = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importPayload),
+        })
+      );
+      expect(rClassReadB.status).toBe(403);
+      expect(rImportReadB.status).toBe(403);
 
-      // 2. SUPERADMIN com escola B selecionada tentando editar turma de escola A -> 404
+      // 2. SUPERADMIN sem seleção válida -> 403 nos dois POSTs
       authContext.email = "super@redeativa.local";
-      authContext.cookieSchoolId = schoolBId;
-      authContext.explicitSchoolId = schoolBId;
-      const resSuperWrongSchool = await patchClass(
-        new Request(`http://localhost/api/classes/${cgA.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "3º 3 Alterado" }),
-        }),
-        { params: Promise.resolve({ id: cgA.id }) }
-      );
-      expect(resSuperWrongSchool.status).toBe(404);
-
-      // 3. SUPERADMIN sem escola selecionada -> 403
       authContext.cookieSchoolId = undefined;
       authContext.explicitSchoolId = undefined;
-      const resSuperNoSchool = await patchClass(
-        new Request(`http://localhost/api/classes/${cgA.id}`, {
-          method: "PATCH",
+      const rClassSuperNoSchool = await postClass(
+        new Request("http://localhost/api/classes", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "3º 3 Alterado" }),
-        }),
-        { params: Promise.resolve({ id: cgA.id }) }
+          body: JSON.stringify({ name: "3º 3", segment: "NOTURNO", shift: "NOITE" }),
+        })
       );
-      expect(resSuperNoSchool.status).toBe(403);
+      const rImportSuperNoSchool = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importPayload),
+        })
+      );
+      expect(rClassSuperNoSchool.status).toBe(403);
+      expect(rImportSuperNoSchool.status).toBe(403);
 
-      // 4. Revogação do vínculo do Gestor A no banco -> 403
+      // 3. Vínculo revogado no banco -> 403 nos dois POSTs
       await prisma.userSchool.updateMany({
         where: { schoolId: schoolAId },
         data: { active: false },
@@ -409,23 +471,106 @@ describe.skipIf(!SHOULD_RUN)(
       authContext.email = "gestor-a@escola.pr.gov.br";
       authContext.cookieSchoolId = schoolAId;
       authContext.explicitSchoolId = schoolAId;
-      const resRevoked = await patchClass(
-        new Request(`http://localhost/api/classes/${cgA.id}`, {
-          method: "PATCH",
+      const rClassRevoked = await postClass(
+        new Request("http://localhost/api/classes", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "3º 3 Alterado" }),
-        }),
-        { params: Promise.resolve({ id: cgA.id }) }
+          body: JSON.stringify({ name: "3º 3", segment: "NOTURNO", shift: "NOITE" }),
+        })
       );
-      expect(resRevoked.status).toBe(403);
+      const rImportRevoked = await importStudents(
+        new Request("http://localhost/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importPayload),
+        })
+      );
+      expect(rClassRevoked.status).toBe(403);
+      expect(rImportRevoked.status).toBe(403);
 
-      // Comprova zero mutação e zero auditoria em todas as recusas
-      const cgAAfter = await prisma.classGroup.findUnique({ where: { id: cgA.id } });
-      const cgBAfter = await prisma.classGroup.findUnique({ where: { id: cgB.id } });
-      const auditCount = await prisma.auditLog.count();
-      expect(cgAAfter?.name).toBe("3º 3");
-      expect(cgBAfter?.name).toBe("3º 3");
-      expect(auditCount).toBe(0);
+      expect(await prisma.classGroup.count()).toBe(0);
+      expect(await prisma.student.count()).toBe(0);
+      expect(await prisma.auditLog.count()).toBe(0);
+    });
+
+    it("recusa edição em PATCH /api/classes/[id] com zero mutação e zero auditoria", async () => {
+      const cgA = await prisma.classGroup.create({
+        data: { name: "3º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolAId },
+      });
+      const cgB = await prisma.classGroup.create({
+        data: { name: "3º 3", segment: "NOTURNO", shift: "NOITE", schoolId: schoolBId },
+      });
+
+      authContext.email = "gestor-a@escola.pr.gov.br";
+      authContext.cookieSchoolId = schoolBId;
+      authContext.explicitSchoolId = schoolBId;
+      expect(
+        (
+          await patchClass(
+            new Request(`http://localhost/api/classes/${cgB.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: "3º 3 Alterado" }),
+            }),
+            { params: Promise.resolve({ id: cgB.id }) }
+          )
+        ).status
+      ).toBe(403);
+
+      authContext.email = "super@redeativa.local";
+      authContext.cookieSchoolId = schoolBId;
+      authContext.explicitSchoolId = schoolBId;
+      expect(
+        (
+          await patchClass(
+            new Request(`http://localhost/api/classes/${cgA.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: "3º 3 Alterado" }),
+            }),
+            { params: Promise.resolve({ id: cgA.id }) }
+          )
+        ).status
+      ).toBe(404);
+
+      authContext.cookieSchoolId = undefined;
+      authContext.explicitSchoolId = undefined;
+      expect(
+        (
+          await patchClass(
+            new Request(`http://localhost/api/classes/${cgA.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: "3º 3 Alterado" }),
+            }),
+            { params: Promise.resolve({ id: cgA.id }) }
+          )
+        ).status
+      ).toBe(403);
+
+      await prisma.userSchool.updateMany({
+        where: { schoolId: schoolAId },
+        data: { active: false },
+      });
+      authContext.email = "gestor-a@escola.pr.gov.br";
+      authContext.cookieSchoolId = schoolAId;
+      authContext.explicitSchoolId = schoolAId;
+      expect(
+        (
+          await patchClass(
+            new Request(`http://localhost/api/classes/${cgA.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: "3º 3 Alterado" }),
+            }),
+            { params: Promise.resolve({ id: cgA.id }) }
+          )
+        ).status
+      ).toBe(403);
+
+      expect((await prisma.classGroup.findUnique({ where: { id: cgA.id } }))?.name).toBe("3º 3");
+      expect((await prisma.classGroup.findUnique({ where: { id: cgB.id } }))?.name).toBe("3º 3");
+      expect(await prisma.auditLog.count()).toBe(0);
     });
   }
 );

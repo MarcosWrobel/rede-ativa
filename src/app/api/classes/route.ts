@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { formatZodError, classGroupCreateSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import {
+  canMutateSchoolCouncil,
+  resolveAuthorizedSchoolForCouncil,
+  resolveExplicitSelectedSchoolForCouncil,
+} from "@/services/classCouncilService";
 import {
   acquireClassGroupSchoolLock,
   isPrismaUniqueConstraintError,
@@ -51,9 +56,27 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
-    if (!schoolCheck.ok) return schoolCheck.response;
-    const currentSchool = schoolCheck.school;
+    const currentSchool = checkIsSuperAdmin(authCheck.session)
+      ? await resolveExplicitSelectedSchoolForCouncil(
+          authCheck.session,
+          authCheck.schoolId
+        )
+      : await resolveAuthorizedSchoolForCouncil(
+          authCheck.session,
+          authCheck.schoolId
+        );
+    if (!currentSchool) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada selecionada na sessão atual." },
+        { status: 403 }
+      );
+    }
+    if (!canMutateSchoolCouncil(authCheck.session, currentSchool.id)) {
+      return NextResponse.json(
+        { error: "Sem permissão de escrita para cadastrar turmas nesta escola." },
+        { status: 403 }
+      );
+    }
     const parsed = classGroupCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });

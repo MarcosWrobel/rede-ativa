@@ -358,6 +358,15 @@ export default function SereImportModal({
 
       const data = await res.json();
       if (!res.ok) {
+        if (
+          res.status === 409 &&
+          data.code === "AMBIGUOUS_CLASS_GROUP" &&
+          Array.isArray(data.ambiguousTurmas)
+        ) {
+          setUnresolvedAmbiguousIds(
+            new Set(data.ambiguousTurmas.map((item: { tempId: string }) => item.tempId))
+          );
+        }
         throw new Error(data.error || "Erro ao gravar o lote de alunos.");
       }
 
@@ -871,9 +880,18 @@ export default function SereImportModal({
                                     />
                                   </div>
                                   <select
-                                    value={cfg.targetClassGroupId || ""}
+                                    value={
+                                      cfg.targetClassGroupId
+                                        ? cfg.targetClassGroupId
+                                        : cfg.confirmCreateNew
+                                          ? "__CREATE_NEW__"
+                                          : ""
+                                    }
                                     onChange={(e) => {
-                                      const nextId = e.target.value || undefined;
+                                      const rawVal = e.target.value;
+                                      const isCreateNew = rawVal === "__CREATE_NEW__";
+                                      const nextId =
+                                        rawVal && !isCreateNew ? rawVal : undefined;
                                       const chosen = nextId
                                         ? existingClassGroups.find((cg) => cg.id === nextId)
                                         : undefined;
@@ -882,6 +900,7 @@ export default function SereImportModal({
                                         [t.tempId]: {
                                           ...prev[t.tempId],
                                           targetClassGroupId: nextId,
+                                          confirmCreateNew: isCreateNew,
                                           ...(chosen
                                             ? {
                                                 customName: chosen.name,
@@ -891,11 +910,13 @@ export default function SereImportModal({
                                             : {}),
                                         },
                                       }));
-                                      setUnresolvedAmbiguousIds((prev) => {
-                                        const next = new Set(prev);
-                                        next.delete(t.tempId);
-                                        return next;
-                                      });
+                                      if (rawVal) {
+                                        setUnresolvedAmbiguousIds((prev) => {
+                                          const next = new Set(prev);
+                                          next.delete(t.tempId);
+                                          return next;
+                                        });
+                                      }
                                     }}
                                     aria-label={`Vincular turma existente para ${t.seriacaoRaw} ${t.turmaRaw}`}
                                     className={`w-full px-2 py-1 border rounded-lg text-[11px] font-medium ${
@@ -906,8 +927,11 @@ export default function SereImportModal({
                                   >
                                     <option value="">
                                       {isAmbiguous
-                                        ? "Selecione a turma de destino..."
+                                        ? "Selecione: vincular existente ou criar nova..."
                                         : "Criar nova turma (se não existir)"}
+                                    </option>
+                                    <option value="__CREATE_NEW__">
+                                      Criar nova turma: {cfg.customName}
                                     </option>
                                     {existingClassGroups.map((cg) => (
                                       <option key={cg.id} value={cg.id}>
@@ -917,7 +941,7 @@ export default function SereImportModal({
                                   </select>
                                   {isAmbiguous && (
                                     <p className="text-[10px] font-bold text-amber-800">
-                                      Correspondência ambígua: selecione a turma existente.
+                                      Confirme o destino: selecione uma turma existente ou criar nova.
                                     </p>
                                   )}
                                 </div>

@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
-import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
+import {
+  canMutateSchoolCouncil,
+  resolveAuthorizedSchoolForCouncil,
+  resolveExplicitSelectedSchoolForCouncil,
+} from "@/services/classCouncilService";
 import { normalizeStudentName } from "@/lib/studentMatcher";
 import { cleanSerePhone, resolveSereTurmaMatch } from "@/lib/sereParser";
 import { safeQueryList } from "@/lib/safePhase3Queries";
@@ -31,11 +35,28 @@ export async function POST(req: Request) {
 
     const { turmas, students, transferredStudents, options } = parsed.data;
 
-    // 1. Resolve escola ativa (e atualiza nome/cidade se solicitado por SuperAdmin)
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
-    if (!schoolCheck.ok) return schoolCheck.response;
-    const currentSchool = schoolCheck.school;
-    let schoolRecord: any = currentSchool;
+    // 1. Resolve escola ativa com seleção explícita para SuperAdmin e permissão de escrita na escola alvo
+    const currentSchool = checkIsSuperAdmin(authCheck.session)
+      ? await resolveExplicitSelectedSchoolForCouncil(
+          authCheck.session,
+          authCheck.schoolId
+        )
+      : await resolveAuthorizedSchoolForCouncil(
+          authCheck.session,
+          authCheck.schoolId
+        );
+    if (!currentSchool) {
+      return NextResponse.json(
+        { error: "Nenhuma instituição escolar autorizada selecionada na sessão atual." },
+        { status: 403 }
+      );
+    }
+    if (!canMutateSchoolCouncil(authCheck.session, currentSchool.id)) {
+      return NextResponse.json(
+        { error: "Sem permissão de escrita para importar estudantes nesta escola." },
+        { status: 403 }
+      );
+    }
 
     // RBAC Guard: apenas SuperAdmin pode atualizar dados cadastrais da instituição (Ponto 5)
     if (options.updateSchoolInfo && !checkIsSuperAdmin(authCheck.session)) {
@@ -45,27 +66,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (
-      schoolRecord &&
-      options.updateSchoolInfo &&
-      options.schoolInfo?.name &&
-      checkIsSuperAdmin(authCheck.session)
-    ) {
-      try {
-        schoolRecord = await prisma.school.update({
-          where: { id: schoolRecord.id },
-          data: {
-            name: options.schoolInfo.name.trim(),
-            ...(options.schoolInfo.city?.trim()
-              ? { city: options.schoolInfo.city.trim() }
-              : {}),
-          },
-        });
-      } catch (err) {
-        console.warn("[students/import] Aviso ao atualizar dados da escola:", err);
-      }
-    }
-    const schoolId: string = schoolRecord?.id || currentSchool.id;
+    const schoolId: string = currentSchool.id;
     const schoolFilter = { schoolId };
 
     // 2. Sincroniza Turmas (ClassGroups) e carrega alunos existentes isolados por escola em withTenantContext
@@ -157,6 +158,31 @@ export async function POST(req: Request) {
             continue;
           }
 
+          if (t.confirmCreateNew) {
+            const canonicalConflict = existingClassGroups.find(
+              (cg) => normalizeClassGroupKey(cg.name) === upperKey
+            );
+            if (canonicalConflict) {
+              return {
+                errorStatus: 409 as const,
+                error: `Já existe uma turma com o nome "${cleanName}" nesta escola.`,
+              };
+            }
+            if (seenNewCanonicalKeys.has(upperKey)) {
+              return {
+                errorStatus: 409 as const,
+                error: `Já existe uma turma com o nome "${cleanName}" no lote de importação.`,
+              };
+            }
+            seenNewCanonicalKeys.add(upperKey);
+            plannedTurmas.push({
+              turma: t,
+              cleanName,
+              upperKey,
+            });
+            continue;
+          }
+
           const resolution = resolveSereTurmaMatch({
             name: cleanName,
             shift: t.shift,
@@ -209,6 +235,22 @@ export async function POST(req: Request) {
             code: "AMBIGUOUS_CLASS_GROUP",
             ambiguousTurmas,
           };
+        }
+
+        if (
+          options.updateSchoolInfo &&
+          options.schoolInfo?.name &&
+          checkIsSuperAdmin(authCheck.session)
+        ) {
+          await tx.school.update({
+            where: { id: schoolId },
+            data: {
+              name: options.schoolInfo.name.trim(),
+              ...(options.schoolInfo.city?.trim()
+                ? { city: options.schoolInfo.city.trim() }
+                : {}),
+            },
+          });
         }
 
         for (const plan of plannedTurmas) {
