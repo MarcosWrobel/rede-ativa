@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { classifyActionItemCategory } from "@/lib/actionClassifier";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
@@ -19,6 +21,9 @@ export async function GET(req: Request) {
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, school)
+      : authCheck.session;
 
     const now = new Date();
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
@@ -28,50 +33,52 @@ export async function GET(req: Request) {
     const in7Days = new Date(startOfToday);
     in7Days.setDate(in7Days.getDate() + 7);
 
-    const pendingActions = await prisma.pedagogicalActionItem.findMany({
-      where: {
-        status: "PENDING",
-        minute: {
-          schoolId: school.id,
-          status: { in: ["FINALIZED", "DRAFT"] },
+    const pendingActions = await withTenantContext(prisma, school.id, (tx) =>
+      tx.pedagogicalActionItem.findMany({
+        where: {
+          status: "PENDING",
+          minute: {
+            schoolId: school.id,
+            status: { in: ["FINALIZED", "DRAFT"] },
+          },
         },
-      },
-      orderBy: [
-        { dueDate: "asc" },
-        { createdAt: "desc" },
-      ],
-      take: 200,
-      include: {
-        minute: {
-          select: {
-            id: true,
-            schoolId: true,
-            isConfidential: true,
-            authorId: true,
-            authorEmail: true,
-            ataNumber: true,
-            year: true,
-            subject: true,
-            attendedAt: true,
-            students: {
-              select: {
-                studentId: true,
-                studentNameSnapshot: true,
-                classNameSnapshot: true,
-                student: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    contacts: {
-                      select: {
-                        name: true,
-                        phone: true,
-                        kinship: true,
-                        isPrimary: true,
-                        whatsappValid: true,
+        orderBy: [
+          { dueDate: "asc" },
+          { createdAt: "desc" },
+        ],
+        take: 200,
+        include: {
+          minute: {
+            select: {
+              id: true,
+              schoolId: true,
+              isConfidential: true,
+              authorId: true,
+              authorEmail: true,
+              ataNumber: true,
+              year: true,
+              subject: true,
+              attendedAt: true,
+              students: {
+                select: {
+                  studentId: true,
+                  studentNameSnapshot: true,
+                  classNameSnapshot: true,
+                  student: {
+                    select: {
+                      id: true,
+                      name: true,
+                      phone: true,
+                      contacts: {
+                        select: {
+                          name: true,
+                          phone: true,
+                          kinship: true,
+                          isPrimary: true,
+                          whatsappValid: true,
+                        },
+                        take: 2,
                       },
-                      take: 2,
                     },
                   },
                 },
@@ -79,11 +86,11 @@ export async function GET(req: Request) {
             },
           },
         },
-      },
-    });
+      })
+    );
 
     const visiblePendingActions = pendingActions.filter((item) =>
-      canAccessConfidentialMinute(item.minute as any, authCheck.session)
+      canAccessConfidentialMinute(item.minute as any, effectiveSession)
     );
 
     let overdueCount = 0;

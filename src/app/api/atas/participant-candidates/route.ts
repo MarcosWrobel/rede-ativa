@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
@@ -151,9 +153,13 @@ export async function GET(req: Request) {
       );
     }
 
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+      : authCheck.session;
+
     const accessCheck = await verifyActiveSchoolCandidateAccess(
       authCheck.userId,
-      authCheck.session,
+      effectiveSession,
       currentSchool.id
     );
     if (!accessCheck.ok) {
@@ -172,51 +178,6 @@ export async function GET(req: Request) {
     }
 
     const minuteId = searchParams.get("minuteId")?.trim() || null;
-    let allowedInactiveStudentIds = new Set<string>();
-
-    if (minuteId) {
-      const minute = await prisma.pedagogicalMinute.findUnique({
-        where: { id: minuteId },
-        select: {
-          id: true,
-          schoolId: true,
-          isConfidential: true,
-          authorId: true,
-          authorEmail: true,
-          students: { select: { studentId: true } },
-          participants: { select: { studentId: true } },
-        },
-      });
-
-      if (!minute) {
-        return NextResponse.json(
-          { error: "Ata pedagógica não encontrada." },
-          { status: 404, headers: NO_STORE_HEADERS }
-        );
-      }
-
-      if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
-        return NextResponse.json(
-          { error: "Acesso negado a registro de outra instituição de ensino." },
-          { status: 403, headers: NO_STORE_HEADERS }
-        );
-      }
-
-      if (!canAccessConfidentialMinute(minute, authCheck.session)) {
-        return NextResponse.json(
-          { error: "Esta ata possui Sigilo Reforçado restrito à Direção Escolar e ao servidor autor." },
-          { status: 403, headers: NO_STORE_HEADERS }
-        );
-      }
-
-      allowedInactiveStudentIds = new Set<string>([
-        ...(minute.students || []).map((s) => s.studentId).filter(Boolean),
-        ...(minute.participants || [])
-          .map((p) => p.studentId)
-          .filter((id): id is string => Boolean(id)),
-      ]);
-    }
-
     const uniqueStudentIds = parseStudentIdsParam(searchParams);
     if (uniqueStudentIds.length > MAX_STUDENT_IDS) {
       return NextResponse.json(
@@ -225,127 +186,181 @@ export async function GET(req: Request) {
       );
     }
 
-    let staff: Array<{ id: string; name: string; email: string }> | undefined;
-    let staffTruncated: boolean | undefined;
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      let allowedInactiveStudentIds = new Set<string>();
 
-    if (partParam === "all" || partParam === "staff") {
-      const staffRows = await prisma.user.findMany({
-        where: {
-          active: true,
-          schools: { some: { schoolId: currentSchool.id, active: true } },
-        },
-        orderBy: [{ name: "asc" }, { email: "asc" }],
-        take: STAFF_CANDIDATES_LIMIT + 1,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      });
-
-      staffTruncated = staffRows.length > STAFF_CANDIDATES_LIMIT;
-      staff = staffRows.slice(0, STAFF_CANDIDATES_LIMIT).map((u) => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-      }));
-    }
-
-    let students:
-      | Array<{
-          id: string;
-          name: string;
-          classGroupName: string | null;
-          cgm: string | null;
-          phone: string | null;
-          email: string | null;
-          guardianName: string | null;
-          isInactiveRecord: boolean;
-          contacts: Array<{
-            id: string;
-            studentId: string;
-            name: string;
-            kinship: string;
-            phone: string;
-            isPrimary: boolean;
-          }>;
-        }>
-      | undefined;
-
-    if (partParam === "all" || partParam === "contacts") {
-      if (uniqueStudentIds.length === 0) {
-        students = [];
-      } else {
-        const studentsDb = await prisma.student.findMany({
-          where: {
-            id: { in: uniqueStudentIds },
-            schoolId: currentSchool.id,
-          },
+      if (minuteId) {
+        const minute = await tx.pedagogicalMinute.findUnique({
+          where: { id: minuteId },
           select: {
             id: true,
-            name: true,
-            cgm: true,
-            phone: true,
-            email: true,
-            guardianName: true,
-            active: true,
-            classGroup: { select: { name: true } },
-            contacts: {
-              orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-              select: {
-                id: true,
-                studentId: true,
-                name: true,
-                kinship: true,
-                phone: true,
-                isPrimary: true,
-              },
-            },
+            schoolId: true,
+            isConfidential: true,
+            authorId: true,
+            authorEmail: true,
+            students: { select: { studentId: true } },
+            participants: { select: { studentId: true } },
           },
         });
 
-        if (studentsDb.length !== uniqueStudentIds.length) {
-          return NextResponse.json(
-            { error: "Um ou mais estudantes informados não pertencem a esta unidade escolar." },
-            { status: 403, headers: NO_STORE_HEADERS }
-          );
+        if (!minute) {
+          return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada." };
         }
 
-        const disallowedInactive = studentsDb.find(
-          (s) => s.active === false && !allowedInactiveStudentIds.has(s.id)
-        );
-        if (disallowedInactive) {
-          return NextResponse.json(
-            { error: "Estudante com matrícula inativa só pode ser carregado na ata histórica em que já está vinculado." },
-            { status: 403, headers: NO_STORE_HEADERS }
-          );
+        if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
+          return {
+            errorStatus: 403 as const,
+            error: "Acesso negado a registro de outra instituição de ensino.",
+          };
         }
 
-        const studentOrder = new Map(uniqueStudentIds.map((id, idx) => [id, idx]));
-        studentsDb.sort(
-          (a, b) => (studentOrder.get(a.id) ?? 0) - (studentOrder.get(b.id) ?? 0)
-        );
+        if (!canAccessConfidentialMinute(minute, effectiveSession)) {
+          return {
+            errorStatus: 403 as const,
+            error: "Esta ata possui Sigilo Reforçado restrito à Direção Escolar e ao servidor autor.",
+          };
+        }
 
-        students = studentsDb.map((s) => ({
-          id: s.id,
-          name: s.name,
-          classGroupName: s.classGroup?.name || null,
-          cgm: s.cgm || null,
-          phone: s.phone || null,
-          email: s.email || null,
-          guardianName: s.guardianName || null,
-          isInactiveRecord: s.active === false,
-          contacts: (s.contacts || []).map((c) => ({
-            id: c.id,
-            studentId: c.studentId,
-            name: c.name,
-            kinship: c.kinship,
-            phone: c.phone,
-            isPrimary: Boolean(c.isPrimary),
-          })),
+        allowedInactiveStudentIds = new Set<string>([
+          ...(minute.students || []).map((s) => s.studentId).filter(Boolean),
+          ...(minute.participants || [])
+            .map((p) => p.studentId)
+            .filter((id): id is string => Boolean(id)),
+        ]);
+      }
+
+      let staff: Array<{ id: string; name: string; email: string }> | undefined;
+      let staffTruncated: boolean | undefined;
+
+      if (partParam === "all" || partParam === "staff") {
+        const staffRows = await tx.user.findMany({
+          where: {
+            active: true,
+            schools: { some: { schoolId: currentSchool.id, active: true } },
+          },
+          orderBy: [{ name: "asc" }, { email: "asc" }],
+          take: STAFF_CANDIDATES_LIMIT + 1,
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        });
+
+        staffTruncated = staffRows.length > STAFF_CANDIDATES_LIMIT;
+        staff = staffRows.slice(0, STAFF_CANDIDATES_LIMIT).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
         }));
       }
+
+      let students:
+        | Array<{
+            id: string;
+            name: string;
+            classGroupName: string | null;
+            cgm: string | null;
+            phone: string | null;
+            email: string | null;
+            guardianName: string | null;
+            isInactiveRecord: boolean;
+            contacts: Array<{
+              id: string;
+              studentId: string;
+              name: string;
+              kinship: string;
+              phone: string;
+              isPrimary: boolean;
+            }>;
+          }>
+        | undefined;
+
+      if (partParam === "all" || partParam === "contacts") {
+        if (uniqueStudentIds.length === 0) {
+          students = [];
+        } else {
+          const studentsDb = await tx.student.findMany({
+            where: {
+              id: { in: uniqueStudentIds },
+              schoolId: currentSchool.id,
+            },
+            select: {
+              id: true,
+              name: true,
+              cgm: true,
+              phone: true,
+              email: true,
+              guardianName: true,
+              active: true,
+              classGroup: { select: { name: true } },
+              contacts: {
+                orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+                select: {
+                  id: true,
+                  studentId: true,
+                  name: true,
+                  kinship: true,
+                  phone: true,
+                  isPrimary: true,
+                },
+              },
+            },
+          });
+
+          if (studentsDb.length !== uniqueStudentIds.length) {
+            return {
+              errorStatus: 403 as const,
+              error: "Um ou mais estudantes informados não pertencem a esta unidade escolar.",
+            };
+          }
+
+          const disallowedInactive = studentsDb.find(
+            (s) => s.active === false && !allowedInactiveStudentIds.has(s.id)
+          );
+          if (disallowedInactive) {
+            return {
+              errorStatus: 403 as const,
+              error: "Estudante com matrícula inativa só pode ser carregado na ata histórica em que já está vinculado.",
+            };
+          }
+
+          const studentOrder = new Map(uniqueStudentIds.map((id, idx) => [id, idx]));
+          studentsDb.sort(
+            (a, b) => (studentOrder.get(a.id) ?? 0) - (studentOrder.get(b.id) ?? 0)
+          );
+
+          students = studentsDb.map((s) => ({
+            id: s.id,
+            name: s.name,
+            classGroupName: s.classGroup?.name || null,
+            cgm: s.cgm || null,
+            phone: s.phone || null,
+            email: s.email || null,
+            guardianName: s.guardianName || null,
+            isInactiveRecord: s.active === false,
+            contacts: (s.contacts || []).map((c) => ({
+              id: c.id,
+              studentId: c.studentId,
+              name: c.name,
+              kinship: c.kinship,
+              phone: c.phone,
+              isPrimary: Boolean(c.isPrimary),
+            })),
+          }));
+        }
+      }
+
+      return { staff, staffTruncated, students };
+    });
+
+    if ("errorStatus" in txResult) {
+      return NextResponse.json(
+        { error: txResult.error },
+        { status: txResult.errorStatus, headers: NO_STORE_HEADERS }
+      );
     }
+    const { staff, staffTruncated, students } = txResult;
 
     return NextResponse.json(
       {

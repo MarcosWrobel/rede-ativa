@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { z } from "zod";
 import { justificationTypeEnum } from "@/lib/schemas";
 
@@ -81,41 +82,46 @@ export async function GET(req: Request) {
       ];
     }
 
-    const [justifications, totalCount, activeCount, classes] = await Promise.all([
-      prisma.absenceJustification.findMany({
-        where,
-        take: limit,
-        orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
-        include: {
-          student: {
-            select: {
-              id: true,
-              name: true,
-              cgm: true,
-              phone: true,
-              guardianName: true,
-              classGroup: {
-                select: { id: true, name: true, shift: true },
+    const { justifications, totalCount, activeCount, classes } = await withTenantContext(
+      prisma,
+      school.id,
+      async (tx) => {
+        const justifications = await tx.absenceJustification.findMany({
+          where,
+          take: limit,
+          orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
+          include: {
+            student: {
+              select: {
+                id: true,
+                name: true,
+                cgm: true,
+                phone: true,
+                guardianName: true,
+                classGroup: {
+                  select: { id: true, name: true, shift: true },
+                },
               },
             },
           },
-        },
-      }),
-      prisma.absenceJustification.count({
-        where: { student: { ...schoolCondition, active: true } },
-      }),
-      prisma.absenceJustification.count({
-        where: {
-          student: { ...schoolCondition, active: true },
-          endDate: { gte: startOfTodayBrasilia },
-        },
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId: school.id },
-        select: { id: true, name: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-    ]);
+        });
+        const totalCount = await tx.absenceJustification.count({
+          where: { student: { ...schoolCondition, active: true } },
+        });
+        const activeCount = await tx.absenceJustification.count({
+          where: {
+            student: { ...schoolCondition, active: true },
+            endDate: { gte: startOfTodayBrasilia },
+          },
+        });
+        const classes = await tx.classGroup.findMany({
+          where: { schoolId: school.id },
+          select: { id: true, name: true, shift: true },
+          orderBy: { name: "asc" },
+        });
+        return { justifications, totalCount, activeCount, classes };
+      }
+    );
 
     return NextResponse.json({
       success: true,
@@ -153,48 +159,54 @@ export async function POST(req: Request) {
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
 
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      include: { classGroup: true },
-    });
-
-    if (!student) {
-      return NextResponse.json({ error: "Estudante não encontrado nesta instituição." }, { status: 404 });
-    }
-
-    if (!assertTenantOwnership(student.schoolId, school.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
     // Grava início e fim no horário civil de Brasília (-03:00)
     const startDt = new Date(`${startDate}T00:00:00.000-03:00`);
     const endDt = new Date(`${endDate}T23:59:59.999-03:00`);
 
-    const created = await prisma.absenceJustification.create({
-      data: {
-        studentId,
-        type,
-        startDate: startDt,
-        endDate: endDt,
-        cidCode: cidCode || null,
-        notes: notes || null,
-        createdByName: authCheck.userName || "Equipe Pedagógica",
-        createdByEmail: authCheck.email,
-      },
-      include: {
-        student: {
-          select: {
-            id: true,
-            name: true,
-            cgm: true,
-            classGroup: { select: { id: true, name: true } },
+    const txResult = await withTenantContext(prisma, school.id, async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { id: studentId },
+        include: { classGroup: true },
+      });
+
+      if (!student) {
+        return { errorStatus: 404 as const, error: "Estudante não encontrado nesta instituição." };
+      }
+
+      if (!assertTenantOwnership(student.schoolId, school.id, authCheck.session)) {
+        return { errorStatus: 403 as const, error: "Acesso negado a registro de outra instituição de ensino." };
+      }
+
+      const created = await tx.absenceJustification.create({
+        data: {
+          studentId,
+          type,
+          startDate: startDt,
+          endDate: endDt,
+          cidCode: cidCode || null,
+          notes: notes || null,
+          createdByName: authCheck.userName || "Equipe Pedagógica",
+          createdByEmail: authCheck.email,
+        },
+        include: {
+          student: {
+            select: {
+              id: true,
+              name: true,
+              cgm: true,
+              classGroup: { select: { id: true, name: true } },
+            },
           },
         },
-      },
+      });
+
+      return { created, student };
     });
+
+    if ("errorStatus" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+    const { created, student } = txResult;
 
     const ip = extractClientIp(req);
     await logAudit({

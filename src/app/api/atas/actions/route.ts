@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
+import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { canAccessConfidentialMinute } from "@/lib/ataCrypto";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,9 @@ export async function GET(req: Request) {
     );
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, school)
+      : authCheck.session;
 
     const now = new Date();
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
@@ -78,81 +83,86 @@ export async function GET(req: Request) {
       ];
     }
 
-    const [rawActionItems, rawAllSchoolActions, classes] = await Promise.all([
-      prisma.pedagogicalActionItem.findMany({
-        where,
-        take: limit,
-        orderBy: [
-          { status: "asc" }, // PENDING primeiro
-          { dueDate: "asc" }, // Mais urgentes primeiro
-          { createdAt: "desc" },
-        ],
-        include: {
-          minute: {
-            select: {
-              id: true,
-              schoolId: true,
-              authorId: true,
-              authorEmail: true,
-              ataNumber: true,
-              year: true,
-              subject: true,
-              attendedAt: true,
-              finalizedAt: true,
-              status: true,
-              isConfidential: true,
-              students: {
-                select: {
-                  id: true,
-                  studentId: true,
-                  studentNameSnapshot: true,
-                  classNameSnapshot: true,
-                  cgmSnapshot: true,
-                  student: {
-                    select: {
-                      id: true,
-                      name: true,
-                      classGroup: { select: { id: true, name: true } },
+    const { rawActionItems, rawAllSchoolActions, classes } = await withTenantContext(
+      prisma,
+      school.id,
+      async (tx) => {
+        const rawActionItems = await tx.pedagogicalActionItem.findMany({
+          where,
+          take: limit,
+          orderBy: [
+            { status: "asc" }, // PENDING primeiro
+            { dueDate: "asc" }, // Mais urgentes primeiro
+            { createdAt: "desc" },
+          ],
+          include: {
+            minute: {
+              select: {
+                id: true,
+                schoolId: true,
+                authorId: true,
+                authorEmail: true,
+                ataNumber: true,
+                year: true,
+                subject: true,
+                attendedAt: true,
+                finalizedAt: true,
+                status: true,
+                isConfidential: true,
+                students: {
+                  select: {
+                    id: true,
+                    studentId: true,
+                    studentNameSnapshot: true,
+                    classNameSnapshot: true,
+                    cgmSnapshot: true,
+                    student: {
+                      select: {
+                        id: true,
+                        name: true,
+                        classGroup: { select: { id: true, name: true } },
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      }),
-      // Métricas gerais de todos os combinados da escola
-      prisma.pedagogicalActionItem.findMany({
-        where: {
-          minute: { schoolId: school.id, status: { in: ["FINALIZED", "DRAFT"] } },
-        },
-        select: {
-          id: true,
-          status: true,
-          dueDate: true,
-          responsible: true,
-          minute: {
-            select: {
-              isConfidential: true,
-              schoolId: true,
-              authorId: true,
-              authorEmail: true,
+        });
+        // Métricas gerais de todos os combinados da escola
+        const rawAllSchoolActions = await tx.pedagogicalActionItem.findMany({
+          where: {
+            minute: { schoolId: school.id, status: { in: ["FINALIZED", "DRAFT"] } },
+          },
+          select: {
+            id: true,
+            status: true,
+            dueDate: true,
+            responsible: true,
+            minute: {
+              select: {
+                isConfidential: true,
+                schoolId: true,
+                authorId: true,
+                authorEmail: true,
+              },
             },
           },
-        },
-      }),
-      prisma.classGroup.findMany({
-        where: { schoolId: school.id },
-        select: { id: true, name: true, shift: true },
-        orderBy: { name: "asc" },
-      }),
-    ]);
+        });
+        const classes = await tx.classGroup.findMany({
+          where: { schoolId: school.id },
+          select: { id: true, name: true, shift: true },
+          orderBy: { name: "asc" },
+        });
+        return { rawActionItems, rawAllSchoolActions, classes };
+      }
+    );
 
     const actionItems = rawActionItems.filter((item) =>
-      canAccessConfidentialMinute(item.minute, authCheck.session)
+      canAccessConfidentialMinute(item.minute, effectiveSession)
     );
     const allSchoolActions = rawAllSchoolActions.filter((item) =>
-      canAccessConfidentialMinute(item.minute, authCheck.session)
+      canAccessConfidentialMinute(item.minute, effectiveSession)
     );
 
     // Calcula métricas analíticas

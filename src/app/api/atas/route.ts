@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import {
   PHYSICAL_PROOF_HISTORY_SELECT,
@@ -133,130 +134,130 @@ export async function GET(req: Request) {
 
     const includeSignatures = searchParams.get("includeSignatures") === "true";
 
-    const minutes = await prisma.pedagogicalMinute.findMany({
-      where,
-      orderBy: [
-        { status: "asc" }, // DRAFT primeiro se houver
-        { ataNumber: "desc" },
-        { attendedAt: "desc" },
-      ],
-      select: {
-        id: true,
-        schoolId: true,
-        year: true,
-        ataNumber: true,
-        status: true,
-        category: true,
-        isConfidential: true,
-        attendedAt: true,
-        subject: true,
-        rawNotes: true,
-        summary: true,
-        agreementsSummary: true,
-        authorId: true,
-        authorName: true,
-        authorEmail: true,
-        authorRole: true,
-        authorIp: true,
-        finalizedAt: true,
-        contentRevision: true,
-        physicalScanRevision: true,
-        physicalScanSupersededAt: true,
-        contentHash: true,
-        verificationCode: true,
-        pdfArchiveSha256: true,
-        pdfArchiveGeneratedAt: true,
-        ...(includeSignatures ? { physicalSignedScanData: true } : {}),
-        physicalScanStorageKey: true,
-        physicalScanProvider: true,
-        physicalScanMimeType: true,
-        physicalScanSizeBytes: true,
-        physicalScanSha256: true,
-        physicalScanUploadedAt: true,
-        physicalScanUploadedBy: true,
-        hasPhysicalScan: true,
-        govBrVerified: true,
-        govBrProtocol: true,
-        voidedAt: true,
-        voidedByName: true,
-        voidedByEmail: true,
-        voidReason: true,
-        isExtemporaneous: true,
-        extemporaneousReason: true,
-        createdAt: true,
-        updatedAt: true,
-        students: {
-          include: {
-            student: {
-              select: { id: true, name: true, phone: true, cgm: true },
+    const minutes = await withTenantContext(prisma, school.id, async (tx) => {
+      const rows = await tx.pedagogicalMinute.findMany({
+        where,
+        orderBy: [
+          { status: "asc" }, // DRAFT primeiro se houver
+          { ataNumber: "desc" },
+          { attendedAt: "desc" },
+        ],
+        select: {
+          id: true,
+          schoolId: true,
+          year: true,
+          ataNumber: true,
+          status: true,
+          category: true,
+          isConfidential: true,
+          attendedAt: true,
+          subject: true,
+          rawNotes: true,
+          summary: true,
+          agreementsSummary: true,
+          authorId: true,
+          authorName: true,
+          authorEmail: true,
+          authorRole: true,
+          authorIp: true,
+          finalizedAt: true,
+          contentRevision: true,
+          physicalScanRevision: true,
+          physicalScanSupersededAt: true,
+          contentHash: true,
+          verificationCode: true,
+          pdfArchiveSha256: true,
+          pdfArchiveGeneratedAt: true,
+          ...(includeSignatures ? { physicalSignedScanData: true } : {}),
+          physicalScanStorageKey: true,
+          physicalScanProvider: true,
+          physicalScanMimeType: true,
+          physicalScanSizeBytes: true,
+          physicalScanSha256: true,
+          physicalScanUploadedAt: true,
+          physicalScanUploadedBy: true,
+          hasPhysicalScan: true,
+          govBrVerified: true,
+          govBrProtocol: true,
+          voidedAt: true,
+          voidedByName: true,
+          voidedByEmail: true,
+          voidReason: true,
+          isExtemporaneous: true,
+          extemporaneousReason: true,
+          createdAt: true,
+          updatedAt: true,
+          students: {
+            include: {
+              student: {
+                select: { id: true, name: true, phone: true, cgm: true },
+              },
             },
           },
-        },
-        participants: {
-          select: {
-            id: true,
-            minuteId: true,
-            role: true,
-            studentId: true,
-            name: true,
-            kinship: true,
-            documentType: true,
-            documentNumber: true,
-            documentVerifiedByStaff: true,
-            phone: true,
-            signatureMode: true,
-            ...(includeSignatures ? { signatureData: true } : {}),
-            signedAt: true,
-            signerIp: true,
-            signerUserAgent: true,
-            clientTimestampIso: true,
-            refusalReason: true,
-            witnessName: true,
-            hasSignature: true,
-            hasActiveSignLink: true,
-            signedRevision: true,
-            biometricVerified: true,
-            biometricDeviceType: true,
-            biometricAuthTime: true,
-            expectedEmail: true,
-            verifiedEmail: true,
-            verifiedGoogleSub: true,
-            verifiedGoogleName: true,
-            emailVerifiedAt: true,
-            createdAt: true,
+          participants: {
+            select: {
+              id: true,
+              minuteId: true,
+              role: true,
+              studentId: true,
+              name: true,
+              kinship: true,
+              documentType: true,
+              documentNumber: true,
+              documentVerifiedByStaff: true,
+              phone: true,
+              signatureMode: true,
+              ...(includeSignatures ? { signatureData: true } : {}),
+              signedAt: true,
+              signerIp: true,
+              signerUserAgent: true,
+              clientTimestampIso: true,
+              refusalReason: true,
+              witnessName: true,
+              hasSignature: true,
+              hasActiveSignLink: true,
+              signedRevision: true,
+              biometricVerified: true,
+              biometricDeviceType: true,
+              biometricAuthTime: true,
+              expectedEmail: true,
+              verifiedEmail: true,
+              verifiedGoogleSub: true,
+              verifiedGoogleName: true,
+              emailVerifiedAt: true,
+              createdAt: true,
+            },
+          },
+          addendums: {
+            orderBy: { createdAt: "asc" },
+          },
+          actionItems: {
+            orderBy: { createdAt: "asc" },
+          },
+          physicalProofHistory: {
+            orderBy: { supersededAt: "desc" },
+            select: PHYSICAL_PROOF_HISTORY_SELECT,
           },
         },
-        addendums: {
-          orderBy: { createdAt: "asc" },
-        },
-        actionItems: {
-          orderBy: { createdAt: "asc" },
-        },
-        physicalProofHistory: {
-          orderBy: { supersededAt: "desc" },
-          select: PHYSICAL_PROOF_HISTORY_SELECT,
-        },
-      },
-    });
+      });
 
-    // Auto-recuperação de fé pública: assegura verificationCode para atas finalizadas legadas
-    const missingCodes = minutes.filter((m) => m.status === "FINALIZED" && !m.verificationCode);
-    if (missingCodes.length > 0) {
-      await Promise.all(
-        missingCodes.map(async (m) => {
-          const code = generateVerificationCode();
-          m.verificationCode = code;
-          try {
-            await prisma.pedagogicalMinute.update({
-              where: { id: m.id },
-              data: { verificationCode: code },
-            });
-          } catch (e) {
-            console.warn(`[GET /api/atas] Falha ao persistir verificationCode para ata ${m.id}:`, e);
-          }
-        })
-      );
-    }
+      // Assegura verificationCode para atas finalizadas legadas
+      const missingCodes = rows.filter((m) => m.status === "FINALIZED" && !m.verificationCode);
+      for (const m of missingCodes) {
+        const code = generateVerificationCode();
+        m.verificationCode = code;
+        try {
+          await tx.pedagogicalMinute.update({
+            where: { id: m.id },
+            data: { verificationCode: code },
+          });
+        } catch (e) {
+          console.warn(`[GET /api/atas] Falha ao persistir verificationCode para ata ${m.id}:`, e);
+        }
+      }
+
+      return rows;
+    });
 
     const visibleMinutes = search
       ? minutes.filter((m) => canAccessConfidentialMinute(m, effectiveSession))
@@ -395,26 +396,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Busca dados cadastrais atuais dos estudantes para snapshot fiel, garantindo escopo da escola ativa
-    const studentsDb = uniqueStudentIds.length > 0
-      ? await prisma.student.findMany({
-          where: {
-            id: { in: uniqueStudentIds },
-            schoolId: effectiveSchoolId,
-          },
-          include: { classGroup: true },
-        })
-      : [];
-
-    if (uniqueStudentIds.length > 0 && studentsDb.length !== uniqueStudentIds.length) {
-      return NextResponse.json(
-        { error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular." },
-        { status: 400 }
-      );
-    }
-
-    await validateParticipantStudentLinks(prisma, effectiveSchoolId, participants);
-
     if ((participants || []).some((p) => Boolean(p.signatureData))) {
       return NextResponse.json(
         {
@@ -425,83 +406,113 @@ export async function POST(req: Request) {
       );
     }
 
-    const minute = await prisma.pedagogicalMinute.create({
-      data: {
-        schoolId: effectiveSchoolId,
-        year: currentYear,
-        status: "DRAFT", // Sempre inicia como rascunho sem consumir número
-        contentRevision: 1,
-        category,
-        isConfidential,
-        attendedAt: attendedAt ? new Date(attendedAt) : new Date(),
-        subject,
-        rawNotes,
-        summary: summary || "",
-        agreementsSummary,
-        authorId: authCheck.userId,
-        authorName: authCheck.userName || "Equipe Pedagógica",
-        authorEmail: authCheck.email,
-        authorRole:
-          (effectiveSession?.user as { role?: string } | undefined)?.role ||
-          authCheck.role ||
-          "PEDAGOGA",
-        authorIp: ip,
-        students: {
-          create: studentsDb.map((s) => ({
-            studentId: s.id,
-            studentNameSnapshot: s.name,
-            classNameSnapshot: s.classGroup?.name || null,
-            cgmSnapshot: s.cgm || null,
-          })),
+    const txResult = await withTenantContext(prisma, effectiveSchoolId, async (tx) => {
+      // Busca dados cadastrais atuais dos estudantes para snapshot fiel, garantindo escopo da escola ativa
+      const studentsDb = uniqueStudentIds.length > 0
+        ? await tx.student.findMany({
+            where: {
+              id: { in: uniqueStudentIds },
+              schoolId: effectiveSchoolId,
+            },
+            include: { classGroup: true },
+          })
+        : [];
+
+      if (uniqueStudentIds.length > 0 && studentsDb.length !== uniqueStudentIds.length) {
+        return {
+          errorStatus: 400 as const,
+          error: "Um ou mais estudantes informados não foram encontrados nesta instituição escolar para vincular.",
+        };
+      }
+
+      await validateParticipantStudentLinks(tx, effectiveSchoolId, participants);
+
+      const minute = await tx.pedagogicalMinute.create({
+        data: {
+          schoolId: effectiveSchoolId,
+          year: currentYear,
+          status: "DRAFT", // Sempre inicia como rascunho sem consumir número
+          contentRevision: 1,
+          category,
+          isConfidential,
+          attendedAt: attendedAt ? new Date(attendedAt) : new Date(),
+          subject,
+          rawNotes,
+          summary: summary || "",
+          agreementsSummary,
+          authorId: authCheck.userId,
+          authorName: authCheck.userName || "Equipe Pedagógica",
+          authorEmail: authCheck.email,
+          authorRole:
+            (effectiveSession?.user as { role?: string } | undefined)?.role ||
+            authCheck.role ||
+            "PEDAGOGA",
+          authorIp: ip,
+          students: {
+            create: studentsDb.map((s) => ({
+              studentId: s.id,
+              studentNameSnapshot: s.name,
+              classNameSnapshot: s.classGroup?.name || null,
+              cgmSnapshot: s.cgm || null,
+            })),
+          },
+          participants: {
+            create: participants.map((p) => {
+              const isSigned = Boolean(p.signatureData);
+              return {
+                role: p.role,
+                studentId:
+                  (p.role || "RESPONSAVEL").trim().toUpperCase() === "ESTUDANTE"
+                    ? p.studentId || null
+                    : null,
+                name: p.name,
+                kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
+                documentType: p.documentType || null,
+                documentNumber: p.documentNumber || null,
+                documentVerifiedByStaff: p.documentVerifiedByStaff,
+                phone: p.phone || null,
+                signatureMode: p.signatureMode === "REFUSED" ? "REFUSED" : "PENDING",
+                signatureData: null,
+                signedAt: null,
+                hasSignature: false,
+                hasActiveSignLink: false,
+                mobileSignRevision: null,
+                signedRevision: null,
+                biometricVerified: false,
+                biometricDeviceType: null,
+                biometricAuthTime: null,
+                expectedEmail: p.expectedEmail || null,
+                verifiedEmail: null,
+                verifiedGoogleSub: null,
+                verifiedGoogleName: null,
+                emailVerifiedAt: null,
+                refusalReason: p.refusalReason || null,
+                witnessName: p.witnessName || null,
+              };
+            }),
+          },
+          actionItems: {
+            create: actionItems.map((a) => ({
+              description: a.description,
+              responsible: a.responsible,
+              dueDate: a.dueDate ? new Date(a.dueDate) : null,
+            })),
+          },
         },
-        participants: {
-          create: participants.map((p) => {
-            const isSigned = Boolean(p.signatureData);
-            return {
-              role: p.role,
-              studentId:
-                (p.role || "RESPONSAVEL").trim().toUpperCase() === "ESTUDANTE"
-                  ? p.studentId || null
-                  : null,
-              name: p.name,
-              kinship: sanitizeKinshipForRole(p.role, p.kinship, { isSigned }),
-            documentType: p.documentType || null,
-            documentNumber: p.documentNumber || null,
-            documentVerifiedByStaff: p.documentVerifiedByStaff,
-            phone: p.phone || null,
-            signatureMode: p.signatureMode === "REFUSED" ? "REFUSED" : "PENDING",
-            signatureData: null,
-            signedAt: null,
-            hasSignature: false,
-            hasActiveSignLink: false,
-            mobileSignRevision: null,
-            signedRevision: null,
-            biometricVerified: false,
-            biometricDeviceType: null,
-            biometricAuthTime: null,
-            expectedEmail: p.expectedEmail || null,
-            verifiedEmail: null,
-            verifiedGoogleSub: null,
-            verifiedGoogleName: null,
-            emailVerifiedAt: null,
-            refusalReason: p.refusalReason || null,
-            witnessName: p.witnessName || null,
-          }; }),
+        include: {
+          students: true,
+          participants: true,
+          actionItems: true,
         },
-        actionItems: {
-          create: actionItems.map((a) => ({
-            description: a.description,
-            responsible: a.responsible,
-            dueDate: a.dueDate ? new Date(a.dueDate) : null,
-          })),
-        },
-      },
-      include: {
-        students: true,
-        participants: true,
-        actionItems: true,
-      },
+      });
+
+      return { studentsDb, minute };
     });
+
+    if ("errorStatus" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+    const { studentsDb, minute } = txResult;
 
     await logAudit({
       action: "CREATE_ATA_DRAFT",

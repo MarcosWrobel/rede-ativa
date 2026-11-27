@@ -70,8 +70,9 @@ vi.mock("@/lib/currentSchool", async () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaMock: any = {
+    $executeRaw: vi.fn(async () => 1),
     pedagogicalMinute: {
       findUnique: hoisted.minuteFindUnique,
       update: vi.fn(async () => ({})),
@@ -79,8 +80,10 @@ vi.mock("@/lib/prisma", () => ({
     school: {
       findMany: hoisted.schoolFindMany,
     },
-  },
-}));
+  };
+  prismaMock.$transaction = vi.fn(async (fn: any) => fn(prismaMock));
+  return { prisma: prismaMock };
+});
 
 vi.mock("@/components/AppLayoutClient", () => ({
   default: ({ children }: any) => children,

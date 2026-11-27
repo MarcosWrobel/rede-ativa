@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { buildSessionFromSnapshot } from "@/lib/serverAuthContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
@@ -65,7 +66,7 @@ export async function POST(
 
     const runTx =
       typeof prisma.$transaction === "function"
-        ? prisma.$transaction.bind(prisma)
+        ? (fn: (txClient: any) => Promise<any>) => withTenantContext(prisma, currentSchool.id, fn)
         : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
 
     const txResult = await runTx(async (tx) => {

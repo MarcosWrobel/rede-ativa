@@ -189,49 +189,49 @@ vi.mock("@/lib/prisma", () => {
       deleteMany: vi.fn(async () => ({ count: 0 })),
       createMany: vi.fn(async () => ({ count: 0 })),
     },
+    user: {
+      findUnique: vi.fn(async ({ where }: any) => {
+        const u = state.users.find(
+          (x) => (where?.id && x.id === where.id) || (where?.email && x.email === where.email)
+        );
+        if (!u) return null;
+        return {
+          ...u,
+          schools: (u.schools || []).map((link: any) => ({
+            ...link,
+            school: state.schools.find((s) => s.id === link.schoolId) || null,
+          })),
+          networks: u.networks || [],
+        };
+      }),
+      findMany: vi.fn(async ({ where, orderBy, take, select }: any) => {
+        let list = state.users.filter((u) => {
+          if (where?.active === true && u.active !== true) return false;
+          const targetSchool =
+            where?.schools?.some?.schoolId || where?.OR?.[0]?.schoolId;
+          if (targetSchool) {
+            const hasActiveLink = (u.schools || []).some(
+              (s: any) => s.schoolId === targetSchool && s.active === true
+            );
+            if (!hasActiveLink) return false;
+          }
+          return true;
+        });
+        if (orderBy) {
+          list = [...list].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        }
+        if (typeof take === "number") {
+          list = list.slice(0, take);
+        }
+        return list.map((u) => selectFields(u, select));
+      }),
+    },
   };
 
   return {
     prisma: {
       ...txMock,
       $transaction: vi.fn(async (fn: any) => fn(txMock)),
-      user: {
-        findUnique: vi.fn(async ({ where }: any) => {
-          const u = state.users.find(
-            (x) => (where?.id && x.id === where.id) || (where?.email && x.email === where.email)
-          );
-          if (!u) return null;
-          return {
-            ...u,
-            schools: (u.schools || []).map((link: any) => ({
-              ...link,
-              school: state.schools.find((s) => s.id === link.schoolId) || null,
-            })),
-            networks: u.networks || [],
-          };
-        }),
-        findMany: vi.fn(async ({ where, orderBy, take, select }: any) => {
-          let list = state.users.filter((u) => {
-            if (where?.active === true && u.active !== true) return false;
-            const targetSchool =
-              where?.schools?.some?.schoolId || where?.OR?.[0]?.schoolId;
-            if (targetSchool) {
-              const hasActiveLink = (u.schools || []).some(
-                (s: any) => s.schoolId === targetSchool && s.active === true
-              );
-              if (!hasActiveLink) return false;
-            }
-            return true;
-          });
-          if (orderBy) {
-            list = [...list].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-          }
-          if (typeof take === "number") {
-            list = list.slice(0, take);
-          }
-          return list.map((u) => selectFields(u, select));
-        }),
-      },
       school: {
         findUnique: vi.fn(async ({ where, select }: any) => {
           const found = state.schools.find((s) => s.id === where.id);

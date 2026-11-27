@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   buildSessionFromSnapshot,
   resolveEffectiveRoleForSchool,
@@ -445,6 +446,9 @@ export async function POST(req: Request) {
       try {
         minuteParticipants = await (prisma as any).$transaction(
           async (tx: any) => {
+            if (typeof tx?.$executeRaw === "function") {
+              await tx.$executeRaw`SELECT set_config('app.current_school_id', ${currentSchool.id}, true)`;
+            }
             const txFinder =
               typeof tx?.pedagogicalMinute?.findFirst === "function"
                 ? tx.pedagogicalMinute.findFirst
@@ -613,13 +617,24 @@ export async function POST(req: Request) {
           minuteScopeUnconfirmed = true;
         } else {
           try {
-            const matchedStudents = await prisma.student.findMany({
-              where: {
-                id: { in: uniqueStudentIds },
-                schoolId: currentSchool.id,
-              },
-              select: { id: true, name: true },
-            });
+            const matchedStudents =
+              typeof (prisma as any)?.$transaction === "function"
+                ? await withTenantContext(prisma, currentSchool.id, (tx) =>
+                    tx.student.findMany({
+                      where: {
+                        id: { in: uniqueStudentIds },
+                        schoolId: currentSchool.id,
+                      },
+                      select: { id: true, name: true },
+                    })
+                  )
+                : await prisma.student.findMany({
+                    where: {
+                      id: { in: uniqueStudentIds },
+                      schoolId: currentSchool.id,
+                    },
+                    select: { id: true, name: true },
+                  });
             if (!Array.isArray(matchedStudents) || matchedStudents.length !== uniqueStudentIds.length) {
               minuteScopeUnconfirmed = true;
             } else {

@@ -142,6 +142,7 @@ vi.mock("@/lib/prisma", () => ({
       update: hoisted.userUpdate,
     },
     $transaction: hoisted.transaction,
+    $executeRaw: vi.fn(async () => 1),
   },
 }));
 
@@ -273,6 +274,8 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
           $executeRaw: vi.fn(async () => 0),
           absenceJustification: {
             findMany: vi.fn(async () => []),
+            count: vi.fn(async () => 0),
+            create: vi.fn(async ({ data }: any) => ({ id: "just-1", ...data })),
           },
           studentContact: {
             findMany: vi.fn(async () => []),
@@ -323,6 +326,11 @@ describe("Remediação Cirúrgica Setor B & Regra 10 GEMINI.md", () => {
           messageLog: {
             create: hoisted.messageLogCreate,
             update: vi.fn(async ({ where, data }: any) => ({ id: where.id, ...data })),
+          },
+          pedagogicalActionItem: {
+            findUnique: hoisted.actionFindUnique,
+            findMany: hoisted.actionFindMany,
+            update: hoisted.actionUpdate,
           },
         });
       }

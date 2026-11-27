@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSchoolManager, checkIsSuperAdmin } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { generateAtaPdfA1b } from "@/lib/ataPdfArchive";
@@ -21,25 +22,6 @@ export async function GET(
     const targetStudentId = searchParams.get("studentId") || undefined;
     const download = searchParams.get("download") === "1";
 
-    const minute = await prisma.pedagogicalMinute.findUnique({
-      where: { id },
-      include: {
-        school: true,
-        students: {
-          include: { student: true },
-        },
-        participants: true,
-        actionItems: true,
-        addendums: {
-          orderBy: { createdAt: "asc" },
-        },
-      },
-    });
-
-    if (!minute) {
-      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
-    }
-
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
@@ -47,6 +29,28 @@ export async function GET(
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
+
+    const minute = await withTenantContext(prisma, currentSchool.id, (tx) =>
+      tx.pedagogicalMinute.findUnique({
+        where: { id },
+        include: {
+          school: true,
+          students: {
+            include: { student: true },
+          },
+          participants: true,
+          actionItems: true,
+          addendums: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      })
+    );
+
+    if (!minute) {
+      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    }
+
     if (!assertTenantOwnership(minute.schoolId, currentSchool.id, authCheck.session)) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
@@ -108,13 +112,15 @@ export async function GET(
     });
 
     // Registra o hash emitido da certidão PDF/A-1b no banco
-    await prisma.pedagogicalMinute.update({
-      where: { id },
-      data: {
-        pdfArchiveSha256: archiveResult.sha256,
-        pdfArchiveGeneratedAt: new Date(),
-      },
-    });
+    await withTenantContext(prisma, currentSchool.id, (tx) =>
+      tx.pedagogicalMinute.update({
+        where: { id },
+        data: {
+          pdfArchiveSha256: archiveResult.sha256,
+          pdfArchiveGeneratedAt: new Date(),
+        },
+      })
+    );
 
     await logAudit({
       action: "GENERATE_DOSSIER",

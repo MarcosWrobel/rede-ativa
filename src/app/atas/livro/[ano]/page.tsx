@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
   buildRestrictedConfidentialMinuteSummary,
   canAccessConfidentialMinute,
@@ -36,14 +37,15 @@ export default async function LivroAnualPage({ params }: Props) {
 
   let minutes: any[] = [];
   try {
-    minutes = await prisma.pedagogicalMinute.findMany({
-      where: {
-        ...schoolFilter,
-        year,
-        status: { in: ["FINALIZED", "VOIDED"] },
-      },
-      orderBy: { ataNumber: "asc" },
-      select: {
+    minutes = await withTenantContext(prisma, school.id, (tx) =>
+      tx.pedagogicalMinute.findMany({
+        where: {
+          ...schoolFilter,
+          year,
+          status: { in: ["FINALIZED", "VOIDED"] },
+        },
+        orderBy: { ataNumber: "asc" },
+        select: {
         id: true,
         schoolId: true,
         year: true,
@@ -116,7 +118,8 @@ export default async function LivroAnualPage({ params }: Props) {
         addendums: { orderBy: { createdAt: "asc" } },
         actionItems: true,
       },
-    });
+      })
+    );
   } catch (err) {
     console.error("[LivroAnualPage] Erro ao consultar atas do livro anual:", err);
   }

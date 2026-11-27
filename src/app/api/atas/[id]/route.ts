@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
@@ -107,53 +109,56 @@ export async function GET(
     const { id } = await params;
     const isPollMode = new URL(req.url).searchParams.get("poll") === "1";
 
+    const schoolRes = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot
+    );
+    if (!schoolRes.ok) return schoolRes.response;
+    const currentSchool = schoolRes.school;
+    const effectiveSession = authCheck.snapshot
+      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
+      : authCheck.session;
+
     if (isPollMode) {
-      const pollMinute = await prisma.pedagogicalMinute.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          schoolId: true,
-          status: true,
-          contentRevision: true,
-          updatedAt: true,
-          hasPhysicalScan: true,
-          physicalScanStorageKey: true,
-          physicalScanRevision: true,
-          physicalScanSupersededAt: true,
-          govBrVerified: true,
-          govBrProtocol: true,
-          isConfidential: true,
-          authorId: true,
-          authorEmail: true,
-          participants: {
-            select: {
-              id: true,
-              role: true,
-              signatureMode: true,
-              hasSignature: true,
-              hasActiveSignLink: true,
-              signedRevision: true,
-              verifiedEmail: true,
-              mobileSignExpiresAt: true,
+      const pollMinute = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+        tx.pedagogicalMinute.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            schoolId: true,
+            status: true,
+            contentRevision: true,
+            updatedAt: true,
+            hasPhysicalScan: true,
+            physicalScanStorageKey: true,
+            physicalScanRevision: true,
+            physicalScanSupersededAt: true,
+            govBrVerified: true,
+            govBrProtocol: true,
+            isConfidential: true,
+            authorId: true,
+            authorEmail: true,
+            participants: {
+              select: {
+                id: true,
+                role: true,
+                signatureMode: true,
+                hasSignature: true,
+                hasActiveSignLink: true,
+                signedRevision: true,
+                verifiedEmail: true,
+                mobileSignExpiresAt: true,
+              },
             },
           },
-        },
-      });
+        })
+      );
 
       if (!pollMinute) {
         return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
       }
 
-      const schoolRes = await requireAuthorizedSchool(
-        authCheck.session,
-        authCheck.schoolId,
-        authCheck.snapshot
-      );
-      if (!schoolRes.ok) return schoolRes.response;
-      const currentSchool = schoolRes.school;
-      const effectiveSession = authCheck.snapshot
-        ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
-        : authCheck.session;
       if (!assertTenantOwnership(pollMinute.schoolId, currentSchool.id, effectiveSession)) {
         return NextResponse.json(
           { error: "Acesso negado a registro de outra instituição de ensino." },
@@ -199,77 +204,76 @@ export async function GET(
       });
     }
 
-    const minute = await prisma.pedagogicalMinute.findUnique({
-      where: { id },
-      include: {
-        school: true,
-        students: {
-          include: {
-            student: {
-              select: { id: true, name: true, phone: true, cgm: true },
+    const getTxResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const minute = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+        include: {
+          school: true,
+          students: {
+            include: {
+              student: {
+                select: { id: true, name: true, phone: true, cgm: true },
+              },
             },
           },
+          participants: true,
+          addendums: {
+            orderBy: { createdAt: "asc" },
+          },
+          actionItems: {
+            orderBy: { createdAt: "asc" },
+          },
         },
-        participants: true,
-        addendums: {
-          orderBy: { createdAt: "asc" },
-        },
-        actionItems: {
-          orderBy: { createdAt: "asc" },
-        },
-      },
+      });
+
+      if (!minute) {
+        return { errorStatus: 404 as const, error: "Ata pedagógica não encontrada" };
+      }
+
+      if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      if (!canAccessConfidentialMinute(minute, effectiveSession)) {
+        return {
+          errorStatus: 403 as const,
+          error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor.",
+        };
+      }
+
+      // Assegura verificationCode para ata finalizada legada
+      if (minute.status === "FINALIZED" && !minute.verificationCode) {
+        const code = generateVerificationCode();
+        minute.verificationCode = code;
+        try {
+          await tx.pedagogicalMinute.update({
+            where: { id: minute.id },
+            data: { verificationCode: code },
+          });
+        } catch (e) {
+          console.warn(`[GET /api/atas/${id}] Falha ao persistir verificationCode legado:`, e);
+        }
+      }
+
+      const rawPhysicalProofHistory =
+        typeof (tx as any).pedagogicalMinutePhysicalProofHistory?.findMany === "function"
+          ? await (tx as any).pedagogicalMinutePhysicalProofHistory.findMany({
+              where: { minuteId: id },
+              orderBy: { supersededAt: "desc" },
+              select: PHYSICAL_PROOF_HISTORY_SELECT,
+            })
+          : [];
+
+      return { minute, rawPhysicalProofHistory };
     });
 
-    if (!minute) {
-      return NextResponse.json({ error: "Ata pedagógica não encontrada" }, { status: 404 });
+    if ("errorStatus" in getTxResult) {
+      return NextResponse.json({ error: getTxResult.error }, { status: getTxResult.errorStatus });
     }
-
-    const schoolRes = await requireAuthorizedSchool(
-      authCheck.session,
-      authCheck.schoolId,
-      authCheck.snapshot
-    );
-    if (!schoolRes.ok) return schoolRes.response;
-    const currentSchool = schoolRes.school;
-    const effectiveSession = authCheck.snapshot
-      ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
-      : authCheck.session;
-    if (!assertTenantOwnership(minute.schoolId, currentSchool.id, effectiveSession)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
-    if (!canAccessConfidentialMinute(minute, effectiveSession)) {
-      return NextResponse.json(
-        { error: "Esta ata possui Sigilo Reforçado (ECA) restrito à Direção Escolar e ao servidor autor." },
-        { status: 403 }
-      );
-    }
-
-    // Auto-recuperação de fé pública: assegura verificationCode para ata finalizada legada
-    if (minute.status === "FINALIZED" && !minute.verificationCode) {
-      const code = generateVerificationCode();
-      minute.verificationCode = code;
-      try {
-        await prisma.pedagogicalMinute.update({
-          where: { id: minute.id },
-          data: { verificationCode: code },
-        });
-      } catch (e) {
-        console.warn(`[GET /api/atas/${id}] Falha ao persistir verificationCode legado:`, e);
-      }
-    }
-
-    const rawPhysicalProofHistory =
-      typeof (prisma as any).pedagogicalMinutePhysicalProofHistory?.findMany === "function"
-        ? await (prisma as any).pedagogicalMinutePhysicalProofHistory.findMany({
-            where: { minuteId: id },
-            orderBy: { supersededAt: "desc" },
-            select: PHYSICAL_PROOF_HISTORY_SELECT,
-          })
-        : [];
+    const { minute, rawPhysicalProofHistory } = getTxResult;
     const physicalProofHistory = filterAccessiblePhysicalProofHistory(
       rawPhysicalProofHistory,
       minute.schoolId,
@@ -318,15 +322,6 @@ export async function PATCH(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await params;
-    const existing = await prisma.pedagogicalMinute.findUnique({
-      where: { id },
-      include: { students: true, participants: true, actionItems: true },
-    });
-
-    if (!existing) {
-      return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
-    }
-
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
@@ -337,6 +332,22 @@ export async function PATCH(
     const effectiveSession = authCheck.snapshot
       ? buildSessionFromSnapshot(authCheck.session, authCheck.snapshot, currentSchool)
       : authCheck.session;
+
+    const existing = await (typeof prisma.$transaction === "function"
+      ? withTenantContext(prisma, currentSchool.id, (tx) =>
+          tx.pedagogicalMinute.findUnique({
+            where: { id },
+            include: { students: true, participants: true, actionItems: true },
+          })
+        )
+      : prisma.pedagogicalMinute.findUnique({
+          where: { id },
+          include: { students: true, participants: true, actionItems: true },
+        }));
+
+    if (!existing) {
+      return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
+    }
 
     if (!assertTenantOwnership(existing.schoolId, currentSchool.id, effectiveSession)) {
       return NextResponse.json(
@@ -384,8 +395,10 @@ export async function PATCH(
 
     const runTx =
       typeof prisma.$transaction === "function"
-        ? prisma.$transaction.bind(prisma)
-        : async (fn: (txClient: typeof prisma) => Promise<any>) => fn(prisma);
+        ? (fn: (txClient: Prisma.TransactionClient) => Promise<any>) =>
+            withTenantContext(prisma, currentSchool.id, fn)
+        : async (fn: (txClient: Prisma.TransactionClient) => Promise<any>) =>
+            fn(prisma as unknown as Prisma.TransactionClient);
 
     const updated = await runTx(async (tx) => {
       await acquireMinuteWriteLock(tx, id);
@@ -658,9 +671,7 @@ export async function PATCH(
           physicalProofHistory,
         },
       };
-        },
-        { maxWait: 5000, timeout: 10000 }
-      );
+        });
 
     if (updated.effectiveChanged) {
       await logAudit({
@@ -741,14 +752,6 @@ export async function DELETE(
     if (!authCheck.ok) return authCheck.response;
 
     const { id } = await params;
-    const existing = await prisma.pedagogicalMinute.findUnique({
-      where: { id },
-    });
-
-    if (!existing) {
-      return NextResponse.json({ error: "Ata não encontrada" }, { status: 404 });
-    }
-
     const schoolRes = await requireAuthorizedSchool(
       authCheck.session,
       authCheck.schoolId,
@@ -756,28 +759,45 @@ export async function DELETE(
     );
     if (!schoolRes.ok) return schoolRes.response;
     const currentSchool = schoolRes.school;
-    if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a registro de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
-
     const isSuper = checkIsSuperAdmin(authCheck.session);
 
-    // REGRA DE OURO JURÍDICA: Usuários comuns só podem descartar rascunhos (DRAFT).
-    // Administradores Gerais possuem permissão de expurgo técnico (ex: descarte de atas de teste/homologação).
-    if (!isSuper && existing.status !== "DRAFT") {
-      return NextResponse.json(
-        {
+    const deleteTxResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const existing = await tx.pedagogicalMinute.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        return { errorStatus: 404 as const, error: "Ata não encontrada" };
+      }
+
+      if (!assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a registro de outra instituição de ensino.",
+        };
+      }
+
+      // REGRA DE OURO JURÍDICA: Usuários comuns só podem descartar rascunhos (DRAFT).
+      // Administradores Gerais possuem permissão de expurgo técnico (ex: descarte de atas de teste/homologação).
+      if (!isSuper && existing.status !== "DRAFT") {
+        return {
+          errorStatus: 403 as const,
           error:
             "Ata oficial lavrada não pode ser excluída do livro de registros. Apenas Administradores do sistema possuem permissão para expurgar registros.",
-        },
-        { status: 403 }
+        };
+      }
+
+      await tx.pedagogicalMinute.delete({ where: { id } });
+      return { existing };
+    });
+
+    if ("errorStatus" in deleteTxResult) {
+      return NextResponse.json(
+        { error: deleteTxResult.error },
+        { status: deleteTxResult.errorStatus }
       );
     }
-
-    await prisma.pedagogicalMinute.delete({ where: { id } });
+    const existing = deleteTxResult.existing;
 
     const ip = extractClientIp(req);
     await logAudit({

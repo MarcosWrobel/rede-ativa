@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
 import {
   generateVerificationCode,
@@ -115,39 +116,44 @@ export default async function AtaPrintPage({ params }: Props) {
 
   const ctx = await resolveAuthorizedPageContext();
   const session = ctx.session;
-
-  let minute: any = await prisma.pedagogicalMinute.findUnique({
-    where: { id },
-    select: PRINT_MINUTE_SELECT,
-  });
-
-  if (!minute) {
-    notFound();
-  }
-
   const currentSchool = ctx.school;
 
-  // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
-  const isOwner = assertTenantOwnership(minute.schoolId, currentSchool.id, session);
-  if (!isOwner || !canAccessConfidentialMinute(minute, session)) {
-    notFound();
-  }
+  let minute: any = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+    let row: any = await tx.pedagogicalMinute.findUnique({
+      where: { id },
+      select: PRINT_MINUTE_SELECT,
+    });
 
-  // Auto-healing: Se a ata está FINALIZED mas não tem verificationCode (legado ou importado),
-  // assegura a geração atômica e salva no banco para garantir a fé pública e o QR Code.
-  // Executado estritamente APÓS validação de tenant autorizada.
-  if (minute.status === "FINALIZED" && !minute.verificationCode) {
-    const newCode = generateVerificationCode();
-    try {
-      minute = await prisma.pedagogicalMinute.update({
-        where: { id: minute.id },
-        data: { verificationCode: newCode },
-        select: PRINT_MINUTE_SELECT,
-      });
-    } catch (err) {
-      console.warn("[AtaPrintPage] Falha ao persistir verificationCode legado:", err);
-      minute.verificationCode = newCode;
+    if (!row) return null;
+
+    // Validação estrita de isolamento multi-tenant (Ponto 2) e Sigilo Reforçado ECA
+    const isOwner = assertTenantOwnership(row.schoolId, currentSchool.id, session);
+    if (!isOwner || !canAccessConfidentialMinute(row, session)) {
+      return "FORBIDDEN" as const;
     }
+
+    // Auto-healing: Se a ata está FINALIZED mas não tem verificationCode (legado ou importado),
+    // assegura a geração atômica e salva no banco para garantir a fé pública e o QR Code.
+    // Executado estritamente APÓS validação de tenant autorizada.
+    if (row.status === "FINALIZED" && !row.verificationCode) {
+      const newCode = generateVerificationCode();
+      try {
+        row = await tx.pedagogicalMinute.update({
+          where: { id: row.id },
+          data: { verificationCode: newCode },
+          select: PRINT_MINUTE_SELECT,
+        });
+      } catch (err) {
+        console.warn("[AtaPrintPage] Falha ao persistir verificationCode legado:", err);
+        row.verificationCode = newCode;
+      }
+    }
+
+    return row;
+  });
+
+  if (!minute || minute === "FORBIDDEN") {
+    notFound();
   }
 
   if (minute?.school) {

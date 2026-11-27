@@ -22,6 +22,7 @@ import {
   hasMinimumOfficialSummary,
   OFFICIAL_SUMMARY_REQUIRED_FOR_FINALIZATION_ERROR,
 } from "@/lib/ataRevision";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 const BRASILIA_TIMEZONE = "America/Sao_Paulo";
 
@@ -236,6 +237,7 @@ export interface ExecuteMinuteFinalizationParams {
   };
   verifyTenantOwnership: (minuteSchoolId: string) => boolean;
   session?: any;
+  schoolId?: string;
 }
 
 export interface ExecuteMinuteFinalizationResult {
@@ -253,12 +255,14 @@ export interface ExecuteMinuteFinalizationResult {
 export async function executeMinuteFinalization(
   params: ExecuteMinuteFinalizationParams
 ): Promise<ExecuteMinuteFinalizationResult> {
-  const { prisma, minuteId, rawBody, author, verifyTenantOwnership, session } = params;
+  const { prisma, minuteId, rawBody, author, verifyTenantOwnership, session, schoolId } = params;
   const currentYear = getBrasiliaDateParts(new Date()).year;
 
   const runTx =
     typeof prisma.$transaction === "function"
-      ? prisma.$transaction.bind(prisma)
+      ? schoolId
+        ? (fn: (txClient: any) => Promise<any>) => withTenantContext(prisma, schoolId, fn)
+        : prisma.$transaction.bind(prisma)
       : async (fn: (txClient: any) => Promise<any>) => fn(prisma);
 
   let finalized: any = null;

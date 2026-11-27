@@ -9876,6 +9876,370 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
+
+    it("isola Justificativas e Atas (/api/justifications/**, /api/atas/**, /atas/** e executeMinuteFinalization) com withTenantContext", async () => {
+      const rlsTenantModule = await import("@/lib/rlsTenantContext");
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenantContext = rlsTenantModule.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantModule, "withTenantContext")
+        .mockImplementation(async (client: any, schoolId: string, fn: any) => {
+          return originalWithTenantContext(client, schoolId, async (tx: any) => {
+            const rows = await tx.$queryRaw<Array<{ current_school_id: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS current_school_id
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.current_school_id ?? null,
+            });
+            return fn(tx);
+          });
+        });
+
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      let createdBetaJustificationId: string | null = null;
+      let createdBetaMinuteId: string | null = null;
+      let createdAlphaMinuteId: string | null = null;
+
+      try {
+        testAuthState.useRealCurrentSchool = true;
+        testAuthState.useRealPermissions = true;
+
+        const { hashPin } = await import("@/lib/signingPin");
+        const pinHash = await hashPin("4829");
+
+        await prisma.user.create({
+          data: {
+            id: "user-l4-alpha",
+            email: "l4-alpha@escola-alpha.local",
+            name: "Pedagoga L4 Alpha",
+            role: "PEDAGOGA",
+            active: true,
+            schoolId: "school-alpha",
+            signingPinHash: pinHash,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-l4-alpha",
+            userId: "user-l4-alpha",
+            schoolId: "school-alpha",
+            role: "PEDAGOGA",
+            active: true,
+          },
+        });
+
+        const betaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-beta", active: true },
+          select: { id: true },
+        });
+        const alphaStudent = await prisma.student.findFirst({
+          where: { schoolId: "school-alpha", active: true },
+          select: { id: true },
+        });
+        expect(betaStudent?.id).toBeTruthy();
+        expect(alphaStudent?.id).toBeTruthy();
+
+        const createdBetaJust = await prisma.absenceJustification.create({
+          data: {
+            studentId: betaStudent!.id,
+            type: "ATESTADO_MEDICO",
+            startDate: new Date("2026-04-10T00:00:00.000-03:00"),
+            endDate: new Date("2026-04-11T23:59:59.999-03:00"),
+            notes: "Atestado sintetico beta L4",
+            createdByName: "Equipe Beta",
+            createdByEmail: "beta@escola-beta.local",
+          },
+        });
+        createdBetaJustificationId = createdBetaJust.id;
+
+        const createdBetaMin = await prisma.pedagogicalMinute.create({
+          data: {
+            schoolId: "school-beta",
+            year: 2026,
+            status: "DRAFT",
+            contentRevision: 1,
+            category: "ACOMPANHAMENTO_PEDAGOGICO",
+            attendedAt: new Date("2026-04-10T10:00:00.000-03:00"),
+            subject: "Ata Beta L4",
+            summary: "Resumo sintetico da escola beta",
+            authorId: "user-beta-l4",
+            authorName: "Equipe Beta",
+            authorEmail: "beta@escola-beta.local",
+            authorRole: "PEDAGOGA",
+            students: {
+              create: [
+                {
+                  studentId: betaStudent!.id,
+                  studentNameSnapshot: "Aluno Beta",
+                },
+              ],
+            },
+          },
+        });
+        createdBetaMinuteId = createdBetaMin.id;
+
+        testAuthState.pendingSessionUser = {
+          id: "user-l4-alpha",
+          email: "l4-alpha@escola-alpha.local",
+          name: "Pedagoga L4 Alpha",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+        };
+
+        const { GET: getJustificationsHandler, POST: postJustificationsHandler } = await import(
+          "@/app/api/justifications/route"
+        );
+        const { DELETE: deleteJustificationHandler } = await import(
+          "@/app/api/justifications/[id]/route"
+        );
+        const { GET: getAtasHandler, POST: postAtasHandler } = await import(
+          "@/app/api/atas/route"
+        );
+        const {
+          GET: getAtaByIdHandler,
+          PATCH: patchAtaByIdHandler,
+          DELETE: deleteAtaByIdHandler,
+        } = await import("@/app/api/atas/[id]/route");
+        const { POST: finalizeAtaHandler } = await import("@/app/api/atas/[id]/finalize/route");
+        const { GET: getAtaActionsHandler } = await import("@/app/api/atas/actions/route");
+        const { GET: getAtaAlertsHandler } = await import("@/app/api/atas/actions/alerts/route");
+        const { GET: getCandidatesHandler } = await import(
+          "@/app/api/atas/participant-candidates/route"
+        );
+        const { default: AtasPage } = await import("@/app/atas/page");
+
+        // 1. Justificativas: cria em alpha, lista apenas alpha, deleta em alpha e bloqueia beta (403)
+        tenantCalls.length = 0;
+        const rPostJustAlpha = await postJustificationsHandler(
+          new Request("http://127.0.0.1/api/justifications", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              studentId: alphaStudent!.id,
+              type: "ATESTADO_MEDICO",
+              startDate: "2026-04-12",
+              endDate: "2026-04-13",
+              notes: "Atestado alpha L4",
+            }),
+          })
+        );
+        expect(rPostJustAlpha.status).toBe(200);
+        const jPostJustAlpha = await rPostJustAlpha.json();
+        const createdAlphaJustId = jPostJustAlpha.justification.id as string;
+
+        const rGetJustAlpha = await getJustificationsHandler(
+          new Request("http://127.0.0.1/api/justifications")
+        );
+        expect(rGetJustAlpha.status).toBe(200);
+        const jGetJustAlpha = await rGetJustAlpha.json();
+        expect(
+          jGetJustAlpha.justifications.some((j: any) => j.id === createdBetaJustificationId)
+        ).toBe(false);
+        expect(
+          jGetJustAlpha.justifications.some((j: any) => j.id === createdAlphaJustId)
+        ).toBe(true);
+
+        const rPostJustCross = await postJustificationsHandler(
+          new Request("http://127.0.0.1/api/justifications", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              studentId: betaStudent!.id,
+              type: "ATESTADO_MEDICO",
+              startDate: "2026-04-12",
+              endDate: "2026-04-13",
+            }),
+          })
+        );
+        expect(rPostJustCross.status).toBe(403);
+
+        const rDelJustCross = await deleteJustificationHandler(
+          new Request(`http://127.0.0.1/api/justifications/${createdBetaJustificationId}`, {
+            method: "DELETE",
+          }),
+          { params: Promise.resolve({ id: createdBetaJustificationId }) }
+        );
+        expect(rDelJustCross.status).toBe(403);
+
+        const rDelJustAlpha = await deleteJustificationHandler(
+          new Request(`http://127.0.0.1/api/justifications/${createdAlphaJustId}`, {
+            method: "DELETE",
+          }),
+          { params: Promise.resolve({ id: createdAlphaJustId }) }
+        );
+        expect(rDelJustAlpha.status).toBe(200);
+
+        // 2. Atas: cria rascunho em alpha, bloqueia studentId de beta, edita, finaliza e lê ações/alertas/candidatos/SSR
+        const rPostAtaCross = await postAtasHandler(
+          new Request("http://127.0.0.1/api/atas", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              subject: "Tentativa Cruzada",
+              studentIds: [betaStudent!.id],
+            }),
+          })
+        );
+        expect(rPostAtaCross.status).toBe(400);
+
+        const rPostAtaAlpha = await postAtasHandler(
+          new Request("http://127.0.0.1/api/atas", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              subject: "Atendimento Alpha L4",
+              attendedAt: new Date().toISOString(),
+              summary: "Texto oficial sintético com mais de cinquenta caracteres para validação completa do fluxo de lavratura.",
+              studentIds: [alphaStudent!.id],
+              participants: [
+                {
+                  role: "SERVIDOR",
+                  name: "Pedagoga L4 Alpha",
+                },
+              ],
+              actionItems: [
+                {
+                  description: "Acompanhar frequência semanalmente",
+                  responsible: "ESCOLA",
+                },
+              ],
+            }),
+          })
+        );
+        expect(rPostAtaAlpha.status).toBe(201);
+        const jPostAtaAlpha = await rPostAtaAlpha.json();
+        createdAlphaMinuteId = jPostAtaAlpha.minute.id as string;
+
+        const rPatchAtaAlpha = await patchAtaByIdHandler(
+          new Request(`http://127.0.0.1/api/atas/${createdAlphaMinuteId}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: 1,
+              subject: "Atendimento Alpha L4 Atualizado",
+            }),
+          }),
+          { params: Promise.resolve({ id: createdAlphaMinuteId }) }
+        );
+        expect(rPatchAtaAlpha.status).toBe(200);
+
+        const rFinalizeAlpha = await finalizeAtaHandler(
+          new Request(`http://127.0.0.1/api/atas/${createdAlphaMinuteId}/finalize`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              signingPin: "4829",
+              expectedRevision: 2,
+            }),
+          }),
+          { params: Promise.resolve({ id: createdAlphaMinuteId }) }
+        );
+        expect(rFinalizeAlpha.status).toBe(200);
+
+        // Bloqueios cross-tenant em [id] e participant-candidates
+        const rGetAtaCross = await getAtaByIdHandler(
+          new Request(`http://127.0.0.1/api/atas/${createdBetaMinuteId}`),
+          { params: Promise.resolve({ id: createdBetaMinuteId }) }
+        );
+        expect(rGetAtaCross.status).toBe(403);
+
+        const rPatchAtaCross = await patchAtaByIdHandler(
+          new Request(`http://127.0.0.1/api/atas/${createdBetaMinuteId}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ subject: "Invasao" }),
+          }),
+          { params: Promise.resolve({ id: createdBetaMinuteId }) }
+        );
+        expect(rPatchAtaCross.status).toBe(403);
+
+        const rDelAtaCross = await deleteAtaByIdHandler(
+          new Request(`http://127.0.0.1/api/atas/${createdBetaMinuteId}`, {
+            method: "DELETE",
+          }),
+          { params: Promise.resolve({ id: createdBetaMinuteId }) }
+        );
+        expect(rDelAtaCross.status).toBe(403);
+
+        const rCandCrossMinute = await getCandidatesHandler(
+          new Request(
+            `http://127.0.0.1/api/atas/participant-candidates?minuteId=${createdBetaMinuteId}`
+          )
+        );
+        expect(rCandCrossMinute.status).toBe(403);
+
+        const rCandCrossStudent = await getCandidatesHandler(
+          new Request(
+            `http://127.0.0.1/api/atas/participant-candidates?part=contacts&studentIds=${betaStudent!.id}`
+          )
+        );
+        expect(rCandCrossStudent.status).toBe(403);
+
+        const rGetAtasAlpha = await getAtasHandler(new Request("http://127.0.0.1/api/atas"));
+        expect(rGetAtasAlpha.status).toBe(200);
+        const rGetActionsAlpha = await getAtaActionsHandler(
+          new Request("http://127.0.0.1/api/atas/actions")
+        );
+        expect(rGetActionsAlpha.status).toBe(200);
+        const rGetAlertsAlpha = await getAtaAlertsHandler(
+          new Request("http://127.0.0.1/api/atas/actions/alerts")
+        );
+        expect(rGetAlertsAlpha.status).toBe(200);
+        const rCandAlpha = await getCandidatesHandler(
+          new Request(
+            `http://127.0.0.1/api/atas/participant-candidates?minuteId=${createdAlphaMinuteId}&studentIds=${alphaStudent!.id}`
+          )
+        );
+        expect(rCandAlpha.status).toBe(200);
+        await expect(AtasPage({})).resolves.toBeTruthy();
+
+        expect(tenantCalls.length).toBeGreaterThanOrEqual(12);
+        expect(
+          tenantCalls.every(
+            (c) => c.schoolId === "school-alpha" && c.currentSetting === "school-alpha"
+          )
+        ).toBe(true);
+
+        // 3. Vínculo revogado -> 403 antes de abrir withTenantContext
+        await prisma.userSchool.update({
+          where: { id: "us-l4-alpha" },
+          data: { active: false },
+        });
+        tenantCalls.length = 0;
+        const rRevokedAtas = await getAtasHandler(new Request("http://127.0.0.1/api/atas"));
+        expect(rRevokedAtas.status).toBe(403);
+        const rRevokedJust = await getJustificationsHandler(
+          new Request("http://127.0.0.1/api/justifications")
+        );
+        expect(rRevokedJust.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+      } finally {
+        if (createdAlphaMinuteId) {
+          await prisma.pedagogicalMinute
+            .deleteMany({ where: { id: createdAlphaMinuteId } })
+            .catch(() => {});
+        }
+        if (createdBetaMinuteId) {
+          await prisma.pedagogicalMinute
+            .deleteMany({ where: { id: createdBetaMinuteId } })
+            .catch(() => {});
+        }
+        if (createdBetaJustificationId) {
+          await prisma.absenceJustification
+            .deleteMany({ where: { id: createdBetaJustificationId } })
+            .catch(() => {});
+        }
+        await prisma.userSchool.deleteMany({ where: { id: { in: ["us-l4-alpha"] } } }).catch(() => {});
+        await prisma.user.deleteMany({ where: { id: { in: ["user-l4-alpha"] } } }).catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
   }
 );
 

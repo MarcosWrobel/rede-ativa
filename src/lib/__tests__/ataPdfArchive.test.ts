@@ -61,6 +61,8 @@ import { prisma } from "../prisma";
 
 describe("JUR-08: Preservação Arquivística Binária PDF/A-1b (ISO 19005-1 Level B)", () => {
   beforeEach(() => {
+    vi.spyOn(prisma, "$executeRaw").mockResolvedValue(1 as any);
+    vi.spyOn(prisma, "$transaction").mockImplementation(async (fn: any) => fn(prisma));
     vi.spyOn(prisma.user, "findUnique").mockResolvedValue({
       id: "usr_pedagoga_1",
       email: "natiele.pacheco@escola.pr.gov.br",

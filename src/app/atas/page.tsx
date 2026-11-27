@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import AtasClient from "./AtasClient";
 
 export const metadata = {
@@ -28,19 +29,21 @@ export default async function AtasPage({
 
   let formattedStudents: any[] = [];
   try {
-    const students = await prisma.student.findMany({
-      where: { schoolId: school.id, active: true },
-      select: {
-        id: true,
-        name: true,
-        cgm: true,
-        email: true,
-        phone: true,
-        guardianName: true,
-        classGroup: { select: { name: true } },
-      },
-      orderBy: { name: "asc" },
-    });
+    const students = await withTenantContext(prisma, school.id, (tx) =>
+      tx.student.findMany({
+        where: { schoolId: school.id, active: true },
+        select: {
+          id: true,
+          name: true,
+          cgm: true,
+          email: true,
+          phone: true,
+          guardianName: true,
+          classGroup: { select: { name: true } },
+        },
+        orderBy: { name: "asc" },
+      })
+    );
     formattedStudents = students.map((s) => ({
       id: s.id,
       name: s.name,

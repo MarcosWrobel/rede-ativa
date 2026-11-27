@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/permissions";
 import { logAudit, extractClientIp } from "@/lib/audit";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export const dynamic = "force-dynamic";
 
@@ -24,24 +25,33 @@ export async function DELETE(
     if (!schoolRes.ok) return schoolRes.response;
     const school = schoolRes.school;
 
-    const justification = await prisma.absenceJustification.findUnique({
-      where: { id },
-      include: {
-        student: { select: { id: true, name: true, schoolId: true } },
-      },
+    const txResult = await withTenantContext(prisma, school.id, async (tx) => {
+      const justification = await tx.absenceJustification.findUnique({
+        where: { id },
+        include: {
+          student: { select: { id: true, name: true, schoolId: true } },
+        },
+      });
+
+      if (!justification) {
+        return { errorStatus: 404 as const, error: "Justificativa não encontrada." };
+      }
+
+      if (!assertTenantOwnership(justification.student.schoolId, school.id, authCheck.session)) {
+        return { errorStatus: 403 as const, error: "Acesso negado a registro de outra instituição de ensino." };
+      }
+
+      await tx.absenceJustification.delete({
+        where: { id },
+      });
+
+      return { justification };
     });
 
-    if (!justification) {
-      return NextResponse.json({ error: "Justificativa não encontrada." }, { status: 404 });
+    if ("errorStatus" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
     }
-
-    if (!assertTenantOwnership(justification.student.schoolId, school.id, authCheck.session)) {
-      return NextResponse.json({ error: "Acesso negado a registro de outra instituição de ensino." }, { status: 403 });
-    }
-
-    await prisma.absenceJustification.delete({
-      where: { id },
-    });
+    const justification = txResult.justification;
 
     const ip = extractClientIp(req);
     await logAudit({

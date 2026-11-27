@@ -85,6 +85,7 @@ export async function POST(
     const { minute: finalized, alreadyFinalized } = await executeMinuteFinalization({
       prisma,
       minuteId: id,
+      schoolId: currentSchool.id,
       rawBody,
       author: {
         userId: authCheck.userId,
