@@ -11925,6 +11925,683 @@ describe.skipIf(!SHOULD_RUN)(
     }
   });
 
+  it("Aceite final Conselho e SERE PDF: leitura sem gravação, posse nas relações e colisões, e pareamento alinhado prévia × aplicação", async () => {
+    const { cookies } = await import("next/headers");
+    const { logAudit } = await import("@/lib/audit");
+    const { POST: postBoardRoute } = await import("@/app/api/conselho-classe/route");
+    const { GET: getBoardRoute } = await import("@/app/api/conselho-classe/[boardId]/route");
+    const { PUT: putMatrixRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/matrix/route"
+    );
+    const { POST: postImportPdfRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/import-pdf/route"
+    );
+    const { default: ConselhoTurmaPage } = await import(
+      "@/app/conselho-classe/[boardId]/page"
+    );
+    const { default: ConselhoPrintPage } = await import(
+      "@/app/conselho-classe/[boardId]/imprimir/page"
+    );
+    const { getCouncilBoardDetail, listSchoolCouncilBoards } = await import(
+      "@/services/classCouncilService"
+    );
+
+    const buildMultiStudentSerePdf = (opts: {
+      shift: string;
+      subjects: string[];
+      rows: Array<{ nro: number; name: string; grades: Array<[string, string, string]> }>;
+    }): Uint8Array => {
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const yFromBottom = (pdfY: number) => doc.internal.pageSize.getHeight() - pdfY;
+      doc.setFontSize(8);
+      doc.text("GOVERNO DO ESTADO DO PARANÁ", 28.3, yFromBottom(573.5));
+      doc.text("DATA: 18/11/2026", 748, yFromBottom(573.5));
+      doc.text("SECRETARIA DE ESTADO DA EDUCAÇÃO - SEED", 28.3, yFromBottom(562.5));
+      doc.text("SISTEMA ESCOLA", 743.5, yFromBottom(562.5));
+      doc.text("ESCOLA SINTÉTICA", 28.3, yFromBottom(539.5));
+      doc.text("2026", 802, yFromBottom(539.5));
+      doc.text("Curso: ENSINO FUNDAMENTAL", 28.3, yFromBottom(528.5));
+      doc.text("Seriação: 6º Ano", 247.7, yFromBottom(528.5));
+      doc.text(`Turno: ${opts.shift}`, 359.5, yFromBottom(528.5));
+      doc.text("Turma: Conselho", 783.5, yFromBottom(528.5));
+      doc.setFontSize(10);
+      doc.text("RELATÓRIO DE ACOMPANHAMENTO TRIMESTRAL", 318.3, yFromBottom(503));
+      doc.setFontSize(7);
+      doc.text("Disciplinas", 300, yFromBottom(475));
+      doc.text("Nro.", 31.1, yFromBottom(453.5));
+      doc.text("Nome", 48.4, yFromBottom(453.5));
+
+      const firstT1X = 164.2;
+      const tStep = 18.4;
+      const subjectStep = 73.7;
+      opts.subjects.forEach((subj, sIdx) => {
+        const baseX = firstT1X + sIdx * subjectStep;
+        doc.text(subj, baseX + 5, yFromBottom(458));
+        doc.text("T1", baseX, yFromBottom(445));
+        doc.text("T2", baseX + tStep, yFromBottom(445));
+        doc.text("T3", baseX + tStep * 2, yFromBottom(445));
+      });
+
+      let currentY = 432;
+      for (const row of opts.rows) {
+        doc.text(String(row.nro), 31.4, yFromBottom(currentY));
+        doc.text(row.name, 48.4, yFromBottom(currentY));
+        row.grades.forEach(([t1, t2, t3], sIdx) => {
+          const baseX = firstT1X + sIdx * subjectStep;
+          doc.text(t1, baseX - 2, yFromBottom(currentY));
+          doc.text(t2, baseX + tStep - 2, yFromBottom(currentY));
+          doc.text(t3, baseX + tStep * 2 - 2, yFromBottom(currentY));
+          doc.text("--", baseX + tStep * 3 + 1.4, yFromBottom(currentY));
+        });
+        currentY -= 20;
+      }
+      return new Uint8Array(doc.output("arraybuffer"));
+    };
+
+    const makeSereReq = (
+      boardId: string,
+      mode: "preview" | "apply",
+      pdfBytes: Uint8Array,
+      confirmShiftUpdate = false
+    ) => {
+      const fd = new FormData();
+      fd.set("mode", mode);
+      if (confirmShiftUpdate) fd.set("updateClassShift", "true");
+      fd.set("files", new File([Buffer.from(pdfBytes)], "sere.pdf", { type: "application/pdf" }));
+      return new Request(`http://127.0.0.1/api/conselho-classe/${boardId}/import-pdf`, {
+        method: "POST",
+        body: fd,
+      });
+    };
+
+    const alphaSchoolRow = await prisma.school.findUnique({
+      where: { id: "school-alpha" },
+      select: { networkId: true },
+    });
+    const alphaNetId = alphaSchoolRow?.networkId || "ac-net-alpha";
+    if (!alphaSchoolRow?.networkId) {
+      await prisma.educationNetwork.upsert({
+        where: { id: alphaNetId },
+        create: { id: alphaNetId, name: "Rede Aceite Alpha", shortName: "Rede AC", city: "Curitiba" },
+        update: {},
+      });
+      await prisma.school.update({
+        where: { id: "school-alpha" },
+        data: { networkId: alphaNetId },
+      });
+    }
+
+    await prisma.classGroup.createMany({
+      data: [
+        {
+          id: "ac-cg-alpha",
+          schoolId: "school-alpha",
+          name: "6º Ano Aceite",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "ac-cg-alpha-hist",
+          schoolId: "school-alpha",
+          name: "6º Ano Histórico",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "ac-cg-beta",
+          schoolId: "school-beta",
+          name: "6º Ano Aceite",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.student.createMany({
+      data: [
+        {
+          id: "ac-stu-a-card",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha",
+          cgm: "9800011",
+          name: "ALUNO ALPHA COM FICHA",
+          phone: "41999980011",
+          active: true,
+        },
+        {
+          id: "ac-stu-a-nocard",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha",
+          cgm: "9800012",
+          name: "ALUNO ALPHA SEM FICHA",
+          phone: "41999980012",
+          active: true,
+        },
+        {
+          id: "ac-stu-a-hom-1",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha",
+          cgm: "9800013",
+          name: "HOMONIMO TURMA ALPHA",
+          phone: "41999980013",
+          active: true,
+        },
+        {
+          id: "ac-stu-a-hom-2",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha",
+          cgm: "9800014",
+          name: "HOMONIMO TURMA ALPHA",
+          phone: "41999980014",
+          active: true,
+        },
+        {
+          id: "ac-stu-a-hist",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha-hist",
+          cgm: "9800015",
+          name: "ALUNO HISTORICO ALPHA",
+          phone: "41999980015",
+          active: true,
+        },
+        {
+          id: "ac-stu-b-foreign",
+          schoolId: "school-beta",
+          classGroupId: "ac-cg-beta",
+          cgm: "9800021",
+          name: "ALUNO ESTRANGEIRO BETA",
+          phone: "41999980021",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilBoard.createMany({
+      data: [
+        {
+          id: "ac-board-alpha",
+          schoolId: "school-alpha",
+          classGroupId: "ac-cg-alpha",
+          year: 2026,
+        },
+        {
+          id: "ac-board-beta",
+          schoolId: "school-beta",
+          classGroupId: "ac-cg-beta",
+          year: 2026,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    // Disciplinas: 1 legítima de Alpha + 1 divergente de Beta presa no mesmo board
+    await prisma.classCouncilSubject.createMany({
+      data: [
+        {
+          id: "ac-sub-a-lp",
+          schoolId: "school-alpha",
+          boardId: "ac-board-alpha",
+          name: "Língua Portuguesa",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "ac-sub-b-colisao",
+          schoolId: "school-beta",
+          boardId: "ac-board-alpha",
+          name: "História",
+          displayOrder: 2,
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    // Fichas: 1 com ficha, 1 histórica válida de outra turma da mesma escola, 1 divergente de Beta
+    await prisma.studentCouncilCard.createMany({
+      data: [
+        {
+          id: "ac-card-a-main",
+          schoolId: "school-alpha",
+          boardId: "ac-board-alpha",
+          studentId: "ac-stu-a-card",
+        },
+        {
+          id: "ac-card-a-hist",
+          schoolId: "school-alpha",
+          boardId: "ac-board-alpha",
+          studentId: "ac-stu-a-hist",
+        },
+        {
+          id: "ac-card-b-divergent",
+          schoolId: "school-beta",
+          boardId: "ac-board-alpha",
+          studentId: "ac-stu-b-foreign",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    // Avaliações: 1 manual em LP + 1 colisão divergente (schoolId: school-beta) no mesmo card/subject/trimester 2
+    await prisma.studentCouncilSubjectEntry.createMany({
+      data: [
+        {
+          id: "ac-eval-a-manual",
+          schoolId: "school-alpha",
+          cardId: "ac-card-a-main",
+          subjectId: "ac-sub-a-lp",
+          trimester: 1,
+          descriptorCodes: [3, 4],
+          grade: 7.5,
+        },
+        {
+          id: "ac-eval-b-colisao",
+          schoolId: "school-beta",
+          cardId: "ac-card-a-main",
+          subjectId: "ac-sub-a-lp",
+          trimester: 2,
+          descriptorCodes: [5],
+          grade: 8.8,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.user.createMany({
+      data: [
+        {
+          id: "ac-usr-sec",
+          email: "ac.sec@redeativa.local",
+          name: "Secretaria Aceite",
+          role: "GESTAO_SECRETARIA",
+          active: true,
+        },
+        {
+          id: "ac-usr-super",
+          email: "ac.super@redeativa.local",
+          name: "Superadmin Aceite",
+          role: "SUPERADMIN",
+          active: true,
+        },
+        {
+          id: "ac-usr-ped-a",
+          email: "ac.ped.a@redeativa.local",
+          name: "Pedagoga Aceite",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    await prisma.userNetwork.createMany({
+      data: [
+        {
+          id: "ac-un-sec",
+          userId: "ac-usr-sec",
+          networkId: alphaNetId,
+          role: "GESTAO_SECRETARIA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    await prisma.userSchool.createMany({
+      data: [
+        {
+          id: "ac-us-ped-a",
+          userId: "ac-usr-ped-a",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    testAuthState.useRealPermissions = true;
+    testAuthState.useRealCurrentSchool = true;
+
+    try {
+      // --- REQUISITO 1: Leitura sem gravações (com trimestres e fichas faltantes) ---
+      expect(
+        await prisma.classCouncilTrimester.count({ where: { boardId: "ac-board-alpha" } })
+      ).toBe(0);
+      expect(
+        await prisma.studentCouncilCard.count({
+          where: { boardId: "ac-board-alpha", studentId: "ac-stu-a-nocard" },
+        })
+      ).toBe(0);
+
+      // 1a. Perfil de leitura (GESTAO_SECRETARIA) em GET, detalhe SSR e impressão SSR
+      testAuthState.pendingSessionUser = {
+        id: "ac-usr-sec",
+        email: "ac.sec@redeativa.local",
+        networkId: alphaNetId,
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) =>
+          name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+      } as never);
+      vi.mocked(logAudit).mockClear();
+
+      const secGet = await getBoardRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/ac-board-alpha"),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(secGet.status).toBe(200);
+      const secBody = await secGet.json();
+      expect(secBody.board.trimesters).toHaveLength(0);
+      expect(secBody.board.studentCards.map((c: { studentId: string }) => c.studentId)).toEqual(
+        expect.arrayContaining(["ac-stu-a-card", "ac-stu-a-hist"])
+      );
+      // Requisito 2 (leitura): exclui sujeitos/fichas/avaliações divergentes, preserva ficha histórica válida
+      expect(
+        secBody.board.subjects.some((s: { id: string }) => s.id === "ac-sub-b-colisao")
+      ).toBe(false);
+      expect(
+        secBody.board.studentCards.some((c: { id: string }) => c.id === "ac-card-b-divergent")
+      ).toBe(false);
+      const cardMainRead = secBody.board.studentCards.find(
+        (c: { id: string }) => c.id === "ac-card-a-main"
+      );
+      expect(
+        cardMainRead.subjectEntries.some((e: { id: string }) => e.id === "ac-eval-b-colisao")
+      ).toBe(false);
+
+      // Listagem também exclui contagens divergentes
+      const listedAlpha = await listSchoolCouncilBoards("school-alpha", 2026);
+      const listedBoard = listedAlpha.boards.find((b) => b.id === "ac-board-alpha");
+      expect(listedBoard?._count.subjects).toBe(1);
+      expect(listedBoard?._count.studentCards).toBe(2);
+
+      await expect(
+        ConselhoTurmaPage({ params: Promise.resolve({ boardId: "ac-board-alpha" }) })
+      ).resolves.toBeTruthy();
+      await expect(
+        ConselhoPrintPage({ params: Promise.resolve({ boardId: "ac-board-alpha" }) })
+      ).resolves.toBeTruthy();
+
+      // Zero gravações após leitura da secretaria
+      expect(
+        await prisma.classCouncilTrimester.count({ where: { boardId: "ac-board-alpha" } })
+      ).toBe(0);
+      expect(
+        await prisma.studentCouncilCard.count({
+          where: { boardId: "ac-board-alpha", studentId: "ac-stu-a-nocard" },
+        })
+      ).toBe(0);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 1b. SUPERADMIN sem seleção explícita (cookie ausente, schoolId nulo) em leitura
+      testAuthState.pendingSessionUser = {
+        id: "ac-usr-super",
+        email: "ac.super@redeativa.local",
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      const superDetail = await getCouncilBoardDetail("school-alpha", "ac-board-alpha");
+      expect(superDetail?.id).toBe("ac-board-alpha");
+      expect(
+        await prisma.classCouncilTrimester.count({ where: { boardId: "ac-board-alpha" } })
+      ).toBe(0);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // --- REQUISITO 2: Colisão na gravação (Matriz e SERE PDF) com rollback atômico ---
+      testAuthState.pendingSessionUser = {
+        id: "ac-usr-ped-a",
+        email: "ac.ped.a@redeativa.local",
+        schoolId: "school-alpha",
+        active: true,
+      };
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) =>
+          name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+      } as never);
+      vi.mocked(logAudit).mockClear();
+
+      // 2a. Colisão em PUT /matrix: lote com 1 item válido (ac-stu-a-hist T2) + 1 item colidindo com ac-eval-b-colisao (school-beta)
+      const matrixCollisionRes = await putMatrixRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/ac-board-alpha/matrix", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 2,
+            entries: [
+              {
+                studentId: "ac-stu-a-hist",
+                subjectId: "ac-sub-a-lp",
+                descriptorCodes: [1],
+                grade: 9.0,
+              },
+              {
+                studentId: "ac-stu-a-card",
+                subjectId: "ac-sub-a-lp",
+                descriptorCodes: [2],
+                grade: 4.0,
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(matrixCollisionRes.status).toBe(409);
+      // Rollback integral: nem o item válido foi gravado e a linha divergente de Beta permanece intacta
+      expect(
+        await prisma.studentCouncilSubjectEntry.findUnique({
+          where: { id: "ac-eval-b-colisao" },
+          select: { schoolId: true, grade: true },
+        })
+      ).toEqual({ schoolId: "school-beta", grade: 8.8 });
+      expect(
+        await prisma.studentCouncilSubjectEntry.count({
+          where: { cardId: "ac-card-a-hist", trimester: 2 },
+        })
+      ).toBe(0);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 2b. Colisão em SERE PDF apply contra disciplina divergente ("História", schoolId: school-beta)
+      const collisionPdf = buildMultiStudentSerePdf({
+        shift: "Manhã",
+        subjects: ["HISTORIA"],
+        rows: [
+          {
+            nro: 1,
+            name: "ALUNO ALPHA COM FICHA",
+            grades: [["5.0", "--", "--"]],
+          },
+        ],
+      });
+      const sereSubjCollisionRes = await postImportPdfRoute(
+        makeSereReq("ac-board-alpha", "apply", collisionPdf),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(sereSubjCollisionRes.status).toBe(409);
+      expect(
+        await prisma.classCouncilSubject.findUnique({
+          where: { id: "ac-sub-b-colisao" },
+          select: { schoolId: true, name: true },
+        })
+      ).toEqual({ schoolId: "school-beta", name: "História" });
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // --- REQUISITO 3: Alinhamento prévia × aplicação SERE PDF (sem ficha, homônimo, outra escola, turno) ---
+      const alignedPdf = buildMultiStudentSerePdf({
+        shift: "Tarde",
+        subjects: ["LINGUA PORTU"],
+        rows: [
+          {
+            nro: 1,
+            name: "ALUNO ALPHA COM FICHA",
+            grades: [["5.1", "--", "--"]],
+          },
+          {
+            nro: 2,
+            name: "ALUNO ALPHA SEM FICHA",
+            grades: [["4.5", "--", "--"]],
+          },
+          {
+            nro: 3,
+            name: "HOMONIMO TURMA ALPHA",
+            grades: [["6.5", "--", "--"]],
+          },
+          {
+            nro: 4,
+            name: "ALUNO ESTRANGEIRO BETA",
+            grades: [["3.0", "--", "--"]],
+          },
+        ],
+      });
+
+      const previewRes = await postImportPdfRoute(
+        makeSereReq("ac-board-alpha", "preview", alignedPdf),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(previewRes.status).toBe(200);
+      const previewJson = await previewRes.json();
+
+      expect(previewJson.preview.summary.studentsMatched).toBe(2);
+      expect(previewJson.preview.summary.studentsUnmatched).toBe(2);
+      expect(previewJson.preview.summary.belowAverageGrades).toBe(2);
+      expect(previewJson.preview.detectedShift).toBe("TARDE");
+      const matchedPreviewIds = previewJson.preview.students
+        .filter((s: { status: string }) => s.status === "matched")
+        .map((s: { matchedStudentId: string }) => s.matchedStudentId);
+      expect(matchedPreviewIds).toEqual(["ac-stu-a-card", "ac-stu-a-nocard"]);
+      expect(
+        previewJson.preview.students.find((s: { pdfName: string }) =>
+          s.pdfName.includes("HOMONIMO")
+        )?.status
+      ).toBe("ambiguous");
+      expect(
+        previewJson.preview.students.find((s: { pdfName: string }) =>
+          s.pdfName.includes("ESTRANGEIRO")
+        )?.status
+      ).toBe("unmatched");
+
+      // Prévia NÃO gravou ficha nem turno nem notas
+      expect(
+        await prisma.studentCouncilCard.count({
+          where: { boardId: "ac-board-alpha", studentId: "ac-stu-a-nocard" },
+        })
+      ).toBe(0);
+      expect(
+        (await prisma.classGroup.findUnique({ where: { id: "ac-cg-alpha" } }))?.shift
+      ).toBe("MANHA");
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // Aplicação sem confirmar mudança de turno -> concorda com prévia e preserva turno + descritivos manuais
+      const applyRes = await postImportPdfRoute(
+        makeSereReq("ac-board-alpha", "apply", alignedPdf, false),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(applyRes.status).toBe(200);
+      const applyJson = await applyRes.json();
+      expect(applyJson.summary.studentsMatched).toBe(previewJson.preview.summary.studentsMatched);
+      expect(applyJson.summary.studentsUnmatched).toBe(previewJson.preview.summary.studentsUnmatched);
+      expect(applyJson.summary.belowAverageGrades).toBe(previewJson.preview.summary.belowAverageGrades);
+      expect(applyJson.summary.shiftUpdatedTo ?? null).toBeNull();
+      expect(
+        (await prisma.classGroup.findUnique({ where: { id: "ac-cg-alpha" } }))?.shift
+      ).toBe("MANHA");
+
+      // Ficha criada para aluno elegível sem ficha e descritivos manuais (3, 4) preservados no aluno existente
+      const createdNoCard = await prisma.studentCouncilCard.findUnique({
+        where: {
+          boardId_studentId: { boardId: "ac-board-alpha", studentId: "ac-stu-a-nocard" },
+        },
+      });
+      expect(createdNoCard?.schoolId).toBe("school-alpha");
+
+      const updatedManualEval = await prisma.studentCouncilSubjectEntry.findUnique({
+        where: { id: "ac-eval-a-manual" },
+      });
+      expect(updatedManualEval?.grade).toBe(5.1);
+      expect(updatedManualEval?.descriptorCodes).toEqual(expect.arrayContaining([3, 4]));
+
+      // Aplicação com confirmShiftUpdate: true atualiza turno da turma
+      const applyShiftRes = await postImportPdfRoute(
+        makeSereReq("ac-board-alpha", "apply", alignedPdf, true),
+        { params: Promise.resolve({ boardId: "ac-board-alpha" }) }
+      );
+      expect(applyShiftRes.status).toBe(200);
+      expect((await applyShiftRes.json()).board.classGroup.shift).toBe("TARDE");
+      expect(
+        (await prisma.classGroup.findUnique({ where: { id: "ac-cg-alpha" } }))?.shift
+      ).toBe("TARDE");
+
+      // --- Inicialização legítima por fluxo autorizado de escrita (POST /api/conselho-classe) ---
+      const initBoardRes = await postBoardRoute(
+        new Request("http://127.0.0.1/api/conselho-classe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classGroupId: "ac-cg-alpha", year: 2026 }),
+        })
+      );
+      expect(initBoardRes.status).toBe(201);
+      expect(
+        await prisma.classCouncilTrimester.count({ where: { boardId: "ac-board-alpha" } })
+      ).toBe(3);
+    } finally {
+      testAuthState.useRealPermissions = false;
+      testAuthState.useRealCurrentSchool = false;
+      testAuthState.pendingSessionUser = null;
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.userNetwork.deleteMany({ where: { id: "ac-un-sec" } }).catch(() => {});
+      await prisma.userSchool.deleteMany({ where: { id: "ac-us-ped-a" } }).catch(() => {});
+      await prisma.user
+        .deleteMany({ where: { id: { in: ["ac-usr-sec", "ac-usr-super", "ac-usr-ped-a"] } } })
+        .catch(() => {});
+      await prisma.studentCouncilSubjectEntry
+        .deleteMany({
+          where: {
+            card: { boardId: { in: ["ac-board-alpha", "ac-board-beta"] } },
+          },
+        })
+        .catch(() => {});
+      await prisma.studentCouncilCard
+        .deleteMany({ where: { boardId: { in: ["ac-board-alpha", "ac-board-beta"] } } })
+        .catch(() => {});
+      await prisma.classCouncilTrimester
+        .deleteMany({ where: { boardId: { in: ["ac-board-alpha", "ac-board-beta"] } } })
+        .catch(() => {});
+      await prisma.classCouncilSubject
+        .deleteMany({ where: { boardId: { in: ["ac-board-alpha", "ac-board-beta"] } } })
+        .catch(() => {});
+      await prisma.classCouncilBoard
+        .deleteMany({ where: { id: { in: ["ac-board-alpha", "ac-board-beta"] } } })
+        .catch(() => {});
+      await prisma.student
+        .deleteMany({
+          where: {
+            id: {
+              in: [
+                "ac-stu-a-card",
+                "ac-stu-a-nocard",
+                "ac-stu-a-hom-1",
+                "ac-stu-a-hom-2",
+                "ac-stu-a-hist",
+                "ac-stu-b-foreign",
+              ],
+            },
+          },
+        })
+        .catch(() => {});
+      await prisma.classGroup
+        .deleteMany({ where: { id: { in: ["ac-cg-alpha", "ac-cg-alpha-hist", "ac-cg-beta"] } } })
+        .catch(() => {});
+      if (!alphaSchoolRow?.networkId) {
+        await prisma.school
+          .update({ where: { id: "school-alpha" }, data: { networkId: null } })
+          .catch(() => {});
+        await prisma.educationNetwork.deleteMany({ where: { id: "ac-net-alpha" } }).catch(() => {});
+      }
+    }
+  });
+
   }
 );
 

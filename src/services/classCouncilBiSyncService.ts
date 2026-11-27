@@ -19,6 +19,7 @@ import {
   computeHasSensitiveHealthTag,
   ensureOrUpsertCouncilBoard,
   getCouncilBoardDetail,
+  initializeCouncilBoardRecordsInTx,
   parseBelowAverageJson,
   type CouncilBelowAvgItem,
 } from "@/services/classCouncilService";
@@ -662,21 +663,32 @@ export async function executeClassCouncilBiSync(options: {
         select: { id: true },
       });
 
-      const board = existingBoardHeader
-        ? await getCouncilBoardDetail(currentSchool.id, existingBoardHeader.id, tx)
-        : await ensureOrUpsertCouncilBoard(
-            {
-              schoolId: currentSchool.id,
-              payload: {
-                classGroupId,
-                year,
-                seatingMapMode: "REVEZAMENTO_MENSAL",
-              },
-              authorName: userName,
-              authorEmail: userEmail,
+      let board: Awaited<ReturnType<typeof getCouncilBoardDetail>> = null;
+      if (existingBoardHeader) {
+        await initializeCouncilBoardRecordsInTx(
+          tx,
+          currentSchool.id,
+          existingBoardHeader.id,
+          classGroupId,
+          userName,
+          userEmail
+        );
+        board = await getCouncilBoardDetail(currentSchool.id, existingBoardHeader.id, tx);
+      } else {
+        board = await ensureOrUpsertCouncilBoard(
+          {
+            schoolId: currentSchool.id,
+            payload: {
+              classGroupId,
+              year,
+              seatingMapMode: "REVEZAMENTO_MENSAL",
             },
-            tx
-          );
+            authorName: userName,
+            authorEmail: userEmail,
+          },
+          tx
+        );
+      }
 
       if (!board || board.schoolId !== currentSchool.id || board.classGroupId !== classGroupId) {
         return null;

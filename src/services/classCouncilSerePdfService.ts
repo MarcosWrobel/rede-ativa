@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import { logAudit, type AuditUser } from "@/lib/audit";
@@ -160,37 +161,90 @@ function buildBoardSubjectLookup(
   return byMatchKey;
 }
 
+interface SereStudentTarget {
+  cardId: string | null;
+  studentId: string;
+  studentName: string;
+  active: boolean;
+  isSpecialNeeds: boolean;
+}
+
+async function loadAuthorizedClassRosterStudents(
+  client: Prisma.TransactionClient | typeof prisma,
+  schoolId: string,
+  classGroupId: string
+): Promise<Array<{ id: string; name: string; active: boolean; isSpecialNeeds: boolean }>> {
+  const studentClient = (client as { student?: { findMany?: Function } }).student;
+  if (typeof studentClient?.findMany !== "function") {
+    return [];
+  }
+  return client.student.findMany({
+    where: { schoolId, classGroupId },
+    select: { id: true, name: true, active: true, isSpecialNeeds: true },
+  });
+}
+
 function buildBoardStudentLookup(
   cards: Array<{
     id: string;
     studentId: string;
-    student: { id: string; name: string; active: boolean };
-  }>
+    student: { id: string; name: string; active: boolean; isSpecialNeeds?: boolean };
+  }>,
+  classStudents: Array<{ id: string; name: string; active: boolean; isSpecialNeeds?: boolean }> = []
 ) {
-  const byNormName = new Map<
-    string,
-    Array<{
-      cardId: string;
-      studentId: string;
-      studentName: string;
-      active: boolean;
-    }>
-  >();
+  const byStudentId = new Map<string, SereStudentTarget>();
 
   for (const card of cards) {
-    const norm = normalizeStudentName(card.student.name);
-    if (!norm) continue;
-    const list = byNormName.get(norm) || [];
-    list.push({
+    byStudentId.set(card.studentId, {
       cardId: card.id,
       studentId: card.studentId,
       studentName: card.student.name,
       active: card.student.active,
+      isSpecialNeeds: Boolean(card.student.isSpecialNeeds),
     });
+  }
+
+  for (const stu of classStudents) {
+    if (!byStudentId.has(stu.id)) {
+      byStudentId.set(stu.id, {
+        cardId: null,
+        studentId: stu.id,
+        studentName: stu.name,
+        active: stu.active,
+        isSpecialNeeds: Boolean(stu.isSpecialNeeds),
+      });
+    }
+  }
+
+  const byNormName = new Map<string, SereStudentTarget[]>();
+  for (const target of byStudentId.values()) {
+    const norm = normalizeStudentName(target.studentName);
+    if (!norm) continue;
+    const list = byNormName.get(norm) || [];
+    list.push(target);
     byNormName.set(norm, list);
   }
 
   return byNormName;
+}
+
+type SereStudentMatchOutcome =
+  | { status: "matched"; target: SereStudentTarget }
+  | { status: "ambiguous" }
+  | { status: "unmatched" };
+
+function resolveSereStudentPairing(
+  stu: MergedSereCouncilPdfBatch["students"][number],
+  studentLookup: Map<string, SereStudentTarget[]>
+): SereStudentMatchOutcome {
+  const matches = studentLookup.get(stu.normalizedName) || [];
+  if (stu.isAmbiguousInPdf || matches.length > 1) {
+    return { status: "ambiguous" };
+  }
+  if (matches.length === 1) {
+    return { status: "matched", target: matches[0] };
+  }
+  return { status: "unmatched" };
 }
 
 /**
@@ -202,15 +256,21 @@ export async function previewCouncilSerePdfImport(params: {
   batch: MergedSereCouncilPdfBatch;
 }): Promise<CouncilSerePdfPreviewResult> {
   const { boardId, schoolId, batch } = params;
-  const board = await getCouncilBoardDetail(schoolId, boardId, undefined, {
-    skipImplicitWrites: true,
+  const { board, classStudents } = await withTenantContext(prisma, schoolId, async (tx) => {
+    const loadedBoard = await getCouncilBoardDetail(schoolId, boardId, tx);
+    if (!loadedBoard) {
+      throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
+    }
+    const roster = await loadAuthorizedClassRosterStudents(
+      tx,
+      schoolId,
+      loadedBoard.classGroupId
+    );
+    return { board: loadedBoard, classStudents: roster };
   });
-  if (!board) {
-    throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
-  }
 
   const subjectLookup = buildBoardSubjectLookup(board.subjects);
-  const studentLookup = buildBoardStudentLookup(board.studentCards);
+  const studentLookup = buildBoardStudentLookup(board.studentCards, classStudents);
 
   const subjects: CouncilSerePdfPreviewSubject[] = batch.subjects.map((subj) => {
     const existing =
@@ -235,14 +295,14 @@ export async function previewCouncilSerePdfImport(params: {
   let belowAverageGrades = 0;
 
   const students: CouncilSerePdfPreviewStudent[] = batch.students.map((stu) => {
-    const matches = studentLookup.get(stu.normalizedName) || [];
+    const pairing = resolveSereStudentPairing(stu, studentLookup);
     const belowCount = stu.grades.filter((g) => g.grade < 6.0).length;
 
     if (!stu.hasAnyGrade) {
       studentsWithoutGrades += 1;
     }
 
-    if (stu.isAmbiguousInPdf || matches.length > 1) {
+    if (pairing.status === "ambiguous") {
       studentsUnmatched += 1;
       return {
         rowNumber: stu.rowNumber,
@@ -256,8 +316,8 @@ export async function previewCouncilSerePdfImport(params: {
       };
     }
 
-    if (matches.length === 1) {
-      const target = matches[0];
+    if (pairing.status === "matched") {
+      const target = pairing.target;
       studentsMatched += 1;
       gradesToImport += stu.grades.length;
       belowAverageGrades += belowCount;
@@ -375,8 +435,14 @@ export async function applyCouncilSerePdfImport(params: {
       throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
     }
 
+    const classStudents = await loadAuthorizedClassRosterStudents(
+      tx,
+      schoolId,
+      board.classGroupId
+    );
     const subjectLookup = buildBoardSubjectLookup(board.subjects);
-    const studentLookup = buildBoardStudentLookup(board.studentCards);
+    const studentLookup = buildBoardStudentLookup(board.studentCards, classStudents);
+    const mutableCards = [...board.studentCards];
 
     // 1. Garante que todas as disciplinas presentes no lote existam no quadro (sem apagar existentes)
     let nextDisplayOrder =
@@ -408,80 +474,117 @@ export async function applyCouncilSerePdfImport(params: {
           name: existing.name,
           displayOrder: existing.displayOrder,
         });
-      } else if (typeof (tx.classCouncilSubject as any).upsert === "function") {
-        const upserted = await (tx.classCouncilSubject as any).upsert({
-          where: { boardId_name: { boardId: board.id, name: subj.name } },
-          create: {
-            schoolId,
-            boardId: board.id,
-            name: subj.name,
-            displayOrder: nextDisplayOrder++,
-            active: true,
-          },
-          update: {
-            active: true,
-          },
-          select: { id: true, name: true, displayOrder: true },
-        });
-        subjectsCreated += 1;
-        resolvedSubjectByMatchKey.set(subj.matchKey, upserted);
-        subjectLookup.set(toCouncilSubjectMatchKey(upserted.name), {
-          ...upserted,
-          active: true,
-        });
       } else {
-        try {
-          const created = await tx.classCouncilSubject.create({
-            data: {
-              schoolId,
-              boardId: board.id,
-              name: subj.name,
-              displayOrder: nextDisplayOrder++,
-              active: true,
-            },
-            select: { id: true, name: true, displayOrder: true },
-          });
-          subjectsCreated += 1;
-          resolvedSubjectByMatchKey.set(subj.matchKey, created);
-          subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
-            ...created,
-            active: true,
-          });
-        } catch (err) {
-          if ((err as { code?: string })?.code !== "P2002") {
-            throw err;
-          }
-          const conflicted =
-            (await tx.classCouncilSubject.findUnique?.({
-              where: { boardId_name: { boardId: board.id, name: subj.name } },
-              select: { id: true, name: true, displayOrder: true, active: true },
-            })) ??
-            (await tx.classCouncilSubject.findFirst?.({
-              where: { boardId: board.id, schoolId, name: subj.name },
-              select: { id: true, name: true, displayOrder: true, active: true },
-            })) ??
-            null;
+        const collisionByUniqueName =
+          typeof tx.classCouncilSubject.findUnique === "function"
+            ? await tx.classCouncilSubject.findUnique({
+                where: { boardId_name: { boardId: board.id, name: subj.name } },
+                select: {
+                  id: true,
+                  schoolId: true,
+                  name: true,
+                  displayOrder: true,
+                  active: true,
+                },
+              })
+            : null;
 
-          if (!conflicted) {
-            throw err;
+        if (collisionByUniqueName) {
+          if (collisionByUniqueName.schoolId && collisionByUniqueName.schoolId !== schoolId) {
+            throw new CouncilDomainError(
+              "Conflito de instituição ao registrar componente curricular.",
+              409
+            );
           }
-          if (!conflicted.active) {
+          if (!collisionByUniqueName.active) {
             await tx.classCouncilSubject.update({
-              where: { id: conflicted.id },
+              where: { id: collisionByUniqueName.id },
               data: { active: true },
             });
           }
           subjectsMatched += 1;
-          const resolvedConflicted = {
-            id: conflicted.id,
-            name: conflicted.name,
-            displayOrder: conflicted.displayOrder,
+          const resolvedExisting = {
+            id: collisionByUniqueName.id,
+            name: collisionByUniqueName.name,
+            displayOrder: collisionByUniqueName.displayOrder,
           };
-          resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
-          subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
-            ...resolvedConflicted,
+          resolvedSubjectByMatchKey.set(subj.matchKey, resolvedExisting);
+          subjectLookup.set(toCouncilSubjectMatchKey(collisionByUniqueName.name), {
+            ...resolvedExisting,
             active: true,
           });
+        } else {
+          try {
+            const created = await tx.classCouncilSubject.create({
+              data: {
+                schoolId,
+                boardId: board.id,
+                name: subj.name,
+                displayOrder: nextDisplayOrder++,
+                active: true,
+              },
+              select: { id: true, name: true, displayOrder: true },
+            });
+            subjectsCreated += 1;
+            resolvedSubjectByMatchKey.set(subj.matchKey, created);
+            subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
+              ...created,
+              active: true,
+            });
+          } catch (err) {
+            if ((err as { code?: string })?.code !== "P2002") {
+              throw err;
+            }
+            const conflicted =
+              (await tx.classCouncilSubject.findUnique?.({
+                where: { boardId_name: { boardId: board.id, name: subj.name } },
+                select: {
+                  id: true,
+                  schoolId: true,
+                  name: true,
+                  displayOrder: true,
+                  active: true,
+                },
+              })) ??
+              (await tx.classCouncilSubject.findFirst?.({
+                where: { boardId: board.id, schoolId, name: subj.name },
+                select: {
+                  id: true,
+                  schoolId: true,
+                  name: true,
+                  displayOrder: true,
+                  active: true,
+                },
+              })) ??
+              null;
+
+            if (!conflicted) {
+              throw err;
+            }
+            if (conflicted.schoolId && conflicted.schoolId !== schoolId) {
+              throw new CouncilDomainError(
+                "Conflito de instituição ao registrar componente curricular.",
+                409
+              );
+            }
+            if (!conflicted.active) {
+              await tx.classCouncilSubject.update({
+                where: { id: conflicted.id },
+                data: { active: true },
+              });
+            }
+            subjectsMatched += 1;
+            const resolvedConflicted = {
+              id: conflicted.id,
+              name: conflicted.name,
+              displayOrder: conflicted.displayOrder,
+            };
+            resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
+            subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
+              ...resolvedConflicted,
+              active: true,
+            });
+          }
         }
       }
     }
@@ -534,14 +637,105 @@ export async function applyCouncilSerePdfImport(params: {
   let belowAverageGrades = 0;
 
   for (const stu of batch.students) {
-    const matches = studentLookup.get(stu.normalizedName) || [];
-    if (stu.isAmbiguousInPdf || matches.length !== 1) {
+    const pairing = resolveSereStudentPairing(stu, studentLookup);
+    if (pairing.status !== "matched") {
       studentsUnmatched += 1;
       continue;
     }
 
+    let targetCardId = pairing.target.cardId;
+    if (!targetCardId) {
+      const eligibleStudent =
+        typeof (tx as { student?: { findFirst?: Function } }).student?.findFirst === "function"
+          ? await tx.student.findFirst({
+              where: {
+                id: pairing.target.studentId,
+                schoolId,
+                classGroupId: board.classGroupId,
+              },
+              select: { id: true, name: true, active: true, isSpecialNeeds: true },
+            })
+          : null;
+
+      if (!eligibleStudent) {
+        throw new CouncilDomainError(
+          "Estudante não elegível para esta turma ou instituição.",
+          403
+        );
+      }
+
+      const existingCardCollision =
+        typeof tx.studentCouncilCard?.findUnique === "function"
+          ? await tx.studentCouncilCard.findUnique({
+              where: {
+                boardId_studentId: {
+                  boardId: board.id,
+                  studentId: eligibleStudent.id,
+                },
+              },
+              select: { id: true, schoolId: true },
+            })
+          : null;
+
+      if (existingCardCollision) {
+        if (existingCardCollision.schoolId !== schoolId) {
+          throw new CouncilDomainError(
+            "Conflito de instituição ao inicializar ficha do estudante.",
+            409
+          );
+        }
+        targetCardId = existingCardCollision.id;
+      } else {
+        const createdCard = await tx.studentCouncilCard.create({
+          data: {
+            schoolId,
+            boardId: board.id,
+            studentId: eligibleStudent.id,
+            enrollmentStatus: eligibleStudent.active ? "ATIVO" : "TRANSFERIDO",
+            tags: eligibleStudent.isSpecialNeeds ? ["AEE"] : [],
+            hasSensitiveHealthTag: Boolean(eligibleStudent.isSpecialNeeds),
+          },
+          select: {
+            id: true,
+            studentId: true,
+            trimester1BelowAvgJson: true,
+            trimester2BelowAvgJson: true,
+            trimester3BelowAvgJson: true,
+          },
+        });
+        targetCardId = createdCard.id;
+        mutableCards.push({
+          ...createdCard,
+          schoolId,
+          boardId: board.id,
+          enrollmentStatus: eligibleStudent.active ? "ATIVO" : "TRANSFERIDO",
+          tags: eligibleStudent.isSpecialNeeds ? ["AEE"] : [],
+          hasSensitiveHealthTag: Boolean(eligibleStudent.isSpecialNeeds),
+          trimester1Opinion: null,
+          trimester2Opinion: null,
+          trimester3Opinion: null,
+          externalEvalEd1Percent: null,
+          externalEvalEd2Percent: null,
+          externalEvalEd3Percent: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          student: {
+            id: eligibleStudent.id,
+            name: eligibleStudent.name,
+            cgm: null,
+            active: eligibleStudent.active,
+            isSpecialNeeds: eligibleStudent.isSpecialNeeds,
+            isExchangeStudent: false,
+            age: null,
+            lowAttendanceRecord: null,
+          },
+          subjectEntries: [],
+        } as (typeof mutableCards)[number]);
+      }
+      pairing.target.cardId = targetCardId;
+    }
+
     studentsMatched += 1;
-    const targetCardId = matches[0].cardId;
     const cardEvalMap = existingEvalByCardId.get(targetCardId) || new Map();
     if (!existingEvalByCardId.has(targetCardId)) {
       existingEvalByCardId.set(targetCardId, cardEvalMap);
@@ -584,31 +778,77 @@ export async function applyCouncilSerePdfImport(params: {
     }
   }
 
-  // Persiste avaliações sequencialmente no mesmo tx
+  // Persiste avaliações sequencialmente no mesmo tx validando posse da linha existente
   for (const item of evaluationUpserts) {
-    await tx.studentCouncilSubjectEntry.upsert({
-      where: {
-        cardId_subjectId_trimester: {
+    const existingEntry =
+      typeof tx.studentCouncilSubjectEntry.findUnique === "function"
+        ? await tx.studentCouncilSubjectEntry.findUnique({
+            where: {
+              cardId_subjectId_trimester: {
+                cardId: item.cardId,
+                subjectId: item.subjectId,
+                trimester: item.trimester,
+              },
+            },
+            select: { id: true, schoolId: true },
+          })
+        : null;
+
+    if (existingEntry) {
+      if (existingEntry.schoolId !== schoolId) {
+        throw new CouncilDomainError(
+          "Conflito de instituição ao registrar avaliação do estudante.",
+          409
+        );
+      }
+      await tx.studentCouncilSubjectEntry.update({
+        where: { id: existingEntry.id },
+        data: {
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade,
+          updatedByEmail: actor.email,
+        },
+      });
+    } else if (
+      typeof tx.studentCouncilSubjectEntry.findUnique === "function" &&
+      typeof tx.studentCouncilSubjectEntry.create === "function"
+    ) {
+      await tx.studentCouncilSubjectEntry.create({
+        data: {
+          schoolId,
           cardId: item.cardId,
           subjectId: item.subjectId,
           trimester: item.trimester,
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade,
+          updatedByEmail: actor.email,
         },
-      },
-      create: {
-        schoolId,
-        cardId: item.cardId,
-        subjectId: item.subjectId,
-        trimester: item.trimester,
-        descriptorCodes: item.descriptorCodes,
-        grade: item.grade,
-        updatedByEmail: actor.email,
-      },
-      update: {
-        descriptorCodes: item.descriptorCodes,
-        grade: item.grade,
-        updatedByEmail: actor.email,
-      },
-    });
+      });
+    } else {
+      await tx.studentCouncilSubjectEntry.upsert({
+        where: {
+          cardId_subjectId_trimester: {
+            cardId: item.cardId,
+            subjectId: item.subjectId,
+            trimester: item.trimester,
+          },
+        },
+        create: {
+          schoolId,
+          cardId: item.cardId,
+          subjectId: item.subjectId,
+          trimester: item.trimester,
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade,
+          updatedByEmail: actor.email,
+        },
+        update: {
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade,
+          updatedByEmail: actor.email,
+        },
+      });
+    }
   }
 
   // 3. Atualiza trimester{1,2,3}BelowAvgJson preservando itens manuais (!subjectId) e outras disciplinas já salvas
@@ -621,7 +861,7 @@ export async function applyCouncilSerePdfImport(params: {
     };
   }> = [];
 
-  for (const card of board.studentCards) {
+  for (const card of mutableCards) {
     const touchedTris = touchedCardTrimesters.get(card.id);
     if (!touchedTris || touchedTris.size === 0) continue;
 

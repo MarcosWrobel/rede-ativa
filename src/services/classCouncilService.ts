@@ -436,6 +436,18 @@ async function syncMissingStudentCardsForBoard(
   return true;
 }
 
+export async function initializeCouncilBoardRecordsInTx(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  boardId: string,
+  classGroupId: string,
+  userName?: string | null,
+  userEmail?: string | null
+): Promise<void> {
+  await ensureTrimestersForBoard(tx, schoolId, boardId, userName, userEmail);
+  await syncMissingStudentCardsForBoard(tx, schoolId, boardId, classGroupId);
+}
+
 export async function findCouncilBoardOwnershipRecord(
   boardId: string,
   txClient?: Prisma.TransactionClient | PrismaClient
@@ -478,7 +490,7 @@ export async function listSchoolCouncilBoards(
         include: {
           _count: {
             select: {
-              students: { where: { active: true } },
+              students: { where: { active: true, schoolId } },
             },
           },
         },
@@ -491,6 +503,7 @@ export async function listSchoolCouncilBoards(
             select: { id: true, name: true, segment: true, shift: true },
           },
           trimesters: {
+            where: { schoolId },
             orderBy: { trimester: "asc" },
             select: {
               id: true,
@@ -503,8 +516,8 @@ export async function listSchoolCouncilBoards(
           },
           _count: {
             select: {
-              subjects: { where: { active: true } },
-              studentCards: true,
+              subjects: { where: { active: true, schoolId } },
+              studentCards: { where: { schoolId, student: { schoolId } } },
             },
           },
         },
@@ -524,7 +537,7 @@ export async function getCouncilBoardDetail(
   schoolId: string,
   boardId: string,
   txClient?: Prisma.TransactionClient | PrismaClient,
-  options?: { skipImplicitWrites?: boolean }
+  _options?: { skipImplicitWrites?: boolean }
 ) {
   return runCouncilTenantTx(
     schoolId,
@@ -547,24 +560,22 @@ export async function getCouncilBoardDetail(
         return null;
       }
 
-      if (!options?.skipImplicitWrites) {
-        await ensureTrimestersForBoard(db, schoolId, boardId);
-        await syncMissingStudentCardsForBoard(db, schoolId, boardId, boardHeader.classGroupId);
-      }
-
-          return db.classCouncilBoard.findUnique({
+      return db.classCouncilBoard.findUnique({
         where: { id: boardId },
         include: {
           classGroup: {
             select: { id: true, name: true, segment: true, shift: true },
           },
           subjects: {
+            where: { schoolId },
             orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
           },
           trimesters: {
+            where: { schoolId },
             orderBy: { trimester: "asc" },
           },
           studentCards: {
+            where: { schoolId, student: { schoolId } },
             orderBy: { student: { name: "asc" } },
             include: {
               student: {
@@ -582,7 +593,7 @@ export async function getCouncilBoardDetail(
                 },
               },
               subjectEntries: {
-                where: { schoolId },
+                where: { schoolId, subject: { schoolId } },
                 orderBy: [{ trimester: "asc" }],
               },
             },
@@ -869,7 +880,7 @@ export async function saveOrCloneCouncilSubjects(params: {
   return runCouncilTenantTx(schoolId, async (tx) => {
     const board = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
-      select: { id: true, schoolId: true, classGroup: { select: { schoolId: true } } },
+      select: { id: true, schoolId: true, classGroupId: true, classGroup: { select: { schoolId: true } } },
     });
 
     if (!board) {
@@ -877,6 +888,14 @@ export async function saveOrCloneCouncilSubjects(params: {
     }
     if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
       throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    if (
+      board.classGroupId &&
+      typeof tx.student?.findMany === "function" &&
+      typeof tx.studentCouncilCard?.findMany === "function"
+    ) {
+      await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
     }
 
     if (payload.sourceBoardId) {
@@ -1629,29 +1648,75 @@ async function saveCouncilMatrixBatchInTx(
   const belowAvgField = getBelowAvgFieldName(payload.trimester);
 
   for (const item of entriesList) {
-    await tx.studentCouncilSubjectEntry.upsert({
-      where: {
-        cardId_subjectId_trimester: {
+    const existingEntry =
+      typeof tx.studentCouncilSubjectEntry.findUnique === "function"
+        ? await tx.studentCouncilSubjectEntry.findUnique({
+            where: {
+              cardId_subjectId_trimester: {
+                cardId: item.cardId,
+                subjectId: item.subjectId,
+                trimester: payload.trimester,
+              },
+            },
+            select: { id: true, schoolId: true },
+          })
+        : null;
+
+    if (existingEntry) {
+      if (existingEntry.schoolId !== schoolId) {
+        throw new CouncilDomainError(
+          "Conflito de instituição ao registrar avaliação do estudante.",
+          409
+        );
+      }
+      await tx.studentCouncilSubjectEntry.update({
+        where: { id: existingEntry.id },
+        data: {
+          descriptorCodes: item.descriptorCodes,
+          ...(item.grade !== undefined ? { grade: item.grade } : {}),
+          updatedByEmail: userEmail,
+        },
+      });
+    } else if (
+      typeof tx.studentCouncilSubjectEntry.findUnique === "function" &&
+      typeof tx.studentCouncilSubjectEntry.create === "function"
+    ) {
+      await tx.studentCouncilSubjectEntry.create({
+        data: {
+          schoolId,
           cardId: item.cardId,
           subjectId: item.subjectId,
           trimester: payload.trimester,
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade ?? null,
+          updatedByEmail: userEmail,
         },
-      },
-      create: {
-        schoolId,
-        cardId: item.cardId,
-        subjectId: item.subjectId,
-        trimester: payload.trimester,
-        descriptorCodes: item.descriptorCodes,
-        grade: item.grade ?? null,
-        updatedByEmail: userEmail,
-      },
-      update: {
-        descriptorCodes: item.descriptorCodes,
-        ...(item.grade !== undefined ? { grade: item.grade } : {}),
-        updatedByEmail: userEmail,
-      },
-    });
+      });
+    } else {
+      await tx.studentCouncilSubjectEntry.upsert({
+        where: {
+          cardId_subjectId_trimester: {
+            cardId: item.cardId,
+            subjectId: item.subjectId,
+            trimester: payload.trimester,
+          },
+        },
+        create: {
+          schoolId,
+          cardId: item.cardId,
+          subjectId: item.subjectId,
+          trimester: payload.trimester,
+          descriptorCodes: item.descriptorCodes,
+          grade: item.grade ?? null,
+          updatedByEmail: userEmail,
+        },
+        update: {
+          descriptorCodes: item.descriptorCodes,
+          ...(item.grade !== undefined ? { grade: item.grade } : {}),
+          updatedByEmail: userEmail,
+        },
+      });
+    }
   }
 
   for (const cardId of affectedCardIds) {
@@ -1722,7 +1787,7 @@ export async function saveCouncilMatrixBatch(params: {
   return runCouncilTenantTx(schoolId, async (tx) => {
     const board = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
-      select: { id: true, schoolId: true, classGroup: { select: { schoolId: true } } },
+      select: { id: true, schoolId: true, classGroupId: true, classGroup: { select: { schoolId: true } } },
     });
 
     if (!board) {
@@ -1730,6 +1795,14 @@ export async function saveCouncilMatrixBatch(params: {
     }
     if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
       throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+
+    if (
+      board.classGroupId &&
+      typeof tx.student?.findMany === "function" &&
+      typeof tx.studentCouncilCard?.findMany === "function"
+    ) {
+      await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
     }
 
     return saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail });
@@ -1755,12 +1828,40 @@ export async function updateStudentCouncilCard(params: {
   }
 
   return runCouncilTenantTx(schoolId, async (tx) => {
-    const card = await tx.studentCouncilCard.findUnique({
+    let card = await tx.studentCouncilCard.findUnique({
       where: { boardId_studentId: { boardId, studentId } },
       include: {
         student: { select: { id: true, schoolId: true } },
       },
     });
+
+    if (!card && typeof tx.classCouncilBoard?.findUnique === "function" && typeof tx.student?.findFirst === "function") {
+      const board = await tx.classCouncilBoard.findUnique({
+        where: { id: boardId },
+        select: { id: true, schoolId: true, classGroupId: true, classGroup: { select: { schoolId: true } } },
+      });
+      if (board && board.schoolId === schoolId && (!board.classGroup || board.classGroup.schoolId === schoolId)) {
+        const eligibleStudent = await tx.student.findFirst({
+          where: { id: studentId, schoolId, classGroupId: board.classGroupId },
+          select: { id: true, schoolId: true, active: true, isSpecialNeeds: true },
+        });
+        if (eligibleStudent) {
+          card = await tx.studentCouncilCard.create({
+            data: {
+              schoolId,
+              boardId,
+              studentId: eligibleStudent.id,
+              enrollmentStatus: eligibleStudent.active ? "ATIVO" : "TRANSFERIDO",
+              tags: eligibleStudent.isSpecialNeeds ? ["AEE"] : [],
+              hasSensitiveHealthTag: Boolean(eligibleStudent.isSpecialNeeds),
+            },
+            include: {
+              student: { select: { id: true, schoolId: true } },
+            },
+          });
+        }
+      }
+    }
 
     if (!card) {
       throw new CouncilDomainError("Ficha do estudante não encontrada neste conselho de turma.", 404);
