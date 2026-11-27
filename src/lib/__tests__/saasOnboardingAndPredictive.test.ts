@@ -18,6 +18,17 @@ vi.mock("@/lib/prisma", () => {
     },
     userSchool: {
       upsert: vi.fn(),
+      count: vi.fn(async () => 0),
+    },
+    student: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
+    },
+    classGroup: {
+      count: vi.fn(async () => 0),
+    },
+    pedagogicalMinute: {
+      count: vi.fn(async () => 0),
     },
     messageLog: {
       count: vi.fn(),
@@ -195,12 +206,15 @@ describe("SAAS-06 & SAAS-07: Auto-Onboarding e Diagnóstico Preditivo", () => {
           state: "PR",
           nre: "SEMEC",
           syncTokenHash: "token-1",
-          _count: { students: 100, classGroups: 4, userSchools: 3, pedagogicalMinutes: 2 },
-          students: [
-            { id: "st-1", updatedAt: new Date(), lowAttendanceRecord: { attendancePercent: 65 } },
-            { id: "st-2", updatedAt: new Date(), lowAttendanceRecord: { attendancePercent: 90 } },
-          ],
         },
+      ] as any);
+      vi.mocked(prisma.student.count).mockResolvedValueOnce(100);
+      vi.mocked(prisma.classGroup.count).mockResolvedValueOnce(4);
+      vi.mocked(prisma.userSchool.count).mockResolvedValueOnce(3);
+      vi.mocked(prisma.pedagogicalMinute.count).mockResolvedValueOnce(2);
+      vi.mocked(prisma.student.findMany).mockResolvedValueOnce([
+        { id: "st-1", updatedAt: new Date(), lowAttendanceRecord: { attendancePercent: 65 } },
+        { id: "st-2", updatedAt: new Date(), lowAttendanceRecord: { attendancePercent: 90 } },
       ] as any);
 
       vi.mocked(prisma.messageLog.count).mockResolvedValueOnce(45);

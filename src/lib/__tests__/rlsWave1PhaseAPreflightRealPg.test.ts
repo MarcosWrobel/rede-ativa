@@ -231,6 +231,8 @@ import { GET as getPendingMessagesHandler } from "@/app/api/messages/pending/rou
 import { PATCH as patchMessageStatusHandler } from "@/app/api/messages/status/route";
 import { POST as postMessageReplyHandler } from "@/app/api/messages/reply/route";
 import { PUT as putMessageManageHandler, DELETE as deleteMessageManageHandler } from "@/app/api/messages/manage/route";
+import { GET as secretariaMetricsHandler } from "@/app/api/secretaria/metrics/route";
+import SecretariaPage from "@/app/secretaria/page";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -7103,6 +7105,493 @@ describe.skipIf(!SHOULD_RUN)(
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = null;
         testAuthState.useRealPermissions = false;
+      }
+    });
+
+    it("isola painel /secretaria e GET /api/secretaria/metrics por escola autorizada com withTenantContext e integridade Fase A", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      testAuthState.useRealPermissions = true;
+
+      try {
+        await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sec-a"] } } });
+        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "superadmin-sec-test"] } } });
+        await prisma.educationNetwork.deleteMany({ where: { id: { in: ["net-sec-a", "net-sec-b"] } } });
+
+        await prisma.educationNetwork.createMany({
+          data: [
+            {
+              id: "net-sec-a",
+              name: "SEMEC Sec A",
+              shortName: "SEMEC A",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              active: true,
+            },
+            {
+              id: "net-sec-b",
+              name: "SEMEC Sec B",
+              shortName: "SEMEC B",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.school.createMany({
+          data: [
+            {
+              id: "school-sec-a1",
+              inepCode: "99000901",
+              name: "Escola Sec A1",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sec-a",
+              active: true,
+            },
+            {
+              id: "school-sec-a2",
+              inepCode: "99000902",
+              name: "Escola Sec A2",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sec-a",
+              active: true,
+            },
+            {
+              id: "school-sec-a-inativa",
+              inepCode: "99000903",
+              name: "Escola Sec A Inativa",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sec-a",
+              active: false,
+            },
+            {
+              id: "school-sec-b1",
+              inepCode: "99000904",
+              name: "Escola Sec B1",
+              city: "Cidade Sec Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sec-b",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.classGroup.createMany({
+          data: [
+            { id: "cg-sec-a1", name: "6º A", segment: "EF2", shift: "MANHA", schoolId: "school-sec-a1" },
+            { id: "cg-sec-a2", name: "7º A", segment: "EF2", shift: "MANHA", schoolId: "school-sec-a2" },
+            { id: "cg-sec-a-inativa", name: "8º A", segment: "EF2", shift: "MANHA", schoolId: "school-sec-a-inativa" },
+            { id: "cg-sec-b1", name: "9º A", segment: "EF2", shift: "MANHA", schoolId: "school-sec-b1" },
+          ],
+        });
+
+        await prisma.student.createMany({
+          data: [
+            {
+              id: "stu-sec-a1-1",
+              cgm: "99090101",
+              name: "Estudante A1 1",
+              phone: "5541999900011",
+              classGroupId: "cg-sec-a1",
+              schoolId: "school-sec-a1",
+            },
+            {
+              id: "stu-sec-a1-2",
+              cgm: "99090102",
+              name: "Estudante A1 2",
+              phone: "5541999900012",
+              classGroupId: "cg-sec-a1",
+              schoolId: "school-sec-a1",
+            },
+            {
+              id: "stu-sec-a1-cross",
+              cgm: "99090103",
+              name: "Estudante A1 Cross",
+              phone: "5541999900013",
+              classGroupId: "cg-sec-b1",
+              schoolId: "school-sec-a1",
+            },
+            {
+              id: "stu-sec-a2-1",
+              cgm: "99090201",
+              name: "Estudante A2 1",
+              phone: "5541999900021",
+              classGroupId: "cg-sec-a2",
+              schoolId: "school-sec-a2",
+            },
+            {
+              id: "stu-sec-a2-norec",
+              cgm: "99090202",
+              name: "Estudante A2 Sem Registro",
+              phone: "5541999900022",
+              classGroupId: "cg-sec-a2",
+              schoolId: "school-sec-a2",
+            },
+            {
+              id: "stu-sec-a-inativa-1",
+              cgm: "99090301",
+              name: "Estudante Inativa",
+              phone: "5541999900031",
+              classGroupId: "cg-sec-a-inativa",
+              schoolId: "school-sec-a-inativa",
+            },
+            {
+              id: "stu-sec-b1-1",
+              cgm: "99090401",
+              name: "Estudante B1 1",
+              phone: "5541999900041",
+              classGroupId: "cg-sec-b1",
+              schoolId: "school-sec-b1",
+            },
+          ],
+        });
+
+        await prisma.lowAttendanceRecord.createMany({
+          data: [
+            { studentId: "stu-sec-a1-1", attendancePercent: 60 },
+            { studentId: "stu-sec-a1-2", attendancePercent: 80 },
+            { studentId: "stu-sec-a1-cross", attendancePercent: 10 },
+            { studentId: "stu-sec-a2-1", attendancePercent: 100 },
+            { studentId: "stu-sec-a-inativa-1", attendancePercent: 20 },
+            { studentId: "stu-sec-b1-1", attendancePercent: 50 },
+          ],
+        });
+
+        const now = new Date();
+        const oldDate = new Date(now.getFullYear(), now.getMonth() - 2, 10, 12, 0, 0);
+
+        await prisma.messageLog.createMany({
+          data: [
+            {
+              id: "msg-sec-a1-own",
+              studentId: "stu-sec-a1-1",
+              schoolId: "school-sec-a1",
+              phoneUsed: "5541999900011",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato A1",
+              sentAt: now,
+              guardianReplied: true,
+              replyCategory: "TRANSPORTE",
+            },
+            {
+              id: "msg-sec-a1-legacy",
+              studentId: "stu-sec-a1-2",
+              schoolId: null,
+              phoneUsed: "5541999900012",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato Legado",
+              sentAt: now,
+              guardianReplied: true,
+              replyCategory: "SAUDE",
+            },
+            {
+              id: "msg-sec-a1-div",
+              studentId: "stu-sec-a1-1",
+              schoolId: "school-sec-b1",
+              phoneUsed: "5541999900011",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato Divergente",
+              sentAt: now,
+              guardianReplied: true,
+              replyCategory: "TRABALHO",
+            },
+            {
+              id: "msg-sec-a1-old-cause",
+              studentId: "stu-sec-a1-2",
+              schoolId: "school-sec-a1",
+              phoneUsed: "5541999900012",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato Mês Anterior",
+              sentAt: oldDate,
+              guardianReplied: true,
+              replyCategory: "TRANSPORTE",
+            },
+            {
+              id: "msg-sec-a-inativa",
+              studentId: "stu-sec-a-inativa-1",
+              schoolId: "school-sec-a-inativa",
+              phoneUsed: "5541999900031",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato Inativa",
+              sentAt: now,
+              guardianReplied: true,
+              replyCategory: "TRABALHO",
+            },
+            {
+              id: "msg-sec-b1-own",
+              studentId: "stu-sec-b1-1",
+              schoolId: "school-sec-b1",
+              phoneUsed: "5541999900041",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Contato B1",
+              sentAt: now,
+              guardianReplied: true,
+              replyCategory: "VULNERABILIDADE",
+            },
+          ],
+        });
+
+        await prisma.pedagogicalMinute.create({
+          data: {
+            id: "ata-sec-a1",
+            schoolId: "school-sec-a1",
+            year: now.getFullYear(),
+            subject: "Ata Sec A1",
+            summary: "Resumo",
+            status: "FINALIZED",
+            attendedAt: now,
+            authorName: "Gestora Sec A",
+            authorEmail: "sec-a@redeativa.local",
+          },
+        });
+
+        const secUser = await prisma.user.create({
+          data: {
+            id: "user-sec-a",
+            email: "sec-a@redeativa.local",
+            name: "Gestora Sec A",
+            role: "GESTAO_SECRETARIA",
+            active: true,
+          },
+        });
+        await prisma.user.create({
+          data: {
+            id: "superadmin-sec-test",
+            email: "super@redeativa.local",
+            name: "Superadmin Teste",
+            role: "SUPERADMIN",
+            active: true,
+          },
+        });
+
+        await prisma.userNetwork.create({
+          data: {
+            id: "un-sec-a",
+            userId: secUser.id,
+            networkId: "net-sec-a",
+            active: true,
+          },
+        });
+
+        const secSessionUser = {
+          id: secUser.id,
+          email: secUser.email,
+          name: secUser.name,
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+          networks: [{ networkId: "net-sec-a", name: "SEMEC Sec A", city: "Cidade Sec Teste" }],
+        };
+        testAuthState.pendingSessionUser = secSessionUser;
+
+        // 1. GESTAO_SECRETARIA ativo: paridade API x SSR, contexto por escola, Fase A + exclusão de turma cruzada
+        tenantCalls.length = 0;
+        const rSecApi = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics")
+        );
+        expect(rSecApi.status).toBe(200);
+        const secApiBody = await rSecApi.json();
+
+        expect(secApiBody.city).toBe("Cidade Sec Teste");
+        expect(secApiBody.schools.map((s: { id: string }) => s.id)).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+        ]);
+        expect(secApiBody.metrics).toEqual({
+          totalSchools: 2,
+          totalStudents: 4,
+          totalClasses: 2,
+          criticalStudentsCount: 1,
+          networkAverageAttendance: 80,
+          messagesSentThisMonth: 2,
+        });
+        expect(secApiBody.predictiveAnalysis.totalCategorizedReplies).toBe(3);
+        expect(secApiBody.predictiveAnalysis.causesBreakdown).toEqual([
+          { category: "TRANSPORTE", count: 2, percentage: 66.7 },
+          { category: "SAUDE", count: 1, percentage: 33.3 },
+        ]);
+        expect([...tenantCalls].sort((a, b) => a.schoolId.localeCompare(b.schoolId))).toEqual([
+          { schoolId: "school-sec-a1", currentSetting: "school-sec-a1" },
+          { schoolId: "school-sec-a2", currentSetting: "school-sec-a2" },
+        ]);
+        expect(tenantCalls.some((c) => c.schoolId === "school-sec-a-inativa" || c.schoolId === "school-sec-b1")).toBe(false);
+
+        tenantCalls.length = 0;
+        const pageEl = (await SecretariaPage({
+          searchParams: Promise.resolve({}),
+        })) as unknown as {
+          props: {
+            city: string;
+            metrics: typeof secApiBody.metrics;
+            initialSchools: typeof secApiBody.schools;
+            predictiveData: typeof secApiBody.predictiveAnalysis;
+          };
+        };
+        expect(pageEl.props.city).toBe("Cidade Sec Teste");
+        expect(pageEl.props.metrics).toEqual(secApiBody.metrics);
+        expect(pageEl.props.initialSchools).toEqual(secApiBody.schools);
+        expect(pageEl.props.predictiveData).toEqual(secApiBody.predictiveAnalysis);
+        expect([...tenantCalls].sort((a, b) => a.schoolId.localeCompare(b.schoolId))).toEqual([
+          { schoolId: "school-sec-a1", currentSetting: "school-sec-a1" },
+          { schoolId: "school-sec-a2", currentSetting: "school-sec-a2" },
+        ]);
+
+        // 2. Filtro networkId estrangeiro e cidade conflitante -> 403 na API e fallback seguro na página
+        tenantCalls.length = 0;
+        const rForeignNet = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics?networkId=net-sec-b")
+        );
+        expect(rForeignNet.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        const rConflictCity = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics?city=OutraCidade")
+        );
+        expect(rConflictCity.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        const pageConflictEl = (await SecretariaPage({
+          searchParams: Promise.resolve({ city: "OutraCidade", networkId: "net-sec-b" }),
+        })) as unknown as {
+          props: { city: string; initialSchools: Array<{ id: string }> };
+        };
+        expect(pageConflictEl.props.city).toBe("Cidade Sec Teste");
+        expect(pageConflictEl.props.initialSchools.map((s) => s.id)).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+        ]);
+
+        // 3. Vínculo UserNetwork revogado mesmo com sessão antiga -> 403 na API e estado vazio na página
+        await prisma.userNetwork.update({
+          where: { id: "un-sec-a" },
+          data: { active: false },
+        });
+        tenantCalls.length = 0;
+        const rRevoked = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics")
+        );
+        expect(rRevoked.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        await expect(
+          SecretariaPage({
+            searchParams: Promise.resolve({}),
+          })
+        ).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+
+        // 4. Rede inativa mesmo com vínculo ativo -> 403 na API e redirect seguro na página
+        await prisma.userNetwork.update({
+          where: { id: "un-sec-a" },
+          data: { active: true },
+        });
+        await prisma.educationNetwork.update({
+          where: { id: "net-sec-a" },
+          data: { active: false },
+        });
+        tenantCalls.length = 0;
+        const rInactiveNet = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics")
+        );
+        expect(rInactiveNet.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        await expect(
+          SecretariaPage({
+            searchParams: Promise.resolve({}),
+          })
+        ).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+
+        // 5. SUPERADMIN municipal vê ambas as redes da cidade com média ponderada e filtro networkId
+        await prisma.educationNetwork.update({
+          where: { id: "net-sec-a" },
+          data: { active: true },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "superadmin-sec-test",
+          email: "super@redeativa.local",
+          name: "Superadmin Teste",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+        tenantCalls.length = 0;
+        const rSuperCity = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics?city=Cidade%20Sec%20Teste")
+        );
+        expect(rSuperCity.status).toBe(200);
+        const superCityBody = await rSuperCity.json();
+        expect(superCityBody.schools.map((s: { id: string }) => s.id)).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+          "school-sec-b1",
+        ]);
+        expect(superCityBody.metrics).toEqual({
+          totalSchools: 3,
+          totalStudents: 5,
+          totalClasses: 3,
+          criticalStudentsCount: 2,
+          networkAverageAttendance: 72.5,
+          messagesSentThisMonth: 3,
+        });
+        expect(tenantCalls.map((c) => c.schoolId).sort()).toEqual([
+          "school-sec-a1",
+          "school-sec-a2",
+          "school-sec-b1",
+        ]);
+        expect(tenantCalls.every((c) => c.currentSetting === c.schoolId)).toBe(true);
+
+        tenantCalls.length = 0;
+        const rSuperNetB = await secretariaMetricsHandler(
+          new NextRequest("http://127.0.0.1/api/secretaria/metrics?networkId=net-sec-b")
+        );
+        expect(rSuperNetB.status).toBe(200);
+        const superNetBBody = await rSuperNetB.json();
+        expect(superNetBBody.schools.map((s: { id: string }) => s.id)).toEqual(["school-sec-b1"]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "school-sec-b1", currentSetting: "school-sec-b1" },
+        ]);
+      } finally {
+        await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sec-a"] } } }).catch(() => {});
+        await prisma.user.deleteMany({ where: { id: { in: ["user-sec-a", "superadmin-sec-test"] } } }).catch(() => {});
+        await prisma.educationNetwork.deleteMany({ where: { id: { in: ["net-sec-a", "net-sec-b"] } } }).catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
   }

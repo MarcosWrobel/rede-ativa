@@ -150,6 +150,7 @@ vi.mock("@/lib/prisma", () => {
       }),
     },
     student: {
+      count: vi.fn(async () => 0),
       findUnique: vi.fn(async ({ where }: any) => {
         const st = hoisted.state.db.students.find((s) => s.id === where.id);
         if (!st) return null;
@@ -168,6 +169,7 @@ vi.mock("@/lib/prisma", () => {
     inPersonAttendance: { findMany: vi.fn(async () => []) },
     attendanceSnapshot: { findMany: vi.fn(async () => []) },
     pedagogicalMinute: {
+      count: vi.fn(async () => 0),
       findUnique: vi.fn(async ({ where }: any) => {
         const found = hoisted.state.db.minutes.find(
           (m) =>
@@ -286,6 +288,8 @@ vi.mock("@/lib/prisma", () => {
       deleteMany: vi.fn(async () => ({ count: 0 })),
       createMany: vi.fn(async () => ({ count: 0 })),
     },
+    classGroup: { count: vi.fn(async () => 0) },
+    userSchool: { count: vi.fn(async () => 0) },
     messageLog: {
       count: vi.fn(async () => 0),
       groupBy: vi.fn(async () => []),

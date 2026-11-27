@@ -296,6 +296,7 @@ vi.mock("@/lib/prisma", () => {
         Object.assign(existing, data);
         return existing;
       }),
+      count: vi.fn(async () => 0),
     },
     student: {
       findMany: vi.fn(async ({ where }: any) =>
@@ -307,12 +308,14 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async ({ where }: any) =>
         hoisted.state.atas.filter((a) => a.schoolId === where?.schoolId)
       ),
+      count: vi.fn(async () => 0),
     },
     classGroup: {
       findFirst: vi.fn(async ({ where }: any) => {
         if (!where?.id || !where?.schoolId) return null;
         return { id: where.id, schoolId: where.schoolId, name: "6º Ano A" };
       }),
+      count: vi.fn(async () => 0),
     },
     messageLog: {
       findUnique: vi.fn(async ({ where }: any) =>
