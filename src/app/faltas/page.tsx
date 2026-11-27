@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import FaltasClient from "./FaltasClient";
@@ -113,18 +114,20 @@ export default async function FaltasPage() {
         select: { id: true, name: true, segment: true, shift: true },
         orderBy: { name: "asc" },
       }),
-      prisma.messageTemplate.findMany({
-        where: { active: true, schoolId },
-        orderBy: { title: "asc" },
-        select: {
-          id: true,
+      withTenantContext(prisma, schoolId, async (tx) =>
+        tx.messageTemplate.findMany({
+          where: { active: true, schoolId },
+          orderBy: { title: "asc" },
+          select: {
+            id: true,
           title: true,
           segment: true,
           prefixText: true,
           suffixText: true,
-          isAbsenceRelated: true,
-        },
-      }),
+            isAbsenceRelated: true,
+          },
+        })
+      ),
       safeQueryList(() =>
         prisma.absenceJustification.findMany({
           where: { student: { schoolId }, endDate: { gte: recentCutoff } },

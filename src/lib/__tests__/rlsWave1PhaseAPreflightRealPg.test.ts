@@ -235,6 +235,10 @@ import { GET as secretariaMetricsHandler } from "@/app/api/secretaria/metrics/ro
 import SecretariaPage from "@/app/secretaria/page";
 import AdminPage from "@/app/admin/page";
 import AdminEscolasPage from "@/app/admin/escolas/page";
+import { GET as listTemplatesHandler, POST as createTemplateHandler, PUT as updateTemplateHandler } from "@/app/api/templates/route";
+import ModelosPage from "@/app/modelos/page";
+import BuscaAtivaPage from "@/app/busca-ativa/page";
+import FaltasPage from "@/app/faltas/page";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -8141,8 +8145,10 @@ describe.skipIf(!SHOULD_RUN)(
         });
 
       const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
       const prevPendingSessionUser = testAuthState.pendingSessionUser;
       testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
 
       try {
         await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sch-combo"] } } });
@@ -8547,6 +8553,548 @@ describe.skipIf(!SHOULD_RUN)(
           .catch(() => {});
         withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
+
+    it("isola MessageTemplate em GET/POST/PUT /api/templates e /modelos, /busca-ativa e /faltas com exceção global do SuperAdmin", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const logAuditMock = vi.mocked(logAudit);
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      testAuthState.useRealPermissions = true;
+      testAuthState.useRealCurrentSchool = true;
+
+      try {
+        await prisma.userSchool.deleteMany({
+          where: { id: { in: ["us-tpl-alpha", "us-tpl-piloto"] } },
+        });
+        await prisma.user.deleteMany({
+          where: { id: { in: ["user-tpl-alpha", "user-tpl-piloto", "user-tpl-super"] } },
+        });
+        await prisma.messageTemplate.deleteMany({
+          where: {
+            id: {
+              in: [
+                "tpl-piloto-own",
+                "tpl-piloto-inact",
+                "tpl-global-legacy",
+                "tpl-alpha-ef2",
+                "tpl-alpha-inact",
+              ],
+            },
+          },
+        });
+        await prisma.school.deleteMany({ where: { id: { in: ["default-leopoldina"] } } });
+
+        await prisma.school.create({
+          data: {
+            id: "default-leopoldina",
+            inepCode: "41042730",
+            name: "Escola Piloto Teste",
+            city: "Tibagi",
+            state: "PR",
+            nre: "Telêmaco Borba",
+            network: "ESTADUAL",
+            active: true,
+          },
+        });
+
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "MessageTemplate" ALTER COLUMN "schoolId" DROP NOT NULL`
+        );
+
+        await prisma.messageTemplate.createMany({
+          data: [
+            {
+              id: "tpl-piloto-own",
+              schoolId: "default-leopoldina",
+              title: "AVISO PILOTO EM",
+              segment: "EM",
+              prefixText: "Prezado piloto",
+              suffixText: "Att",
+              active: true,
+              isAbsenceRelated: true,
+            },
+            {
+              id: "tpl-piloto-inact",
+              schoolId: "default-leopoldina",
+              title: "AVISO PILOTO INATIVO",
+              segment: "TODOS",
+              prefixText: "Inativo",
+              suffixText: "Att",
+              active: false,
+              isAbsenceRelated: false,
+            },
+            {
+              id: "tpl-alpha-ef2",
+              schoolId: "school-alpha",
+              title: "AVISO ALPHA EF2",
+              segment: "EF2",
+              prefixText: "Alpha EF2",
+              suffixText: "Att",
+              active: true,
+              isAbsenceRelated: true,
+            },
+            {
+              id: "tpl-alpha-inact",
+              schoolId: "school-alpha",
+              title: "AVISO ALPHA INATIVO",
+              segment: "TODOS",
+              prefixText: "Alpha Inat",
+              suffixText: "Att",
+              active: false,
+              isAbsenceRelated: false,
+            },
+          ],
+        });
+
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "MessageTemplate" ("id", "schoolId", "title", "segment", "prefixText", "suffixText", "active", "isAbsenceRelated")
+           VALUES ('tpl-global-legacy', NULL, 'AVISO GLOBAL LEGADO', 'TODOS', 'Global', 'Att', true, true)`
+        );
+
+        await prisma.user.createMany({
+          data: [
+            {
+              id: "user-tpl-alpha",
+              email: "tpl-alpha@redeativa.local",
+              name: "Pedagoga Alpha",
+              role: "PEDAGOGA",
+              active: true,
+            },
+            {
+              id: "user-tpl-piloto",
+              email: "tpl-piloto@redeativa.local",
+              name: "Gestora Piloto",
+              role: "GESTOR_ESCOLAR",
+              active: true,
+            },
+            {
+              id: "user-tpl-super",
+              email: "tpl-super@redeativa.local",
+              name: "Super Templates",
+              role: "SUPERADMIN",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.userSchool.createMany({
+          data: [
+            {
+              id: "us-tpl-alpha",
+              userId: "user-tpl-alpha",
+              schoolId: "school-alpha",
+              role: "PEDAGOGA",
+              active: true,
+            },
+            {
+              id: "us-tpl-piloto",
+              userId: "user-tpl-piloto",
+              schoolId: "default-leopoldina",
+              role: "GESTOR_ESCOLAR",
+              active: true,
+            },
+          ],
+        });
+
+        // 1. Escola Piloto (default-leopoldina): GET inclui global legado; SSRs retornam modelos da própria escola
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-piloto",
+          email: "tpl-piloto@redeativa.local",
+          name: "Gestora Piloto",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "default-leopoldina",
+        };
+
+        tenantCalls.length = 0;
+        const rGetPiloto = await listTemplatesHandler(
+          new Request("http://127.0.0.1/api/templates?segment=EM")
+        );
+        expect(rGetPiloto.status).toBe(200);
+        const pilotoApiList = await rGetPiloto.json();
+        expect(pilotoApiList.map((t: { id: string }) => t.id)).toEqual([
+          "tpl-global-legacy",
+          "tpl-piloto-own",
+        ]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
+        ]);
+
+        tenantCalls.length = 0;
+        const modelosPilotoEl = (await ModelosPage()) as unknown as {
+          props: { initialTemplates: Array<{ id: string }> };
+        };
+        expect(modelosPilotoEl.props.initialTemplates.map((t) => t.id)).toEqual([
+          "tpl-piloto-own",
+          "tpl-piloto-inact",
+        ]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
+        ]);
+
+        tenantCalls.length = 0;
+        const buscaPilotoEl = (await BuscaAtivaPage({
+          searchParams: Promise.resolve({}),
+        })) as unknown as {
+          props: { templates: Array<{ id: string }> };
+        };
+        expect(buscaPilotoEl.props.templates.map((t) => t.id)).toEqual(["tpl-piloto-own"]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
+        ]);
+
+        tenantCalls.length = 0;
+        const faltasPilotoEl = (await FaltasPage()) as unknown as {
+          props: { templates: Array<{ id: string }> };
+        };
+        expect(faltasPilotoEl.props.templates.map((t) => t.id)).toEqual(["tpl-piloto-own"]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
+        ]);
+
+        // 2. Outra escola (school-alpha): GET e SSR excluem global legado e escola piloto
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-alpha",
+          email: "tpl-alpha@redeativa.local",
+          name: "Pedagoga Alpha",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+        };
+
+        tenantCalls.length = 0;
+        const rGetAlpha = await listTemplatesHandler(
+          new Request("http://127.0.0.1/api/templates?segment=EF2")
+        );
+        expect(rGetAlpha.status).toBe(200);
+        const alphaApiList = await rGetAlpha.json();
+        expect(alphaApiList.map((t: { id: string }) => t.id)).toEqual([
+          "tpl-alpha-ef2",
+          "tpl-alpha",
+        ]);
+        expect(tenantCalls).toEqual([
+          { schoolId: "school-alpha", currentSetting: "school-alpha" },
+        ]);
+
+        tenantCalls.length = 0;
+        const modelosAlphaEl = (await ModelosPage()) as unknown as {
+          props: { initialTemplates: Array<{ id: string }> };
+        };
+        expect(modelosAlphaEl.props.initialTemplates.map((t) => t.id).sort()).toEqual([
+          "tpl-alpha",
+          "tpl-alpha-ef2",
+          "tpl-alpha-inact",
+        ]);
+
+        tenantCalls.length = 0;
+        const buscaAlphaEl = (await BuscaAtivaPage({
+          searchParams: Promise.resolve({}),
+        })) as unknown as {
+          props: { templates: Array<{ id: string }> };
+        };
+        expect(buscaAlphaEl.props.templates.map((t) => t.id).sort()).toEqual([
+          "tpl-alpha",
+          "tpl-alpha-ef2",
+        ]);
+
+        tenantCalls.length = 0;
+        const faltasAlphaEl = (await FaltasPage()) as unknown as {
+          props: { templates: Array<{ id: string }> };
+        };
+        expect(faltasAlphaEl.props.templates.map((t) => t.id).sort()).toEqual([
+          "tpl-alpha",
+          "tpl-alpha-ef2",
+        ]);
+
+        // 3. POST e PUT na própria escola (school-alpha) + negativas cruzadas e de auditoria
+        logAuditMock.mockClear();
+        tenantCalls.length = 0;
+        const rPostAlpha = await createTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: "Novo Modelo Alpha",
+              segment: "MEDIO",
+              prefixText: "Olá responsável",
+              suffixText: "Atenciosamente",
+              isAbsenceRelated: true,
+            }),
+          })
+        );
+        expect(rPostAlpha.status).toBe(200);
+        const createdAlpha = await rPostAlpha.json();
+        expect(createdAlpha.schoolId).toBe("school-alpha");
+        expect(createdAlpha.title).toBe("NOVO MODELO ALPHA");
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+        expect(logAuditMock).toHaveBeenCalledTimes(1);
+        expect(logAuditMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "CREATE_TEMPLATE",
+            schoolId: "school-alpha",
+          })
+        );
+
+        logAuditMock.mockClear();
+        const rPutAlpha = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: createdAlpha.id,
+              title: "Modelo Alpha Editado",
+              segment: "FUNDAMENTAL",
+              prefixText: "Olá atualizado",
+              suffixText: "Equipe",
+              isAbsenceRelated: false,
+              active: true,
+            }),
+          })
+        );
+        expect(rPutAlpha.status).toBe(200);
+        const updatedAlpha = await rPutAlpha.json();
+        expect(updatedAlpha.title).toBe("MODELO ALPHA EDITADO");
+        expect(updatedAlpha.schoolId).toBe("school-alpha");
+        expect(logAuditMock).toHaveBeenCalledTimes(1);
+
+        // Negativa: school-alpha tentando editar modelo da Escola Piloto -> 403 e sem auditoria
+        logAuditMock.mockClear();
+        const rPutCross = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "tpl-piloto-own",
+              title: "Tentativa Cruzada",
+              segment: "MEDIO",
+              prefixText: "Invasão",
+              suffixText: "Att",
+            }),
+          })
+        );
+        expect(rPutCross.status).toBe(403);
+        expect(logAuditMock).not.toHaveBeenCalled();
+        expect(
+          (await prisma.messageTemplate.findUnique({ where: { id: "tpl-piloto-own" } }))?.title
+        ).toBe("AVISO PILOTO EM");
+
+        // Negativa: não-SUPERADMIN tentando editar modelo global legado -> 403 e sem auditoria
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-piloto",
+          email: "tpl-piloto@redeativa.local",
+          name: "Gestora Piloto",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "default-leopoldina",
+        };
+        logAuditMock.mockClear();
+        const rPutGlobalNonSuper = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "tpl-global-legacy",
+              title: "Alteração Não Autorizada",
+              segment: "TODOS",
+              prefixText: "X",
+              suffixText: "Y",
+            }),
+          })
+        );
+        expect(rPutGlobalNonSuper.status).toBe(403);
+        expect(logAuditMock).not.toHaveBeenCalled();
+        const globalCheckRows = await prisma.$queryRaw<Array<{ title: string }>>`
+          SELECT "title" FROM "MessageTemplate" WHERE "id" = 'tpl-global-legacy'
+        `;
+        expect(globalCheckRows[0]?.title).toBe("AVISO GLOBAL LEGADO");
+
+        // Negativa: vínculo revogado -> 403 sem withTenantContext e sem auditoria
+        await prisma.userSchool.update({
+          where: { id: "us-tpl-alpha" },
+          data: { active: false },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-alpha",
+          email: "tpl-alpha@redeativa.local",
+          name: "Pedagoga Alpha",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+        };
+        tenantCalls.length = 0;
+        logAuditMock.mockClear();
+        const rPostRevoked = await createTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: "Sem Vínculo",
+              segment: "TODOS",
+              prefixText: "A",
+              suffixText: "B",
+            }),
+          })
+        );
+        expect(rPostRevoked.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+        expect(logAuditMock).not.toHaveBeenCalled();
+
+        // 4. SUPERADMIN sem escola selecionada -> 403 em POST e PUT
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-super",
+          email: "tpl-super@redeativa.local",
+          name: "Super Templates",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+        tenantCalls.length = 0;
+        logAuditMock.mockClear();
+        const rSuperPostNoSchool = await createTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: "Super Sem Escola",
+              segment: "TODOS",
+              prefixText: "A",
+              suffixText: "B",
+            }),
+          })
+        );
+        expect(rSuperPostNoSchool.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+        expect(logAuditMock).not.toHaveBeenCalled();
+
+        const rSuperPutNoSchool = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "tpl-global-legacy",
+              title: "Super Sem Escola",
+              segment: "TODOS",
+              prefixText: "A",
+              suffixText: "B",
+            }),
+          })
+        );
+        expect(rSuperPutNoSchool.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+        expect(logAuditMock).not.toHaveBeenCalled();
+
+        // SUPERADMIN com school-beta selecionada tentando editar modelo de school-alpha -> 403
+        await prisma.user.update({
+          where: { id: "user-tpl-super" },
+          data: { schoolId: "school-beta" },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-super",
+          email: "tpl-super@redeativa.local",
+          name: "Super Templates",
+          role: "SUPERADMIN",
+          schoolId: "school-beta",
+        };
+        logAuditMock.mockClear();
+        const rSuperCrossEdit = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "tpl-alpha-ef2",
+              title: "Super Cruzado",
+              segment: "FUNDAMENTAL",
+              prefixText: "X",
+              suffixText: "Y",
+            }),
+          })
+        );
+        expect(rSuperCrossEdit.status).toBe(403);
+        expect(logAuditMock).not.toHaveBeenCalled();
+
+        // SUPERADMIN com escola selecionada (default-leopoldina) edita modelo global legado (schoolId: null) -> 200
+        await prisma.user.update({
+          where: { id: "user-tpl-super" },
+          data: { schoolId: "default-leopoldina" },
+        });
+        testAuthState.pendingSessionUser = {
+          id: "user-tpl-super",
+          email: "tpl-super@redeativa.local",
+          name: "Super Templates",
+          role: "SUPERADMIN",
+          schoolId: "default-leopoldina",
+        };
+        tenantCalls.length = 0;
+        logAuditMock.mockClear();
+        const rSuperEditGlobal = await updateTemplateHandler(
+          new Request("http://127.0.0.1/api/templates", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "tpl-global-legacy",
+              title: "Aviso Global Atualizado",
+              segment: "TODOS",
+              prefixText: "Global Novo",
+              suffixText: "Att",
+            }),
+          })
+        );
+        expect(rSuperEditGlobal.status).toBe(200);
+        const globalUpdated = await rSuperEditGlobal.json();
+        expect(globalUpdated.schoolId).toBeNull();
+        expect(globalUpdated.title).toBe("AVISO GLOBAL ATUALIZADO");
+        expect(tenantCalls).toEqual([
+          { schoolId: "default-leopoldina", currentSetting: "default-leopoldina" },
+        ]);
+        expect(logAuditMock).toHaveBeenCalledTimes(1);
+      } finally {
+        await prisma.userSchool
+          .deleteMany({ where: { id: { in: ["us-tpl-alpha", "us-tpl-piloto"] } } })
+          .catch(() => {});
+        await prisma.user
+          .deleteMany({ where: { id: { in: ["user-tpl-alpha", "user-tpl-piloto", "user-tpl-super"] } } })
+          .catch(() => {});
+        await prisma.messageTemplate
+          .deleteMany({
+            where: {
+              id: {
+                in: [
+                  "tpl-piloto-own",
+                  "tpl-piloto-inact",
+                  "tpl-global-legacy",
+                  "tpl-alpha-ef2",
+                  "tpl-alpha-inact",
+                ],
+              },
+            },
+          })
+          .catch(() => {});
+        await prisma.messageTemplate
+          .deleteMany({ where: { schoolId: "default-leopoldina" } })
+          .catch(() => {});
+        await prisma
+          .$executeRawUnsafe(`ALTER TABLE "MessageTemplate" ALTER COLUMN "schoolId" SET NOT NULL`)
+          .catch(() => {});
+        await prisma.school.deleteMany({ where: { id: { in: ["default-leopoldina"] } } }).catch(() => {});
+        withTenantSpy.mockRestore();
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });

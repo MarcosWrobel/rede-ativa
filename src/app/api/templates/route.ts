@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
+import { resolveEffectiveRoleForSchool } from "@/lib/serverAuthContext";
 import { formatZodError, templateCreateSchema, templateUpdateSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool, isDefaultSchoolContext } from "@/lib/currentSchool";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 
 export async function GET(req: Request) {
   try {
@@ -27,9 +28,33 @@ export async function GET(req: Request) {
       where.AND = [{ OR: [{ segment }, { segment: "TODOS" }] }];
     }
 
-    const templates = await prisma.messageTemplate.findMany({
-      where,
-      orderBy: { title: "asc" },
+    const templates = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      try {
+        return await tx.messageTemplate.findMany({
+          where,
+          orderBy: { title: "asc" },
+        });
+      } catch (queryErr: any) {
+        if (!isDefaultSchoolContext(currentSchool) || queryErr?.name !== "PrismaClientValidationError") {
+          throw queryErr;
+        }
+        return segment && segment !== "TODOS"
+          ? tx.$queryRaw`
+              SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+              FROM "MessageTemplate"
+              WHERE "active" = true
+                AND ("schoolId" = ${currentSchool.id} OR "schoolId" IS NULL)
+                AND ("segment" = ${segment} OR "segment" = 'TODOS')
+              ORDER BY "title" ASC
+            `
+          : tx.$queryRaw`
+              SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+              FROM "MessageTemplate"
+              WHERE "active" = true
+                AND ("schoolId" = ${currentSchool.id} OR "schoolId" IS NULL)
+              ORDER BY "title" ASC
+            `;
+      }
     });
 
     return NextResponse.json(templates);
@@ -44,9 +69,25 @@ export async function POST(req: Request) {
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    const schoolCheck = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
+    );
     if (!schoolCheck.ok) return schoolCheck.response;
     const currentSchool = schoolCheck.school;
+
+    if (authCheck.snapshot) {
+      const effectiveRole = resolveEffectiveRoleForSchool(authCheck.snapshot, currentSchool);
+      if (!effectiveRole) {
+        return NextResponse.json(
+          { error: "Sem vínculo ativo autorizado para criar modelos nesta instituição." },
+          { status: 403 }
+        );
+      }
+    }
+
     const parsed = templateCreateSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
@@ -54,16 +95,18 @@ export async function POST(req: Request) {
 
     const { title, segment, prefixText, suffixText, isAbsenceRelated } = parsed.data;
 
-    const template = await prisma.messageTemplate.create({
-      data: {
-        title: title.toUpperCase(),
-        segment,
-        prefixText,
-        suffixText,
-        isAbsenceRelated,
-        schoolId: currentSchool.id,
-      },
-    });
+    const template = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.messageTemplate.create({
+        data: {
+          title: title.toUpperCase(),
+          segment,
+          prefixText,
+          suffixText,
+          isAbsenceRelated,
+          schoolId: currentSchool.id,
+        },
+      })
+    );
 
     await logAudit({
       action: "CREATE_TEMPLATE",
@@ -97,44 +140,143 @@ export async function PUT(req: Request) {
     }
 
     const { id, title, segment, prefixText, suffixText, isAbsenceRelated, active } = parsed.data;
-    const schoolCheck = await requireAuthorizedSchool(authCheck.session, authCheck.schoolId, authCheck.snapshot);
+    const schoolCheck = await requireAuthorizedSchool(
+      authCheck.session,
+      authCheck.schoolId,
+      authCheck.snapshot,
+      { allowSuperAdminReadOnlyFallback: false }
+    );
     if (!schoolCheck.ok) return schoolCheck.response;
     const currentSchool = schoolCheck.school;
 
-    const existing = await prisma.messageTemplate.findUnique({
-      where: { id },
-    });
-
-    if (!existing) {
-      return NextResponse.json({ error: "Modelo de mensagem não encontrado" }, { status: 404 });
+    if (authCheck.snapshot) {
+      const effectiveRole = resolveEffectiveRoleForSchool(authCheck.snapshot, currentSchool);
+      if (!effectiveRole) {
+        return NextResponse.json(
+          { error: "Sem vínculo ativo autorizado para editar modelos nesta instituição." },
+          { status: 403 }
+        );
+      }
     }
 
     const isSuper = checkIsSuperAdmin(authCheck.session);
-    if (!existing.schoolId && !isSuper) {
-      return NextResponse.json(
-        { error: "Modelos padrão globais só podem ser editados pelo SuperAdmin." },
-        { status: 403 }
-      );
-    }
 
-    if (existing.schoolId && !assertTenantOwnership(existing.schoolId, currentSchool.id, authCheck.session)) {
-      return NextResponse.json(
-        { error: "Acesso negado a modelo de outra instituição de ensino." },
-        { status: 403 }
-      );
-    }
+    const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      const existingRows = await tx.$queryRaw<
+        Array<{
+          id: string;
+          title: string;
+          segment: string;
+          prefixText: string;
+          suffixText: string;
+          isAbsenceRelated: boolean;
+          active: boolean;
+          schoolId: string | null;
+          createdAt: Date;
+        }>
+      >`
+        SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+        FROM "MessageTemplate"
+        WHERE "id" = ${id}
+        LIMIT 1
+      `;
+      const existing = existingRows[0] ?? null;
 
-    const template = await prisma.messageTemplate.update({
-      where: { id },
-      data: {
+      if (!existing) {
+        return { errorStatus: 404 as const, error: "Modelo de mensagem não encontrado" };
+      }
+
+      if (!existing.schoolId && !isSuper) {
+        return {
+          errorStatus: 403 as const,
+          error: "Modelos padrão globais só podem ser editados pelo SuperAdmin.",
+        };
+      }
+
+      if (existing.schoolId && existing.schoolId !== currentSchool.id) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a modelo de outra instituição de ensino.",
+        };
+      }
+
+      const updateData = {
         title: title ? title.toUpperCase() : undefined,
         segment,
         prefixText,
         suffixText,
         isAbsenceRelated,
         active,
-      },
+      };
+
+      let updatedCount = 0;
+      if (existing.schoolId) {
+        const updated = await tx.messageTemplate.updateMany({
+          where: { id, schoolId: currentSchool.id },
+          data: updateData,
+        });
+        updatedCount = updated.count;
+      } else {
+        const nextTitle = updateData.title ?? existing.title;
+        const nextSegment = updateData.segment ?? existing.segment;
+        const nextPrefix = updateData.prefixText ?? existing.prefixText;
+        const nextSuffix = updateData.suffixText ?? existing.suffixText;
+        const nextAbsence =
+          typeof updateData.isAbsenceRelated === "boolean"
+            ? updateData.isAbsenceRelated
+            : existing.isAbsenceRelated;
+        const nextActive =
+          typeof updateData.active === "boolean" ? updateData.active : existing.active;
+        updatedCount = await tx.$executeRaw`
+          UPDATE "MessageTemplate"
+          SET "title" = ${nextTitle},
+              "segment" = ${nextSegment},
+              "prefixText" = ${nextPrefix},
+              "suffixText" = ${nextSuffix},
+              "isAbsenceRelated" = ${nextAbsence},
+              "active" = ${nextActive}
+          WHERE "id" = ${id} AND "schoolId" IS NULL
+        `;
+      }
+
+      if (updatedCount === 0) {
+        return {
+          errorStatus: 403 as const,
+          error: "Acesso negado a modelo de outra instituição de ensino.",
+        };
+      }
+
+      const updatedRows = await tx.$queryRaw<
+        Array<{
+          id: string;
+          title: string;
+          segment: string;
+          prefixText: string;
+          suffixText: string;
+          isAbsenceRelated: boolean;
+          active: boolean;
+          schoolId: string | null;
+          createdAt: Date;
+        }>
+      >`
+        SELECT "id", "title", "segment", "prefixText", "suffixText", "isAbsenceRelated", "active", "schoolId", "createdAt"
+        FROM "MessageTemplate"
+        WHERE "id" = ${id}
+        LIMIT 1
+      `;
+      const template = updatedRows[0] ?? null;
+      if (!template) {
+        return { errorStatus: 404 as const, error: "Modelo de mensagem não encontrado" };
+      }
+
+      return { template };
     });
+
+    if ("error" in txResult) {
+      return NextResponse.json({ error: txResult.error }, { status: txResult.errorStatus });
+    }
+
+    const template = txResult.template;
 
     await logAudit({
       action: "UPDATE_TEMPLATE",

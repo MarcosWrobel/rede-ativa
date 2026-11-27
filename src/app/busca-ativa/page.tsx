@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import BuscaAtivaClient from "./BuscaAtivaClient";
@@ -41,18 +42,20 @@ export default async function BuscaAtivaPage({
         select: { id: true, name: true, segment: true, shift: true },
         orderBy: { name: "asc" },
       }),
-      prisma.messageTemplate.findMany({
-        where: { active: true, schoolId },
-        select: {
-          id: true,
-          title: true,
-          segment: true,
-          prefixText: true,
-          suffixText: true,
-          isAbsenceRelated: true,
-        },
-        orderBy: { title: "asc" },
-      }),
+      withTenantContext(prisma, schoolId, async (tx) =>
+        tx.messageTemplate.findMany({
+          where: { active: true, schoolId },
+          select: {
+            id: true,
+            title: true,
+            segment: true,
+            prefixText: true,
+            suffixText: true,
+            isAbsenceRelated: true,
+          },
+          orderBy: { title: "asc" },
+        })
+      ),
       prisma.student.findMany({
         where: { schoolId, active: true },
         select: {

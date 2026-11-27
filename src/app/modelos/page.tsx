@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { resolveAuthorizedPageContext } from "@/lib/pageAuth";
 import ModelosClient from "./ModelosClient";
 
@@ -10,12 +11,14 @@ export default async function ModelosPage() {
 
   let templates: any[] = [];
   try {
-    templates = await prisma.messageTemplate.findMany({
-      where: {
-        schoolId: currentSchool.id,
-      },
-      orderBy: [{ segment: "asc" }, { title: "asc" }],
-    });
+    templates = await withTenantContext(prisma, currentSchool.id, async (tx) =>
+      tx.messageTemplate.findMany({
+        where: {
+          schoolId: currentSchool.id,
+        },
+        orderBy: [{ segment: "asc" }, { title: "asc" }],
+      })
+    );
   } catch (err) {
     console.error("[ModelosPage] Erro ao buscar templates:", err);
   }
