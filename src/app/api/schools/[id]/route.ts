@@ -9,6 +9,7 @@ import { resolveSchoolEdition } from "@/lib/platformEditions";
 import { parseSchoolAiExternalFormalizeFlag } from "@/lib/aiPolicy";
 import { mutateSchoolSettingsAtomically } from "@/lib/schoolSettingsMutation";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { readSchoolScopedCounts } from "@/lib/schoolReadMetrics";
 import { assertNoCrossSchoolCleanupConflicts } from "@/lib/schoolCleanupGuards";
 import { z } from "zod";
 
@@ -63,14 +64,6 @@ export async function GET(
         networkId: true,
         createdAt: true,
         updatedAt: true,
-        _count: {
-          select: {
-            students: { where: { active: true } },
-            classGroups: true,
-            pedagogicalMinutes: true,
-            userSchools: { where: { active: true } },
-          },
-        },
         userSchools: {
           where: { active: true },
           include: {
@@ -87,6 +80,11 @@ export async function GET(
       return NextResponse.json({ error: "Instituição escolar não encontrada" }, { status: 404 });
     }
 
+    const counts = await readSchoolScopedCounts(school.id, {
+      includePedagogicalMinutes: true,
+      includeActiveUserSchools: true,
+    });
+
     const { syncTokenHash, ...safeSchool } = school;
     const aiPolicyFlag = parseSchoolAiExternalFormalizeFlag(school.settingsJson);
 
@@ -94,6 +92,12 @@ export async function GET(
       success: true,
       school: {
         ...safeSchool,
+        _count: {
+          students: counts.students,
+          classGroups: counts.classGroups,
+          pedagogicalMinutes: counts.pedagogicalMinutes ?? 0,
+          userSchools: counts.userSchools ?? 0,
+        },
         logoUrl: resolveSchoolLogoProxyUrl({
           id: school.id,
           logoUrl: (school as { logoUrl?: string | null }).logoUrl,

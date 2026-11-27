@@ -213,8 +213,8 @@ import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { dispatchWhatsAppMessage } from "@/lib/whatsappProvider";
 import { logAudit } from "@/lib/audit";
 import * as rlsTenantContext from "@/lib/rlsTenantContext";
-import { POST as createSchoolHandler } from "@/app/api/schools/route";
-import { DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
+import { POST as createSchoolHandler, GET as listSchoolsHandler } from "@/app/api/schools/route";
+import { GET as getSchoolByIdHandler, DELETE as deleteSchoolHandler } from "@/app/api/schools/[id]/route";
 import { POST as sanitizeSchoolHandler } from "@/app/api/schools/[id]/sanitize/route";
 import { GET as getMessagesHandler } from "@/app/api/messages/route";
 import { POST as webhookWhatsappHandler } from "@/app/api/webhooks/whatsapp/route";
@@ -234,6 +234,7 @@ import { PUT as putMessageManageHandler, DELETE as deleteMessageManageHandler } 
 import { GET as secretariaMetricsHandler } from "@/app/api/secretaria/metrics/route";
 import SecretariaPage from "@/app/secretaria/page";
 import AdminPage from "@/app/admin/page";
+import AdminEscolasPage from "@/app/admin/escolas/page";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -8116,6 +8117,435 @@ describe.skipIf(!SHOULD_RUN)(
         auditFindSpy.mockRestore();
         withTenantSpy.mockRestore();
         testAuthState.pendingTokenSchoolId = prevPendingTokenSchoolId;
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
+
+    it("isola leituras de GET /api/schools, GET /api/schools/[id] e /admin/escolas por escola com withTenantContext", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      testAuthState.useRealPermissions = true;
+
+      try {
+        await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sch-combo"] } } });
+        await prisma.userSchool.deleteMany({
+          where: { id: { in: ["us-sch-gestor", "us-sch-combo"] } },
+        });
+        await prisma.user.deleteMany({
+          where: { id: { in: ["user-sch-super", "user-sch-gestor", "user-sch-combo"] } },
+        });
+        await prisma.educationNetwork.deleteMany({
+          where: { id: { in: ["net-sch-a", "net-sch-b"] } },
+        });
+
+        await prisma.educationNetwork.createMany({
+          data: [
+            {
+              id: "net-sch-a",
+              name: "SEMEC Escolas A",
+              shortName: "SEMEC Esc A",
+              city: "Cidade Teste",
+              state: "PR",
+              active: true,
+            },
+            {
+              id: "net-sch-b",
+              name: "SEMEC Escolas B",
+              shortName: "SEMEC Esc B",
+              city: "Cidade Teste",
+              state: "PR",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.school.update({
+          where: { id: "school-alpha" },
+          data: { network: "MUNICIPAL", networkId: "net-sch-a", syncTokenHash: "hash-alpha" },
+        });
+
+        await prisma.school.createMany({
+          data: [
+            {
+              id: "school-sch-a2",
+              inepCode: "99000961",
+              name: "Escola A2",
+              city: "Cidade Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sch-a",
+              active: true,
+            },
+            {
+              id: "school-sch-b1",
+              inepCode: "99000962",
+              name: "Escola B1",
+              city: "Cidade Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sch-b",
+              active: true,
+            },
+            {
+              id: "school-sch-inativa",
+              inepCode: "99000963",
+              name: "Escola Inativa",
+              city: "Cidade Teste",
+              state: "PR",
+              nre: "NRE Teste",
+              network: "MUNICIPAL",
+              networkId: "net-sch-a",
+              active: false,
+            },
+          ],
+        });
+
+        await prisma.classGroup.createMany({
+          data: [
+            { id: "cg-sch-a2", name: "2º A", segment: "EM", shift: "MANHA", schoolId: "school-alpha" },
+            { id: "cg-sch-a2-1", name: "1º A2", segment: "EM", shift: "MANHA", schoolId: "school-sch-a2" },
+            { id: "cg-sch-b1", name: "1º B1", segment: "EM", shift: "MANHA", schoolId: "school-sch-b1" },
+            {
+              id: "cg-sch-inativa",
+              name: "1º Inat",
+              segment: "EM",
+              shift: "MANHA",
+              schoolId: "school-sch-inativa",
+            },
+          ],
+        });
+
+        await prisma.student.createMany({
+          data: [
+            {
+              id: "stu-sch-a-act",
+              cgm: "99096101",
+              name: "Estudante Alpha Ativo",
+              phone: "5541999960011",
+              classGroupId: "cg-alpha",
+              schoolId: "school-alpha",
+              active: true,
+              updatedAt: new Date("2026-06-01T12:00:00.000Z"),
+            },
+            {
+              id: "stu-sch-a-inact",
+              cgm: "99096102",
+              name: "Estudante Alpha Inativo",
+              phone: "5541999960012",
+              classGroupId: "cg-alpha",
+              schoolId: "school-alpha",
+              active: false,
+              updatedAt: new Date("2099-01-15T12:00:00.000Z"),
+            },
+            {
+              id: "stu-sch-a-cross",
+              cgm: "99096103",
+              name: "Estudante Alpha Cross",
+              phone: "5541999960013",
+              classGroupId: "cg-sch-b1",
+              schoolId: "school-alpha",
+              active: true,
+              updatedAt: new Date("2099-06-01T12:00:00.000Z"),
+            },
+            {
+              id: "stu-sch-a2-1",
+              cgm: "99096201",
+              name: "Estudante A2",
+              phone: "5541999960021",
+              classGroupId: "cg-sch-a2-1",
+              schoolId: "school-sch-a2",
+              active: true,
+            },
+            {
+              id: "stu-sch-b1-1",
+              cgm: "99096301",
+              name: "Estudante B1",
+              phone: "5541999960031",
+              classGroupId: "cg-sch-b1",
+              schoolId: "school-sch-b1",
+              active: true,
+            },
+            {
+              id: "stu-sch-inativa-1",
+              cgm: "99096401",
+              name: "Estudante Inativa",
+              phone: "5541999960041",
+              classGroupId: "cg-sch-inativa",
+              schoolId: "school-sch-inativa",
+              active: false,
+              updatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            },
+          ],
+        });
+
+        await prisma.pedagogicalMinute.create({
+          data: {
+            id: "ata-sch-a",
+            schoolId: "school-alpha",
+            year: 2026,
+            subject: "Ata Alpha",
+            summary: "Resumo",
+            status: "FINALIZED",
+            authorName: "Equipe",
+            authorEmail: "equipe@redeativa.local",
+          },
+        });
+
+        await prisma.user.createMany({
+          data: [
+            {
+              id: "user-sch-super",
+              email: "super-sch@redeativa.local",
+              name: "Super Escolas",
+              role: "SUPERADMIN",
+              active: true,
+            },
+            {
+              id: "user-sch-gestor",
+              email: "gestor-sch@redeativa.local",
+              name: "Gestor Alpha",
+              role: "GESTOR_ESCOLAR",
+              active: true,
+            },
+            {
+              id: "user-sch-combo",
+              email: "combo-sch@redeativa.local",
+              name: "Gestor Secretaria Combo",
+              role: "GESTAO_SECRETARIA",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.userSchool.createMany({
+          data: [
+            {
+              id: "us-sch-gestor",
+              userId: "user-sch-gestor",
+              schoolId: "school-alpha",
+              role: "GESTOR_ESCOLAR",
+              active: true,
+            },
+            {
+              id: "us-sch-combo",
+              userId: "user-sch-combo",
+              schoolId: "school-alpha",
+              role: "GESTOR_ESCOLAR",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.userNetwork.create({
+          data: {
+            id: "un-sch-combo",
+            userId: "user-sch-combo",
+            networkId: "net-sch-a",
+            role: "GESTAO_SECRETARIA",
+            active: true,
+          },
+        });
+
+        // 1. SUPERADMIN sem escola selecionada -> GET /api/schools e /admin/escolas
+        testAuthState.pendingSessionUser = {
+          id: "user-sch-super",
+          email: "super-sch@redeativa.local",
+          name: "Super Escolas",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+
+        tenantCalls.length = 0;
+        const rSuperList = await listSchoolsHandler();
+        expect(rSuperList.status).toBe(200);
+        const superListBody = await rSuperList.json();
+        expect(superListBody.success).toBe(true);
+        const superIds = superListBody.schools.map((s: { id: string }) => s.id);
+        expect(superIds).toEqual(
+          expect.arrayContaining(["school-alpha", "school-beta", "school-sch-a2", "school-sch-b1"])
+        );
+        expect(superIds).not.toContain("school-sch-inativa");
+        const superAlpha = superListBody.schools.find((s: { id: string }) => s.id === "school-alpha");
+        expect(superAlpha.syncTokenHash).toBeUndefined();
+        expect(superAlpha.hasSyncToken).toBe(true);
+        expect(superAlpha._count).toEqual({
+          students: 2,
+          classGroups: 2,
+          pedagogicalMinutes: 1,
+          userSchools: 2,
+        });
+        expect(tenantCalls.map((c) => c.schoolId).sort()).toEqual([
+          "school-alpha",
+          "school-beta",
+          "school-sch-a2",
+          "school-sch-b1",
+        ]);
+        expect(tenantCalls.every((c) => c.currentSetting === c.schoolId)).toBe(true);
+
+        tenantCalls.length = 0;
+        const escolasEl = (await AdminEscolasPage()) as unknown as {
+          props: {
+            schools: Array<{
+              id: string;
+              studentsCount: number;
+              classesCount: number;
+              lastSyncAt: string | null;
+              hasSyncToken: boolean;
+            }>;
+          };
+        };
+        const escAlpha = escolasEl.props.schools.find((s) => s.id === "school-alpha");
+        const escInativa = escolasEl.props.schools.find((s) => s.id === "school-sch-inativa");
+        expect(escAlpha).toMatchObject({
+          id: "school-alpha",
+          studentsCount: 3,
+          classesCount: 2,
+          lastSyncAt: "2099-01-15T12:00:00.000Z",
+          hasSyncToken: true,
+        });
+        expect(escInativa).toMatchObject({
+          id: "school-sch-inativa",
+          studentsCount: 1,
+          classesCount: 1,
+          lastSyncAt: "2026-07-01T12:00:00.000Z",
+        });
+        expect(tenantCalls.map((c) => c.schoolId).sort()).toEqual([
+          "school-alpha",
+          "school-beta",
+          "school-sch-a2",
+          "school-sch-b1",
+          "school-sch-inativa",
+        ]);
+        expect(tenantCalls.every((c) => c.currentSetting === c.schoolId)).toBe(true);
+
+        // 2. Gestor com vínculo ativo na escola-alvo (sessão apontando para school-beta) -> GET /api/schools/[id]
+        testAuthState.pendingSessionUser = {
+          id: "user-sch-gestor",
+          email: "gestor-sch@redeativa.local",
+          name: "Gestor Alpha",
+          role: "GESTOR_ESCOLAR",
+          schoolId: "school-beta",
+        };
+        tenantCalls.length = 0;
+        const rDetailOk = await getSchoolByIdHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha"),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rDetailOk.status).toBe(200);
+        const detailBody = await rDetailOk.json();
+        expect(detailBody.success).toBe(true);
+        expect(detailBody.school.id).toBe("school-alpha");
+        expect(detailBody.school.syncTokenHash).toBeUndefined();
+        expect(detailBody.school.hasSyncToken).toBe(true);
+        expect(detailBody.school._count).toEqual({
+          students: 2,
+          classGroups: 2,
+          pedagogicalMinutes: 1,
+          userSchools: 2,
+        });
+        expect(detailBody.school.userSchools.map((u: { user: { id: string } }) => u.user.id).sort()).toEqual([
+          "user-sch-combo",
+          "user-sch-gestor",
+        ]);
+        expect(tenantCalls).toEqual([{ schoolId: "school-alpha", currentSetting: "school-alpha" }]);
+
+        tenantCalls.length = 0;
+        const rDetailForbidden = await getSchoolByIdHandler(
+          new Request("http://127.0.0.1/api/schools/school-sch-b1"),
+          { params: Promise.resolve({ id: "school-sch-b1" }) }
+        );
+        expect(rDetailForbidden.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        // 3. Secretaria com vínculo ativo na rede + UserSchool em school-alpha -> deduplicação e precedência de userRole
+        testAuthState.pendingSessionUser = {
+          id: "user-sch-combo",
+          email: "combo-sch@redeativa.local",
+          name: "Gestor Secretaria Combo",
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+        };
+        tenantCalls.length = 0;
+        const rComboList = await listSchoolsHandler();
+        expect(rComboList.status).toBe(200);
+        const comboListBody = await rComboList.json();
+        expect(comboListBody.schools.map((s: { id: string }) => s.id).sort()).toEqual([
+          "school-alpha",
+          "school-sch-a2",
+        ]);
+        expect(comboListBody.schools.find((s: { id: string }) => s.id === "school-alpha")).toMatchObject({
+          userRole: "GESTOR_ESCOLAR",
+          _count: { students: 2, classGroups: 2, pedagogicalMinutes: 1 },
+        });
+        expect(comboListBody.schools.find((s: { id: string }) => s.id === "school-sch-a2")).toMatchObject({
+          userRole: "GESTAO_SECRETARIA",
+          _count: { students: 1, classGroups: 1, pedagogicalMinutes: 0 },
+        });
+        expect(tenantCalls.map((c) => c.schoolId).sort()).toEqual(["school-alpha", "school-sch-a2"]);
+
+        tenantCalls.length = 0;
+        const rSecOtherNet = await getSchoolByIdHandler(
+          new Request("http://127.0.0.1/api/schools/school-sch-b1"),
+          { params: Promise.resolve({ id: "school-sch-b1" }) }
+        );
+        expect(rSecOtherNet.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+
+        // 4. Vínculo revogado -> lista vazia sem withTenantContext e detalhe 403 sem withTenantContext
+        await prisma.userSchool.update({
+          where: { id: "us-sch-combo" },
+          data: { active: false },
+        });
+        await prisma.userNetwork.update({
+          where: { id: "un-sch-combo" },
+          data: { active: false },
+        });
+
+        tenantCalls.length = 0;
+        const rRevokedList = await listSchoolsHandler();
+        expect(rRevokedList.status).toBe(200);
+        const revokedListBody = await rRevokedList.json();
+        expect(revokedListBody.schools).toEqual([]);
+        expect(tenantCalls).toHaveLength(0);
+
+        const rRevokedDetail = await getSchoolByIdHandler(
+          new Request("http://127.0.0.1/api/schools/school-alpha"),
+          { params: Promise.resolve({ id: "school-alpha" }) }
+        );
+        expect(rRevokedDetail.status).toBe(403);
+        expect(tenantCalls).toHaveLength(0);
+      } finally {
+        await prisma.userNetwork.deleteMany({ where: { id: { in: ["un-sch-combo"] } } }).catch(() => {});
+        await prisma.userSchool
+          .deleteMany({ where: { id: { in: ["us-sch-gestor", "us-sch-combo"] } } })
+          .catch(() => {});
+        await prisma.user
+          .deleteMany({ where: { id: { in: ["user-sch-super", "user-sch-gestor", "user-sch-combo"] } } })
+          .catch(() => {});
+        await prisma.educationNetwork
+          .deleteMany({ where: { id: { in: ["net-sch-a", "net-sch-b"] } } })
+          .catch(() => {});
+        withTenantSpy.mockRestore();
         testAuthState.pendingSessionUser = prevPendingSessionUser;
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }

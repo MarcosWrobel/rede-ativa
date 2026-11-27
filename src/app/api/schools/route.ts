@@ -4,6 +4,7 @@ import { checkIsSuperAdmin, checkIsSecretariat } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { withTenantContext } from "@/lib/rlsTenantContext";
+import { readSchoolsScopedCountsBatch } from "@/lib/schoolReadMetrics";
 import { invalidateSchoolCache } from "@/lib/currentSchool";
 import { resolveSchoolLogoProxyUrl } from "@/lib/schoolLogo";
 import { resolveSchoolEdition } from "@/lib/platformEditions";
@@ -67,70 +68,57 @@ export async function GET() {
 
     const isRootAdmin = checkIsSuperAdmin(authCheck.session);
 
-    let schools;
+    const schoolHeaderSelect = {
+      id: true,
+      inepCode: true,
+      name: true,
+      city: true,
+      state: true,
+      nre: true,
+      network: true,
+      phone: true,
+      email: true,
+      active: true,
+      syncTokenHash: true,
+      settingsJson: true,
+      networkId: true,
+      createdAt: true,
+      updatedAt: true,
+    } as const;
+
+    let schools: any[];
     if (isRootAdmin) {
-      // Administrador Geral tem visão ampla de todas as escolas cadastradas (sem payload Base64 de logoUrl)
-      schools = await prisma.school.findMany({
+      // Administrador Geral tem visão ampla de todas as escolas ativas (sem payload Base64 de logoUrl)
+      const schoolHeaders = await prisma.school.findMany({
         where: { active: true },
-        select: {
-          id: true,
-          inepCode: true,
-          name: true,
-          city: true,
-          state: true,
-          nre: true,
-          network: true,
-          phone: true,
-          email: true,
-          active: true,
-          syncTokenHash: true,
-          settingsJson: true,
-          networkId: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: {
-            select: {
-              students: { where: { active: true } },
-              classGroups: true,
-              pedagogicalMinutes: true,
-              userSchools: { where: { active: true } },
-            },
-          },
-        },
+        select: schoolHeaderSelect,
         orderBy: [{ network: "asc" }, { name: "asc" }],
+      });
+
+      const countsBySchool = await readSchoolsScopedCountsBatch(
+        schoolHeaders.map((s) => s.id),
+        { includePedagogicalMinutes: true, includeActiveUserSchools: true }
+      );
+
+      schools = schoolHeaders.map((s) => {
+        const counts = countsBySchool.get(s.id);
+        return {
+          ...s,
+          _count: {
+            students: counts?.students ?? 0,
+            classGroups: counts?.classGroups ?? 0,
+            pedagogicalMinutes: counts?.pedagogicalMinutes ?? 0,
+            userSchools: counts?.userSchools ?? 0,
+          },
+        };
       });
     } else {
       // Servidor comum lista apenas escolas com vínculo ativo em UserSchool ou UserNetwork (por networkId)
-      const schoolSelectWithCounts = {
-        id: true,
-        inepCode: true,
-        name: true,
-        city: true,
-        state: true,
-        nre: true,
-        network: true,
-        phone: true,
-        email: true,
-        active: true,
-        syncTokenHash: true,
-        settingsJson: true,
-        networkId: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: {
-          select: {
-            students: { where: { active: true } },
-            classGroups: true,
-            pedagogicalMinutes: true,
-          },
-        },
-      } as const;
-
       const userSchools = await prisma.userSchool.findMany({
         where: { userId: authCheck.userId, active: true, school: { active: true } },
         include: {
           school: {
-            select: schoolSelectWithCounts,
+            select: schoolHeaderSelect,
           },
         },
         orderBy: { school: { name: "asc" } },
@@ -158,6 +146,7 @@ export async function GET() {
         .filter(Boolean);
 
       if (
+        !authCheck.snapshot &&
         activeSecNetworkIds.length === 0 &&
         authCheck.userId &&
         typeof (prisma as any).userNetwork?.findMany === "function"
@@ -183,7 +172,7 @@ export async function GET() {
             active: true,
             networkId: { in: Array.from(new Set(activeSecNetworkIds)) },
           },
-          select: schoolSelectWithCounts,
+          select: schoolHeaderSelect,
           orderBy: { name: "asc" },
         });
         for (const ns of netSchools as any[]) {
@@ -198,9 +187,26 @@ export async function GET() {
         }
       }
 
-      schools = Array.from(byId.values()).sort((a, b) =>
+      const sortedHeaders = Array.from(byId.values()).sort((a, b) =>
         String(a.name || "").localeCompare(String(b.name || ""), "pt-BR")
       );
+
+      const countsBySchool = await readSchoolsScopedCountsBatch(
+        sortedHeaders.map((s) => s.id),
+        { includePedagogicalMinutes: true }
+      );
+
+      schools = sortedHeaders.map((s) => {
+        const counts = countsBySchool.get(s.id);
+        return {
+          ...s,
+          _count: {
+            students: counts?.students ?? 0,
+            classGroups: counts?.classGroups ?? 0,
+            pedagogicalMinutes: counts?.pedagogicalMinutes ?? 0,
+          },
+        };
+      });
     }
 
     const sanitizedSchools = schools.map((s: any) => {

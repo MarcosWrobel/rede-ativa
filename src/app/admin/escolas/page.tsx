@@ -10,6 +10,7 @@ import {
 } from "@/lib/aiPolicy";
 import { sanitizePublicSchoolSettings } from "@/lib/schoolSettingsMutation";
 import { prisma } from "@/lib/prisma";
+import { readSchoolsScopedCountsBatch } from "@/lib/schoolReadMetrics";
 import AdminEscolasClient from "./AdminEscolasClient";
 
 export const dynamic = "force-dynamic";
@@ -67,8 +68,6 @@ export default async function AdminEscolasPage() {
       updatedAt: true,
       _count: {
         select: {
-          students: true,
-          classGroups: true,
           users: true,
           userSchools: true,
         },
@@ -82,18 +81,24 @@ export default async function AdminEscolasPage() {
         },
         take: 6,
       },
-      students: {
-        orderBy: { updatedAt: "desc" },
-        take: 1,
-        select: { updatedAt: true },
-      },
     },
   });
+
+  const scopedCounts = await readSchoolsScopedCountsBatch(
+    schools.map((s) => s.id),
+    {
+      includeInactiveStudents: true,
+      includeLastStudentUpdate: true,
+    }
+  );
 
   const formattedSchools = schools.map((s) => {
     const settings = sanitizePublicSchoolSettings(s.settingsJson);
     const aiPolicyFlag = parseSchoolAiExternalFormalizeFlag(s.settingsJson);
-    const lastSyncAt = s.students[0]?.updatedAt ? s.students[0].updatedAt.toISOString() : null;
+    const counts = scopedCounts.get(s.id);
+    const lastSyncAt = counts?.lastStudentUpdatedAt
+      ? counts.lastStudentUpdatedAt.toISOString()
+      : null;
 
     return {
       id: s.id,
@@ -124,8 +129,8 @@ export default async function AdminEscolasPage() {
           : null,
       hasSyncToken: Boolean(s.syncTokenHash),
       lastSyncAt,
-      studentsCount: s._count.students,
-      classesCount: s._count.classGroups,
+      studentsCount: counts?.students ?? 0,
+      classesCount: counts?.classGroups ?? 0,
       staffCount: s._count.userSchools || s._count.users,
       staff: s.userSchools.map((us) => ({
         id: us.user.id,
