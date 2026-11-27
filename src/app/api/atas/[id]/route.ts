@@ -221,7 +221,11 @@ export async function GET(
       });
     }
 
-    const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(authCheck.snapshot);
+    const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(
+      authCheck.snapshot,
+      currentSchool.id,
+      authCheck.session
+    );
 
     const getTxResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
       const header = await tx.pedagogicalMinute.findUnique({

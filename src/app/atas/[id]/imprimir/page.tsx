@@ -119,7 +119,11 @@ export default async function AtaPrintPage({ params }: Props) {
   const session = ctx.session;
   const currentSchool = ctx.school;
 
-  const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(ctx.snapshot);
+  const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(
+    ctx.snapshot,
+    currentSchool.id,
+    session
+  );
 
   let minute: any = await withTenantContext(prisma, currentSchool.id, async (tx) => {
     const header = await tx.pedagogicalMinute.findUnique({

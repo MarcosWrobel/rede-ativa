@@ -245,7 +245,11 @@ export async function GET(req: Request) {
       });
 
       // Assegura verificationCode para atas finalizadas legadas (apenas quando há autorização explícita de escrita)
-      const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(authCheck.snapshot);
+      const canAutoHealWrite = await hasExplicitSuperAdminSchoolSelection(
+        authCheck.snapshot,
+        school.id,
+        authCheck.session
+      );
       const missingCodes = canAutoHealWrite
         ? rows.filter((m) => m.status === "FINALIZED" && !m.verificationCode)
         : [];

@@ -229,21 +229,43 @@ export interface AuthorizedSchoolOptions {
 }
 
 export async function hasExplicitSuperAdminSchoolSelection(
-  preloadedSnapshot?: ServerUserAuthSnapshot | null
+  preloadedSnapshot?: ServerUserAuthSnapshot | null,
+  resolvedReadSchoolId?: string | null,
+  session?: AuthSessionLike | null
 ): Promise<boolean> {
   if (!preloadedSnapshot || !isSnapshotSuperAdmin(preloadedSnapshot)) {
     return true;
   }
 
-  let cookieVal: string | null = null;
-  try {
-    const cookieStore = await cookies();
-    cookieVal = cookieStore.get("active_school_id")?.value?.trim() || null;
-  } catch {
-    // Fora do ciclo de requisição HTTP
+  const strictSession: AuthSessionLike = session ?? {
+    user: {
+      id: preloadedSnapshot.id,
+      email: preloadedSnapshot.email,
+      name: preloadedSnapshot.name,
+      role: preloadedSnapshot.role,
+      active: preloadedSnapshot.active,
+    },
+  };
+
+  const strictSchool = await getAuthorizedCurrentSchool(
+    strictSession,
+    null,
+    preloadedSnapshot,
+    {
+      allowSuperAdminReadOnlyFallback: false,
+      requireExplicitSuperAdminSelection: true,
+    }
+  );
+
+  if (!strictSchool) {
+    return false;
   }
 
-  return Boolean(cookieVal || preloadedSnapshot.schoolId?.trim());
+  if (resolvedReadSchoolId && strictSchool.id !== resolvedReadSchoolId) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function getAuthorizedCurrentSchool(

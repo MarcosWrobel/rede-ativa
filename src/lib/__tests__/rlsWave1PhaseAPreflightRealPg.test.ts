@@ -11066,6 +11066,230 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
+
+    it("restringe gravação legada de verificationCode em GET /api/atas, GET /api/atas/[id] e /atas/[id]/imprimir à seleção estrita coincidente", async () => {
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevUseRealCurrentSchool = testAuthState.useRealCurrentSchool;
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const nextHeaders = await import("next/headers");
+      const legacyIds: string[] = [];
+
+      try {
+        testAuthState.useRealCurrentSchool = true;
+        testAuthState.useRealPermissions = true;
+
+        await prisma.school.create({
+          data: {
+            id: "school-inactive-legacy",
+            inepCode: "99000999",
+            name: "Escola Inativa Legacy",
+            active: false,
+          },
+        });
+
+        await prisma.user.create({
+          data: {
+            id: "user-super-legacy-check",
+            email: "super-legacy@redeativa.local",
+            name: "SuperAdmin Legacy",
+            role: "SUPERADMIN",
+            active: true,
+            schoolId: null,
+          },
+        });
+        await prisma.userSchool.create({
+          data: {
+            id: "us-super-legacy-alpha",
+            userId: "user-super-legacy-check",
+            schoolId: "school-alpha",
+            role: "SUPERADMIN",
+            active: true,
+          },
+        });
+
+        for (let i = 1; i <= 3; i++) {
+          const m = await prisma.pedagogicalMinute.create({
+            data: {
+              schoolId: "school-alpha",
+              year: 2026,
+              ataNumber: 950 + i,
+              status: "FINALIZED",
+              contentRevision: 1,
+              category: "ACOMPANHAMENTO_PEDAGOGICO",
+              attendedAt: new Date(),
+              subject: `Ata Legada Alpha ${i}`,
+              summary:
+                "Resumo finalizado em Alpha com mais de cinquenta caracteres para testar gravação legada.",
+              authorId: "user-super-legacy-check",
+              authorName: "SuperAdmin Legacy",
+              authorEmail: "super-legacy@redeativa.local",
+              authorRole: "SUPERADMIN",
+              verificationCode: null,
+            },
+          });
+          legacyIds.push(m.id);
+        }
+
+        const { GET: getAtas } = await import("@/app/api/atas/route");
+        const { GET: getAtaById } = await import("@/app/api/atas/[id]/route");
+        const { default: AtaPrintPage } = await import("@/app/atas/[id]/imprimir/page");
+        const { hasExplicitSuperAdminSchoolSelection } = await import("@/lib/currentSchool");
+        const { resolveServerUserAuthSnapshot } = await import("@/lib/serverAuthContext");
+
+        testAuthState.pendingSessionUser = {
+          id: "user-super-legacy-check",
+          email: "super-legacy@redeativa.local",
+          name: "SuperAdmin Legacy",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+
+        // 1. Seleção ausente (sem cookie e sem schoolId no perfil) -> leitura via fallback funciona sem gravar verificationCode
+        expect((await getAtas(new Request("http://127.0.0.1/api/atas"))).status).toBe(200);
+        expect(
+          (
+            await getAtaById(new Request(`http://127.0.0.1/api/atas/${legacyIds[0]}`), {
+              params: Promise.resolve({ id: legacyIds[0] }),
+            })
+          ).status
+        ).toBe(200);
+        await expect(
+          AtaPrintPage({ params: Promise.resolve({ id: legacyIds[0] }) })
+        ).resolves.toBeTruthy();
+
+        let check0 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[0] },
+          select: { verificationCode: true },
+        });
+        expect(check0?.verificationCode).toBeNull();
+
+        // 2. Cookie obsoleto / de escola inativa -> leitura via fallback funciona sem gravar verificationCode
+        vi.mocked(nextHeaders.cookies).mockResolvedValue({
+          get: (name: string) =>
+            name === "active_school_id" ? { name, value: "school-inactive-legacy" } : undefined,
+        } as any);
+
+        expect((await getAtas(new Request("http://127.0.0.1/api/atas"))).status).toBe(200);
+        expect(
+          (
+            await getAtaById(new Request(`http://127.0.0.1/api/atas/${legacyIds[1]}`), {
+              params: Promise.resolve({ id: legacyIds[1] }),
+            })
+          ).status
+        ).toBe(200);
+        await expect(
+          AtaPrintPage({ params: Promise.resolve({ id: legacyIds[1] }) })
+        ).resolves.toBeTruthy();
+
+        let check1 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[1] },
+          select: { verificationCode: true },
+        });
+        expect(check1?.verificationCode).toBeNull();
+
+        // 3. Perfil obsoleto (User.schoolId = escola inativa, sem cookie) -> leitura via fallback sem gravar
+        vi.mocked(nextHeaders.cookies).mockResolvedValue({ get: () => undefined } as any);
+        await prisma.user.update({
+          where: { id: "user-super-legacy-check" },
+          data: { schoolId: "school-inactive-legacy" },
+        });
+
+        expect((await getAtas(new Request("http://127.0.0.1/api/atas"))).status).toBe(200);
+        expect(
+          (
+            await getAtaById(new Request(`http://127.0.0.1/api/atas/${legacyIds[2]}`), {
+              params: Promise.resolve({ id: legacyIds[2] }),
+            })
+          ).status
+        ).toBe(200);
+        await expect(
+          AtaPrintPage({ params: Promise.resolve({ id: legacyIds[2] }) })
+        ).resolves.toBeTruthy();
+
+        let check2 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[2] },
+          select: { verificationCode: true },
+        });
+        expect(check2?.verificationCode).toBeNull();
+
+        // 4. Divergência entre seleção estrita (school-alpha) e contexto de leitura (school-beta) -> false
+        await prisma.user.update({
+          where: { id: "user-super-legacy-check" },
+          data: { schoolId: "school-alpha" },
+        });
+        const sessionWrap = { user: testAuthState.pendingSessionUser };
+        const snap = await resolveServerUserAuthSnapshot(sessionWrap);
+        expect(snap).not.toBeNull();
+        expect(
+          await hasExplicitSuperAdminSchoolSelection(
+            snap,
+            "school-beta",
+            sessionWrap
+          )
+        ).toBe(false);
+        expect(
+          await hasExplicitSuperAdminSchoolSelection(
+            snap,
+            "school-alpha",
+            sessionWrap
+          )
+        ).toBe(true);
+
+        // 5. Seleção válida coincidente -> grava verificationCode nos três pontos de entrada
+        testAuthState.pendingSessionUser = {
+          id: "user-super-legacy-check",
+          email: "super-legacy@redeativa.local",
+          name: "SuperAdmin Legacy",
+          role: "SUPERADMIN",
+          schoolId: "school-alpha",
+        };
+        expect(
+          (
+            await getAtaById(new Request(`http://127.0.0.1/api/atas/${legacyIds[0]}`), {
+              params: Promise.resolve({ id: legacyIds[0] }),
+            })
+          ).status
+        ).toBe(200);
+        check0 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[0] },
+          select: { verificationCode: true },
+        });
+        expect(check0?.verificationCode).toBeTruthy();
+
+        await expect(
+          AtaPrintPage({ params: Promise.resolve({ id: legacyIds[1] }) })
+        ).resolves.toBeTruthy();
+        check1 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[1] },
+          select: { verificationCode: true },
+        });
+        expect(check1?.verificationCode).toBeTruthy();
+
+        expect((await getAtas(new Request("http://127.0.0.1/api/atas"))).status).toBe(200);
+        check2 = await prisma.pedagogicalMinute.findUnique({
+          where: { id: legacyIds[2] },
+          select: { verificationCode: true },
+        });
+        expect(check2?.verificationCode).toBeTruthy();
+      } finally {
+        vi.mocked(nextHeaders.cookies).mockResolvedValue({ get: () => undefined } as any);
+        for (const id of legacyIds) {
+          await prisma.pedagogicalMinute.deleteMany({ where: { id } }).catch(() => {});
+        }
+        await prisma.userSchool
+          .deleteMany({ where: { id: { in: ["us-super-legacy-alpha"] } } })
+          .catch(() => {});
+        await prisma.user
+          .deleteMany({ where: { id: { in: ["user-super-legacy-check"] } } })
+          .catch(() => {});
+        await prisma.school
+          .deleteMany({ where: { id: { in: ["school-inactive-legacy"] } } })
+          .catch(() => {});
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealCurrentSchool = prevUseRealCurrentSchool;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
+      }
+    });
   }
 );
 
