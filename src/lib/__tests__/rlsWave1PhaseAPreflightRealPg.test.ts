@@ -233,6 +233,7 @@ import { POST as postMessageReplyHandler } from "@/app/api/messages/reply/route"
 import { PUT as putMessageManageHandler, DELETE as deleteMessageManageHandler } from "@/app/api/messages/manage/route";
 import { GET as secretariaMetricsHandler } from "@/app/api/secretaria/metrics/route";
 import SecretariaPage from "@/app/secretaria/page";
+import AdminPage from "@/app/admin/page";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -7745,6 +7746,378 @@ describe.skipIf(!SHOULD_RUN)(
         testAuthState.snapshot = prevSnapshot;
         testAuthState.userId = prevUserId;
         testAuthState.role = prevRole;
+      }
+    });
+
+    it("isola métricas globais de /admin por escola com withTenantContext preservando denominadores e RBAC", async () => {
+      const tenantCalls: Array<{ schoolId: string; currentSetting: string | null }> = [];
+      const originalWithTenant = rlsTenantContext.withTenantContext;
+      const withTenantSpy = vi
+        .spyOn(rlsTenantContext, "withTenantContext")
+        .mockImplementation(async (client, schoolId, callback) => {
+          return originalWithTenant(client, schoolId, async (tx) => {
+            const rows = await tx.$queryRaw<Array<{ sid: string | null }>>`
+              SELECT current_setting('app.current_school_id', true) AS sid
+            `;
+            tenantCalls.push({
+              schoolId,
+              currentSetting: rows[0]?.sid ?? null,
+            });
+            return callback(tx);
+          });
+        });
+
+      const netFindSpy = vi.spyOn(prisma.educationNetwork, "findMany");
+      const schoolFindSpy = vi.spyOn(prisma.school, "findMany");
+      const auditFindSpy = vi.spyOn(prisma.auditLog, "findMany");
+
+      const prevUseRealPermissions = testAuthState.useRealPermissions;
+      const prevPendingSessionUser = testAuthState.pendingSessionUser;
+      const prevPendingTokenSchoolId = testAuthState.pendingTokenSchoolId;
+      testAuthState.useRealPermissions = true;
+
+      try {
+        await prisma.user.deleteMany({
+          where: { id: { in: ["user-adm-super", "user-adm-inativo", "user-adm-sec"] } },
+        });
+        await prisma.educationNetwork.deleteMany({
+          where: { id: { in: ["net-adm-a", "net-adm-inativa"] } },
+        });
+
+        await prisma.educationNetwork.createMany({
+          data: [
+            {
+              id: "net-adm-a",
+              name: "SEMEC Admin A",
+              shortName: "SEMEC Adm A",
+              city: "Cidade Teste",
+              state: "PR",
+              active: true,
+            },
+            {
+              id: "net-adm-inativa",
+              name: "SEMEC Admin Inativa",
+              shortName: "SEMEC Adm Inat",
+              city: "Cidade Teste",
+              state: "PR",
+              active: false,
+            },
+          ],
+        });
+
+        await prisma.school.update({
+          where: { id: "school-alpha" },
+          data: { network: "MUNICIPAL", networkId: "net-adm-a" },
+        });
+
+        await prisma.school.create({
+          data: {
+            id: "school-adm-inativa",
+            inepCode: "99000950",
+            name: "Escola Admin Inativa",
+            city: "Cidade Teste",
+            state: "PR",
+            nre: "NRE Teste",
+            network: "MUNICIPAL",
+            active: false,
+          },
+        });
+
+        await prisma.classGroup.createMany({
+          data: [
+            { id: "cg-adm-a1", name: "1º A", segment: "EM", shift: "MANHA", schoolId: "school-alpha" },
+            { id: "cg-adm-a2", name: "2º A", segment: "EM", shift: "MANHA", schoolId: "school-alpha" },
+            { id: "cg-adm-b1", name: "1º B", segment: "EM", shift: "MANHA", schoolId: "school-beta" },
+            {
+              id: "cg-adm-inativa",
+              name: "1º Inat",
+              segment: "EM",
+              shift: "MANHA",
+              schoolId: "school-adm-inativa",
+            },
+          ],
+        });
+
+        await prisma.student.createMany({
+          data: [
+            {
+              id: "stu-adm-a1",
+              cgm: "99095101",
+              name: "Estudante Adm A1",
+              phone: "5541999950011",
+              classGroupId: "cg-adm-a1",
+              schoolId: "school-alpha",
+              active: true,
+            },
+            {
+              id: "stu-adm-a2",
+              cgm: "99095102",
+              name: "Estudante Adm A2",
+              phone: "5541999950012",
+              classGroupId: "cg-adm-a1",
+              schoolId: "school-alpha",
+              active: true,
+            },
+            {
+              id: "stu-adm-a-inativo",
+              cgm: "99095103",
+              name: "Estudante Adm A Inativo",
+              phone: "5541999950013",
+              classGroupId: "cg-adm-a1",
+              schoolId: "school-alpha",
+              active: false,
+            },
+            {
+              id: "stu-adm-a-cross",
+              cgm: "99095104",
+              name: "Estudante Adm A Cross",
+              phone: "5541999950014",
+              classGroupId: "cg-adm-b1",
+              schoolId: "school-alpha",
+              active: true,
+            },
+            {
+              id: "stu-adm-b1",
+              cgm: "99095201",
+              name: "Estudante Adm B1",
+              phone: "5541999950021",
+              classGroupId: "cg-adm-b1",
+              schoolId: "school-beta",
+              active: true,
+            },
+            {
+              id: "stu-adm-inativa-1",
+              cgm: "99095301",
+              name: "Estudante Adm Inativa",
+              phone: "5541999950031",
+              classGroupId: "cg-adm-inativa",
+              schoolId: "school-adm-inativa",
+              active: true,
+            },
+          ],
+        });
+
+        await prisma.messageLog.createMany({
+          data: [
+            {
+              id: "msg-adm-a-own",
+              studentId: "stu-adm-a1",
+              schoolId: "school-alpha",
+              phoneUsed: "5541999950011",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg A Own",
+            },
+            {
+              id: "msg-adm-a-legacy",
+              studentId: "stu-adm-a2",
+              schoolId: null,
+              phoneUsed: "5541999950012",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg A Legacy",
+            },
+            {
+              id: "msg-adm-a-inativo-stu",
+              studentId: "stu-adm-a-inativo",
+              schoolId: "school-alpha",
+              phoneUsed: "5541999950013",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg A Inativo",
+            },
+            {
+              id: "msg-adm-a-div",
+              studentId: "stu-adm-a1",
+              schoolId: "school-beta",
+              phoneUsed: "5541999950011",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg A Divergente",
+            },
+            {
+              id: "msg-adm-a-cross-stu",
+              studentId: "stu-adm-a-cross",
+              schoolId: "school-alpha",
+              phoneUsed: "5541999950014",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg A Cross",
+            },
+            {
+              id: "msg-adm-b-own",
+              studentId: "stu-adm-b1",
+              schoolId: "school-beta",
+              phoneUsed: "5541999950021",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg B Own",
+            },
+            {
+              id: "msg-adm-inativa",
+              studentId: "stu-adm-inativa-1",
+              schoolId: "school-adm-inativa",
+              phoneUsed: "5541999950031",
+              sentByName: "Equipe Teste",
+              reasonTitle: "Faltas",
+              messageContent: "Msg Inativa",
+            },
+          ],
+        });
+
+        await prisma.auditLog.create({
+          data: {
+            id: "audit-adm-1",
+            action: "CREATE_SCHOOL",
+            entityType: "School",
+            userName: "Super Admin Teste",
+            userEmail: "super-adm@redeativa.local",
+            details: "Registro de auditoria admin",
+          },
+        });
+
+        await prisma.user.createMany({
+          data: [
+            {
+              id: "user-adm-super",
+              email: "super-adm@redeativa.local",
+              name: "Super Admin Teste",
+              role: "SUPERADMIN",
+              active: true,
+            },
+            {
+              id: "user-adm-inativo",
+              email: "inativo-adm@redeativa.local",
+              name: "Inativo Teste",
+              role: "SUPERADMIN",
+              active: false,
+            },
+            {
+              id: "user-adm-sec",
+              email: "sec-adm@redeativa.local",
+              name: "Secretaria Sem Global",
+              role: "GESTAO_SECRETARIA",
+              active: true,
+            },
+          ],
+        });
+
+        // 1. Sessão ausente -> redirect("/login"), zero consultas de métricas
+        tenantCalls.length = 0;
+        netFindSpy.mockClear();
+        schoolFindSpy.mockClear();
+        auditFindSpy.mockClear();
+        testAuthState.pendingSessionUser = null;
+        testAuthState.pendingTokenSchoolId = "force-null";
+        await expect(AdminPage()).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+        expect(netFindSpy).not.toHaveBeenCalled();
+        expect(schoolFindSpy).not.toHaveBeenCalled();
+        expect(auditFindSpy).not.toHaveBeenCalled();
+
+        // 2. Usuário inativo -> redirect("/login?error=AccountInactive"), zero consultas de métricas
+        testAuthState.pendingTokenSchoolId = null;
+        testAuthState.pendingSessionUser = {
+          id: "user-adm-inativo",
+          email: "inativo-adm@redeativa.local",
+          name: "Inativo Teste",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+        await expect(AdminPage()).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+        expect(netFindSpy).not.toHaveBeenCalled();
+        expect(schoolFindSpy).not.toHaveBeenCalled();
+        expect(auditFindSpy).not.toHaveBeenCalled();
+
+        // 3. GESTAO_SECRETARIA (ou ADMIN) sem privilégio global -> redirect("/"), zero consultas de métricas
+        testAuthState.pendingSessionUser = {
+          id: "user-adm-sec",
+          email: "sec-adm@redeativa.local",
+          name: "Secretaria Sem Global",
+          role: "GESTAO_SECRETARIA",
+          schoolId: null,
+        };
+        await expect(AdminPage()).rejects.toThrow("NEXT_REDIRECT");
+        expect(tenantCalls).toHaveLength(0);
+        expect(netFindSpy).not.toHaveBeenCalled();
+        expect(schoolFindSpy).not.toHaveBeenCalled();
+        expect(auditFindSpy).not.toHaveBeenCalled();
+
+        // 4. SUPERADMIN sem escola selecionada -> consolida métricas via withTenantContext por escola
+        testAuthState.pendingSessionUser = {
+          id: "user-adm-super",
+          email: "super-adm@redeativa.local",
+          name: "Super Admin Teste",
+          role: "SUPERADMIN",
+          schoolId: null,
+        };
+
+        const adminEl = (await AdminPage()) as unknown as {
+          props: {
+            metrics: {
+              totalNetworks: number;
+              totalSchools: number;
+              totalStudents: number;
+              totalMessages: number;
+            };
+            networks: Array<{ id: string; schoolsCount: number }>;
+            schools: Array<{
+              id: string;
+              networkName: string | null;
+              studentsCount: number;
+              classesCount: number;
+            }>;
+            auditLogs: Array<{ id: string }>;
+          };
+        };
+
+        expect(adminEl.props.metrics).toEqual({
+          totalNetworks: 1,
+          totalSchools: 2,
+          totalStudents: 6,
+          totalMessages: 5,
+        });
+        expect(adminEl.props.networks).toHaveLength(1);
+        expect(adminEl.props.networks[0]).toMatchObject({
+          id: "net-adm-a",
+          schoolsCount: 1,
+        });
+        expect(adminEl.props.schools.map((s) => s.id)).toEqual(["school-alpha", "school-beta"]);
+        expect(adminEl.props.schools.find((s) => s.id === "school-alpha")).toMatchObject({
+          id: "school-alpha",
+          networkName: "SEMEC Admin A",
+          studentsCount: 3,
+          classesCount: 3,
+        });
+        expect(adminEl.props.schools.find((s) => s.id === "school-beta")).toMatchObject({
+          id: "school-beta",
+          studentsCount: 2,
+          classesCount: 2,
+        });
+        expect(adminEl.props.auditLogs.some((a) => a.id === "audit-adm-1")).toBe(true);
+        expect(tenantCalls.map((c) => c.schoolId).sort()).toEqual([
+          "school-adm-inativa",
+          "school-alpha",
+          "school-beta",
+        ]);
+        expect(tenantCalls.every((c) => c.currentSetting === c.schoolId)).toBe(true);
+      } finally {
+        await prisma.user
+          .deleteMany({
+            where: { id: { in: ["user-adm-super", "user-adm-inativo", "user-adm-sec"] } },
+          })
+          .catch(() => {});
+        await prisma.educationNetwork
+          .deleteMany({ where: { id: { in: ["net-adm-a", "net-adm-inativa"] } } })
+          .catch(() => {});
+        netFindSpy.mockRestore();
+        schoolFindSpy.mockRestore();
+        auditFindSpy.mockRestore();
+        withTenantSpy.mockRestore();
+        testAuthState.pendingTokenSchoolId = prevPendingTokenSchoolId;
+        testAuthState.pendingSessionUser = prevPendingSessionUser;
+        testAuthState.useRealPermissions = prevUseRealPermissions;
       }
     });
   }
