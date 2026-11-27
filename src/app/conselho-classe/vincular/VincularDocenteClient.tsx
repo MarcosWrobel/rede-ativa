@@ -344,7 +344,7 @@ export default function VincularDocenteClient({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-28">
+    <div className="min-h-screen bg-slate-50 pb-36 sm:pb-28 overflow-x-hidden">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -455,8 +455,8 @@ export default function VincularDocenteClient({
         )}
       </main>
 
-      <footer className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-slate-200">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <footer className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <p className="text-xs font-bold text-slate-700">
             {selectedSubjectIds.length} componente(s) selecionado(s)
           </p>
@@ -464,7 +464,7 @@ export default function VincularDocenteClient({
             type="button"
             disabled={saving || selectedSubjectIds.length === 0}
             onClick={() => void handleClaimSelected()}
-            className="min-h-[40px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer"
+            className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer"
           >
             {saving ? "Vinculando..." : "Vincular selecionados"}
           </button>
