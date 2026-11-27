@@ -155,4 +155,26 @@ describe("sereParser — Importação Universal de Arquivos do SERE (XLS, PDF, C
     expect(classifySereSituacao("Sem ")).toBe("SEM_FREQUENCIA");
     expect(formatSereSchoolName("MONTEIRO LOBATO, C E-EF M")).toBe("Colégio Estadual Monteiro Lobato");
   });
+
+  it("preserva sufixo 3 das turmas do turno da noite (1º 3, 2º 3, 3º 3)", () => {
+    const nightCsv = `,,,,,,,,,,,,,,,,,,,
+,,GOVERNO DO ESTADO DO PARANÁ ,,,,,,,,,,,,Data: 27/11/2026,,,,,
+,,"LEOPOLDINA B PEDROSO, C E PROFA-EF M PRO",,,,,,,,,,,,2026,,,,,
+,RELAÇÃO DE ALUNOS POR TURMA,,,,,,,,,,,,,,,,,,
+,,Curso: ENSINO MEDIO,,,,Seriação: 1ª Série,,,,,,,Turno: Noite,,,Turma: 3 ,,,
+,,N. ,CGM,Nome do Estudante,Data de ,,Idad,Sex,Telefone,RG,,CPF,,,Situação,,Data Matricula,,
+,,1,1000000001,ESTUDANTE NOTURNO UM,10/01/2009,,17,M,(42)99999-0001,,,,,Matriculado,,01/02/2026,,
+,,Curso: ENSINO MEDIO,,,,Seriação: 2ª Série,,,,,,,Turno: Noite,,,Turma: 3 ,,,
+,,N. ,CGM,Nome do Estudante,Data de ,,Idad,Sex,Telefone,RG,,CPF,,,Situação,,Data Matricula,,
+,,1,1000000002,ESTUDANTE NOTURNO DOIS,10/01/2008,,18,F,(42)99999-0002,,,,,Matriculado,,01/02/2026,,
+,,Curso: ENSINO MEDIO,,,,Seriação: 3ª Série,,,,,,,Turno: Noite,,,Turma: 3 ,,,
+,,N. ,CGM,Nome do Estudante,Data de ,,Idad,Sex,Telefone,RG,,CPF,,,Situação,,Data Matricula,,
+,,1,1000000003,ESTUDANTE NOTURNO TRES,10/01/2007,,19,M,(42)99999-0003,,,,,Matriculado,,01/02/2026,,
+`;
+
+    const parsed = parseSereFiles([{ fileName: "noite.csv", content: nightCsv }]);
+    const names = parsed.turmas.map((t) => t.suggestedName);
+    expect(names).toEqual(["1º 3", "2º 3", "3º 3"]);
+    expect(parsed.turmas.every((t) => t.shift === "NOITE")).toBe(true);
+  });
 });

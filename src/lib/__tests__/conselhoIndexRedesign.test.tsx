@@ -10,6 +10,7 @@ const mockRequireAuth = vi.fn();
 const mockGetCurrentSchool = vi.fn();
 const mockLogAudit = vi.fn();
 const mockClassGroupFindUnique = vi.fn();
+const mockClassGroupFindMany = vi.fn();
 const mockClassGroupUpdate = vi.fn();
 
 vi.mock("@/lib/permissions", () => ({
@@ -33,8 +34,15 @@ vi.mock("@/lib/prisma", () => {
         lastUpdatedClassGroup = null;
         return mockClassGroupFindUnique(...args);
       },
-      findFirst: (...args: unknown[]) =>
-        lastUpdatedClassGroup ?? mockClassGroupFindUnique(...args),
+      findFirst: (...args: unknown[]) => {
+        if (lastUpdatedClassGroup) {
+          const updated = lastUpdatedClassGroup;
+          lastUpdatedClassGroup = null;
+          return updated;
+        }
+        return mockClassGroupFindUnique(...args);
+      },
+      findMany: (...args: unknown[]) => mockClassGroupFindMany(...args),
       update: (...args: unknown[]) => mockClassGroupUpdate(...args),
       updateMany: async ({ where, data }: any) => {
         lastUpdatedClassGroup = await mockClassGroupUpdate({ where, data });
@@ -228,6 +236,67 @@ describe("Redesenho do Conselho de Classe (Etapa 1)", () => {
       );
       expect(orphanRes.status).toBe(403);
       expect(mockClassGroupUpdate).not.toHaveBeenCalled();
+    });
+
+    it("renomeia a turma com normalização e bloqueia duplicidade canônica (409)", async () => {
+      mockClassGroupFindUnique.mockResolvedValueOnce({
+        id: "cg-a",
+        schoolId: "school-a",
+        name: "1º Série",
+        segment: "MEDIO",
+        shift: "NOITE",
+      });
+      mockClassGroupFindMany.mockResolvedValueOnce([
+        { id: "cg-a", name: "1º Série" },
+        { id: "cg-b", name: "1º 1" },
+      ]);
+      mockClassGroupUpdate.mockResolvedValueOnce({
+        id: "cg-a",
+        name: "1º 3",
+        segment: "MEDIO",
+        shift: "NOITE",
+      });
+
+      const okRes = await patchClassShift(
+        new Request("http://localhost/api/classes/cg-a", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "1° 3" }),
+        }),
+        { params: Promise.resolve({ id: "cg-a" }) }
+      );
+      expect(okRes.status).toBe(200);
+      const okBody = await okRes.json();
+      expect(okBody.classGroup.name).toBe("1º 3");
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "UPDATE_CLASS_GROUP",
+          entityId: "cg-a",
+          schoolId: "school-a",
+        })
+      );
+
+      mockClassGroupFindUnique.mockResolvedValueOnce({
+        id: "cg-a",
+        schoolId: "school-a",
+        name: "1º Série",
+        segment: "MEDIO",
+        shift: "NOITE",
+      });
+      mockClassGroupFindMany.mockResolvedValueOnce([
+        { id: "cg-a", name: "1º Série" },
+        { id: "cg-b", name: "1º 3" },
+      ]);
+
+      const dupRes = await patchClassShift(
+        new Request("http://localhost/api/classes/cg-a", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "1ª 3" }),
+        }),
+        { params: Promise.resolve({ id: "cg-a" }) }
+      );
+      expect(dupRes.status).toBe(409);
     });
   });
 

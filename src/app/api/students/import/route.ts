@@ -5,11 +5,13 @@ import { requireAuth, checkIsSuperAdmin } from "@/lib/permissions";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { formatZodError, sereBatchImportSchema } from "@/lib/schemas";
 import { normalizeStudentName } from "@/lib/studentMatcher";
-import { cleanSerePhone } from "@/lib/sereParser";
+import { cleanSerePhone, resolveSereTurmaMatch } from "@/lib/sereParser";
 import { safeQueryList } from "@/lib/safePhase3Queries";
 import { applyPendingCgmUpdatesSafely } from "@/lib/syncCgmGuard";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
+  acquireClassGroupSchoolLock,
+  isPrismaUniqueConstraintError,
   normalizeClassGroupDisplayName,
   normalizeClassGroupKey,
 } from "@/lib/classGroupName";
@@ -79,27 +81,145 @@ export async function POST(req: Request) {
       )
     );
 
-    const [existingSchoolStudents, globalCgmRows] = await Promise.all([
+    const [txImportState, globalCgmRows] = await Promise.all([
       withTenantContext(prisma, schoolId, async (tx) => {
-        const existingClassGroups = await tx.classGroup.findMany({
-          where: schoolFilter,
-        });
-        const existingByName = new Map(
-          existingClassGroups.map((cg) => [normalizeClassGroupKey(cg.name), cg])
-        );
+        await acquireClassGroupSchoolLock(tx, schoolId);
+
+        const [existingClassGroups, schoolStudents] = await Promise.all([
+          tx.classGroup.findMany({
+            where: schoolFilter,
+          }),
+          tx.student.findMany({
+            where: schoolFilter,
+            select: {
+              id: true,
+              cgm: true,
+              name: true,
+              guardianName: true,
+              phone: true,
+              classGroupId: true,
+              schoolId: true,
+              active: true,
+            },
+          }),
+        ]);
+
+        const existingById = new Map(existingClassGroups.map((cg) => [cg.id, cg]));
+        const existingStudentsByCgm = new Map<string, { classGroupId: string }>();
+        for (const st of schoolStudents) {
+          const clean = (st.cgm || "").replace(/\D/g, "").trim();
+          if (clean) {
+            existingStudentsByCgm.set(clean, { classGroupId: st.classGroupId });
+          }
+        }
+
+        const cgmsByTempId = new Map<string, string[]>();
+        for (const s of students) {
+          const clean = (s.cgm || "").replace(/\D/g, "").trim();
+          if (!clean) continue;
+          const list = cgmsByTempId.get(s.turmaTempId) || [];
+          list.push(clean);
+          cgmsByTempId.set(s.turmaTempId, list);
+        }
+
+        const seenNewCanonicalKeys = new Set<string>();
+        const ambiguousTurmas: Array<{
+          tempId: string;
+          name: string;
+          reason?: string;
+          candidates: Array<{ id: string; name: string; segment: string; shift: string }>;
+        }> = [];
+        const plannedTurmas: Array<{
+          turma: (typeof turmas)[number];
+          cleanName: string;
+          upperKey: string;
+          matchedClassGroup?: (typeof existingClassGroups)[number];
+        }> = [];
 
         for (const t of turmas) {
           const cleanName = normalizeClassGroupDisplayName(t.name);
           const upperKey = normalizeClassGroupKey(cleanName);
-          const found = existingByName.get(upperKey);
 
+          if (t.targetClassGroupId) {
+            const explicitTarget = existingById.get(t.targetClassGroupId);
+            if (!explicitTarget) {
+              return {
+                errorStatus: 400 as const,
+                error: "Turma selecionada não encontrada nesta instituição escolar.",
+              };
+            }
+            plannedTurmas.push({
+              turma: t,
+              cleanName,
+              upperKey,
+              matchedClassGroup: explicitTarget,
+            });
+            continue;
+          }
+
+          const resolution = resolveSereTurmaMatch({
+            name: cleanName,
+            shift: t.shift,
+            sourceIdentity: t.sourceIdentity,
+            studentCgms: cgmsByTempId.get(t.tempId) || [],
+            existingClassGroups,
+            existingStudentsByCgm,
+          });
+
+          if (resolution.status === "ambiguous") {
+            ambiguousTurmas.push({
+              tempId: t.tempId,
+              name: cleanName,
+              reason: resolution.reason,
+              candidates: resolution.candidates,
+            });
+            continue;
+          }
+
+          if (resolution.status === "matched" && resolution.matchedClassGroupId) {
+            const matched = existingById.get(resolution.matchedClassGroupId);
+            plannedTurmas.push({
+              turma: t,
+              cleanName,
+              upperKey,
+              matchedClassGroup: matched,
+            });
+            continue;
+          }
+
+          if (seenNewCanonicalKeys.has(upperKey)) {
+            return {
+              errorStatus: 409 as const,
+              error: `Já existe uma turma com o nome "${cleanName}" no lote de importação.`,
+            };
+          }
+          seenNewCanonicalKeys.add(upperKey);
+          plannedTurmas.push({
+            turma: t,
+            cleanName,
+            upperKey,
+          });
+        }
+
+        if (ambiguousTurmas.length > 0) {
+          return {
+            errorStatus: 409 as const,
+            error:
+              "Existem turmas com correspondência ambígua na escola. Selecione a turma de destino antes de importar.",
+            code: "AMBIGUOUS_CLASS_GROUP",
+            ambiguousTurmas,
+          };
+        }
+
+        for (const plan of plannedTurmas) {
+          const { turma: t, cleanName, matchedClassGroup: found } = plan;
           if (found) {
             if (
               found.segment !== t.segment ||
               found.shift !== t.shift ||
               (!found.schoolId && schoolId)
             ) {
-              const updatedCg = await tx.classGroup.update({
+              await tx.classGroup.update({
                 where: { id: found.id },
                 data: {
                   segment: t.segment,
@@ -107,7 +227,6 @@ export async function POST(req: Request) {
                   ...(schoolId && !found.schoolId ? { schoolId } : {}),
                 },
               });
-              existingByName.set(upperKey, updatedCg);
               turmasUpdated++;
             }
             tempIdToClassId.set(t.tempId, found.id);
@@ -120,25 +239,12 @@ export async function POST(req: Request) {
                 schoolId,
               },
             });
-            existingByName.set(upperKey, createdCg);
             tempIdToClassId.set(t.tempId, createdCg.id);
             turmasCreated++;
           }
         }
 
-        return tx.student.findMany({
-          where: schoolFilter,
-          select: {
-            id: true,
-            cgm: true,
-            name: true,
-            guardianName: true,
-            phone: true,
-            classGroupId: true,
-            schoolId: true,
-            active: true,
-          },
-        });
+        return { errorStatus: null, schoolStudents };
       }),
       // Exceção explícita da Fase A: consulta global mínima apenas de CGMs ocupados (@unique cgm)
       incomingCgms.length > 0
@@ -148,6 +254,21 @@ export async function POST(req: Request) {
           })
         : Promise.resolve([]),
     ]);
+
+    if (txImportState.errorStatus !== null) {
+      return NextResponse.json(
+        {
+          error: txImportState.error,
+          ...("code" in txImportState ? { code: txImportState.code } : {}),
+          ...("ambiguousTurmas" in txImportState
+            ? { ambiguousTurmas: txImportState.ambiguousTurmas }
+            : {}),
+        },
+        { status: txImportState.errorStatus }
+      );
+    }
+
+    const existingSchoolStudents = txImportState.schoolStudents;
 
     type ExistingRow = (typeof existingSchoolStudents)[number];
     const byCgm = new Map<string, ExistingRow>();
@@ -483,6 +604,12 @@ export async function POST(req: Request) {
       classGroups: freshClassGroups,
     });
   } catch (error: any) {
+    if (isPrismaUniqueConstraintError(error)) {
+      return NextResponse.json(
+        { error: "Já existe uma turma com este nome nesta escola." },
+        { status: 409 }
+      );
+    }
     console.error("[students/import] Erro ao importar lote do SERE:", error);
     return NextResponse.json(
       { error: "Erro interno ao processar o lote de alunos." },

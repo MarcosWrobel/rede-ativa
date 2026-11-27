@@ -21,6 +21,7 @@ import {
   MAX_SERE_FILE_SIZE_BYTES,
   consolidateSelectedStudents,
   parseSereRawFiles,
+  resolveSereTurmaMatch,
   type SchoolSegment,
   type SchoolShift,
   type SereParseResult,
@@ -45,6 +46,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   existingClassGroups: Array<{ id: string; name: string; segment: string; shift?: string }>;
+  existingStudents?: Array<{ cgm?: string | null; classGroupId: string }>;
   isAdmin?: boolean;
   isIntegrated?: boolean;
   onImportComplete: (payload: {
@@ -58,6 +60,7 @@ export default function SereImportModal({
   open,
   onClose,
   existingClassGroups,
+  existingStudents = [],
   isAdmin = false,
   isIntegrated = false,
   onImportComplete,
@@ -67,6 +70,29 @@ export default function SereImportModal({
   const [loadedFileNames, setLoadedFileNames] = useState<string[]>([]);
   const [parseResult, setParseResult] = useState<SereParseResult | null>(null);
   const [turmaConfigs, setTurmaConfigs] = useState<Record<string, TurmaSelectionConfig>>({});
+  const [unresolvedAmbiguousIds, setUnresolvedAmbiguousIds] = useState<Set<string>>(new Set());
+
+  const existingStudentsByCgm = useMemo(() => {
+    const map = new Map<string, { classGroupId: string }>();
+    for (const st of existingStudents) {
+      const clean = (st.cgm || "").replace(/\D/g, "").trim();
+      if (clean && st.classGroupId) {
+        map.set(clean, { classGroupId: st.classGroupId });
+      }
+    }
+    return map;
+  }, [existingStudents]);
+
+  const existingClassGroupsNormalized = useMemo(
+    () =>
+      existingClassGroups.map((cg) => ({
+        id: cg.id,
+        name: cg.name,
+        segment: cg.segment,
+        shift: cg.shift || "MANHA",
+      })),
+    [existingClassGroups]
+  );
 
   // Opções de sincronização
   const [updateExisting, setUpdateExisting] = useState(true);
@@ -96,7 +122,7 @@ export default function SereImportModal({
   }, [existingClassGroups]);
 
   const existingTurmaByUpper = useMemo(() => {
-    const map = new Map<string, { name: string; segment: string; shift?: string }>();
+    const map = new Map<string, { id: string; name: string; segment: string; shift?: string }>();
     for (const cg of existingClassGroups) {
       map.set(normalizeClassGroupKey(cg.name), cg);
     }
@@ -204,14 +230,30 @@ export default function SereImportModal({
       }
 
       const nextConfigs: Record<string, TurmaSelectionConfig> = {};
+      const nextAmbiguous = new Set<string>();
       for (const t of parsed.turmas) {
-        const matchedExisting = existingTurmaByUpper.get(
-          normalizeClassGroupKey(t.suggestedName)
-        );
+        const resolution = resolveSereTurmaMatch({
+          name: t.suggestedName,
+          shift: t.shift,
+          sourceIdentity: t.sourceIdentity,
+          studentCgms: t.students.map((s) => s.cgm).filter(Boolean),
+          existingClassGroups: existingClassGroupsNormalized,
+          existingStudentsByCgm,
+        });
+        const matchedExisting =
+          resolution.status === "matched" && resolution.matchedClassGroupId
+            ? existingClassGroups.find((cg) => cg.id === resolution.matchedClassGroupId)
+            : existingTurmaByUpper.get(normalizeClassGroupKey(t.suggestedName));
+
+        if (resolution.status === "ambiguous") {
+          nextAmbiguous.add(t.tempId);
+        }
+
         nextConfigs[t.tempId] = {
           tempId: t.tempId,
           selected: t.selectedByDefault,
           customName: matchedExisting ? matchedExisting.name : t.suggestedName,
+          ...(matchedExisting ? { targetClassGroupId: matchedExisting.id } : {}),
           segment: (matchedExisting?.segment as SchoolSegment) || t.segment,
           shift: (matchedExisting?.shift as SchoolShift) || t.shift,
           isComplementary: t.isComplementary,
@@ -221,6 +263,7 @@ export default function SereImportModal({
       setLoadedFileNames(files.map((f) => f.name));
       setParseResult(parsed);
       setTurmaConfigs(nextConfigs);
+      setUnresolvedAmbiguousIds(nextAmbiguous);
 
       if (parsed.schoolMetadata) {
         setSchoolNameEdit(
@@ -786,35 +829,97 @@ export default function SereImportModal({
                               (includeConcluinte && s.statusCategory === "CONCLUINTE")
                           ).length;
 
-                          const existsInDb = existingTurmaNamesUpper.has(
-                            normalizeClassGroupKey(cfg.customName)
-                          );
+                          const existsInDb =
+                            Boolean(cfg.targetClassGroupId) ||
+                            existingTurmaNamesUpper.has(
+                              normalizeClassGroupKey(cfg.customName)
+                            );
+                          const isAmbiguous =
+                            cfg.selected && unresolvedAmbiguousIds.has(t.tempId);
 
                           return (
                             <tr
                               key={t.tempId}
-                              className={cfg.selected ? "bg-white" : "bg-slate-50/80 opacity-65"}
+                              className={
+                                isAmbiguous
+                                  ? "bg-amber-50/70"
+                                  : cfg.selected
+                                    ? "bg-white"
+                                    : "bg-slate-50/80 opacity-65"
+                              }
                             >
                               <th scope="row" className="px-3 py-2 font-semibold text-slate-900">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={cfg.selected}
-                                    onChange={(e) =>
-                                      updateTurmaField(t.tempId, "selected", e.target.checked)
-                                    }
-                                    aria-label={`Importar turma ${cfg.customName}`}
-                                    className="checkbox-custom shrink-0"
-                                  />
-                                  <input
-                                    type="text"
-                                    value={cfg.customName}
-                                    onChange={(e) =>
-                                      updateTurmaField(t.tempId, "customName", e.target.value)
-                                    }
-                                    aria-label={`Nome da turma para ${t.seriacaoRaw} ${t.turmaRaw}`}
-                                    className="w-28 sm:w-32 px-2 py-1 border border-slate-300 rounded-lg bg-white font-bold text-slate-900 text-xs"
-                                  />
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={cfg.selected}
+                                      onChange={(e) =>
+                                        updateTurmaField(t.tempId, "selected", e.target.checked)
+                                      }
+                                      aria-label={`Importar turma ${cfg.customName}`}
+                                      className="checkbox-custom shrink-0"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={cfg.customName}
+                                      onChange={(e) =>
+                                        updateTurmaField(t.tempId, "customName", e.target.value)
+                                      }
+                                      aria-label={`Nome da turma para ${t.seriacaoRaw} ${t.turmaRaw}`}
+                                      className="w-28 sm:w-32 px-2 py-1 border border-slate-300 rounded-lg bg-white font-bold text-slate-900 text-xs"
+                                    />
+                                  </div>
+                                  <select
+                                    value={cfg.targetClassGroupId || ""}
+                                    onChange={(e) => {
+                                      const nextId = e.target.value || undefined;
+                                      const chosen = nextId
+                                        ? existingClassGroups.find((cg) => cg.id === nextId)
+                                        : undefined;
+                                      setTurmaConfigs((prev) => ({
+                                        ...prev,
+                                        [t.tempId]: {
+                                          ...prev[t.tempId],
+                                          targetClassGroupId: nextId,
+                                          ...(chosen
+                                            ? {
+                                                customName: chosen.name,
+                                                segment: chosen.segment as SchoolSegment,
+                                                shift: (chosen.shift || prev[t.tempId].shift) as SchoolShift,
+                                              }
+                                            : {}),
+                                        },
+                                      }));
+                                      setUnresolvedAmbiguousIds((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(t.tempId);
+                                        return next;
+                                      });
+                                    }}
+                                    aria-label={`Vincular turma existente para ${t.seriacaoRaw} ${t.turmaRaw}`}
+                                    className={`w-full px-2 py-1 border rounded-lg text-[11px] font-medium ${
+                                      isAmbiguous
+                                        ? "border-amber-400 bg-amber-50 text-amber-900"
+                                        : "border-slate-200 bg-slate-50 text-slate-700"
+                                    }`}
+                                  >
+                                    <option value="">
+                                      {isAmbiguous
+                                        ? "Selecione a turma de destino..."
+                                        : "Criar nova turma (se não existir)"}
+                                    </option>
+                                    {existingClassGroups.map((cg) => (
+                                      <option key={cg.id} value={cg.id}>
+                                        Vincular a: {cg.name} ({cg.shift || "MANHA"})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isAmbiguous && (
+                                    <p className="text-[10px] font-bold text-amber-800">
+                                      Correspondência ambígua: selecione a turma existente.
+                                    </p>
+                                  )}
                                 </div>
                               </th>
 
@@ -1032,7 +1137,8 @@ export default function SereImportModal({
                 disabled={
                   isImporting ||
                   !consolidated ||
-                  consolidated.stats.activeStudentsCount === 0
+                  consolidated.stats.activeStudentsCount === 0 ||
+                  consolidated.turmasToImport.some((t) => unresolvedAmbiguousIds.has(t.tempId))
                 }
                 onClick={handleConfirmImport}
                 className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-45 text-white font-bold shadow-sm transition"

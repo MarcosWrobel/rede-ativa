@@ -22,3 +22,27 @@ export function normalizeClassGroupKey(name: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase();
 }
+
+/**
+ * Adquire lock transacional por escola no PostgreSQL (`pg_advisory_xact_lock`)
+ * para serializar criação, renomeação e importação de turmas na mesma unidade
+ * e impedir criação concorrente de nomes canonicamente equivalentes.
+ * Escolas distintas não se bloqueiam.
+ */
+export async function acquireClassGroupSchoolLock(
+  tx: { $executeRaw?: (...args: any[]) => Promise<unknown> },
+  schoolId: string
+): Promise<void> {
+  if (typeof tx.$executeRaw !== "function" || !schoolId) return;
+  const lockKey = `class_group:${schoolId}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+}
+
+export function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}

@@ -44,6 +44,8 @@ export const sereBatchImportSchema = z.object({
       z.object({
         tempId: z.string().trim().min(1),
         name: z.string().trim().min(1, "Nome da turma não pode ser vazio"),
+        targetClassGroupId: z.string().trim().min(1).optional(),
+        sourceIdentity: z.string().trim().optional(),
         segment: z.enum(["FUNDAMENTAL", "MEDIO", "NOTURNO"]),
         shift: z.enum(["MANHA", "TARDE", "NOITE"]),
       })

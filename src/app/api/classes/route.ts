@@ -6,6 +6,8 @@ import { formatZodError, classGroupCreateSchema } from "@/lib/schemas";
 import { requireAuthorizedSchool } from "@/lib/currentSchool";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
+  acquireClassGroupSchoolLock,
+  isPrismaUniqueConstraintError,
   normalizeClassGroupDisplayName,
   normalizeClassGroupKey,
 } from "@/lib/classGroupName";
@@ -64,6 +66,8 @@ export async function POST(req: Request) {
     // Verificação de unicidade canônica dentro da mesma escola (multi-tenant)
     // Evita duplicidades por variação de °/º, acentos ou espaços
     const txResult = await withTenantContext(prisma, currentSchool.id, async (tx) => {
+      await acquireClassGroupSchoolLock(tx, currentSchool.id);
+
       const schoolClasses =
         typeof tx.classGroup?.findMany === "function"
           ? await tx.classGroup.findMany({
@@ -133,6 +137,12 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (error: any) {
+    if (isPrismaUniqueConstraintError(error)) {
+      return NextResponse.json(
+        { error: "Já existe uma turma com este nome nesta escola." },
+        { status: 409 }
+      );
+    }
     console.error("Erro ao criar turma:", error);
     return NextResponse.json({ error: "Erro ao criar turma." }, { status: 500 });
   }

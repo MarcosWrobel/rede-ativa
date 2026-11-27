@@ -11,7 +11,10 @@
 
 import * as XLSX from "xlsx";
 import { normalizeStudentName } from "./studentMatcher";
-import { normalizeClassGroupDisplayName } from "./classGroupName";
+import {
+  normalizeClassGroupDisplayName,
+  normalizeClassGroupKey,
+} from "./classGroupName";
 
 export const MAX_SERE_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB por arquivo
 export const MAX_SERE_BATCH_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB por lote
@@ -47,6 +50,7 @@ export interface ParsedSereTurma {
   turnoRaw: string;
   turmaRaw: string;
   suggestedName: string;
+  sourceIdentity?: string;
   segment: SchoolSegment;
   shift: SchoolShift;
   isComplementary: boolean;
@@ -656,14 +660,6 @@ function buildBaseTurmaName(params: {
     };
   }
 
-  if (shift === "NOITE" && gradeNum) {
-    return {
-      baseName: `${gradeNum}º Série`,
-      turmaCode,
-      canOmitSingleTurmaCode: true,
-    };
-  }
-
   if (gradeNum) {
     return {
       baseName: `${gradeNum}º ${turmaCode}`,
@@ -1088,6 +1084,13 @@ export function parseSereRows(
     }
     usedFinalNames.add(suggestedName);
 
+    const sourceIdentity = [
+      dt.segment,
+      dt.seriacaoRaw.trim().toUpperCase(),
+      dt.shift,
+      (dt.turmaCode || dt.turmaRaw).trim().toUpperCase(),
+    ].join("|");
+
     return {
       tempId: dt.tempId,
       sourceFile: dt.sourceFile,
@@ -1096,6 +1099,7 @@ export function parseSereRows(
       turnoRaw: dt.turnoRaw,
       turmaRaw: dt.turmaRaw,
       suggestedName,
+      sourceIdentity,
       segment: dt.segment,
       shift: dt.shift,
       isComplementary: dt.isComplementary,
@@ -1286,6 +1290,7 @@ export interface TurmaSelectionConfig {
   tempId: string;
   selected: boolean;
   customName: string;
+  targetClassGroupId?: string;
   segment: SchoolSegment;
   shift: SchoolShift;
   isComplementary?: boolean;
@@ -1295,6 +1300,8 @@ export interface ConsolidatedImportPreview {
   turmasToImport: Array<{
     tempId: string;
     name: string;
+    targetClassGroupId?: string;
+    sourceIdentity?: string;
     segment: SchoolSegment;
     shift: SchoolShift;
   }>;
@@ -1376,6 +1383,8 @@ export function consolidateSelectedStudents(
     turmasToImport.push({
       tempId: t.tempId,
       name: cleanTurmaName,
+      ...(cfg.targetClassGroupId ? { targetClassGroupId: cfg.targetClassGroupId } : {}),
+      ...(t.sourceIdentity ? { sourceIdentity: t.sourceIdentity } : {}),
       segment: cfg.segment,
       shift: cfg.shift,
     });
@@ -1458,5 +1467,140 @@ export function consolidateSelectedStudents(
       skippedLeftSchoolCount,
       mergedDualMatrixTotal,
     },
+  };
+}
+
+export interface ExistingClassGroupCandidate {
+  id: string;
+  name: string;
+  segment: string;
+  shift: string;
+}
+
+export interface SereTurmaMatchResult {
+  status: "matched" | "new" | "ambiguous";
+  matchedClassGroupId?: string;
+  reason?:
+    | "canonical_name"
+    | "student_overlap"
+    | "legacy_night_name"
+    | "ambiguous_student_overlap"
+    | "ambiguous_legacy_night";
+  candidates: ExistingClassGroupCandidate[];
+}
+
+/**
+ * Resolve de forma determinística se uma turma do SERE corresponde inequivocamente
+ * a uma turma já existente na escola (nome canônico, sobreposição de CGMs ou legado noturno),
+ * se é uma turma nova, ou se há ambiguidade que exige seleção explícita antes da gravação.
+ */
+export function resolveSereTurmaMatch(params: {
+  name: string;
+  shift: string;
+  sourceIdentity?: string;
+  studentCgms: string[];
+  existingClassGroups: ExistingClassGroupCandidate[];
+  existingStudentsByCgm: Map<string, { classGroupId: string }>;
+}): SereTurmaMatchResult {
+  const {
+    name,
+    shift,
+    sourceIdentity,
+    studentCgms,
+    existingClassGroups,
+    existingStudentsByCgm,
+  } = params;
+
+  const byId = new Map(existingClassGroups.map((cg) => [cg.id, cg]));
+  const targetKey = normalizeClassGroupKey(name);
+
+  // 1. Correspondência exata pela chave canônica do nome
+  const canonicalMatch = existingClassGroups.find(
+    (cg) => normalizeClassGroupKey(cg.name) === targetKey
+  );
+  if (canonicalMatch) {
+    return {
+      status: "matched",
+      matchedClassGroupId: canonicalMatch.id,
+      reason: "canonical_name",
+      candidates: [canonicalMatch],
+    };
+  }
+
+  // 2. Correspondência por estudantes já matriculados (CGM) na mesma escola
+  const overlapIds = new Set<string>();
+  for (const rawCgm of studentCgms) {
+    const cleanCgm = rawCgm.replace(/\D/g, "").trim();
+    if (!cleanCgm) continue;
+    const matchedStudent = existingStudentsByCgm.get(cleanCgm);
+    if (matchedStudent && byId.has(matchedStudent.classGroupId)) {
+      overlapIds.add(matchedStudent.classGroupId);
+    }
+  }
+
+  if (overlapIds.size === 1) {
+    const onlyId = Array.from(overlapIds)[0];
+    const matched = byId.get(onlyId)!;
+    return {
+      status: "matched",
+      matchedClassGroupId: matched.id,
+      reason: "student_overlap",
+      candidates: [matched],
+    };
+  }
+
+  if (overlapIds.size > 1) {
+    const candidates = Array.from(overlapIds)
+      .map((id) => byId.get(id))
+      .filter((cg): cg is ExistingClassGroupCandidate => Boolean(cg));
+    return {
+      status: "ambiguous",
+      reason: "ambiguous_student_overlap",
+      candidates,
+    };
+  }
+
+  // 3. Fallback legado do turno noturno ("1º Série", "2º Série", "3º Série")
+  if (shift === "NOITE") {
+    const gradeFromSource = sourceIdentity?.split("|")[1]?.match(/^(\d+)/)?.[1];
+    const gradeFromName = name.trim().match(/^(\d+)/)?.[1];
+    const gradeNum = gradeFromSource || gradeFromName;
+
+    if (gradeNum) {
+      const legacyKey = normalizeClassGroupKey(`${gradeNum}º Série`);
+      const nightGradeClasses = existingClassGroups.filter((cg) => {
+        if (cg.shift !== "NOITE") return false;
+        const cgKey = normalizeClassGroupKey(cg.name);
+        return (
+          cgKey === legacyKey ||
+          new RegExp(`^${gradeNum}(?:\\u00BA|\\s|$)`).test(cgKey)
+        );
+      });
+      const legacyMatches = nightGradeClasses.filter(
+        (cg) => normalizeClassGroupKey(cg.name) === legacyKey
+      );
+
+      if (legacyMatches.length === 1 && nightGradeClasses.length <= 1) {
+        return {
+          status: "matched",
+          matchedClassGroupId: legacyMatches[0].id,
+          reason: "legacy_night_name",
+          candidates: [legacyMatches[0]],
+        };
+      }
+
+      if (nightGradeClasses.length > 1) {
+        return {
+          status: "ambiguous",
+          reason: "ambiguous_legacy_night",
+          candidates: nightGradeClasses,
+        };
+      }
+    }
+  }
+
+  return {
+    status: "new",
+    candidates: [],
   };
 }
