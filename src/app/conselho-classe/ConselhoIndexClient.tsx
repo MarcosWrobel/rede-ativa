@@ -6,12 +6,15 @@ import { useRouter } from "next/navigation";
 import {
   BookOpen,
   Calendar,
+  Check,
   ClipboardList,
   FileUp,
   KeyRound,
   Loader2,
+  Pencil,
   Search,
   Users,
+  X,
 } from "lucide-react";
 import CouncilSerePdfImportModal from "@/components/conselho/CouncilSerePdfImportModal";
 import CouncilTeacherInviteModal from "@/components/conselho/CouncilTeacherInviteModal";
@@ -62,6 +65,9 @@ export default function ConselhoIndexClient({
     action: "open" | "sere";
   } | null>(null);
   const [savingShiftClassId, setSavingShiftClassId] = useState<string | null>(null);
+  const [editingNameClassId, setEditingNameClassId] = useState<string | null>(null);
+  const [editingNameDraft, setEditingNameDraft] = useState("");
+  const [savingNameClassId, setSavingNameClassId] = useState<string | null>(null);
   const [sereModalTarget, setSereModalTarget] = useState<{
     boardId: string;
     classNameLabel: string;
@@ -244,6 +250,43 @@ export default function ConselhoIndexClient({
     }
   }
 
+  async function handleSaveName(cg: CouncilIndexClassGroupItem) {
+    if (!canEdit || savingNameClassId === cg.id) return;
+    const trimmed = editingNameDraft.trim();
+    if (trimmed.length < 2) {
+      notify("Nome da turma deve ter pelo menos 2 caracteres.", "error");
+      return;
+    }
+    if (trimmed === cg.name) {
+      setEditingNameClassId(null);
+      return;
+    }
+    setSavingNameClassId(cg.id);
+    try {
+      const res = await fetch(`/api/classes/${cg.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const data: { success?: boolean; classGroup?: { name: string }; error?: string } =
+        await res.json().catch(() => ({}));
+      if (!res.ok || !data.classGroup) {
+        notify(data.error || "Não foi possível alterar o nome da turma.", "error");
+        return;
+      }
+      const nextName = data.classGroup.name;
+      setClassGroups((prev) =>
+        prev.map((item) => (item.id === cg.id ? { ...item, name: nextName } : item))
+      );
+      setEditingNameClassId(null);
+      notify(`Turma renomeada para ${nextName}.`);
+    } catch {
+      notify("Falha de conexão ao atualizar o nome da turma.", "error");
+    } finally {
+      setSavingNameClassId(null);
+    }
+  }
+
   const yearOptions = Array.from(
     new Set([initialYear - 1, initialYear, initialYear + 1])
   ).sort((a, b) => b - a);
@@ -385,21 +428,78 @@ export default function ConselhoIndexClient({
                 >
                   {/* Turma e Segmento */}
                   <div className="flex items-center justify-between lg:justify-start gap-2.5 min-w-0">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
-                          {cg.name}
-                        </h2>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
-                            board
-                              ? "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800"
-                              : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-                          }`}
-                        >
-                          {board ? "Iniciado" : "Pendente"}
-                        </span>
-                      </div>
+                    <div className="min-w-0 flex-1">
+                      {editingNameClassId === cg.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            aria-label={`Novo nome para ${cg.name}`}
+                            value={editingNameDraft}
+                            onChange={(e) => setEditingNameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void handleSaveName(cg);
+                              } else if (e.key === "Escape") {
+                                setEditingNameClassId(null);
+                              }
+                            }}
+                            disabled={savingNameClassId === cg.id}
+                            className="w-32 sm:w-40 rounded-lg border border-sky-400 bg-white dark:bg-slate-950 px-2 py-1 text-xs font-bold text-slate-900 dark:text-white focus:outline-none"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Salvar nome da turma ${cg.name}`}
+                            disabled={savingNameClassId === cg.id}
+                            onClick={() => void handleSaveName(cg)}
+                            className="p-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 cursor-pointer"
+                          >
+                            {savingNameClassId === cg.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Cancelar edição do nome"
+                            disabled={savingNameClassId === cg.id}
+                            onClick={() => setEditingNameClassId(null)}
+                            className="p-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                            {cg.name}
+                          </h2>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              aria-label={`Editar nome da turma ${cg.name}`}
+                              onClick={() => {
+                                setEditingNameClassId(cg.id);
+                                setEditingNameDraft(cg.name);
+                              }}
+                              className="p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                              board
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800"
+                                : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                            }`}
+                          >
+                            {board ? "Iniciado" : "Pendente"}
+                          </span>
+                        </div>
+                      )}
                       <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
                         {formatSegmentLabel(cg.segment)}
                       </p>

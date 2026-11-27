@@ -656,14 +656,6 @@ function buildBaseTurmaName(params: {
     };
   }
 
-  if (shift === "NOITE" && gradeNum) {
-    return {
-      baseName: `${gradeNum}º Série`,
-      turmaCode,
-      canOmitSingleTurmaCode: true,
-    };
-  }
-
   if (gradeNum) {
     return {
       baseName: `${gradeNum}º ${turmaCode}`,

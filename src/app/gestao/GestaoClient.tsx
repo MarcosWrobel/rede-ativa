@@ -20,6 +20,7 @@ import {
   Plus,
   Loader2,
   CheckCircle2,
+  Pencil,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
 
@@ -86,6 +87,94 @@ export default function GestaoClient({
   const [classNameError, setClassNameError] = useState("");
   const [classError, setClassError] = useState("");
   const [classSuccessToast, setClassSuccessToast] = useState("");
+
+  // Edit Class Modal
+  const [editingClass, setEditingClass] = useState<{
+    id: string;
+    name: string;
+    segment: string;
+    shift: string;
+  } | null>(null);
+  const [editClassName, setEditClassName] = useState("");
+  const [editClassSegment, setEditClassSegment] = useState<
+    "FUNDAMENTAL" | "MEDIO" | "NOTURNO" | "INFANTIL" | "EJA"
+  >("MEDIO");
+  const [editClassShift, setEditClassShift] = useState<
+    "MANHA" | "TARDE" | "NOITE" | "INTEGRAL"
+  >("MANHA");
+  const [isUpdatingClass, setIsUpdatingClass] = useState(false);
+  const [editClassError, setEditClassError] = useState("");
+
+  const handleOpenEditClassModal = (cg: {
+    id: string;
+    name: string;
+    segment: string;
+    shift: string;
+  }) => {
+    setEditingClass(cg);
+    setEditClassName(cg.name);
+    setEditClassSegment(cg.segment as any);
+    setEditClassShift(cg.shift as any);
+    setEditClassError("");
+  };
+
+  const handleCloseEditClassModal = () => {
+    if (isUpdatingClass) return;
+    setEditingClass(null);
+    setEditClassError("");
+  };
+
+  const handleUpdateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingClass || isUpdatingClass) return;
+
+    const fieldMsg = validateClassName(editClassName);
+    if (fieldMsg) {
+      setEditClassError(fieldMsg);
+      return;
+    }
+
+    setIsUpdatingClass(true);
+    setEditClassError("");
+    try {
+      const res = await fetch(`/api/classes/${editingClass.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editClassName.trim(),
+          segment: editClassSegment,
+          shift: editClassShift,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao atualizar turma.");
+      }
+
+      const updated = data.classGroup;
+      setClasses((prev) =>
+        prev
+          .map((cg) =>
+            cg.id === editingClass.id
+              ? {
+                  ...cg,
+                  name: updated.name,
+                  segment: updated.segment,
+                  shift: updated.shift,
+                }
+              : cg
+          )
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditingClass(null);
+      setClassSuccessToast(`Turma "${updated.name}" atualizada.`);
+      setTimeout(() => setClassSuccessToast(""), 5000);
+    } catch (err: any) {
+      setEditClassError(err.message || "Erro inesperado ao atualizar turma.");
+    } finally {
+      setIsUpdatingClass(false);
+    }
+  };
 
   const classNameInputId = useId();
   const classNameErrorId = useId();
@@ -488,13 +577,21 @@ export default function GestaoClient({
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {classes.slice(0, 9).map((cg) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+              {classes.map((cg) => (
                 <div
                   key={cg.id}
-                  className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-center"
+                  className="relative p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-center group"
                 >
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{cg.name}</p>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditClassModal(cg)}
+                    aria-label={`Editar turma ${cg.name}`}
+                    className="absolute top-1.5 right-1.5 p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200 pr-4 truncate">{cg.name}</p>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{cg.shift}</p>
                   <p className="text-xs font-black text-sky-600 dark:text-sky-400 mt-1 tabular-nums">
                     {cg.studentsCount} alunos
@@ -650,6 +747,105 @@ export default function GestaoClient({
                 </>
               ) : (
                 <span>Criar Turma</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* Modal Editar Turma */}
+      <ModalDialog
+        open={Boolean(editingClass)}
+        onClose={handleCloseEditClassModal}
+        preventClose={isUpdatingClass}
+        title="Editar Turma"
+        subtitle={`Ajuste o nome, nível ou turno da turma em ${school.name}.`}
+      >
+        <form onSubmit={handleUpdateClass} noValidate className="space-y-4 text-xs">
+          <div className="space-y-1">
+            <label htmlFor="gestao-edit-class-name" className="font-semibold text-slate-700 dark:text-slate-200 block">
+              Nome da Turma *
+            </label>
+            <input
+              id="gestao-edit-class-name"
+              type="text"
+              data-autofocus
+              value={editClassName}
+              onChange={(e) => {
+                setEditClassName(e.target.value);
+                if (editClassError) setEditClassError("");
+              }}
+              placeholder="Ex: 1º 3, 2º 3, 3º 3"
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-white"
+              disabled={isUpdatingClass}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="gestao-edit-class-segment" className="font-semibold text-slate-700 dark:text-slate-200 block">
+                Nível
+              </label>
+              <select
+                id="gestao-edit-class-segment"
+                value={editClassSegment}
+                onChange={(e) => setEditClassSegment(e.target.value as any)}
+                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                disabled={isUpdatingClass}
+              >
+                <option value="FUNDAMENTAL">Ensino Fundamental</option>
+                <option value="MEDIO">Ensino Médio</option>
+                <option value="NOTURNO">Noturno</option>
+                <option value="INFANTIL">Educação Infantil</option>
+                <option value="EJA">EJA</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="gestao-edit-class-shift" className="font-semibold text-slate-700 dark:text-slate-200 block">
+                Turno
+              </label>
+              <select
+                id="gestao-edit-class-shift"
+                value={editClassShift}
+                onChange={(e) => setEditClassShift(e.target.value as any)}
+                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                disabled={isUpdatingClass}
+              >
+                <option value="MANHA">Manhã</option>
+                <option value="TARDE">Tarde</option>
+                <option value="NOITE">Noite</option>
+                <option value="INTEGRAL">Integral</option>
+              </select>
+            </div>
+          </div>
+
+          {editClassError && (
+            <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold">
+              {editClassError}
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleCloseEditClassModal}
+              disabled={isUpdatingClass}
+              className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isUpdatingClass}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
+            >
+              {isUpdatingClass ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <span>Salvar Alterações</span>
               )}
             </button>
           </div>

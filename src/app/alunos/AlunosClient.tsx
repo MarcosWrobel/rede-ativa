@@ -16,6 +16,9 @@ import {
   Stethoscope,
   PhoneOff,
   Loader2,
+  GraduationCap,
+  Check,
+  X,
 } from "lucide-react";
 import ModalDialog from "@/components/ModalDialog";
 import SereImportModal from "./SereImportModal";
@@ -67,6 +70,70 @@ export default function AlunosClient({
   >("MANHA");
   const [isSubmittingQuickClass, setIsSubmittingQuickClass] = useState(false);
   const [quickClassError, setQuickClassError] = useState("");
+
+  // Gerenciar / Editar Turmas Modal
+  const [isManageClassesModalOpen, setIsManageClassesModalOpen] = useState(false);
+  const [editingClassId, setEditingClassId] = useState<string | null>(null);
+  const [editClassName, setEditClassName] = useState("");
+  const [editClassSegment, setEditClassSegment] = useState<
+    "FUNDAMENTAL" | "MEDIO" | "NOTURNO" | "INFANTIL" | "EJA"
+  >("MEDIO");
+  const [editClassShift, setEditClassShift] = useState<
+    "MANHA" | "TARDE" | "NOITE" | "INTEGRAL"
+  >("MANHA");
+  const [isSavingClassEdit, setIsSavingClassEdit] = useState(false);
+  const [editClassError, setEditClassError] = useState("");
+
+  const startEditClass = (cg: any) => {
+    setEditingClassId(cg.id);
+    setEditClassName(cg.name || "");
+    setEditClassSegment((cg.segment || "MEDIO") as any);
+    setEditClassShift((cg.shift || "MANHA") as any);
+    setEditClassError("");
+  };
+
+  const handleSaveClassEdit = async (classId: string) => {
+    const trimmed = editClassName.trim();
+    if (trimmed.length < 2) {
+      setEditClassError("Informe um nome com pelo menos 2 caracteres.");
+      return;
+    }
+    setIsSavingClassEdit(true);
+    setEditClassError("");
+    try {
+      const res = await fetch(`/api/classes/${classId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: trimmed,
+          segment: editClassSegment,
+          shift: editClassShift,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao atualizar turma.");
+      }
+      const updatedCg = data.classGroup;
+      setClassGroupList((prev) =>
+        prev
+          .map((cg) => (cg.id === classId ? { ...cg, ...updatedCg } : cg))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setStudents((prev) =>
+        prev.map((st) =>
+          st.classGroupId === classId
+            ? { ...st, classGroup: { ...st.classGroup, ...updatedCg } }
+            : st
+        )
+      );
+      setEditingClassId(null);
+    } catch (err: any) {
+      setEditClassError(err.message || "Erro ao atualizar turma.");
+    } finally {
+      setIsSavingClassEdit(false);
+    }
+  };
 
   const handleQuickCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -260,6 +327,19 @@ export default function AlunosClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingClassId(null);
+              setEditClassError("");
+              setIsManageClassesModalOpen(true);
+            }}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold shadow-2xs transition cursor-pointer"
+          >
+            <GraduationCap className="w-4 h-4 text-sky-600" />
+            <span>Gerenciar Turmas</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsSereModalOpen(true)}
@@ -767,6 +847,130 @@ export default function AlunosClient({
               Confirmar Inativação
             </button>
           </div>
+        </div>
+      </ModalDialog>
+
+      {/* Gerenciar Turmas Modal */}
+      <ModalDialog
+        open={isManageClassesModalOpen}
+        onClose={() => {
+          if (!isSavingClassEdit) {
+            setEditingClassId(null);
+            setEditClassError("");
+            setIsManageClassesModalOpen(false);
+          }
+        }}
+        title="Gerenciar Turmas"
+        subtitle="Renomeie turmas ou ajuste nível e turno desta unidade."
+        size="xl"
+      >
+        <div className="space-y-3 text-xs">
+          {editClassError && (
+            <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-semibold">
+              {editClassError}
+            </div>
+          )}
+
+          {classGroupList.length === 0 ? (
+            <p className="text-center py-6 text-slate-500">Nenhuma turma cadastrada.</p>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+              {classGroupList.map((cg) => {
+                const isEditing = editingClassId === cg.id;
+                const studentCount = students.filter((s) => s.classGroupId === cg.id).length;
+
+                return (
+                  <div
+                    key={cg.id}
+                    className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white hover:bg-slate-50/70"
+                  >
+                    {isEditing ? (
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-[1fr_140px_120px_auto] gap-2 items-center">
+                        <input
+                          type="text"
+                          value={editClassName}
+                          onChange={(e) => setEditClassName(e.target.value)}
+                          aria-label={`Nome da turma ${cg.name}`}
+                          className="border border-sky-400 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          disabled={isSavingClassEdit}
+                        />
+                        <select
+                          value={editClassSegment}
+                          onChange={(e) => setEditClassSegment(e.target.value as any)}
+                          aria-label={`Nível da turma ${cg.name}`}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white"
+                          disabled={isSavingClassEdit}
+                        >
+                          <option value="FUNDAMENTAL">Fundamental</option>
+                          <option value="MEDIO">Ensino Médio</option>
+                          <option value="NOTURNO">Noturno</option>
+                          <option value="INFANTIL">Infantil</option>
+                          <option value="EJA">EJA</option>
+                        </select>
+                        <select
+                          value={editClassShift}
+                          onChange={(e) => setEditClassShift(e.target.value as any)}
+                          aria-label={`Turno da turma ${cg.name}`}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white"
+                          disabled={isSavingClassEdit}
+                        >
+                          <option value="MANHA">Manhã</option>
+                          <option value="TARDE">Tarde</option>
+                          <option value="NOITE">Noite</option>
+                          <option value="INTEGRAL">Integral</option>
+                        </select>
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveClassEdit(cg.id)}
+                            disabled={isSavingClassEdit}
+                            aria-label={`Salvar turma ${cg.name}`}
+                            className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 cursor-pointer"
+                          >
+                            {isSavingClassEdit ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingClassId(null);
+                              setEditClassError("");
+                            }}
+                            disabled={isSavingClassEdit}
+                            aria-label="Cancelar edição da turma"
+                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900 text-sm truncate">{cg.name}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {cg.segment} &bull; {cg.shift} &bull; {studentCount} estudante(s)
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => startEditClass(cg)}
+                          aria-label={`Editar turma ${cg.name}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-sky-300 hover:bg-sky-50 text-slate-700 hover:text-sky-700 font-semibold transition self-start sm:self-center cursor-pointer"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </ModalDialog>
 
