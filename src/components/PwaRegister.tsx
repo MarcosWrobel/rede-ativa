@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Download, X } from "lucide-react";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -9,8 +10,14 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function PwaRegister() {
+  const pathname = usePathname() || "";
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  const isTeacherPortalRoute =
+    pathname.startsWith("/conselho-classe/professor/") ||
+    pathname.startsWith("/conselho-classe/vincular") ||
+    pathname.startsWith("/conselho-classe/pre-conselho/");
 
   useEffect(() => {
     // 1. Registro do Service Worker
@@ -56,7 +63,7 @@ export default function PwaRegister() {
     sessionStorage.setItem("pwa_install_dismissed", "true");
   };
 
-  if (!showInstallBanner) return null;
+  if (!showInstallBanner || isTeacherPortalRoute) return null;
 
   return (
     <aside

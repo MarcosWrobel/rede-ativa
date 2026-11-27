@@ -54,10 +54,12 @@ export default function AppLayoutClient({ children, currentUser, currentSchool }
     pathname.startsWith("/impacto/") ||
     pathname.startsWith("/validar/ata/") ||
     pathname.startsWith("/assinar/ata/") ||
-    pathname.startsWith("/conselho-classe/professor/");
+    pathname.startsWith("/conselho-classe/professor/") ||
+    pathname.startsWith("/conselho-classe/vincular") ||
+    pathname.startsWith("/conselho-classe/pre-conselho/");
 
   if (isStandalonePage) {
-    return <main className="min-h-screen bg-slate-50">{children}</main>;
+    return <main className="min-h-screen bg-slate-50 overflow-x-clip [color-scheme:light]">{children}</main>;
   }
 
   return (

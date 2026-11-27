@@ -1411,7 +1411,7 @@ export default function ProfessorConselhoClient({
                       placeholder="Ex.: A7K9-M2P4"
                       value={inlineInviteCode}
                       onChange={(e) => setInlineInviteCode(e.target.value)}
-                      className="w-full sm:flex-1 min-w-0 rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-xs font-mono uppercase text-slate-900"
+                      className="w-full sm:flex-1 min-w-0 rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-base sm:text-xs font-mono uppercase text-slate-900"
                     />
                     <button
                       type="button"
@@ -1449,6 +1449,7 @@ export default function ProfessorConselhoClient({
                                       : [...prev, subj.id]
                                   )
                                 }
+                                className="h-4 w-4 shrink-0 rounded border-slate-300 bg-white accent-sky-600 [color-scheme:light]"
                               />
                               <span className="truncate font-semibold">{subj.name}</span>
                             </span>
@@ -1511,7 +1512,7 @@ export default function ProfessorConselhoClient({
                     value={devEmail}
                     onChange={(e) => setDevEmail(e.target.value)}
                     placeholder="professor@escola.pr.gov.br"
-                    className="flex-1 min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
+                    className="flex-1 min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base sm:text-xs text-slate-900"
                   />
                   <button
                     type="button"
@@ -1786,7 +1787,7 @@ export default function ProfessorConselhoClient({
                     placeholder="Buscar por estudante ou matrícula..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="min-h-[40px] w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-xs text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                    className="min-h-[40px] w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-base sm:text-xs text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
                   />
                 </div>
 
@@ -1794,7 +1795,7 @@ export default function ProfessorConselhoClient({
                   aria-label="Filtrar estudantes"
                   value={filterMode}
                   onChange={(e) => setFilterMode(e.target.value as PortalFilterMode)}
-                  className="min-h-[40px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                  className="min-h-[40px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-base sm:text-xs font-semibold text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
                 >
                   <option value="ALL">Todos ({council.students.length})</option>
                   <option value="PENDING">Sem selo marcado</option>
@@ -1959,7 +1960,7 @@ export default function ProfessorConselhoClient({
                 value={currentMonitoredNotes}
                 onChange={(e) => handleNotesChange(e.target.value)}
                 placeholder="Registre observações prévias sobre dificuldades, frequência, postura ou estratégias aplicadas no trimestre..."
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-900 disabled:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base sm:text-xs text-slate-900 disabled:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
               />
             </section>
 

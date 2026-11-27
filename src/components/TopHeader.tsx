@@ -59,42 +59,44 @@ export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: 
   }
 
   return (
-    <header className="h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 lg:px-8 transition-colors">
+    <header className="h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 flex items-center justify-between gap-2 px-3 sm:px-6 lg:px-8 transition-colors overflow-x-hidden max-w-full">
       {/* Left: Mobile Toggle & Brand / Breadcrumb */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
         <button
           type="button"
           onClick={onOpenMobile}
-          className="lg:hidden p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          className="lg:hidden shrink-0 p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           aria-label="Abrir menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-          <GraduationCap className="w-4 h-4 text-sky-600 dark:text-sky-400 hidden sm:block" />
-          <span className="text-slate-400 dark:text-slate-500 hidden sm:inline">
+        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500 dark:text-slate-400 min-w-0">
+          <GraduationCap className="w-4 h-4 text-sky-600 dark:text-sky-400 hidden sm:block shrink-0" />
+          <span className="text-slate-400 dark:text-slate-500 hidden sm:inline truncate">
             {currentSchool?.shortName || currentSchool?.name || "Instituição de Ensino"}
           </span>
-          <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">/</span>
-          <span className="text-slate-700 dark:text-slate-200 font-bold">{currentInfo.title}</span>
+          <span className="text-slate-300 dark:text-slate-600 hidden sm:inline shrink-0">/</span>
+          <span className="text-slate-700 dark:text-slate-200 font-bold truncate">{currentInfo.title}</span>
         </div>
       </div>
 
       {/* Right: School Selector, Theme Toggle & User Status */}
-      <div className="flex items-center space-x-3">
-        <SchoolSelector
-          currentSchool={currentSchool}
-          userSchools={currentUser?.schools}
-          isAdmin={currentUser?.role === "ADMIN"}
-        />
+      <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+        <div className="hidden sm:block">
+          <SchoolSelector
+            currentSchool={currentSchool}
+            userSchools={currentUser?.schools}
+            isAdmin={currentUser?.role === "ADMIN"}
+          />
+        </div>
 
         <ThemeToggle />
 
         {currentUser ? (
-          <div className="flex items-center space-x-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 py-1.5 px-3 rounded-full text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{currentUser.name}</span>
+          <div className="flex items-center space-x-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 py-1.5 px-2.5 sm:px-3 rounded-full text-xs max-w-[160px] sm:max-w-none">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">{currentUser.name}</span>
             <span className="text-slate-400 dark:text-slate-500 font-mono text-[11px] hidden md:inline">
               ({currentUser.email})
             </span>
@@ -102,7 +104,7 @@ export default function TopHeader({ currentUser, currentSchool, onOpenMobile }: 
         ) : (
           <a
             href="/login"
-            className="text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition"
+            className="text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-sky-100 transition whitespace-nowrap"
           >
             Entrar com @escola
           </a>
