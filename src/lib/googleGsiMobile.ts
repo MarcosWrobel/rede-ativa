@@ -18,7 +18,7 @@ export function prepareGsiRedirectReturnCookie(pathWithSearch: string): void {
   const encoded = encodeURIComponent(pathWithSearch);
   const secureFlag =
     typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${GSI_RETURN_COOKIE}=${encoded}; Path=/; Max-Age=300; SameSite=Lax${secureFlag}`;
+  document.cookie = `${GSI_RETURN_COOKIE}=${encoded}; Path=/; Max-Age=3600; SameSite=Lax${secureFlag}`;
 }
 
 export function readGsiRedirectErrorFromUrl(): string | null {

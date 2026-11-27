@@ -115,6 +115,9 @@ describe("Autovínculo Docente por Código da Escola e Auth Google Mobile", () =
     expect(isSafeTeacherPortalReturnPath("/conselho-classe/professor/abc.def")).toBe(true);
     expect(isSafeTeacherPortalReturnPath("/conselho-classe/pre-conselho/abc.def")).toBe(true);
     expect(isSafeTeacherPortalReturnPath("/conselho-classe/vincular?t=123")).toBe(true);
+    expect(
+      isSafeTeacherPortalReturnPath(decodeURIComponent(encodeURIComponent("/conselho-classe/professor/abc.def")))
+    ).toBe(true);
     expect(isSafeTeacherPortalReturnPath("//evil.com/phish")).toBe(false);
     expect(isSafeTeacherPortalReturnPath("https://evil.com")).toBe(false);
     expect(isSafeTeacherPortalReturnPath("/admin")).toBe(false);

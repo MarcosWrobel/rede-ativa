@@ -45,7 +45,13 @@ export async function POST(req: Request) {
 
     const cookieStore = await cookies();
     const cookieCsrf = cookieStore.get("g_csrf_token")?.value?.trim() || "";
-    const rawReturnTo = cookieStore.get(GSI_RETURN_COOKIE)?.value?.trim() || "";
+    const rawCookieReturn = cookieStore.get(GSI_RETURN_COOKIE)?.value?.trim() || "";
+    let rawReturnTo = rawCookieReturn;
+    try {
+      rawReturnTo = decodeURIComponent(rawCookieReturn);
+    } catch {
+      rawReturnTo = rawCookieReturn;
+    }
     const safeReturnTo = isSafeTeacherPortalReturnPath(rawReturnTo)
       ? rawReturnTo
       : "/conselho-classe/vincular";
