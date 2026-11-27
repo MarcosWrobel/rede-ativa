@@ -33,6 +33,10 @@ import {
   POST as postPreCouncilPortal,
   PUT as putPreCouncilPortal,
 } from "@/app/api/conselho-classe/pre-council-portal/[token]/route";
+import CouncilTeacherLinkModal, {
+  buildTeacherLinkWhatsAppMessage,
+} from "@/components/conselho/CouncilTeacherLinkModal";
+import { buildWhatsAppDispatchUrl } from "@/lib/whatsappProvider";
 import {
   createCouncilTeacherToken,
   createPreCouncilTeacherToken,
@@ -828,5 +832,247 @@ describe("Conselho de Classe — Rate Limit 429 dos Portais e Interações de UI
     });
     expect(viewApp.getText()).toContain("Ciência docente liberada no link do professor.");
     expect(viewApp.getText()).not.toContain("Salve o pré-conselho para liberar a ciência docente.");
+  });
+
+  it("CouncilTeacherLinkModal: gera compartilhamento WhatsApp sem dados estudantis e limpa ao trocar contexto ou fechar", async () => {
+    const sampleGenerated = {
+      url: "https://www.redeativa.app.br/conselho-classe/professor/tok-valido-1",
+      qrCodeDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      trimester: 1,
+      subjectId: "subj-mat",
+      subjectName: "Matemática",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    };
+
+    const waMessage = buildTeacherLinkWhatsAppMessage({
+      classNameLabel: "6º Ano A",
+      generated: sampleGenerated,
+    });
+    expect(waMessage).toContain("6º Ano A");
+    expect(waMessage).toContain("1º Trimestre");
+    expect(waMessage).toContain("Matemática");
+    expect(waMessage).toContain(sampleGenerated.url);
+    expect(waMessage).not.toContain("CGM");
+
+    const mobileUrl = buildWhatsAppDispatchUrl("", waMessage, { forcePlatform: "mobile" });
+    const desktopUrl = buildWhatsAppDispatchUrl("", waMessage, { forcePlatform: "desktop" });
+    expect(mobileUrl).toBe(`https://wa.me/?text=${encodeURIComponent(waMessage)}`);
+    expect(desktopUrl).toBe(
+      `https://web.whatsapp.com/send/?text=${encodeURIComponent(waMessage)}`
+    );
+
+    let resolveReq1!: (res: Response) => void;
+    let resolveReq2!: (res: Response) => void;
+    let callCount = 0;
+    const fetchMock = vi.fn(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveReq1 = resolve;
+        });
+      }
+      if (callCount === 2) {
+        return new Promise<Response>((resolve) => {
+          resolveReq2 = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "Selecione explicitamente uma instituição de ensino." }),
+      } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onClose = vi.fn();
+    const onNotify = vi.fn();
+    const baseProps = {
+      open: true,
+      onClose,
+      schoolId: "school-a",
+      boardId: "board-a1",
+      classNameLabel: "6º Ano A",
+      activeTrimester: 1 as const,
+      subjects: [
+        {
+          id: "subj-mat",
+          schoolId: "school-a",
+          boardId: "board-a1",
+          name: "Matemática",
+          teacherName: "Prof. Marcos",
+          teacherEmail: "marcos@escola.pr.gov.br",
+          displayOrder: 0,
+          active: true,
+        },
+      ],
+      initialSubjectId: "subj-mat",
+      onNotify,
+    };
+
+    const app = mountReactComponent(CouncilTeacherLinkModal, baseProps);
+    await app.flush();
+
+    // Troca de escola limpa o link e dispara nova requisição (descartando a atrasada)
+    await app.updateProps({ ...baseProps, schoolId: "school-b" });
+    await app.flush();
+
+    // Resposta atrasada da requisição 1 resolve DEPOIS, mas deve ser descartada
+    resolveReq1({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        ...sampleGenerated,
+        url: "https://www.redeativa.app.br/conselho-classe/professor/tok-atrasado-school-a",
+      }),
+    } as Response);
+    await app.flush();
+    expect(app.getText()).not.toContain("tok-atrasado-school-a");
+
+    // Resposta vigente da requisição 2
+    resolveReq2({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        ...sampleGenerated,
+        url: "https://www.redeativa.app.br/conselho-classe/professor/tok-vigente-school-b",
+      }),
+    } as Response);
+    await app.flush();
+
+    const writeTextMock = vi.fn(async () => {});
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    });
+
+    const copyBtn = app.findButton("Copiar link");
+    await (copyBtn.props.onClick as () => Promise<void>)();
+    expect(writeTextMock).toHaveBeenCalledWith(
+      "https://www.redeativa.app.br/conselho-classe/professor/tok-vigente-school-b"
+    );
+
+    const qrImg = app.findAll((el) => el.type === "img")[0];
+    expect(qrImg).toBeDefined();
+    expect(qrImg.props.src).toBe(sampleGenerated.qrCodeDataUrl);
+
+    const anchors = app.findAll((el) => el.type === "a");
+    const portalAnchor = anchors.find((a) => String(a.props.href || "").includes("tok-vigente-school-b"));
+    const waAnchor = anchors.find((a) => String(a.props.href || "").includes("whatsapp"));
+    expect(portalAnchor).toBeDefined();
+    expect(portalAnchor!.props.target).toBe("_blank");
+    expect(portalAnchor!.props.rel).toBe("noopener noreferrer");
+    expect(waAnchor).toBeDefined();
+    expect(waAnchor!.props.target).toBe("_blank");
+    expect(waAnchor!.props.rel).toBe("noopener noreferrer");
+
+    // Valida transporte simulado do WhatsApp com a URL vigente
+    const simulatedTransport = (href: string) => {
+      const parsed = new URL(href);
+      return {
+        origin: parsed.origin,
+        pathname: parsed.pathname,
+        text: parsed.searchParams.get("text") || "",
+      };
+    };
+    const transported = simulatedTransport(String(waAnchor!.props.href));
+    expect(["https://wa.me", "https://web.whatsapp.com"]).toContain(transported.origin);
+    expect(transported.text).toContain("tok-vigente-school-b");
+    expect(transported.text).toContain("6º Ano A");
+    expect(transported.text).not.toContain("CGM");
+
+    // Troca de turma/componente com resposta atrasada NÃO reativa compartilhamento
+    let resolveDelayedBoard!: (res: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveDelayedBoard = resolve;
+        })
+    );
+    await app.updateProps({ ...baseProps, schoolId: "school-b", boardId: "board-b2" });
+    await app.flush();
+    expect(app.findAll((el) => el.type === "a")).toHaveLength(0);
+
+    // Nova troca de escola falha -> limpa e depois resposta atrasada de board-b2 é descartada
+    await app.updateProps({ ...baseProps, schoolId: "school-c", boardId: "board-c1" });
+    await app.flush();
+    resolveDelayedBoard({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        ...sampleGenerated,
+        url: "https://www.redeativa.app.br/conselho-classe/professor/tok-atrasado-board-b2",
+      }),
+    } as Response);
+    await app.flush();
+    expect(app.getText()).toContain("Selecione explicitamente uma instituição de ensino.");
+    expect(app.getText()).not.toContain("tok-atrasado-board-b2");
+    expect(app.findAll((el) => el.type === "a")).toHaveLength(0);
+
+    // Ao fechar modal, limpa estado
+    await app.updateProps({ ...baseProps, open: false });
+    await app.flush();
+    expect(app.findAll((el) => el.type === "a")).toHaveLength(0);
+    app.unmount();
+  });
+
+  it("CouncilTeacherLinkModal: retira todas as ações na expiração sem fechar o modal", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const firstUrl = "https://www.redeativa.app.br/conselho-classe/professor/primeiro-link";
+      const newUrl = "https://www.redeativa.app.br/conselho-classe/professor/novo-link";
+      const response = (url: string, expiresAt: number) => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          url,
+          qrCodeDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+          trimester: 1,
+          subjectId: null,
+          subjectName: null,
+          expiresAt: new Date(expiresAt).toISOString(),
+        }),
+      });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(response(firstUrl, now + 1_000))
+        .mockResolvedValueOnce(response(newUrl, now + 60_000));
+      vi.stubGlobal("fetch", fetchMock);
+      const app = mountReactComponent(CouncilTeacherLinkModal, {
+        open: true,
+        onClose: vi.fn(),
+        schoolId: "school-a",
+        boardId: "board-a1",
+        classNameLabel: "6º Ano A",
+        activeTrimester: 1,
+        subjects: [],
+        initialSubjectId: null,
+        onNotify: vi.fn(),
+      });
+      unmounts.push(app.unmount);
+      await app.flush();
+      expect(app.findByTag("img")).toHaveLength(1);
+      expect(app.findButton("Copiar link")).toBeDefined();
+      expect(app.findByTag("a")).toHaveLength(2);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await app.flush();
+      expect(app.getText()).toContain("O link expirou");
+      expect(app.getText()).not.toContain("Copiar link");
+      expect(app.findByTag("input")).toHaveLength(0);
+      expect(app.findByTag("img")).toHaveLength(0);
+      expect(app.findByTag("a")).toHaveLength(0);
+
+      const regenerate = app.findButton("Gerar novo link");
+      (regenerate.props.onClick as () => void)();
+      await app.flush();
+      expect(app.findByTag("a").map((anchor) => anchor.props.href)).toContain(newUrl);
+      expect(app.getText()).not.toContain("O link expirou");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

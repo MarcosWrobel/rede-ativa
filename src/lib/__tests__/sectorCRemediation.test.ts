@@ -606,63 +606,75 @@ describe("Remediação Setorial do Setor C (Itens [C1] a [C5])", () => {
   });
 
   it("[C5-01] stripParticipantSecrets remove mobileSignToken e mobileSignExpiresAt em POST, PATCH e finalize", async () => {
-    const emptyMinute = { id: "m1", participants: [] };
-    expect(stripParticipantSecrets(emptyMinute)).toBe(emptyMinute);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-20T15:00:00Z"));
+    try {
+      for (const p of hoisted.state.db.minuteParticipants) {
+        if (p.minuteId === "min-draft-public" && p.hasActiveSignLink) {
+          p.mobileSignExpiresAt = new Date(Date.now() + 600_000);
+        }
+      }
 
-    // 1. POST /api/atas
-    const createRes = await postAtas(
-      new Request("http://localhost:3000/api/atas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: "Novo Rascunho",
-          summary: "Texto inicial.",
-          studentIds: ["stu-1"],
-          participants: [{ role: "RESPONSAVEL", name: "Pai Teste" }],
-        }),
-      })
-    );
-    expect(createRes.status).toBe(201);
-    const createJson = await createRes.json();
-    expect(createJson.minute.participants[0].mobileSignToken).toBeUndefined();
-    expect(createJson.minute.participants[0].mobileSignExpiresAt).toBeUndefined();
+      const emptyMinute = { id: "m1", participants: [] };
+      expect(stripParticipantSecrets(emptyMinute)).toBe(emptyMinute);
 
-    // 2. PATCH /api/atas/[id]
-    const patchRes = await patchAta(
-      new Request("http://localhost:3000/api/atas/min-draft-public", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: "Atendimento Regular Atualizado",
-          participants: [{ id: "part-draft-1", role: "RESPONSAVEL", name: "Responsável Maria" }],
-        }),
-      }),
-      { params: Promise.resolve({ id: "min-draft-public" }) }
-    );
-    expect(patchRes.status).toBe(200);
-    const patchJson = await patchRes.json();
-    expect(patchJson.minute.participants[0].mobileSignToken).toBeUndefined();
-    expect(patchJson.minute.participants[0].mobileSignExpiresAt).toBeUndefined();
-    expect(patchJson.minute.participants[0].hasActiveSignLink).toBe(true);
+      // 1. POST /api/atas
+      const createRes = await postAtas(
+        new Request("http://localhost:3000/api/atas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Novo Rascunho",
+            summary: "Texto inicial.",
+            studentIds: ["stu-1"],
+            participants: [{ role: "RESPONSAVEL", name: "Pai Teste" }],
+          }),
+        })
+      );
+      expect(createRes.status).toBe(201);
+      const createJson = await createRes.json();
+      expect(createJson.minute.participants[0].mobileSignToken).toBeUndefined();
+      expect(createJson.minute.participants[0].mobileSignExpiresAt).toBeUndefined();
 
-    // 3. POST /api/atas/[id]/finalize (novo e idempotente)
-    const finRes = await finalizeAta(
-      new Request("http://localhost:3000/api/atas/min-draft-public/finalize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          signingPin: "8391",
-          summary: "Texto completo de encerramento pedagógico validado.",
+      // 2. PATCH /api/atas/[id]
+      const patchRes = await patchAta(
+        new Request("http://localhost:3000/api/atas/min-draft-public", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "Atendimento Regular Atualizado",
+            participants: [{ id: "part-draft-1", role: "RESPONSAVEL", name: "Responsável Maria" }],
+          }),
         }),
-      }),
-      { params: Promise.resolve({ id: "min-draft-public" }) }
-    );
-    expect(finRes.status).toBe(200);
-    const finJson = await finRes.json();
-    expect(finJson.minute.participants.length).toBeGreaterThan(0);
-    for (const p of finJson.minute.participants) {
-      expect(p.mobileSignToken).toBeUndefined();
-      expect(p.mobileSignExpiresAt).toBeUndefined();
+        { params: Promise.resolve({ id: "min-draft-public" }) }
+      );
+      expect(patchRes.status).toBe(200);
+      const patchJson = await patchRes.json();
+      expect(patchJson.minute.participants[0].mobileSignToken).toBeUndefined();
+      expect(patchJson.minute.participants[0].mobileSignExpiresAt).toBeUndefined();
+      expect(patchJson.minute.participants[0].hasActiveSignLink).toBe(true);
+
+      // 3. POST /api/atas/[id]/finalize (novo e idempotente)
+      const finRes = await finalizeAta(
+        new Request("http://localhost:3000/api/atas/min-draft-public/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            signingPin: "8391",
+            summary: "Texto completo de encerramento pedagógico validado.",
+          }),
+        }),
+        { params: Promise.resolve({ id: "min-draft-public" }) }
+      );
+      expect(finRes.status).toBe(200);
+      const finJson = await finRes.json();
+      expect(finJson.minute.participants.length).toBeGreaterThan(0);
+      for (const p of finJson.minute.participants) {
+        expect(p.mobileSignToken).toBeUndefined();
+        expect(p.mobileSignExpiresAt).toBeUndefined();
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 

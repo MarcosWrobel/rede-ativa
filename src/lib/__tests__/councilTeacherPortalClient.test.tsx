@@ -185,7 +185,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     activeUnmounts.push(app.unmount);
 
     // Ativa Etapa 3 ("3. Envio e Ciência") para iniciar o polling automático
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
 
     expect(fetchMock).toHaveBeenCalledTimes(0);
@@ -257,7 +257,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     });
     activeUnmounts.push(app.unmount);
 
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
 
     // Poll 1: base 15s -> 429 com Retry-After: 45
@@ -344,7 +344,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(app.getText()).toContain("Rascunho local pendente de envio");
 
     // 2. Vai à Etapa 3, dispara poll pendente e troca de volta para Etapa 1 -> signal[0] abortado
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
     await vi.advanceTimersByTimeAsync(15_000);
     await app.flush();
@@ -352,7 +352,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
 
-    (app.findButton("1. Matriz do Componente").props.onClick as () => void)();
+    (app.findButton("1. Lançamento").props.onClick as () => void)();
     await app.flush();
     expect(signals[0].aborted).toBe(true);
 
@@ -387,7 +387,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     });
     activeUnmounts.push(app2.unmount);
 
-    (app2.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app2.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app2.flush();
     await vi.advanceTimersByTimeAsync(15_000);
     await app2.flush();
@@ -577,7 +577,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
       }
     };
 
-    (app.findButton("3. Envio e Ciência").props.onClick as () => void)();
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
     await app.flush();
     expect(fetchMock).toHaveBeenCalledTimes(0);
 
@@ -629,7 +629,7 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     activeUnmounts.push(app.unmount);
 
     expect(app.getText()).toContain("Este componente curricular está vinculado a Prof. Helena");
-    expect(app.findButton("Enviar matriz e observações").props.disabled).toBe(true);
+    expect(app.findButton("Enviar lançamento").props.disabled).toBe(true);
   });
 
   it("ProfessorPreConselhoClient: exibe feedback no clique manual de Verificar liberação e libera via visibilitychange", async () => {
@@ -696,5 +696,107 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(app.findButton("Confirmar ciência").props.disabled).toBe(false);
     expect(app.getText()).toContain("Assinatura liberada pela equipe pedagógica.");
+  });
+
+  it("ProfessorConselhoClient: unifica lançamento em 2 blocos, marca atenção por linha com acessibilidade >=40px, preserva rascunho, envia e confirma ciência", async () => {
+    const shims = installBrowserShims();
+    const ctx = buildCouncilContext({ canConfirmAck: true });
+    ctx.students[0].subjectEntries[0].grade = 4.5;
+
+    const putPayloads: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body || "{}"));
+        putPayloads.push(body);
+        const updatedCtx = buildCouncilContext({ canConfirmAck: true });
+        if (body.confirmAck) {
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckEmail =
+            "prof@escola.pr.gov.br";
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckName =
+            "Prof. Marcos";
+          updatedCtx.preCouncil!.conversationsBySubjectId["subj-mat"].digitalAckAt =
+            "2026-04-20T12:00:00.000Z";
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, result: { updatedCount: 2 }, council: updatedCtx }),
+        } as Response;
+      })
+    );
+
+    const app = mountReactComponent(ProfessorConselhoClient, {
+      token: "token-teste-2blocos",
+      schoolName: "Escola Estadual Modelo",
+      classNameLabel: "6º Ano A",
+      segmentLabel: "Ensino Fundamental",
+      shiftLabel: "Manhã",
+      year: 2026,
+      trimester: 1,
+      lockedSubjectName: "Matemática",
+      googleClientId: "",
+      preloadedSession: {
+        googleIdToken: "id-token-valido",
+        verifiedEmail: "prof@escola.pr.gov.br",
+        verifiedName: "Prof. Marcos",
+        council: ctx,
+        suggestedSubjectId: "subj-mat",
+      },
+    });
+    activeUnmounts.push(app.unmount);
+
+    // 1. Exibe exatamente os 2 blocos solicitados
+    expect(app.findButton("1. Lançamento")).toBeDefined();
+    expect(app.findButton("2. Ciência dos Combinados")).toBeDefined();
+    expect(app.getText()).toContain("Nota 4,5 • Abaixo da média");
+
+    // 2. Grupo de selos e botão "Em atenção" na mesma linha com alvo >=40px e aria-pressed
+    const sealBtn = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Ana Clara Souza — Dificuldade")
+    )[0];
+    expect(sealBtn).toBeDefined();
+    expect(String(sealBtn.props.className)).toContain("min-h-[40px]");
+    (sealBtn.props.onClick as () => void)();
+    await app.flush();
+
+    const attentionBtn = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Marcar Ana Clara Souza em atenção")
+    )[0];
+    expect(attentionBtn).toBeDefined();
+    expect(attentionBtn.props["aria-pressed"]).toBe(false);
+    expect(String(attentionBtn.props.className)).toContain("min-h-[40px]");
+    (attentionBtn.props.onClick as () => void)();
+    await app.flush();
+
+    const attentionBtnAfter = app.findAll(
+      (el) =>
+        el.type === "button" &&
+        String(el.props["aria-label"] || "").includes("Marcar Ana Clara Souza em atenção")
+    )[0];
+    expect(attentionBtnAfter.props["aria-pressed"]).toBe(true);
+    expect(window.localStorage.length).toBeGreaterThan(0);
+
+    // 3. Envio pelo botão "Enviar lançamento" na barra fixa
+    (app.findButton("Enviar lançamento").props.onClick as () => void)();
+    await app.flush();
+    expect(putPayloads).toHaveLength(1);
+    expect(putPayloads[0].confirmAck).toBe(false);
+    expect((putPayloads[0].preCouncil as { monitoredStudentIds: string[] }).monitoredStudentIds).toContain(
+      "stu-1"
+    );
+
+    // 4. Troca para "2. Ciência dos Combinados" e confirma ciência
+    (app.findButton("2. Ciência dos Combinados").props.onClick as () => void)();
+    await app.flush();
+    (app.findButton("Confirmar ciência").props.onClick as () => void)();
+    await app.flush();
+    expect(putPayloads).toHaveLength(2);
+    expect(putPayloads[1].confirmAck).toBe(true);
+    expect(app.getText()).toContain("Ciência registrada");
   });
 });

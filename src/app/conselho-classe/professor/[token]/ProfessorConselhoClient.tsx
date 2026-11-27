@@ -142,8 +142,8 @@ declare global {
 type DraftMapBySubject = Record<string, Record<string, number[]>>;
 type MonitoredIdsBySubject = Record<string, string[]>;
 type MonitoredNotesBySubject = Record<string, string>;
-type PortalFilterMode = "ALL" | "PENDING" | "BELOW_AVG";
-type PortalStepKey = "matrix" | "pre-council" | "ack";
+type PortalFilterMode = "ALL" | "PENDING" | "BELOW_AVG" | "MONITORED";
+type PortalStepKey = "launch" | "ack";
 
 const SYNTHESIS_VIEW_FIELDS: Array<{ key: keyof PreCouncilSynthesis; label: string }> = [
   { key: "mainDifficulties", label: "Principais dificuldades observadas" },
@@ -286,7 +286,7 @@ export default function ProfessorConselhoClient({
   const [monitoredNotesBySubject, setMonitoredNotesBySubject] = useState<MonitoredNotesBySubject>(
     () => (preloadedSession?.council ? buildInitialMonitoredNotes(preloadedSession.council) : {})
   );
-  const [activeStep, setActiveStep] = useState<PortalStepKey>("matrix");
+  const [activeStep, setActiveStep] = useState<PortalStepKey>("launch");
   const [searchTerm, setSearchTerm] = useState("");
   const [monitoredSearchTerm, setMonitoredSearchTerm] = useState("");
   const [filterMode, setFilterMode] = useState<PortalFilterMode>("ALL");
@@ -357,7 +357,7 @@ export default function ProfessorConselhoClient({
         setMonitoredIdsBySubject(buildInitialMonitoredIds(data.council));
         setMonitoredNotesBySubject(buildInitialMonitoredNotes(data.council));
         setSelectedSubjectId(resolveSuggestedSubjectId(data.council, data.suggestedSubjectId));
-        setActiveStep("matrix");
+        setActiveStep("launch");
       } catch (err: any) {
         setAuthError(err?.message || "Erro ao verificar conta institucional.");
         setGoogleIdToken(null);
@@ -691,9 +691,13 @@ export default function ProfessorConselhoClient({
         return isBelowAverageGradeUi(entry?.grade ?? null);
       }
 
+      if (filterMode === "MONITORED") {
+        return currentMonitoredIds.includes(st.studentId);
+      }
+
       return true;
     });
-  }, [council, searchTerm, filterMode, currentDraftMap, selectedSubjectId]);
+  }, [council, searchTerm, filterMode, currentDraftMap, selectedSubjectId, currentMonitoredIds]);
 
   const liveAlerts = useMemo(() => {
     if (!council || !selectedSubjectId) return [];
@@ -711,6 +715,11 @@ export default function ProfessorConselhoClient({
       descriptorCodesByStudentId: currentDraftMap,
     });
   }, [council, selectedSubjectId, currentDraftMap]);
+
+  const liveAlertMap = useMemo(
+    () => new Map(liveAlerts.map((a) => [a.studentId, a])),
+    [liveAlerts]
+  );
 
   const monitoredSet = useMemo(() => new Set(currentMonitoredIds), [currentMonitoredIds]);
 
@@ -1280,9 +1289,9 @@ export default function ProfessorConselhoClient({
     : [];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-32">
+    <div className="min-h-screen bg-slate-50 pb-44 sm:pb-36 scroll-pb-44 sm:scroll-pb-36">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="max-w-4xl mx-auto px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="max-w-5xl mx-auto px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
               {council.schoolName}
@@ -1310,7 +1319,7 @@ export default function ProfessorConselhoClient({
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-5 space-y-4">
+      <main className="max-w-5xl mx-auto px-4 py-5 space-y-4">
         {/* Banner de rascunho local restaurado */}
         {restoredDraftInfo && restoredDraftInfo.subjectId === selectedSubjectId && (
           <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-950">
@@ -1418,44 +1427,26 @@ export default function ProfessorConselhoClient({
             </div>
           )}
 
-          {/* Navegação em 3 Etapas */}
+          {/* Navegação em 2 Blocos */}
           <div
             role="tablist"
-            aria-label="Etapas do preenchimento docente"
-            className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-100"
+            aria-label="Blocos do preenchimento docente"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100"
           >
             <button
               type="button"
               role="tab"
-              aria-selected={activeStep === "matrix"}
-              onClick={() => setActiveStep("matrix")}
-              className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-left text-xs transition cursor-pointer ${
-                activeStep === "matrix"
+              aria-selected={activeStep === "launch"}
+              onClick={() => setActiveStep("launch")}
+              className={`min-h-[44px] flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border text-left text-xs transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
+                activeStep === "launch"
                   ? "border-sky-600 bg-sky-50 text-sky-950 font-extrabold"
                   : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold"
               }`}
             >
-              <span>1. Matriz do Componente</span>
-              <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px]">
-                {evaluatedCount}/{activeStudents.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeStep === "pre-council"}
-              onClick={() => setActiveStep("pre-council")}
-              className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-left text-xs transition cursor-pointer ${
-                activeStep === "pre-council"
-                  ? "border-sky-600 bg-sky-50 text-sky-950 font-extrabold"
-                  : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold"
-              }`}
-            >
-              <span>2. Pré-Conselho</span>
-              <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px]">
-                {currentMonitoredIds.length} atenção
-                {liveAlerts.length > 0 ? ` • ${liveAlerts.length} alertas` : ""}
+              <span>1. Lançamento</span>
+              <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[11px] font-bold">
+                {evaluatedCount}/{activeStudents.length} • {currentMonitoredIds.length} em atenção
               </span>
             </button>
 
@@ -1464,20 +1455,20 @@ export default function ProfessorConselhoClient({
               role="tab"
               aria-selected={activeStep === "ack"}
               onClick={() => setActiveStep("ack")}
-              className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-left text-xs transition cursor-pointer ${
+              className={`min-h-[44px] flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border text-left text-xs transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
                 activeStep === "ack"
                   ? "border-sky-600 bg-sky-50 text-sky-950 font-extrabold"
                   : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold"
               }`}
             >
-              <span>3. Envio e Ciência</span>
+              <span>2. Ciência dos Combinados</span>
               <span
-                className={`px-2 py-0.5 rounded-full text-[10px] ${
+                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
                   selectedConv?.digitalAckEmail
-                    ? "bg-emerald-100 text-emerald-800"
+                    ? "bg-emerald-100 text-emerald-900"
                     : selectedConv?.canConfirmAck
-                    ? "bg-amber-100 text-amber-900"
-                    : "bg-slate-100 text-slate-600"
+                    ? "bg-amber-100 text-amber-950"
+                    : "bg-slate-100 text-slate-700"
                 }`}
               >
                 {selectedConv?.digitalAckEmail
@@ -1490,12 +1481,12 @@ export default function ProfessorConselhoClient({
           </div>
         </section>
 
-        {/* ETAPA 1: Matriz do Componente */}
-        {activeStep === "matrix" && (
-          <>
+        {/* BLOCO 1: Lançamento (Selos 1-5, Abaixo da média / Em atenção e Observações) */}
+        {activeStep === "launch" && (
+          <div className="space-y-3">
             <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 shadow-2xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5" aria-label="Legenda dos selos">
                   {COUNCIL_DESCRIPTORS.map((d) => (
                     <span
                       key={d.code}
@@ -1507,27 +1498,44 @@ export default function ProfessorConselhoClient({
                   ))}
                 </div>
 
-                <button
-                  type="button"
-                  disabled={isClaimedByOtherTeacher || !selectedSubject}
-                  onClick={handleFillEmptyWithAtende}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-100 hover:bg-emerald-200 disabled:opacity-50 text-emerald-900 text-xs font-bold transition cursor-pointer"
-                >
-                  <CheckCheck className="w-3.5 h-3.5" />
-                  <span>Preencher vazios: Atende</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isClaimedByOtherTeacher || !selectedSubject}
+                    onClick={handleFillEmptyWithAtende}
+                    className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-100 hover:bg-emerald-200 disabled:opacity-50 text-emerald-950 text-xs font-bold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <span>Preencher vazios: Atende</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isClaimedByOtherTeacher || pendingAlertStudentIds.length === 0}
+                    onClick={handleIncludeAllLiveAlerts}
+                    className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 disabled:opacity-50 text-amber-950 text-xs font-bold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>
+                      Incluir alertas
+                      {pendingAlertStudentIds.length > 0
+                        ? ` (${pendingAlertStudentIds.length})`
+                        : ""}
+                    </span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-100">
                 <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="search"
                     aria-label="Buscar estudante na turma"
                     placeholder="Buscar por estudante ou matrícula..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-xs text-slate-900"
+                    className="min-h-[40px] w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 bg-white text-xs text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
                   />
                 </div>
 
@@ -1535,18 +1543,19 @@ export default function ProfessorConselhoClient({
                   aria-label="Filtrar estudantes"
                   value={filterMode}
                   onChange={(e) => setFilterMode(e.target.value as PortalFilterMode)}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+                  className="min-h-[40px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
                 >
                   <option value="ALL">Todos ({council.students.length})</option>
-                  <option value="PENDING">Sem tag marcada</option>
+                  <option value="PENDING">Sem selo marcado</option>
                   <option value="BELOW_AVG">Abaixo da média no componente</option>
+                  <option value="MONITORED">Em atenção ({currentMonitoredIds.length})</option>
                 </select>
               </div>
             </section>
 
-            <section aria-label="Lista de estudantes para avaliação" className="space-y-2.5">
+            <section aria-label="Lista de estudantes para avaliação" className="space-y-2">
               {filteredStudents.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-500">
+                <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-600">
                   Nenhum estudante encontrado para o filtro selecionado.
                 </div>
               ) : (
@@ -1557,28 +1566,55 @@ export default function ProfessorConselhoClient({
                   const formattedGrade = formatCouncilGradePtBr(entry?.grade ?? null);
                   const gradeIsBelow = isBelowAverageGradeUi(entry?.grade ?? null);
                   const selectedCodes = currentDraftMap[st.studentId] || [];
+                  const isMonitored = monitoredSet.has(st.studentId);
+                  const liveAlert = liveAlertMap.get(st.studentId);
 
                   return (
                     <article
                       key={st.studentId}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3"
+                      className={`bg-white rounded-2xl border p-3 sm:px-4 sm:py-3 shadow-2xs transition ${
+                        isMonitored
+                          ? "border-sky-300 bg-sky-50/30"
+                          : "border-slate-200"
+                      }`}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div
                             aria-hidden="true"
-                            className="w-8 h-8 rounded-xl bg-sky-100 text-sky-800 font-extrabold text-xs flex items-center justify-center shrink-0"
+                            className="w-9 h-9 rounded-xl bg-sky-100 text-sky-900 font-extrabold text-xs flex items-center justify-center shrink-0"
                           >
                             {getStudentInitials(st.name)}
                           </div>
-                          <div className="min-w-0">
-                            <h2 className="text-sm font-bold text-slate-900 truncate">
-                              {st.name}
-                            </h2>
-                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <h2 className="text-sm font-bold text-slate-900 truncate">
+                                {st.name}
+                              </h2>
+                              {formattedGrade !== null && (
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[11px] font-bold ${
+                                    gradeIsBelow
+                                      ? "border-rose-300 bg-rose-50 text-rose-900"
+                                      : "border-slate-200 bg-slate-100 text-slate-800"
+                                  }`}
+                                >
+                                  {gradeIsBelow
+                                    ? `Nota ${formattedGrade} • Abaixo da média`
+                                    : `Nota ${formattedGrade}`}
+                                </span>
+                              )}
+                              {liveAlert && !isMonitored && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-amber-300 bg-amber-50 text-amber-950 text-[11px] font-bold">
+                                  Alerta sugerido
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                               {st.cgm && <span>CGM {st.cgm}</span>}
                               {st.enrollmentStatus !== "ATIVO" && (
-                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
                                   {COUNCIL_ENROLLMENT_STATUS_LABELS[
                                     st.enrollmentStatus as CouncilEnrollmentStatus
                                   ] || st.enrollmentStatus}
@@ -1588,8 +1624,8 @@ export default function ProfessorConselhoClient({
                                 <span
                                   className={`px-1.5 py-0.5 rounded font-bold ${
                                     st.attendancePercent < 75
-                                      ? "bg-rose-100 text-rose-800"
-                                      : "bg-slate-100 text-slate-700"
+                                      ? "bg-rose-100 text-rose-900"
+                                      : "bg-slate-100 text-slate-800"
                                   }`}
                                 >
                                   Freq. {st.attendancePercent.toFixed(1)}%
@@ -1599,213 +1635,56 @@ export default function ProfessorConselhoClient({
                           </div>
                         </div>
 
-                        {formattedGrade !== null && (
-                          <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-lg border text-xs font-bold self-start sm:self-auto ${
-                              gradeIsBelow
-                                ? "border-rose-300 bg-rose-50 text-rose-800"
-                                : "border-slate-200 bg-slate-100 text-slate-700"
+                        <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+                          <div
+                            role="group"
+                            aria-label={`Selos de ${st.name}`}
+                            className="flex flex-wrap items-center gap-1.5"
+                          >
+                            {COUNCIL_DESCRIPTORS.map((d) => {
+                              const selected = selectedCodes.includes(d.code);
+                              return (
+                                <button
+                                  key={d.code}
+                                  type="button"
+                                  disabled={isClaimedByOtherTeacher}
+                                  aria-pressed={selected}
+                                  aria-label={`${st.name} — ${d.shortLabel}: ${d.fullLabel}`}
+                                  title={d.fullLabel}
+                                  onClick={() => handleToggleDescriptor(st.studentId, d.code)}
+                                  className={`min-h-[40px] px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
+                                    selected
+                                      ? d.activeClass
+                                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {d.shortLabel}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isClaimedByOtherTeacher}
+                            aria-pressed={isMonitored}
+                            aria-label={`Marcar ${st.name} em atenção`}
+                            onClick={() => handleToggleMonitoredStudent(st.studentId)}
+                            className={`min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 ${
+                              isMonitored
+                                ? "border-sky-700 bg-sky-700 text-white hover:bg-sky-800"
+                                : "border-slate-300 bg-slate-50 text-slate-800 hover:bg-slate-100"
                             }`}
                           >
-                            {gradeIsBelow
-                              ? `Nota ${formattedGrade} • Abaixo da média`
-                              : `Nota ${formattedGrade}`}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {COUNCIL_DESCRIPTORS.map((d) => {
-                          const selected = selectedCodes.includes(d.code);
-                          return (
-                            <button
-                              key={d.code}
-                              type="button"
-                              disabled={isClaimedByOtherTeacher}
-                              aria-pressed={selected}
-                              aria-label={`${st.name} — ${d.shortLabel}: ${d.fullLabel}`}
-                              title={d.fullLabel}
-                              onClick={() => handleToggleDescriptor(st.studentId, d.code)}
-                              className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
-                                selected
-                                  ? d.activeClass
-                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                              }`}
-                            >
-                              {d.shortLabel}
-                            </button>
-                          );
-                        })}
+                            <Users className="w-3.5 h-3.5 shrink-0" />
+                            <span>{isMonitored ? "Em atenção" : "Atenção"}</span>
+                          </button>
+                        </div>
                       </div>
                     </article>
                   );
                 })
               )}
-            </section>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setActiveStep("pre-council")}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-900 text-xs font-bold transition cursor-pointer"
-              >
-                <span>Avançar para Pré-Conselho</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* ETAPA 2: Pré-Conselho (Alertas ao Vivo, Estudantes em Atenção e Observações) */}
-        {activeStep === "pre-council" && (
-          <div className="space-y-4">
-            {/* Sugestões automáticas calculadas da matriz atual + nota + frequência */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 shadow-2xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <h2 className="text-sm font-black text-slate-900">
-                    Estudantes sinalizados automaticamente ({liveAlerts.length})
-                  </h2>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={
-                    isClaimedByOtherTeacher || pendingAlertStudentIds.length === 0
-                  }
-                  onClick={handleIncludeAllLiveAlerts}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 disabled:opacity-50 text-amber-950 text-xs font-bold transition cursor-pointer"
-                >
-                  <CheckCheck className="w-3.5 h-3.5" />
-                  <span>
-                    Incluir todos os alertas
-                    {pendingAlertStudentIds.length > 0
-                      ? ` (${pendingAlertStudentIds.length})`
-                      : ""}
-                  </span>
-                </button>
-              </div>
-
-              {liveAlerts.length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  Nenhum estudante com alerta automático pela matriz atual, nota abaixo da média ou frequência inferior a 75%.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {liveAlerts.map((alert) => {
-                    const included = monitoredSet.has(alert.studentId);
-                    return (
-                      <div
-                        key={alert.studentId}
-                        className={`rounded-xl border p-2.5 flex items-center justify-between gap-2 ${
-                          included
-                            ? "border-sky-300 bg-sky-50/70"
-                            : "border-slate-200 bg-slate-50/60"
-                        }`}
-                      >
-                        <div className="min-w-0 space-y-1">
-                          <p className="text-xs font-bold text-slate-900 truncate">
-                            {alert.studentName}
-                          </p>
-                          <div className="flex flex-wrap gap-1">
-                            {alert.reasons.map((reason) => (
-                              <span
-                                key={reason}
-                                className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-slate-700"
-                              >
-                                {reason}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isClaimedByOtherTeacher}
-                          aria-pressed={included}
-                          onClick={() => handleToggleMonitoredStudent(alert.studentId)}
-                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer shrink-0 disabled:opacity-50 ${
-                            included
-                              ? "bg-sky-600 text-white hover:bg-sky-700"
-                              : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                          }`}
-                        >
-                          {included ? "Incluído" : "Incluir"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            {/* Seleção manual completa de estudantes em acompanhamento */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 shadow-2xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-sky-600 shrink-0" />
-                  <h2 className="text-sm font-black text-slate-900">
-                    Estudantes em atenção ({currentMonitoredIds.length})
-                  </h2>
-                </div>
-
-                <div className="relative w-full sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="search"
-                    aria-label="Filtrar estudantes para acompanhamento"
-                    placeholder="Filtrar estudante da turma..."
-                    value={monitoredSearchTerm}
-                    onChange={(e) => setMonitoredSearchTerm(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-900"
-                  />
-                </div>
-              </div>
-
-              {currentMonitoredIds.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {currentMonitoredIds.map((studentId) => {
-                    const label = studentNameMap.get(studentId) || "Estudante";
-                    return (
-                      <button
-                        key={studentId}
-                        type="button"
-                        disabled={isClaimedByOtherTeacher}
-                        onClick={() => handleToggleMonitoredStudent(studentId)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-100 hover:bg-sky-200 text-sky-900 text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
-                      >
-                        <span>{label}</span>
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              <div className="max-h-56 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
-                {filteredAllStudentsForMonitoring.map((st) => {
-                  const checked = monitoredSet.has(st.studentId);
-                  return (
-                    <label
-                      key={st.studentId}
-                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs cursor-pointer transition ${
-                        checked
-                          ? "border-sky-300 bg-sky-50 text-sky-950 font-bold"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={isClaimedByOtherTeacher}
-                        onChange={() => handleToggleMonitoredStudent(st.studentId)}
-                        className="rounded border-slate-300 text-sky-600"
-                      />
-                      <span className="truncate">{st.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
             </section>
 
             {/* Observações prévias do docente */}
@@ -1817,7 +1696,7 @@ export default function ProfessorConselhoClient({
                 >
                   Observações e encaminhamentos prévios do docente
                 </label>
-                <span className="text-[11px] font-semibold text-slate-500">
+                <span className="text-[11px] font-semibold text-slate-600">
                   {currentMonitoredNotes.length}/3000
                 </span>
               </div>
@@ -1829,33 +1708,24 @@ export default function ProfessorConselhoClient({
                 value={currentMonitoredNotes}
                 onChange={(e) => handleNotesChange(e.target.value)}
                 placeholder="Registre observações prévias sobre dificuldades, frequência, postura ou estratégias aplicadas no trimestre..."
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-900 disabled:bg-slate-50"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-900 disabled:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
               />
             </section>
 
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setActiveStep("matrix")}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Voltar à Matriz</span>
-              </button>
-
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() => setActiveStep("ack")}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-900 text-xs font-bold transition cursor-pointer"
+                className="min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-950 text-xs font-bold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
               >
-                <span>Avançar para Envio e Ciência</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>Avançar para Ciência dos Combinados</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* ETAPA 3: Envio e Ciência */}
+        {/* BLOCO 2: Ciência dos Combinados */}
         {activeStep === "ack" && (
           <div className="space-y-4">
             {/* Resumo da contribuição docente */}
@@ -2040,11 +1910,11 @@ export default function ProfessorConselhoClient({
             <div className="flex justify-start">
               <button
                 type="button"
-                onClick={() => setActiveStep("pre-council")}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition cursor-pointer"
+                onClick={() => setActiveStep("launch")}
+                className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Voltar ao Pré-Conselho</span>
+                <span>Voltar ao Lançamento</span>
               </button>
             </div>
           </div>
@@ -2053,7 +1923,7 @@ export default function ProfessorConselhoClient({
 
       {/* Barra Fixa de Envio */}
       <footer className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs font-bold text-slate-800">
@@ -2094,11 +1964,11 @@ export default function ProfessorConselhoClient({
                 council.students.length === 0
               }
               onClick={() => void handleSubmitPortal(false)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer"
+              className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
             >
               <Send className="w-3.5 h-3.5" />
               <span>
-                {submitting ? "Enviando..." : "Enviar matriz e observações"}
+                {submitting ? "Enviando..." : "Enviar lançamento"}
               </span>
             </button>
 
@@ -2114,7 +1984,7 @@ export default function ProfessorConselhoClient({
                     council.students.length === 0
                   }
                   onClick={() => void handleSubmitPortal(true)}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer"
+                  className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Confirmar ciência</span>

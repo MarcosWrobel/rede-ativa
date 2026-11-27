@@ -615,6 +615,7 @@ export default function CouncilPreCouncilTab({
         <CouncilTeacherLinkModal
           open={teacherLinkOpen}
           onClose={() => setTeacherLinkOpen(false)}
+          schoolId={board.schoolId}
           boardId={board.id}
           classNameLabel={board.classGroup.name}
           activeTrimester={activeTrimester}

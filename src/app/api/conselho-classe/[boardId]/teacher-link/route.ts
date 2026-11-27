@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/permissions";
-import { assertTenantOwnership } from "@/lib/tenantGuard";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { councilTeacherLinkCreateSchema, formatZodError } from "@/lib/schemas";
 import { createCouncilTeacherToken } from "@/lib/councilTeacherToken";
 import { generateQrCodeDataUrl, getTrustedAppOrigin } from "@/lib/qrCode";
+import { isBootstrapAdminEmail } from "@/lib/roles";
 import {
-  canMutateSchoolCouncil,
   findCouncilBoardOwnershipRecord,
   readSafeJsonBody,
-  resolveAuthorizedSchoolForCouncil,
   resolveCouncilHttpError,
+  resolveExplicitSelectedSchoolForCouncil,
 } from "@/services/classCouncilService";
 
 export const dynamic = "force-dynamic";
+
+const teacherLinkIssuerRoles = new Set(["ADMIN", "GESTOR_ESCOLAR", "PEDAGOGA"]);
 
 export async function POST(
   req: Request,
@@ -24,21 +25,62 @@ export async function POST(
     const authCheck = await requireAuth();
     if (!authCheck.ok) return authCheck.response;
 
+    const school = await resolveExplicitSelectedSchoolForCouncil(
+      authCheck.session,
+      authCheck.schoolId
+    );
+    if (!school) {
+      return NextResponse.json(
+        { error: "Selecione explicitamente uma instituição de ensino antes de emitir o link." },
+        { status: 403 }
+      );
+    }
+
     const { boardId } = await params;
     const ownership = await findCouncilBoardOwnershipRecord(boardId);
     if (!ownership) {
       return NextResponse.json({ error: "Conselho de classe não encontrado." }, { status: 404 });
     }
 
-    const school = await resolveAuthorizedSchoolForCouncil(authCheck.session, authCheck.schoolId);
-    if (!school || !assertTenantOwnership(ownership.schoolId, school.id, authCheck.session)) {
+    if (ownership.school && ownership.school.active === false) {
+      return NextResponse.json(
+        { error: "Instituição de ensino inativa para emissão de link." },
+        { status: 403 }
+      );
+    }
+
+    // Mesma verificação estrita de posse aplicada a todos os papéis, incluindo SUPERADMIN
+    if (!ownership.schoolId || ownership.schoolId !== school.id) {
       return NextResponse.json(
         { error: "Acesso negado a registro de outra instituição de ensino." },
         { status: 403 }
       );
     }
 
-    if (!canMutateSchoolCouncil(authCheck.session, ownership.schoolId)) {
+    if (ownership.classGroup && ownership.classGroup.schoolId !== ownership.schoolId) {
+      return NextResponse.json(
+        { error: "Inconsistência institucional entre conselho de classe e turma." },
+        { status: 403 }
+      );
+    }
+
+    const issuer = await prisma.user.findUnique({
+      where: { email: authCheck.email },
+      select: {
+        active: true,
+        role: true,
+        schools: {
+          where: { schoolId: school.id, active: true },
+          select: { role: true },
+        },
+      },
+    });
+    const canIssue = issuer?.active && (
+      issuer.role === "SUPERADMIN" ||
+      isBootstrapAdminEmail(authCheck.email) ||
+      teacherLinkIssuerRoles.has(issuer.schools[0]?.role ?? "")
+    );
+    if (!canIssue) {
       return NextResponse.json(
         { error: "Perfil em modo somente leitura para esta instituição escolar." },
         { status: 403 }
