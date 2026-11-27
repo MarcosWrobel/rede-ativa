@@ -7,6 +7,7 @@ import {
   verifySchoolTeacherInviteToken,
 } from "@/lib/schoolTeacherInvite";
 import { safeCompareStrings } from "@/lib/syncToken";
+import GsiReturnFallbackClient from "./GsiReturnFallbackClient";
 import VincularDocenteClient from "./VincularDocenteClient";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export const metadata = {
 };
 
 interface Props {
-  searchParams: Promise<{ t?: string; school?: string }>;
+  searchParams: Promise<{ t?: string; school?: string; gsi_redirect?: string }>;
 }
 
 function renderStatusCard(title: string, description: string) {
@@ -92,6 +93,8 @@ export default async function VincularDocentePage({ searchParams }: Props) {
     }
     resolvedSchoolId = dbSchool.id;
     resolvedSchoolName = dbSchool.name;
+  } else if (sp.gsi_redirect === "1") {
+    return <GsiReturnFallbackClient />;
   } else {
     return renderStatusCard(
       "Link incompleto",

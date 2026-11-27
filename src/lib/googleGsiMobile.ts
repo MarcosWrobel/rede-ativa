@@ -15,10 +15,15 @@ export function getSafeGsiButtonWidth(container: HTMLElement | null): number {
 
 export function prepareGsiRedirectReturnCookie(pathWithSearch: string): void {
   if (typeof document === "undefined") return;
+  try {
+    window.sessionStorage?.setItem(GSI_RETURN_COOKIE, pathWithSearch);
+  } catch {
+    // ignora restrição de sessionStorage
+  }
   const encoded = encodeURIComponent(pathWithSearch);
-  const secureFlag =
-    typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${GSI_RETURN_COOKIE}=${encoded}; Path=/; Max-Age=3600; SameSite=Lax${secureFlag}`;
+  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+  const sameSiteAndSecure = isHttps ? "SameSite=None; Secure" : "SameSite=Lax";
+  document.cookie = `${GSI_RETURN_COOKIE}=${encoded}; Path=/; Max-Age=3600; ${sameSiteAndSecure}`;
 }
 
 export function readGsiRedirectErrorFromUrl(): string | null {
