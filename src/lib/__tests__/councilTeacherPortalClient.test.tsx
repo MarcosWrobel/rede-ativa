@@ -781,8 +781,14 @@ describe("Portal Docente no Cliente — Polling, Backoff, 401, AbortController e
     expect(attentionBtnAfter.props["aria-pressed"]).toBe(true);
     expect(window.localStorage.length).toBeGreaterThan(0);
 
-    // 3. Envio pelo botão "Enviar lançamento" na barra fixa
+    // 3. Envio pelo botão "Enviar lançamento" abre o resumo de conferência antes de gravar
     (app.findButton("Enviar lançamento").props.onClick as () => void)();
+    await app.flush();
+    expect(app.getText()).toContain("Conferir lançamento antes de enviar");
+    expect(app.getText()).toContain("Ana Clara Souza");
+    expect(putPayloads).toHaveLength(0);
+
+    (app.findButton("Confirmar e enviar").props.onClick as () => void)();
     await app.flush();
     expect(putPayloads).toHaveLength(1);
     expect(putPayloads[0].confirmAck).toBe(false);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   KeyRound,
   LogOut,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import type { TeacherInviteBoardGroup } from "@/services/classCouncilService";
 import {
@@ -18,6 +19,7 @@ import {
   prepareGsiRedirectReturnCookie,
   readGsiRedirectErrorFromUrl,
 } from "@/lib/googleGsiMobile";
+import { useAutoHideHeader } from "@/lib/useAutoHideHeader";
 
 interface VincularDocenteClientProps {
   inviteToken: string | null;
@@ -48,7 +50,20 @@ export default function VincularDocenteClient({
   const [devEmail, setDevEmail] = useState("docente.teste@escola.pr.gov.br");
   const [isWebView, setIsWebView] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
+  const headerHidden = useAutoHideHeader();
+
+  const selectedGroups = useMemo(() => {
+    const selectedSet = new Set(selectedSubjectIds);
+    return boards
+      .map((board) => ({
+        boardId: board.boardId,
+        className: board.className,
+        subjects: board.subjects.filter((s) => selectedSet.has(s.id)),
+      }))
+      .filter((g) => g.subjects.length > 0);
+  }, [boards, selectedSubjectIds]);
 
   const loadCatalog = useCallback(
     async (credential: string, codeOverride?: string) => {
@@ -212,6 +227,7 @@ export default function VincularDocenteClient({
       }
       setBoards(data.boards || []);
       setSelectedSubjectIds([]);
+      setShowConfirmModal(false);
       const claimedCount = data.claimResult?.claimedIds.length ?? 0;
       const skippedCount = data.claimResult?.skippedClaimedByOtherIds.length ?? 0;
       setFeedback({
@@ -226,6 +242,7 @@ export default function VincularDocenteClient({
         type: "error",
         message: err instanceof Error ? err.message : "Falha ao vincular componentes.",
       });
+      setShowConfirmModal(false);
     } finally {
       setSaving(false);
     }
@@ -345,7 +362,11 @@ export default function VincularDocenteClient({
 
   return (
     <div className="min-h-screen bg-slate-50 pb-36 sm:pb-28 overflow-x-clip max-w-full [color-scheme:light]">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+      <header
+        className={`bg-white border-b border-slate-200 sticky top-0 z-20 transition-transform duration-200 ease-out ${
+          headerHidden ? "-translate-y-full pointer-events-none" : "translate-y-0"
+        }`}
+      >
         <div className="max-w-4xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase text-slate-500 truncate">{schoolName}</p>
@@ -463,13 +484,88 @@ export default function VincularDocenteClient({
           <button
             type="button"
             disabled={saving || selectedSubjectIds.length === 0}
-            onClick={() => void handleClaimSelected()}
+            onClick={() => setShowConfirmModal(true)}
             className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer"
           >
             {saving ? "Vinculando..." : "Vincular selecionados"}
           </button>
         </div>
       </footer>
+
+      {showConfirmModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="vincular-confirm-title"
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-3xl border border-slate-200 shadow-2xl p-5 space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <h2 id="vincular-confirm-title" className="text-base font-black text-slate-900">
+                  Conferir componentes selecionados
+                </h2>
+                <p className="text-xs text-slate-600">
+                  Conta institucional: <strong>{verifiedEmail}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                aria-label="Fechar conferência"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-2.5 pr-1">
+              {selectedGroups.map((group) => (
+                <div
+                  key={group.boardId}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-1.5"
+                >
+                  <p className="text-xs font-black text-slate-900">{group.className}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.subjects.map((subj) => (
+                      <span
+                        key={subj.id}
+                        className="inline-flex items-center px-2.5 py-1 rounded-lg bg-white border border-sky-200 text-sky-900 text-xs font-semibold"
+                      >
+                        {subj.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-[11px] text-slate-600">
+              Total selecionado: <strong>{selectedSubjectIds.length} componente(s)</strong> em{" "}
+              <strong>{selectedGroups.length} turma(s)</strong>.
+            </p>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setShowConfirmModal(false)}
+                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Voltar e ajustar
+              </button>
+              <button
+                type="button"
+                disabled={saving || selectedSubjectIds.length === 0}
+                onClick={() => void handleClaimSelected()}
+                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer"
+              >
+                {saving ? "Vinculando..." : "Confirmar vínculo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

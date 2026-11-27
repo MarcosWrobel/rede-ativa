@@ -15,6 +15,7 @@ import {
 } from "@/lib/googleGsiMobile";
 import { isSafeTeacherPortalReturnPath } from "@/app/api/conselho-classe/google-gsi-callback/route";
 import { PUBLIC_PATHS, PUBLIC_PREFIXES, SELF_AUTH_API_PREFIXES } from "@/lib/proxyConstants";
+import { computeNextHeaderHiddenState } from "@/lib/useAutoHideHeader";
 
 const realPgUrl = process.env.REAL_PG_TEST_URL?.trim() || "";
 
@@ -126,6 +127,21 @@ describe("Autovínculo Docente por Código da Escola e Auth Google Mobile", () =
     expect(PUBLIC_PREFIXES).toContain("/conselho-classe/vincular/");
     expect(SELF_AUTH_API_PREFIXES).toContain("/api/conselho-classe/teacher-invite/claim");
     expect(SELF_AUTH_API_PREFIXES).toContain("/api/conselho-classe/google-gsi-callback");
+  });
+
+  it("oculta o cabeçalho ao rolar para baixo e reexibe ao rolar para cima ou voltar ao topo", () => {
+    expect(
+      computeNextHeaderHiddenState({ currentY: 20, lastY: 0, currentlyHidden: true })
+    ).toBe(false);
+    expect(
+      computeNextHeaderHiddenState({ currentY: 80, lastY: 60, currentlyHidden: false })
+    ).toBe(true);
+    expect(
+      computeNextHeaderHiddenState({ currentY: 84, lastY: 80, currentlyHidden: true })
+    ).toBe(true);
+    expect(
+      computeNextHeaderHiddenState({ currentY: 70, lastY: 84, currentlyHidden: true })
+    ).toBe(false);
   });
 });
 

@@ -20,6 +20,7 @@ import {
   Send,
   ShieldCheck,
   Users,
+  X,
 } from "lucide-react";
 import {
   COUNCIL_DESCRIPTORS,
@@ -51,6 +52,7 @@ import {
   prepareGsiRedirectReturnCookie,
   readGsiRedirectErrorFromUrl,
 } from "@/lib/googleGsiMobile";
+import { useAutoHideHeader } from "@/lib/useAutoHideHeader";
 
 export interface TeacherPortalSubjectOption {
   id: string;
@@ -304,6 +306,8 @@ export default function ProfessorConselhoClient({
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
+  const headerHidden = useAutoHideHeader();
   const [checkingAckRelease, setCheckingAckRelease] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<{
@@ -732,6 +736,34 @@ export default function ProfessorConselhoClient({
     }, 0);
   }, [activeStudents, currentDraftMap]);
 
+  const submitReviewSummary = useMemo(() => {
+    const descriptorByCode = new Map<number, string>(
+      COUNCIL_DESCRIPTORS.map((d) => [d.code, d.shortLabel])
+    );
+    const monitoredSetLocal = new Set(currentMonitoredIds);
+    const markedStudents = activeStudents
+      .map((st) => {
+        const codes = currentDraftMap[st.studentId] || [];
+        const isMonitored = monitoredSetLocal.has(st.studentId);
+        if (codes.length === 0 && !isMonitored) return null;
+        return {
+          studentId: st.studentId,
+          name: st.name,
+          descriptorLabels: codes.map((c) => descriptorByCode.get(c) || `Selo ${c}`),
+          isMonitored,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    const unmarkedCount = Math.max(0, activeStudents.length - markedStudents.length);
+    return {
+      markedStudents,
+      unmarkedCount,
+      evaluatedCount,
+      monitoredCount: currentMonitoredIds.length,
+    };
+  }, [activeStudents, currentDraftMap, currentMonitoredIds, evaluatedCount]);
+
   const filteredStudents = useMemo(() => {
     if (!council) return [];
     const q = searchTerm.trim().toLowerCase();
@@ -978,6 +1010,7 @@ export default function ProfessorConselhoClient({
         );
       }
       setRestoredDraftInfo((prev) => (prev?.subjectId === savedSubjectId ? null : prev));
+      setShowSubmitConfirmModal(false);
 
       const refreshedDrafts = buildInitialDrafts(data.council);
       const refreshedMonitored = buildInitialMonitoredIds(data.council);
@@ -1541,8 +1574,12 @@ export default function ProfessorConselhoClient({
     : [];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-44 sm:pb-36 scroll-pb-44 sm:scroll-pb-36">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+    <div className="min-h-screen bg-slate-50 pb-44 sm:pb-36 scroll-pb-44 sm:scroll-pb-36 overflow-x-clip max-w-full [color-scheme:light]">
+      <header
+        className={`bg-white border-b border-slate-200 sticky top-0 z-20 transition-transform duration-200 ease-out ${
+          headerHidden ? "-translate-y-full pointer-events-none" : "translate-y-0"
+        }`}
+      >
         <div className="max-w-5xl mx-auto px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -2215,7 +2252,7 @@ export default function ProfessorConselhoClient({
                 !selectedSubject ||
                 council.students.length === 0
               }
-              onClick={() => void handleSubmitPortal(false)}
+              onClick={() => setShowSubmitConfirmModal(true)}
               className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
             >
               <Send className="w-3.5 h-3.5" />
@@ -2245,6 +2282,126 @@ export default function ProfessorConselhoClient({
           </div>
         </div>
       </footer>
+
+      {showSubmitConfirmModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="portal-submit-confirm-title"
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-xl bg-white rounded-t-3xl sm:rounded-3xl border border-slate-200 shadow-2xl p-5 space-y-4 max-h-[88vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <h2
+                  id="portal-submit-confirm-title"
+                  className="text-base font-black text-slate-900"
+                >
+                  Conferir lançamento antes de enviar
+                </h2>
+                <p className="text-xs text-slate-600">
+                  {council.classGroup.name} • {council.trimester}º Trimestre / {council.year} •{" "}
+                  <strong>{selectedSubject?.name || lockedSubjectName}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSubmitConfirmModal(false)}
+                aria-label="Fechar conferência"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-2">
+                <p className="text-base font-black text-sky-900">
+                  {submitReviewSummary.evaluatedCount}
+                </p>
+                <p className="text-[11px] font-bold text-sky-800">Com selos</p>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2">
+                <p className="text-base font-black text-amber-900">
+                  {submitReviewSummary.monitoredCount}
+                </p>
+                <p className="text-[11px] font-bold text-amber-800">Em atenção</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <p className="text-base font-black text-slate-900">
+                  {submitReviewSummary.unmarkedCount}
+                </p>
+                <p className="text-[11px] font-bold text-slate-600">Sem marcação</p>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto space-y-3 pr-1">
+              <div className="space-y-1.5">
+                <p className="text-xs font-black text-slate-900">
+                  Estudantes com selos ou em atenção ({submitReviewSummary.markedStudents.length})
+                </p>
+                {submitReviewSummary.markedStudents.length === 0 ? (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                    Nenhum estudante recebeu selos ou marcação de atenção até o momento.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {submitReviewSummary.markedStudents.map((item) => (
+                      <div
+                        key={item.studentId}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-900">{item.name}</span>
+                          {item.isMonitored && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-950 text-[10px] font-bold shrink-0">
+                              Em atenção
+                            </span>
+                          )}
+                        </div>
+                        {item.descriptorLabels.length > 0 && (
+                          <p className="text-[11px] text-slate-700">
+                            {item.descriptorLabels.join(" • ")}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-black text-slate-900">Observações do docente</p>
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 whitespace-pre-wrap break-words">
+                  {currentMonitoredNotes.trim() || "Nenhuma observação informada."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setShowSubmitConfirmModal(false)}
+                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Voltar e revisar
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  setShowSubmitConfirmModal(false);
+                  void handleSubmitPortal(false);
+                }}
+                className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer"
+              >
+                {submitting ? "Enviando..." : "Confirmar e enviar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
