@@ -282,8 +282,15 @@ export function parseBelowAverageJson(raw: string | null | undefined): CouncilBe
   if (!raw || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw);
-    const result = z.array(councilBelowAvgItemSchema).safeParse(parsed);
-    return result.success ? result.data : [];
+    if (!Array.isArray(parsed)) return [];
+    const validated: CouncilBelowAvgItem[] = [];
+    for (const entry of parsed) {
+      const itemResult = councilBelowAvgItemSchema.safeParse(entry);
+      if (itemResult.success) {
+        validated.push(itemResult.data);
+      }
+    }
+    return validated;
   } catch {
     return [];
   }
@@ -537,15 +544,32 @@ function filterLegacyBelowAvgSummaryJson(
   rawJson: string | null | undefined,
   validSubjectIds: Set<string>
 ): string | null {
-  if (!rawJson) return rawJson ?? null;
-  const parsed = parseBelowAverageJson(rawJson);
-  const filtered = parsed.filter(
-    (item) => !item.subjectId || validSubjectIds.has(item.subjectId)
-  );
-  if (filtered.length === parsed.length) {
-    return rawJson;
+  if (!rawJson) return null;
+
+  let rawParsed: unknown;
+  try {
+    rawParsed = JSON.parse(rawJson);
+  } catch {
+    return null;
   }
-  return filtered.length > 0 ? JSON.stringify(filtered) : null;
+
+  if (!Array.isArray(rawParsed)) {
+    return null;
+  }
+
+  const validated: CouncilBelowAvgItem[] = [];
+  for (const entry of rawParsed) {
+    const itemResult = councilBelowAvgItemSchema.safeParse(entry);
+    if (!itemResult.success) {
+      continue;
+    }
+    if (itemResult.data.subjectId && !validSubjectIds.has(itemResult.data.subjectId)) {
+      continue;
+    }
+    validated.push(itemResult.data);
+  }
+
+  return validated.length > 0 ? JSON.stringify(validated) : null;
 }
 
 export async function getCouncilBoardDetail(

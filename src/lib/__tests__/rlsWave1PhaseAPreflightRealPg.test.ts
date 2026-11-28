@@ -13130,9 +13130,16 @@ describe.skipIf(!SHOULD_RUN)(
     const legacySummaryPayload = JSON.stringify([
       { subjectId: "cc5-sub-a1-lp", subjectName: "Língua Portuguesa", grade: 5.2 },
       { subjectName: "Projeto Manual C5", grade: 4.1 },
+      { subjectName: "", grade: "invalido" },
       { subjectId: "cc5-sub-a2-otherboard", subjectName: "História Outro Quadro", grade: 3.5 },
       { subjectId: "cc5-sub-b1-foreign", subjectName: "Física Outra Escola", grade: 2.5 },
     ]);
+    const unreadableSummary = "{json-ilegivel";
+    const emptyAfterFilterSummary = JSON.stringify([
+      { subjectId: "cc5-sub-b1-foreign", subjectName: "Física Outra Escola", grade: 2.5 },
+      { wrongField: 123 },
+    ]);
+    const nonArraySummary = JSON.stringify({ notAList: true });
 
     await prisma.classGroup.createMany({
       data: [
@@ -13249,6 +13256,8 @@ describe.skipIf(!SHOULD_RUN)(
           boardId: "cc5-board-a1",
           studentId: "cc5-stu-a1-mat",
           trimester1BelowAvgJson: legacySummaryPayload,
+          trimester2BelowAvgJson: unreadableSummary,
+          trimester3BelowAvgJson: JSON.stringify([{ subjectName: "Manual T3", grade: 4.0 }]),
         },
         {
           id: "cc5-card-a1-sere",
@@ -13256,6 +13265,8 @@ describe.skipIf(!SHOULD_RUN)(
           boardId: "cc5-board-a1",
           studentId: "cc5-stu-a1-sere",
           trimester1BelowAvgJson: legacySummaryPayload,
+          trimester2BelowAvgJson: emptyAfterFilterSummary,
+          trimester3BelowAvgJson: nonArraySummary,
         },
         {
           id: "cc5-card-b1",
@@ -13332,6 +13343,15 @@ describe.skipIf(!SHOULD_RUN)(
           "Projeto Manual C5",
         ]);
       }
+      const readMatCard = getBody.board.studentCards.find(
+        (c: { id: string }) => c.id === "cc5-card-a1-mat"
+      );
+      const readSereCard = getBody.board.studentCards.find(
+        (c: { id: string }) => c.id === "cc5-card-a1-sere"
+      );
+      expect(readMatCard.trimester2BelowAvgJson).toBeNull();
+      expect(readSereCard.trimester2BelowAvgJson).toBeNull();
+      expect(readSereCard.trimester3BelowAvgJson).toBeNull();
 
       // Detalhe SSR e Impressão SSR preservam contrato sem gravar no banco
       await expect(
@@ -13533,28 +13553,101 @@ describe.skipIf(!SHOULD_RUN)(
         expect.objectContaining({ subjectId: "cc5-sub-a1-mat", grade: matT2Entries[0].grade }),
       ]);
 
-      // --- Recuperação de P2002 na criação de disciplina em nova transação withTenantContext ---
-      // Pré-cria "Artes" em cc5-board-a1 fora do snapshot antigo simulando corrida P2002 -> retry revalida e reativa
-      const createdArtes = await prisma.classCouncilSubject.create({
+      // --- Recuperação real de P2002 na criação de disciplina em nova transação withTenantContext ---
+      // Insere "Arte" (active: false) antes de iniciar tx1 para provocar P2002 real do PostgreSQL quando tx1
+      // tentar executar classCouncilSubject.create (sem deadlock de FK com o lock FOR UPDATE do board);
+      // na tentativa 2 (novo txid), a transação é reaberta, revalida escola/quadro e reativa "Arte".
+      await prisma.classCouncilSubject.create({
         data: {
           schoolId: "school-alpha",
           boardId: "cc5-board-a1",
           name: "Arte",
-          displayOrder: 3,
+          displayOrder: 99,
           active: false,
         },
       });
-      const realCreate = prisma.classCouncilSubject.create.bind(prisma.classCouncilSubject);
-      const origFindUnique = prisma.classCouncilSubject.findUnique.bind(prisma.classCouncilSubject);
-      // Simula apenas a 1ª leitura prévia retornando null e create lançando P2002 na transação 1;
-      // na transação 2 (nova withTenantContext), findUnique enxerga a linha real e revalida schoolId === "school-alpha"
-      const p2002 = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
-      const findSpy = vi
-        .spyOn(prisma.classCouncilSubject, "findUnique")
-        .mockResolvedValueOnce(null);
-      const createSpy = vi
-        .spyOn(prisma.classCouncilSubject, "create")
-        .mockRejectedValueOnce(p2002);
+
+      vi.mocked(logAudit).mockClear();
+      const origTransaction = prisma.$transaction.bind(prisma);
+      const txIds: string[] = [];
+      let createCalledOnAttempt1 = false;
+      let attempt2RevalidatedScope = false;
+
+      const txSpy = vi.spyOn(prisma, "$transaction").mockImplementation(((
+        fn: (tx: unknown) => Promise<unknown>,
+        opts?: unknown
+      ) => {
+        if (typeof fn !== "function") {
+          return origTransaction(fn as never, opts as never);
+        }
+        return origTransaction(async (tx) => {
+          const txidRows = await tx.$queryRaw<Array<{ txid: string }>>`
+            SELECT txid_current()::text AS txid
+          `;
+          txIds.push(txidRows[0].txid);
+          const currentAttempt = txIds.length;
+
+          const origSubjCreate = tx.classCouncilSubject.create.bind(tx.classCouncilSubject);
+          const origSubjFindUnique = tx.classCouncilSubject.findUnique.bind(tx.classCouncilSubject);
+          const origBoardFindUnique = tx.classCouncilBoard.findUnique.bind(tx.classCouncilBoard);
+
+          if (currentAttempt === 1) {
+            // Na 1ª tentativa, oculta apenas "Arte" do snapshot inicial de tx1 para forçar a chegada em create() e P2002 real do PG
+            vi.spyOn(tx.classCouncilBoard, "findUnique").mockImplementation((async (args: {
+              include?: unknown;
+            }) => {
+              const res = (await origBoardFindUnique(args as never)) as {
+                subjects?: Array<{ name: string }>;
+              } | null;
+              if (res && Array.isArray(res.subjects)) {
+                res.subjects = res.subjects.filter((s) => s.name !== "Arte");
+              }
+              return res;
+            }) as never);
+            vi.spyOn(tx.classCouncilSubject, "findUnique").mockImplementation((async (args: {
+              where?: { boardId_name?: { boardId: string; name: string } };
+            }) => {
+              if (
+                args?.where?.boardId_name?.boardId === "cc5-board-a1" &&
+                args?.where?.boardId_name?.name === "Arte"
+              ) {
+                return null;
+              }
+              return origSubjFindUnique(args as never);
+            }) as never);
+            vi.spyOn(tx.classCouncilSubject, "create").mockImplementation((async (args: {
+              data: { name: string };
+            }) => {
+              if (args.data.name === "Arte") {
+                createCalledOnAttempt1 = true;
+                expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+              }
+              return origSubjCreate(args as never);
+            }) as never);
+          } else if (currentAttempt === 2) {
+            vi.spyOn(tx.classCouncilBoard, "findUnique").mockImplementation((async (args: {
+              include?: unknown;
+            }) => {
+              const res = (await origBoardFindUnique(args as never)) as {
+                schoolId?: string;
+                subjects?: Array<{ name: string; schoolId?: string; boardId?: string }>;
+              } | null;
+              const arteInBoard = res?.subjects?.find((s) => s.name === "Arte");
+              if (
+                res?.schoolId === "school-alpha" &&
+                arteInBoard?.schoolId === "school-alpha" &&
+                arteInBoard?.boardId === "cc5-board-a1"
+              ) {
+                attempt2RevalidatedScope = true;
+              }
+              return res;
+            }) as never);
+          }
+
+          return fn(tx);
+        }, opts as never);
+      }) as never);
+
       try {
         const retryResult = await applyCouncilSerePdfImport({
           boardId: "cc5-board-a1",
@@ -13585,14 +13678,29 @@ describe.skipIf(!SHOULD_RUN)(
             ],
           },
         });
+        expect(createCalledOnAttempt1).toBe(true);
+        expect(txIds).toHaveLength(2);
+        expect(txIds[0]).not.toBe(txIds[1]);
+        expect(attempt2RevalidatedScope).toBe(true);
         expect(retryResult.summary.subjectsMatched).toBe(1);
-        expect(
-          (await origFindUnique({ where: { id: createdArtes.id } }))?.active
-        ).toBe(true);
+        expect(retryResult.summary.subjectsCreated).toBe(0);
+
+        const arteSubjects = await prisma.classCouncilSubject.findMany({
+          where: { boardId: "cc5-board-a1", name: "Arte" },
+        });
+        expect(arteSubjects).toHaveLength(1);
+        expect(arteSubjects[0].active).toBe(true);
+
+        const t3CardAfterRetry = await prisma.studentCouncilCard.findUniqueOrThrow({
+          where: { id: "cc5-card-a1-mat" },
+        });
+        const t3List = JSON.parse(t3CardAfterRetry.trimester3BelowAvgJson || "[]") as Array<{
+          subjectName: string;
+        }>;
+        expect(t3List.map((i) => i.subjectName)).toEqual(["Arte", "Manual T3"]);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledTimes(1);
       } finally {
-        findSpy.mockRestore();
-        createSpy.mockRestore();
-        void realCreate;
+        txSpy.mockRestore();
       }
 
       // Escola Beta permanece intacta
