@@ -102,16 +102,86 @@ export async function resolvePublicAtaByCode(
 
   return withTenantContext(prisma, minuteLocator.schoolId, async (tx) => {
     const minute = await tx.pedagogicalMinute.findUnique({
-      where: { id: minuteLocator.id },
-      include: {
+      where: {
+        id: minuteLocator.id,
+        schoolId: minuteLocator.schoolId,
+        verificationCode: cleanCode,
+      },
+      select: {
+        id: true,
+        schoolId: true,
+        verificationCode: true,
+        ataNumber: true,
+        year: true,
+        status: true,
+        category: true,
+        isConfidential: true,
+        isExtemporaneous: true,
+        extemporaneousReason: true,
+        subject: true,
+        summary: true,
+        agreementsSummary: true,
+        attendedAt: true,
+        finalizedAt: true,
+        authorName: true,
+        authorRole: true,
+        authorEmail: true,
+        contentHash: true,
+        voidedAt: true,
+        voidReason: true,
+        contentRevision: true,
+        hasPhysicalScan: true,
+        physicalSignedScanData: true,
+        physicalScanStorageKey: true,
+        govBrVerified: true,
+        govBrProtocol: true,
+        physicalScanSupersededAt: true,
+        physicalScanRevision: true,
         school: {
           select: { name: true, city: true, state: true, nre: true, inepCode: true },
         },
-        students: true,
-        participants: true,
-        actionItems: true,
+        students: {
+          select: {
+            studentId: true,
+            studentNameSnapshot: true,
+            classNameSnapshot: true,
+            cgmSnapshot: true,
+          },
+        },
+        participants: {
+          select: {
+            role: true,
+            name: true,
+            documentType: true,
+            documentNumber: true,
+            signatureMode: true,
+            signatureData: true,
+            biometricStrokeData: true,
+            biometricVerified: true,
+            verifiedEmail: true,
+            refusalReason: true,
+            signedAt: true,
+          },
+        },
+        actionItems: {
+          select: {
+            description: true,
+            responsible: true,
+            dueDate: true,
+          },
+        },
         addendums: {
           orderBy: { createdAt: "asc" },
+          select: {
+            createdAt: true,
+            authorName: true,
+            authorEmail: true,
+            content: true,
+            previousHash: true,
+            addendumHash: true,
+            participantSignerName: true,
+            participantSignatureData: true,
+          },
         },
       },
     });
@@ -169,7 +239,8 @@ export async function resolvePublicAtaByCode(
     }
 
     const addendumChain = verifyAddendumChain(minute.contentHash, minute.addendums || []);
-    const isAuthentic = minuteHashValid && addendumChain.isValid;
+    const hasEligiblePublicStatus = minute.status === "FINALIZED" || minute.status === "VOIDED";
+    const isAuthentic = hasEligiblePublicStatus && minuteHashValid && addendumChain.isValid;
     const effectivePhysicalProof = evaluateEffectivePhysicalProof(minute);
 
     return {
