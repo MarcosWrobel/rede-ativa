@@ -7,7 +7,8 @@ function resolveCliArg(prefix) {
   return arg ? arg.slice(prefix.length).trim() : '';
 }
 
-function validateAndParseSeedPayload(resolvedDataPath, targetSchool) {
+function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {}) {
+  const replaceSchoolLogs = options.replaceSchoolLogs === true;
   if (!fs.existsSync(resolvedDataPath)) {
     throw new Error(`SEED_DATA_FILE_NOT_FOUND: arquivo não encontrado (${resolvedDataPath}).`);
   }
@@ -28,29 +29,43 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool) {
     throw new Error('SEED_INVALID_JSON: raiz do arquivo deve ser um objeto JSON.');
   }
 
-  const sourceSchoolId = String(
-    data.sourceSchoolId ?? data.meta?.schoolId ?? ''
-  ).trim();
-  const sourceInepCode = String(
-    data.sourceInepCode ?? data.meta?.inepCode ?? ''
-  ).trim();
+  const rootSchoolId = typeof data.sourceSchoolId === 'string' ? data.sourceSchoolId.trim() : '';
+  const metaSchoolId = typeof data.meta?.schoolId === 'string' ? data.meta.schoolId.trim() : '';
+  const rootInepCode = typeof data.sourceInepCode === 'string' ? data.sourceInepCode.trim() : '';
+  const metaInepCode = typeof data.meta?.inepCode === 'string' ? data.meta.inepCode.trim() : '';
 
-  if (!sourceSchoolId && !sourceInepCode) {
+  if (rootSchoolId && metaSchoolId && rootSchoolId !== metaSchoolId) {
     throw new Error(
-      'SEED_UNVERIFIABLE_ORIGIN: arquivo sem metadados de origem escolar (sourceSchoolId/sourceInepCode).'
+      `SEED_CONTRADICTORY_ORIGIN: sourceSchoolId (${rootSchoolId}) contradiz meta.schoolId (${metaSchoolId}).`
     );
   }
 
-  if (sourceSchoolId && sourceSchoolId !== targetSchool.id) {
+  if (rootInepCode && metaInepCode && rootInepCode !== metaInepCode) {
     throw new Error(
-      `SEED_ORIGIN_SCHOOL_MISMATCH: origem (${sourceSchoolId}) diverge da escola de destino (${targetSchool.id}).`
+      `SEED_CONTRADICTORY_ORIGIN: sourceInepCode (${rootInepCode}) contradiz meta.inepCode (${metaInepCode}).`
     );
   }
 
-  if (sourceInepCode && sourceInepCode !== targetSchool.inepCode) {
+  if (!rootSchoolId && !metaSchoolId && !rootInepCode && !metaInepCode) {
     throw new Error(
-      `SEED_ORIGIN_INEP_MISMATCH: INEP de origem (${sourceInepCode}) diverge do destino (${targetSchool.inepCode}).`
+      'SEED_UNVERIFIABLE_ORIGIN: arquivo sem metadados de origem escolar (sourceSchoolId/sourceInepCode ou meta).'
     );
+  }
+
+  for (const candidateSchoolId of [rootSchoolId, metaSchoolId].filter(Boolean)) {
+    if (candidateSchoolId !== targetSchool.id) {
+      throw new Error(
+        `SEED_ORIGIN_SCHOOL_MISMATCH: origem (${candidateSchoolId}) diverge da escola de destino (${targetSchool.id}).`
+      );
+    }
+  }
+
+  for (const candidateInepCode of [rootInepCode, metaInepCode].filter(Boolean)) {
+    if (candidateInepCode !== targetSchool.inepCode) {
+      throw new Error(
+        `SEED_ORIGIN_INEP_MISMATCH: INEP de origem (${candidateInepCode}) diverge do destino (${targetSchool.inepCode}).`
+      );
+    }
   }
 
   const segments = ['FUNDAMENTAL', 'MEDIO', 'NOTURNO'].filter((seg) => data[seg] != null);
@@ -59,6 +74,7 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool) {
   }
 
   let totalRecords = 0;
+  let totalLogs = 0;
   for (const seg of segments) {
     const segData = data[seg];
     if (!segData || typeof segData !== 'object' || Array.isArray(segData)) {
@@ -107,11 +123,18 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool) {
         throw new Error(`SEED_INVALID_RECORD: log inválido em ${seg}.`);
       }
       totalRecords += 1;
+      totalLogs += 1;
     }
   }
 
   if (totalRecords === 0) {
     throw new Error('SEED_EMPTY_PAYLOAD: arquivo não possui registros para importar.');
+  }
+
+  if (replaceSchoolLogs && totalLogs === 0) {
+    throw new Error(
+      'SEED_REPLACE_LOGS_EMPTY: --replace-school-logs exige pelo menos um log de reposição.'
+    );
   }
 
   return { data, segments };
@@ -175,12 +198,14 @@ async function runSeed(options = {}) {
       );
     }
 
-    const { data, segments } = validateAndParseSeedPayload(resolvedDataPath, targetSchool);
-
     const replaceSchoolLogs =
       options.replaceSchoolLogs === true ||
       process.env.SEED_REPLACE_SCHOOL_LOGS === 'true' ||
       process.argv.includes('--replace-school-logs');
+
+    const { data, segments } = validateAndParseSeedPayload(resolvedDataPath, targetSchool, {
+      replaceSchoolLogs,
+    });
 
     return await prisma.$transaction(
       async (tx) => {
@@ -241,8 +266,11 @@ async function runSeed(options = {}) {
           where: { schoolId: targetSchool.id },
         });
         const studentMap = {};
+        const studentNameCounts = new Map();
         for (const s of existingStudents) {
-          studentMap[`${targetSchool.id}:${s.name}`] = s;
+          const k = `${targetSchool.id}:${s.name}`;
+          studentMap[k] = s;
+          studentNameCounts.set(k, (studentNameCounts.get(k) || 0) + 1);
         }
 
         let createdStudentsCount = 0;
@@ -266,20 +294,33 @@ async function runSeed(options = {}) {
               },
             });
             studentMap[studentKey] = created;
+            studentNameCounts.set(studentKey, (studentNameCounts.get(studentKey) || 0) + 1);
             createdStudentsCount += 1;
           }
-        }
-
-        if (replaceSchoolLogs) {
-          await tx.messageLog.deleteMany({ where: { schoolId: targetSchool.id } });
         }
 
         const logRecords = [];
         for (const seg of segments) {
           const logs = data[seg].logs || [];
           for (const l of logs) {
-            const student = studentMap[`${targetSchool.id}:${l.student_name}`];
-            if (!student) continue;
+            const studentKey = `${targetSchool.id}:${l.student_name}`;
+            const matchCount = studentNameCounts.get(studentKey) || 0;
+            const student = studentMap[studentKey];
+
+            if (replaceSchoolLogs) {
+              if (matchCount > 1) {
+                throw new Error(
+                  `SEED_LOG_STUDENT_AMBIGUOUS: estudante ambíguo na escola (${l.student_name}).`
+                );
+              }
+              if (!student) {
+                throw new Error(
+                  `SEED_LOG_STUDENT_NOT_FOUND: estudante não localizado para log de reposição (${l.student_name}).`
+                );
+              }
+            } else if (!student || matchCount > 1) {
+              continue;
+            }
 
             const tmpl =
               templateMap[`${targetSchool.id}:${seg}:${l.reason}`] ||
@@ -298,6 +339,15 @@ async function runSeed(options = {}) {
               sentAt: new Date(l.date),
             });
           }
+        }
+
+        if (replaceSchoolLogs) {
+          if (logRecords.length === 0) {
+            throw new Error(
+              'SEED_REPLACE_LOGS_EMPTY: --replace-school-logs exige pelo menos um log de reposição.'
+            );
+          }
+          await tx.messageLog.deleteMany({ where: { schoolId: targetSchool.id } });
         }
 
         const chunkSize = 500;

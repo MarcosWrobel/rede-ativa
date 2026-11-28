@@ -567,12 +567,51 @@ describe.skipIf(!SHOULD_RUN)(
       });
 
       const snapshotSeedState = async () => {
-        const [alphaLogs, betaLogs, users, userSchools] = await Promise.all([
+        const [
+          alphaLogs,
+          alphaStudents,
+          alphaTemplates,
+          betaLogs,
+          betaStudents,
+          betaTemplates,
+          users,
+          userSchools,
+        ] = await Promise.all([
           withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
-            tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, templateId: true } })
+            tx.messageLog.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, templateId: true, reasonTitle: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
+            tx.student.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, name: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
+            tx.messageTemplate.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, title: true },
+            })
           ),
           withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
-            tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, templateId: true } })
+            tx.messageLog.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, templateId: true, reasonTitle: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
+            tx.student.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, name: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
+            tx.messageTemplate.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, title: true },
+            })
           ),
           adminPrisma.user.findMany({
             where: { id: "pb-user-existing" },
@@ -583,7 +622,16 @@ describe.skipIf(!SHOULD_RUN)(
             select: { id: true, userId: true, schoolId: true, role: true, active: true },
           }),
         ]);
-        return { alphaLogs, betaLogs, users, userSchools };
+        return {
+          alphaLogs,
+          alphaStudents,
+          alphaTemplates,
+          betaLogs,
+          betaStudents,
+          betaTemplates,
+          users,
+          userSchools,
+        };
       };
 
       const stateBeforeSeed = await snapshotSeedState();
@@ -591,10 +639,16 @@ describe.skipIf(!SHOULD_RUN)(
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seed-cli-phaseb-"));
       const legacyNoOriginPath = path.join(tmpDir, "legacy-no-origin.json");
       const crossOriginPath = path.join(tmpDir, "cross-origin-beta.json");
+      const contradictoryIdPath = path.join(tmpDir, "contradictory-id.json");
+      const contradictoryInepPath = path.join(tmpDir, "contradictory-inep.json");
+      const noLogsReplacePath = path.join(tmpDir, "no-logs-replace.json");
+      const allMissingStudentsPath = path.join(tmpDir, "all-missing-students.json");
+      const mixedMissingStudentPath = path.join(tmpDir, "mixed-missing-student.json");
       const invalidJsonPath = path.join(tmpDir, "invalid.json");
       const emptyPayloadPath = path.join(tmpDir, "empty.json");
       const missingFilePath = path.join(tmpDir, "does-not-exist.json");
-      const validAlphaPath = path.join(tmpDir, "valid-alpha.json");
+      const validMetaOnlyPath = path.join(tmpDir, "valid-meta-only.json");
+      const validAlphaReplacePath = path.join(tmpDir, "valid-alpha-replace.json");
       const validAlphaAdminPath = path.join(tmpDir, "valid-alpha-admin.json");
 
       try {
@@ -622,13 +676,107 @@ describe.skipIf(!SHOULD_RUN)(
           }),
           "utf8"
         );
-        fs.writeFileSync(invalidJsonPath, "{broken json", "utf8");
-        fs.writeFileSync(emptyPayloadPath, "   ", "utf8");
+        // Contradição por ID (raiz coincide com destino phaseb-alpha, meta aponta para phaseb-beta)
         fs.writeFileSync(
-          validAlphaPath,
+          contradictoryIdPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            meta: { schoolId: "phaseb-beta", inepCode: "99150101" },
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Aluno Alpha", phone: "41999991601", turma: "6º Ano A" }],
+              logs: [{ student_name: "Aluno Alpha", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // Contradição por INEP (raiz coincide com destino 99150101, meta aponta para 99150102)
+        fs.writeFileSync(
+          contradictoryInepPath,
+          JSON.stringify({
+            sourceInepCode: "99150101",
+            meta: { schoolId: "phaseb-alpha", inepCode: "99150102" },
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Aluno Alpha", phone: "41999991601", turma: "6º Ano A" }],
+              logs: [{ student_name: "Aluno Alpha", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // Substituição com estudantes/modelos mas zero logs
+        fs.writeFileSync(
+          noLogsReplacePath,
           JSON.stringify({
             sourceSchoolId: "phaseb-alpha",
             sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [{ title: "Sem Log", prefix: "A", suffix: "B" }],
+              students: [{ name: "Aluno Sem Log", phone: "41999991700", turma: "6º Ano A" }],
+              logs: [],
+            },
+          }),
+          "utf8"
+        );
+        // Substituição com todos os estudantes dos logs ausentes
+        fs.writeFileSync(
+          allMissingStudentsPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [],
+              students: [],
+              logs: [{ student_name: "Fantasma Alpha", reason: "Falta", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // Substituição com lote misto (cria estudante novo + 1 log válido + 1 log com estudante ausente)
+        fs.writeFileSync(
+          mixedMissingStudentPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [{ title: "Modelo Parcial", prefix: "A", suffix: "B" }],
+              students: [{ name: "Aluno Lote Misto", phone: "41999991701", turma: "7º Ano Misto" }],
+              logs: [
+                { student_name: "Aluno Lote Misto", reason: "Modelo Parcial", date: "2026-11-28T12:00:00.000Z" },
+                { student_name: "Inexistente Misto", reason: "Modelo Parcial", date: "2026-11-28T12:05:00.000Z" },
+              ],
+            },
+          }),
+          "utf8"
+        );
+        fs.writeFileSync(invalidJsonPath, "{broken json", "utf8");
+        fs.writeFileSync(emptyPayloadPath, "   ", "utf8");
+        fs.writeFileSync(
+          validMetaOnlyPath,
+          JSON.stringify({
+            meta: { schoolId: "phaseb-alpha", inepCode: "99150101" },
+            FUNDAMENTAL: {
+              templates: [{ title: "Aviso Meta Coerente", prefix: "Olá ", suffix: "!" }],
+              students: [{ name: "Aluno Meta Coerente", phone: "41999991776", turma: "7º Ano Meta" }],
+              logs: [
+                {
+                  student_name: "Aluno Meta Coerente",
+                  reason: "Aviso Meta Coerente",
+                  pedagoga: "Equipe Alpha",
+                  returned: false,
+                  date: "2026-11-28T11:30:00.000Z",
+                },
+              ],
+            },
+          }),
+          "utf8"
+        );
+        fs.writeFileSync(
+          validAlphaReplacePath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            meta: { schoolId: "phaseb-alpha", inepCode: "99150101" },
             FUNDAMENTAL: {
               templates: [{ title: "Aviso Seed Alpha", prefix: "Olá ", suffix: "!" }],
               students: [
@@ -696,7 +844,12 @@ describe.skipIf(!SHOULD_RUN)(
           [[`--school-id=phaseb-alpha`, `--data-file=${emptyPayloadPath}`, "--replace-school-logs"], /SEED_DATA_FILE_EMPTY/],
           [[`--school-id=phaseb-alpha`, `--data-file=${legacyNoOriginPath}`, "--replace-school-logs"], /SEED_UNVERIFIABLE_ORIGIN/],
           [[`--school-id=phaseb-alpha`, `--data-file=${crossOriginPath}`, "--replace-school-logs"], /SEED_ORIGIN_SCHOOL_MISMATCH/],
-          [[`--school-id=phaseb-alpha`, `--inep=99150102`, `--data-file=${validAlphaPath}`, "--replace-school-logs"], /SEED_CONFLICTING_TARGET_SELECTORS/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${contradictoryIdPath}`, "--replace-school-logs"], /SEED_CONTRADICTORY_ORIGIN/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${contradictoryInepPath}`, "--replace-school-logs"], /SEED_CONTRADICTORY_ORIGIN/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${noLogsReplacePath}`, "--replace-school-logs"], /SEED_REPLACE_LOGS_EMPTY/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${allMissingStudentsPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_NOT_FOUND/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${mixedMissingStudentPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_NOT_FOUND/],
+          [[`--school-id=phaseb-alpha`, `--inep=99150102`, `--data-file=${validAlphaReplacePath}`, "--replace-school-logs"], /SEED_CONFLICTING_TARGET_SELECTORS/],
         ];
 
         for (const [args, pattern] of negativeCases) {
@@ -706,12 +859,12 @@ describe.skipIf(!SHOULD_RUN)(
           expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
         }
 
-        // Falha no meio da escrita reverte a transação e preserva histórico mesmo com replaceSchoolLogs
+        // Falha no meio da escrita após deleteMany reverte a transação e preserva histórico
         await expect(
           runSeed({
             prismaClient: runtimePrisma,
             schoolId: "phaseb-alpha",
-            dataPath: validAlphaPath,
+            dataPath: validAlphaReplacePath,
             replaceSchoolLogs: true,
             onBeforeCommitForTest: () => {
               throw new Error("FORCED_SEED_ROLLBACK");
@@ -720,21 +873,36 @@ describe.skipIf(!SHOULD_RUN)(
         ).rejects.toThrow("FORCED_SEED_ROLLBACK");
         expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
 
-        // Execução válida pelo CLI `npm run seed` como `app_runtime` sob `FORCE RLS`
-        const okRuntime = runSeedCli(runtimeDbUrl, [
+        // Execução sem substituição com origem apenas em `meta` como `app_runtime`
+        const okMetaOnly = runSeedCli(runtimeDbUrl, [
           "--school-id=phaseb-alpha",
-          `--data-file=${validAlphaPath}`,
+          `--data-file=${validMetaOnlyPath}`,
         ]);
-        expect(okRuntime.status).toBe(0);
+        expect(okMetaOnly.status).toBe(0);
+        const afterMetaOnly = await snapshotSeedState();
+        expect(afterMetaOnly.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 1);
+        expect(afterMetaOnly.betaLogs).toEqual(stateBeforeSeed.betaLogs);
 
-        const afterRuntimeSeed = await snapshotSeedState();
-        expect(afterRuntimeSeed.betaLogs).toEqual(stateBeforeSeed.betaLogs);
-        expect(afterRuntimeSeed.users).toEqual(stateBeforeSeed.users);
-        expect(afterRuntimeSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
-        expect(
-          afterRuntimeSeed.alphaLogs.some((l) => l.templateId === null)
-        ).toBe(true);
-        expect(afterRuntimeSeed.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 2);
+        // Substituição válida pelo CLI `npm run seed` como `app_runtime` sob `FORCE RLS` (inclui templateId: null)
+        const okReplaceRuntime = runSeedCli(runtimeDbUrl, [
+          "--school-id=phaseb-alpha",
+          `--data-file=${validAlphaReplacePath}`,
+          "--replace-school-logs",
+        ]);
+        expect(okReplaceRuntime.status).toBe(0);
+
+        const afterReplaceSeed = await snapshotSeedState();
+        expect(afterReplaceSeed.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+        expect(afterReplaceSeed.betaStudents).toEqual(stateBeforeSeed.betaStudents);
+        expect(afterReplaceSeed.betaTemplates).toEqual(stateBeforeSeed.betaTemplates);
+        expect(afterReplaceSeed.users).toEqual(stateBeforeSeed.users);
+        expect(afterReplaceSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
+        expect(afterReplaceSeed.alphaLogs.length).toBe(2);
+        expect(afterReplaceSeed.alphaLogs.map((l) => l.reasonTitle).sort()).toEqual([
+          "Aviso Seed Alpha",
+          "Motivo Avulso Sem Template",
+        ]);
+        expect(afterReplaceSeed.alphaLogs.some((l) => l.templateId === null)).toBe(true);
 
         // Execução válida pelo CLI `npm run seed` com credencial com escrita em `User` (sem mutar User/UserSchool!)
         const okAdmin = runSeedCli(adminDbUrl, [
@@ -746,9 +914,11 @@ describe.skipIf(!SHOULD_RUN)(
 
         const afterAdminSeed = await snapshotSeedState();
         expect(afterAdminSeed.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+        expect(afterAdminSeed.betaStudents).toEqual(stateBeforeSeed.betaStudents);
+        expect(afterAdminSeed.betaTemplates).toEqual(stateBeforeSeed.betaTemplates);
         expect(afterAdminSeed.users).toEqual(stateBeforeSeed.users);
         expect(afterAdminSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
-        expect(afterAdminSeed.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 3);
+        expect(afterAdminSeed.alphaLogs.length).toBe(3);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
