@@ -351,3 +351,34 @@ export async function reconcileMessageLogSchoolId(
   `;
   return { updatedCount: Number(updatedCount) };
 }
+
+/**
+ * Materializa modelos globais legados (`MessageTemplate.schoolId IS NULL`) para a
+ * Escola Piloto Fundadora (INEP `41042730` ou id `default-leopoldina`) antes da Fase B,
+ * preservando o `templateId` histórico nos logs. Modelos globais referenciados por outras
+ * escolas NÃO são auto-corrigidos e permanecem visíveis ao pré-flight para correção explícita.
+ */
+export async function materializePilotGlobalTemplatesForPhaseB(
+  prismaClient: Pick<PrismaClient, "$executeRaw">
+): Promise<{ materializedCount: number }> {
+  const materializedCount = await prismaClient.$executeRaw`
+    UPDATE "MessageTemplate" tpl
+    SET "schoolId" = pilot."id"
+    FROM (
+      SELECT "id"
+      FROM "School"
+      WHERE "inepCode" = '41042730' OR "id" = 'default-leopoldina'
+      ORDER BY CASE WHEN "inepCode" = '41042730' THEN 0 ELSE 1 END
+      LIMIT 1
+    ) AS pilot
+    WHERE tpl."schoolId" IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "MessageLog" ml
+        LEFT JOIN "Student" st ON st."id" = ml."studentId"
+        WHERE ml."templateId" = tpl."id"
+          AND COALESCE(ml."schoolId", st."schoolId") IS DISTINCT FROM pilot."id"
+      )
+  `;
+  return { materializedCount: Number(materializedCount) };
+}

@@ -172,6 +172,7 @@ async function main() {
       const tmpl = templateMap[`${seg}_${l.reason}`] || templateMap[l.reason];
 
       logRecords.push({
+        schoolId: student.schoolId,
         studentId: student.id,
         templateId: tmpl ? tmpl.id : null,
         reasonTitle: l.reason,
