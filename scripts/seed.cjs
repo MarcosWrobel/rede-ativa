@@ -7,10 +7,121 @@ function resolveCliArg(prefix) {
   return arg ? arg.slice(prefix.length).trim() : '';
 }
 
+function validateAndParseSeedPayload(resolvedDataPath, targetSchool) {
+  if (!fs.existsSync(resolvedDataPath)) {
+    throw new Error(`SEED_DATA_FILE_NOT_FOUND: arquivo não encontrado (${resolvedDataPath}).`);
+  }
+
+  const rawData = fs.readFileSync(resolvedDataPath, 'utf-8');
+  if (!rawData || !rawData.trim()) {
+    throw new Error('SEED_DATA_FILE_EMPTY: arquivo de entrada vazio.');
+  }
+
+  let data;
+  try {
+    data = JSON.parse(rawData);
+  } catch {
+    throw new Error('SEED_INVALID_JSON: arquivo de entrada não contém JSON válido.');
+  }
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('SEED_INVALID_JSON: raiz do arquivo deve ser um objeto JSON.');
+  }
+
+  const sourceSchoolId = String(
+    data.sourceSchoolId ?? data.meta?.schoolId ?? ''
+  ).trim();
+  const sourceInepCode = String(
+    data.sourceInepCode ?? data.meta?.inepCode ?? ''
+  ).trim();
+
+  if (!sourceSchoolId && !sourceInepCode) {
+    throw new Error(
+      'SEED_UNVERIFIABLE_ORIGIN: arquivo sem metadados de origem escolar (sourceSchoolId/sourceInepCode).'
+    );
+  }
+
+  if (sourceSchoolId && sourceSchoolId !== targetSchool.id) {
+    throw new Error(
+      `SEED_ORIGIN_SCHOOL_MISMATCH: origem (${sourceSchoolId}) diverge da escola de destino (${targetSchool.id}).`
+    );
+  }
+
+  if (sourceInepCode && sourceInepCode !== targetSchool.inepCode) {
+    throw new Error(
+      `SEED_ORIGIN_INEP_MISMATCH: INEP de origem (${sourceInepCode}) diverge do destino (${targetSchool.inepCode}).`
+    );
+  }
+
+  const segments = ['FUNDAMENTAL', 'MEDIO', 'NOTURNO'].filter((seg) => data[seg] != null);
+  if (segments.length === 0) {
+    throw new Error('SEED_EMPTY_PAYLOAD: nenhum segmento válido (FUNDAMENTAL/MEDIO/NOTURNO) informado.');
+  }
+
+  let totalRecords = 0;
+  for (const seg of segments) {
+    const segData = data[seg];
+    if (!segData || typeof segData !== 'object' || Array.isArray(segData)) {
+      throw new Error(`SEED_INVALID_SEGMENT: segmento ${seg} inválido.`);
+    }
+
+    const templates = segData.templates ?? [];
+    const students = segData.students ?? [];
+    const logs = segData.logs ?? [];
+    if (!Array.isArray(templates) || !Array.isArray(students) || !Array.isArray(logs)) {
+      throw new Error(`SEED_INVALID_SEGMENT: templates/students/logs de ${seg} devem ser arrays.`);
+    }
+
+    for (const t of templates) {
+      if (!t || typeof t.title !== 'string' || !t.title.trim()) {
+        throw new Error(`SEED_INVALID_RECORD: template inválido em ${seg}.`);
+      }
+      totalRecords += 1;
+    }
+
+    for (const s of students) {
+      if (
+        !s ||
+        typeof s.name !== 'string' ||
+        !s.name.trim() ||
+        typeof s.phone !== 'string' ||
+        !s.phone.trim() ||
+        typeof s.turma !== 'string' ||
+        !s.turma.trim()
+      ) {
+        throw new Error(`SEED_INVALID_RECORD: estudante inválido em ${seg}.`);
+      }
+      totalRecords += 1;
+    }
+
+    for (const l of logs) {
+      if (
+        !l ||
+        typeof l.student_name !== 'string' ||
+        !l.student_name.trim() ||
+        typeof l.reason !== 'string' ||
+        !l.reason.trim() ||
+        !l.date ||
+        Number.isNaN(new Date(l.date).getTime())
+      ) {
+        throw new Error(`SEED_INVALID_RECORD: log inválido em ${seg}.`);
+      }
+      totalRecords += 1;
+    }
+  }
+
+  if (totalRecords === 0) {
+    throw new Error('SEED_EMPTY_PAYLOAD: arquivo não possui registros para importar.');
+  }
+
+  return { data, segments };
+}
+
 /**
- * Executa o seed com escopo escolar estrito e `withTenantContext` (`set_config`)
- * para compatibilidade com a Fase B da Onda 1 sob `FORCE ROW LEVEL SECURITY`.
- * Exige escola explícita (`schoolId` ou `inepCode`) e nunca executa exclusões globais.
+ * Executa o seed escolar estritamente validado e com escopo de tenant (`set_config`).
+ * - Exige escola explícita (`schoolId` / `inepCode`) sem seletores conflitantes.
+ * - Exige arquivo explícito (`--data-file=` / `SEED_DATA_FILE` / `options.dataPath`) com origem verificável.
+ * - Nunca muta `User`, `User.role`, `User.active` ou vínculos `UserSchool`, independentemente dos privilégios da credencial.
  */
 async function runSeed(options = {}) {
   const ownPrisma = !options.prismaClient;
@@ -26,34 +137,36 @@ async function runSeed(options = {}) {
 
     if (!schoolId && !inepCode) {
       throw new Error(
-        'SEED_EXPLICIT_SCHOOL_REQUIRED: informe schoolId ou inepCode explícito (SEED_SCHOOL_ID / SEED_SCHOOL_INEP) antes de executar o seed.'
+        'SEED_EXPLICIT_SCHOOL_REQUIRED: informe schoolId ou inepCode explícito (SEED_SCHOOL_ID / SEED_SCHOOL_INEP / --school-id= / --inep=).'
       );
     }
 
-    const bootstrapPilot =
-      options.bootstrapPilotIfMissing === true || process.env.SEED_BOOTSTRAP_PILOT === 'true';
+    const rawDataPath = String(
+      options.dataPath || process.env.SEED_DATA_FILE || resolveCliArg('--data-file=') || ''
+    ).trim();
+    if (!rawDataPath) {
+      throw new Error(
+        'SEED_EXPLICIT_DATA_FILE_REQUIRED: informe o arquivo explícito (--data-file=... ou SEED_DATA_FILE).'
+      );
+    }
+    const resolvedDataPath = path.resolve(rawDataPath);
 
     let targetSchool = null;
-    if (schoolId) {
+    if (schoolId && inepCode) {
+      const [byId, byInep] = await Promise.all([
+        prisma.school.findUnique({ where: { id: schoolId } }),
+        prisma.school.findUnique({ where: { inepCode } }),
+      ]);
+      if (!byId || !byInep || byId.id !== byInep.id) {
+        throw new Error(
+          `SEED_CONFLICTING_TARGET_SELECTORS: schoolId (${schoolId}) e inepCode (${inepCode}) são conflitantes ou inexistentes.`
+        );
+      }
+      targetSchool = byId;
+    } else if (schoolId) {
       targetSchool = await prisma.school.findUnique({ where: { id: schoolId } });
-    } else if (inepCode) {
+    } else {
       targetSchool = await prisma.school.findUnique({ where: { inepCode } });
-    }
-
-    if (!targetSchool && bootstrapPilot && inepCode === '41042730') {
-      targetSchool = await prisma.school.upsert({
-        where: { inepCode: '41042730' },
-        update: {},
-        create: {
-          inepCode: '41042730',
-          name: 'Colégio Estadual Leopoldina B. Pedroso',
-          city: 'Ponta Grossa',
-          state: 'PR',
-          nre: 'Ponta Grossa',
-          active: true,
-          logoUrl: '/logo.svg',
-        },
-      });
     }
 
     if (!targetSchool || targetSchool.active === false) {
@@ -62,79 +175,17 @@ async function runSeed(options = {}) {
       );
     }
 
-    const privRows = await prisma.$queryRaw`
-      SELECT
-        has_table_privilege(current_user, 'public."User"', 'INSERT, UPDATE') AS can_write_user,
-        has_table_privilege(current_user, 'public."LowAttendanceRecord"', 'INSERT, UPDATE') AS can_write_low_att,
-        has_table_privilege(current_user, 'public."AuditLog"', 'INSERT') AS can_write_audit
-    `;
-    const privs = privRows[0] || {};
-
-    const userMap = {};
-    if (privs.can_write_user) {
-      const usersToCreate = [
-        { name: 'MARCOS ADRIANO WROBEL', email: 'marcos.wrobel@escola.pr.gov.br', role: 'ADMIN', schoolId: targetSchool.id },
-        { name: 'ADRIANA DE ALMEIDA BUENO', email: 'bueno.adriana@escola.pr.gov.br', role: 'ADMIN', schoolId: targetSchool.id },
-        { name: 'ANDREIA DE LOURDES BUENO CARNEIRO', email: 'andreia.carneiro@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: targetSchool.id },
-        { name: 'ANA CECILIA GAMPER SINHORI', email: 'ana.gamper@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: targetSchool.id },
-        { name: 'Jaqueline Lopes', email: 'jaqueline.lopes@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: targetSchool.id },
-        { name: 'Nathaly Cristina Ribeiro da Rosa', email: 'nathaly.ribeiro.rosa@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: targetSchool.id },
-        { name: 'NATIELE PACHECO DOS SANTOS', email: 'natiele.pacheco.santos@escola.pr.gov.br', role: 'PEDAGOGA', schoolId: targetSchool.id },
-      ];
-
-      for (const u of usersToCreate) {
-        const user = await prisma.user.upsert({
-          where: { email: u.email },
-          update: { name: u.name, role: u.role },
-          create: u,
-        });
-        userMap[u.name.toLowerCase()] = user;
-        userMap[u.email] = user;
-      }
-
-      userMap['andreia'] = userMap['andreia.carneiro@escola.pr.gov.br'];
-      userMap['ana cecília'] = userMap['ana.gamper@escola.pr.gov.br'];
-      userMap['ana cecilia'] = userMap['ana.gamper@escola.pr.gov.br'];
-      userMap['nathaly r.'] = userMap['nathaly.ribeiro.rosa@escola.pr.gov.br'];
-      userMap['nathaly'] = userMap['nathaly.ribeiro.rosa@escola.pr.gov.br'];
-      userMap['natiele'] = userMap['natiele.pacheco.santos@escola.pr.gov.br'];
-    }
-
-    const dataPath = options.dataPath || path.join(__dirname, 'extracted_data.json');
-    if (!fs.existsSync(dataPath)) {
-      return {
-        schoolId: targetSchool.id,
-        earlyExit: true,
-        classGroupsCount: 0,
-        templatesCount: 0,
-        studentsCount: 0,
-        logsCount: 0,
-        lowAttendanceCount: 0,
-      };
-    }
-
-    const rawData = fs.readFileSync(dataPath, 'utf-8');
-    const data = JSON.parse(rawData);
-
-    function getUserId(pedagogaName) {
-      if (!pedagogaName || Object.keys(userMap).length === 0) return null;
-      const lower = pedagogaName.toLowerCase();
-      for (const key of Object.keys(userMap)) {
-        if (lower.includes(key) || key.includes(lower)) {
-          return userMap[key].id;
-        }
-      }
-      return userMap['marcos.wrobel@escola.pr.gov.br']?.id || null;
-    }
+    const { data, segments } = validateAndParseSeedPayload(resolvedDataPath, targetSchool);
 
     const replaceSchoolLogs =
-      options.replaceSchoolLogs === true || process.env.SEED_REPLACE_SCHOOL_LOGS === 'true';
+      options.replaceSchoolLogs === true ||
+      process.env.SEED_REPLACE_SCHOOL_LOGS === 'true' ||
+      process.argv.includes('--replace-school-logs');
 
     return await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_school_id', ${targetSchool.id}, true)`;
 
-        const segments = ['FUNDAMENTAL', 'MEDIO', 'NOTURNO'].filter((seg) => Boolean(data[seg]));
         const classGroupMap = {};
         const absenceKeywords = ['FALTOU', 'FALTAS', 'GAZEOU', 'ATRASO', 'ATRASOS'];
 
@@ -143,7 +194,6 @@ async function runSeed(options = {}) {
           const shift = seg === 'NOTURNO' ? 'NOITE' : seg === 'MEDIO' ? 'MANHA' : 'TARDE';
 
           for (const s of students) {
-            if (!s.turma) continue;
             const key = `${targetSchool.id}:${seg}:${s.turma}`;
             if (!classGroupMap[key]) {
               const cg = await tx.classGroup.upsert({
@@ -175,8 +225,8 @@ async function runSeed(options = {}) {
                     schoolId: targetSchool.id,
                     title: t.title,
                     segment: seg,
-                    prefixText: t.prefix,
-                    suffixText: t.suffix,
+                    prefixText: t.prefix || '',
+                    suffixText: t.suffix || '',
                     isAbsenceRelated: isAbsence,
                   },
                 }));
@@ -231,7 +281,6 @@ async function runSeed(options = {}) {
             const student = studentMap[`${targetSchool.id}:${l.student_name}`];
             if (!student) continue;
 
-            const userId = getUserId(l.pedagoga);
             const tmpl =
               templateMap[`${targetSchool.id}:${seg}:${l.reason}`] ||
               templateMap[`${targetSchool.id}:${l.reason}`];
@@ -243,8 +292,8 @@ async function runSeed(options = {}) {
               reasonTitle: l.reason,
               messageContent: `Registro histórico importado de ${seg}: ${l.reason}`,
               phoneUsed: student.phone,
-              sentByUserId: userId,
-              sentByName: l.pedagoga,
+              sentByUserId: null,
+              sentByName: l.pedagoga || 'Seed Institucional',
               guardianReplied: Boolean(l.returned),
               sentAt: new Date(l.date),
             });
@@ -257,61 +306,16 @@ async function runSeed(options = {}) {
           await tx.messageLog.createMany({ data: chunk });
         }
 
-        let lowAttCount = 0;
-        if (privs.can_write_low_att) {
-          for (const seg of segments) {
-            const records = data[seg].low_attendance || [];
-            for (const r of records) {
-              const student = studentMap[`${targetSchool.id}:${r.student_name}`];
-              if (!student) continue;
-
-              await tx.lowAttendanceRecord.upsert({
-                where: { studentId: student.id },
-                update: {
-                  attendancePercent: r.attendance_percent,
-                  enrollmentDetail: r.enrollment_detail,
-                  actionsTaken: r.actions_taken,
-                },
-                create: {
-                  studentId: student.id,
-                  attendancePercent: r.attendance_percent,
-                  enrollmentDetail: r.enrollment_detail,
-                  actionsTaken: r.actions_taken,
-                },
-              });
-              lowAttCount += 1;
-            }
-          }
-        }
-
-        if (privs.can_write_audit && userMap['marcos.wrobel@escola.pr.gov.br']) {
-          const admin = userMap['marcos.wrobel@escola.pr.gov.br'];
-          await tx.auditLog.create({
-            data: {
-              schoolId: targetSchool.id,
-              userId: admin.id,
-              userEmail: admin.email,
-              userName: admin.name,
-              action: 'INITIAL_DATABASE_MIGRATION',
-              entityType: 'System',
-              details: JSON.stringify({
-                schoolId: targetSchool.id,
-                studentsImported: createdStudentsCount,
-                logsImported: logRecords.length,
-                lowAttendanceImported: lowAttCount,
-              }),
-            },
-          });
+        if (typeof options.onBeforeCommitForTest === 'function') {
+          await options.onBeforeCommitForTest(tx);
         }
 
         return {
           schoolId: targetSchool.id,
-          earlyExit: false,
           classGroupsCount: Object.keys(classGroupMap).length,
           templatesCount,
           studentsCount: createdStudentsCount,
           logsCount: logRecords.length,
-          lowAttendanceCount: lowAttCount,
         };
       },
       { maxWait: 10000, timeout: 60000 }
@@ -331,7 +335,7 @@ if (require.main === module) {
       console.log('--- Seed concluído com escopo escolar ---', JSON.stringify(summary));
     })
     .catch((e) => {
-      console.error(e);
+      console.error(e?.message || e);
       process.exit(1);
     });
 }

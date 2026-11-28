@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -24,15 +25,13 @@ const { runSeed } = require("../../../scripts/seed.cjs") as {
     inepCode?: string;
     dataPath?: string;
     replaceSchoolLogs?: boolean;
-    bootstrapPilotIfMissing?: boolean;
+    onBeforeCommitForTest?: (tx: unknown) => Promise<void> | void;
   }) => Promise<{
     schoolId: string;
-    earlyExit: boolean;
     classGroupsCount: number;
     templatesCount: number;
     studentsCount: number;
     logsCount: number;
-    lowAttendanceCount: number;
   }>;
 };
 
@@ -156,19 +155,22 @@ describe.skipIf(!SHOULD_RUN)(
     let adminPrisma: PrismaClient;
     let migratorPrisma: PrismaClient;
     let runtimePrisma: PrismaClient;
+    let adminDbUrl: string;
+    let runtimeDbUrl: string;
 
     beforeAll(async () => {
-      const adminUrl = assertSafeLocalPhaseBDbUrl(
+      adminDbUrl = assertSafeLocalPhaseBDbUrl(
         process.env.RLS_WAVE1_PHASE_B_ADMIN_URL,
         "RLS_WAVE1_PHASE_B_ADMIN_URL"
       );
-      adminPrisma = new PrismaClient({ datasources: { db: { url: adminUrl } } });
+      adminPrisma = new PrismaClient({ datasources: { db: { url: adminDbUrl } } });
       await adminPrisma.$connect();
 
       const { migratorUrl, runtimeUrl } = await provisionLabRolesWithEphemeralPasswords(
         adminPrisma,
-        adminUrl
+        adminDbUrl
       );
+      runtimeDbUrl = runtimeUrl;
 
       migratorPrisma = new PrismaClient({ datasources: { db: { url: migratorUrl } } });
       runtimePrisma = new PrismaClient({ datasources: { db: { url: runtimeUrl } } });
@@ -528,65 +530,228 @@ describe.skipIf(!SHOULD_RUN)(
         ).rejects.toThrow(/23503|foreign key/i);
       });
 
-      // 9. Ponto de entrada real de scripts/seed.cjs com app_runtime sob FORCE RLS e preservação da segunda escola
-      await expect(runSeed({ prismaClient: runtimePrisma })).rejects.toThrow(
-        /SEED_EXPLICIT_SCHOOL_REQUIRED/
-      );
-
-      const betaLogsBeforeSeed = await withTenantContext(runtimePrisma, "phaseb-beta", async (tx) =>
-        tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, reasonTitle: true } })
-      );
-      expect(betaLogsBeforeSeed).toEqual([
-        { id: "pb-log-beta", schoolId: "phaseb-beta", reasonTitle: "Beta" },
-      ]);
-
-      const tmpSeedJson = path.join(os.tmpdir(), `seed-phaseb-${Date.now()}.json`);
-      fs.writeFileSync(
-        tmpSeedJson,
-        JSON.stringify({
-          FUNDAMENTAL: {
-            templates: [{ title: "Aviso Seed Alpha", prefix: "Olá ", suffix: "!" }],
-            students: [
-              {
-                name: "Aluno Seed Alpha",
-                guardian: "Resp Seed",
-                phone: "41999991777",
-                turma: "7º Ano Seed",
-              },
-            ],
-            logs: [
-              {
-                student_name: "Aluno Seed Alpha",
-                reason: "Aviso Seed Alpha",
-                pedagoga: "Equipe Alpha",
-                returned: false,
-                date: "2026-11-28T12:00:00.000Z",
-              },
-            ],
-            low_attendance: [],
+      // 9. Comando público `npm run seed` (CLI) e `runSeed`: validação de origem, sem mutação de User e rollback
+      const runSeedCli = (dbUrl: string, args: string[]) =>
+        spawnSync("npm", ["run", "seed", "--", ...args], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          env: {
+            NODE_ENV: process.env.NODE_ENV || "test",
+            PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+            HOME: process.env.HOME || os.tmpdir(),
+            DATABASE_URL: dbUrl,
+            DIRECT_URL: dbUrl,
           },
-        }),
-        "utf8"
-      );
+        });
+
+      await adminPrisma.userSchool.deleteMany({ where: { userId: "pb-user-existing" } });
+      await adminPrisma.user.deleteMany({ where: { id: "pb-user-existing" } });
+      await adminPrisma.user.create({
+        data: {
+          id: "pb-user-existing",
+          email: "marcos.wrobel@escola.pr.gov.br",
+          name: "MARCOS TESTE EXISTENTE",
+          role: "PEDAGOGA",
+          active: true,
+          schoolId: "phaseb-beta",
+        },
+      });
+      await adminPrisma.userSchool.create({
+        data: {
+          id: "pb-us-existing",
+          userId: "pb-user-existing",
+          schoolId: "phaseb-beta",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+
+      const snapshotSeedState = async () => {
+        const [alphaLogs, betaLogs, users, userSchools] = await Promise.all([
+          withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
+            tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, templateId: true } })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
+            tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, templateId: true } })
+          ),
+          adminPrisma.user.findMany({
+            where: { id: "pb-user-existing" },
+            select: { id: true, email: true, role: true, active: true, schoolId: true },
+          }),
+          adminPrisma.userSchool.findMany({
+            where: { userId: "pb-user-existing" },
+            select: { id: true, userId: true, schoolId: true, role: true, active: true },
+          }),
+        ]);
+        return { alphaLogs, betaLogs, users, userSchools };
+      };
+
+      const stateBeforeSeed = await snapshotSeedState();
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seed-cli-phaseb-"));
+      const legacyNoOriginPath = path.join(tmpDir, "legacy-no-origin.json");
+      const crossOriginPath = path.join(tmpDir, "cross-origin-beta.json");
+      const invalidJsonPath = path.join(tmpDir, "invalid.json");
+      const emptyPayloadPath = path.join(tmpDir, "empty.json");
+      const missingFilePath = path.join(tmpDir, "does-not-exist.json");
+      const validAlphaPath = path.join(tmpDir, "valid-alpha.json");
+      const validAlphaAdminPath = path.join(tmpDir, "valid-alpha-admin.json");
 
       try {
-        const seedSummary = await runSeed({
-          prismaClient: runtimePrisma,
-          schoolId: "phaseb-alpha",
-          dataPath: tmpSeedJson,
-          replaceSchoolLogs: true,
-        });
-        expect(seedSummary.schoolId).toBe("phaseb-alpha");
-        expect(seedSummary.studentsCount).toBe(1);
-        expect(seedSummary.logsCount).toBe(1);
-      } finally {
-        fs.rmSync(tmpSeedJson, { force: true });
-      }
+        fs.writeFileSync(
+          legacyNoOriginPath,
+          JSON.stringify({
+            FUNDAMENTAL: {
+              templates: [{ title: "Legado", prefix: "A", suffix: "B" }],
+              students: [{ name: "Legado", phone: "41999990001", turma: "6º Ano A" }],
+              logs: [{ student_name: "Legado", reason: "Legado", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        fs.writeFileSync(
+          crossOriginPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-beta",
+            sourceInepCode: "99150102",
+            FUNDAMENTAL: {
+              templates: [{ title: "Cruzado", prefix: "A", suffix: "B" }],
+              students: [{ name: "Cruzado", phone: "41999990002", turma: "6º Ano A" }],
+              logs: [{ student_name: "Cruzado", reason: "Cruzado", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        fs.writeFileSync(invalidJsonPath, "{broken json", "utf8");
+        fs.writeFileSync(emptyPayloadPath, "   ", "utf8");
+        fs.writeFileSync(
+          validAlphaPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [{ title: "Aviso Seed Alpha", prefix: "Olá ", suffix: "!" }],
+              students: [
+                {
+                  name: "Aluno Seed Alpha",
+                  guardian: "Resp Seed",
+                  phone: "41999991777",
+                  turma: "7º Ano Seed",
+                },
+              ],
+              logs: [
+                {
+                  student_name: "Aluno Seed Alpha",
+                  reason: "Aviso Seed Alpha",
+                  pedagoga: "Equipe Alpha",
+                  returned: false,
+                  date: "2026-11-28T12:00:00.000Z",
+                },
+                {
+                  student_name: "Aluno Seed Alpha",
+                  reason: "Motivo Avulso Sem Template",
+                  pedagoga: "Equipe Alpha",
+                  returned: true,
+                  date: "2026-11-28T12:05:00.000Z",
+                },
+              ],
+            },
+          }),
+          "utf8"
+        );
+        fs.writeFileSync(
+          validAlphaAdminPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            MEDIO: {
+              templates: [],
+              students: [
+                {
+                  name: "Aluno Seed Admin",
+                  guardian: "Resp Admin",
+                  phone: "41999991888",
+                  turma: "1º Ano Seed",
+                },
+              ],
+              logs: [
+                {
+                  student_name: "Aluno Seed Admin",
+                  reason: "Aviso Avulso Admin",
+                  pedagoga: "Equipe Admin",
+                  returned: false,
+                  date: "2026-11-28T13:00:00.000Z",
+                },
+              ],
+            },
+          }),
+          "utf8"
+        );
 
-      const betaLogsAfterSeed = await withTenantContext(runtimePrisma, "phaseb-beta", async (tx) =>
-        tx.messageLog.findMany({ orderBy: { id: "asc" }, select: { id: true, schoolId: true, reasonTitle: true } })
-      );
-      expect(betaLogsAfterSeed).toEqual(betaLogsBeforeSeed);
+        // Todos os cenários negativos pelo CLI `npm run seed` com `--replace-school-logs`
+        const negativeCases: Array<[string[], RegExp]> = [
+          [["--school-id=phaseb-alpha", "--replace-school-logs"], /SEED_EXPLICIT_DATA_FILE_REQUIRED/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${missingFilePath}`, "--replace-school-logs"], /SEED_DATA_FILE_NOT_FOUND/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${invalidJsonPath}`, "--replace-school-logs"], /SEED_INVALID_JSON/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${emptyPayloadPath}`, "--replace-school-logs"], /SEED_DATA_FILE_EMPTY/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${legacyNoOriginPath}`, "--replace-school-logs"], /SEED_UNVERIFIABLE_ORIGIN/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${crossOriginPath}`, "--replace-school-logs"], /SEED_ORIGIN_SCHOOL_MISMATCH/],
+          [[`--school-id=phaseb-alpha`, `--inep=99150102`, `--data-file=${validAlphaPath}`, "--replace-school-logs"], /SEED_CONFLICTING_TARGET_SELECTORS/],
+        ];
+
+        for (const [args, pattern] of negativeCases) {
+          const res = runSeedCli(runtimeDbUrl, args);
+          expect(res.status).not.toBe(0);
+          expect(`${res.stdout}\n${res.stderr}`).toMatch(pattern);
+          expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
+        }
+
+        // Falha no meio da escrita reverte a transação e preserva histórico mesmo com replaceSchoolLogs
+        await expect(
+          runSeed({
+            prismaClient: runtimePrisma,
+            schoolId: "phaseb-alpha",
+            dataPath: validAlphaPath,
+            replaceSchoolLogs: true,
+            onBeforeCommitForTest: () => {
+              throw new Error("FORCED_SEED_ROLLBACK");
+            },
+          })
+        ).rejects.toThrow("FORCED_SEED_ROLLBACK");
+        expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
+
+        // Execução válida pelo CLI `npm run seed` como `app_runtime` sob `FORCE RLS`
+        const okRuntime = runSeedCli(runtimeDbUrl, [
+          "--school-id=phaseb-alpha",
+          `--data-file=${validAlphaPath}`,
+        ]);
+        expect(okRuntime.status).toBe(0);
+
+        const afterRuntimeSeed = await snapshotSeedState();
+        expect(afterRuntimeSeed.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+        expect(afterRuntimeSeed.users).toEqual(stateBeforeSeed.users);
+        expect(afterRuntimeSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
+        expect(
+          afterRuntimeSeed.alphaLogs.some((l) => l.templateId === null)
+        ).toBe(true);
+        expect(afterRuntimeSeed.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 2);
+
+        // Execução válida pelo CLI `npm run seed` com credencial com escrita em `User` (sem mutar User/UserSchool!)
+        const okAdmin = runSeedCli(adminDbUrl, [
+          "--school-id=phaseb-alpha",
+          "--inep=99150101",
+          `--data-file=${validAlphaAdminPath}`,
+        ]);
+        expect(okAdmin.status).toBe(0);
+
+        const afterAdminSeed = await snapshotSeedState();
+        expect(afterAdminSeed.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+        expect(afterAdminSeed.users).toEqual(stateBeforeSeed.users);
+        expect(afterAdminSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
+        expect(afterAdminSeed.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 3);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
 
       // 10. Limpeza de app.current_school_id após COMMIT e ROLLBACK na mesma conexão física
       const commitInfo = await withTenantContext(runtimePrisma, "phaseb-alpha", async (tx) => {
