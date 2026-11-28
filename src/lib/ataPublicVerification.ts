@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantContext } from "@/lib/rlsTenantContext";
 import {
@@ -83,24 +84,47 @@ export function normalizePublicAtaCode(
  *    `id`, `schoolId` e `verificationCode` antes de recalcular hashes e projetar o DTO público.
  */
 export async function resolvePublicAtaByCode(
-  cleanCode: string
+  cleanCode: string,
+  options?: {
+    prismaClient?: PrismaClient;
+    useSecDefResolver?: boolean;
+  }
 ): Promise<PublicAtaVerificationData | null> {
   if (!cleanCode) return null;
 
-  const minuteLocator = await prisma.pedagogicalMinute.findUnique({
-    where: { verificationCode: cleanCode },
-    select: {
-      id: true,
-      schoolId: true,
-      verificationCode: true,
-    },
-  });
+  const dbClient = options?.prismaClient ?? prisma;
+  const useSecDefResolver =
+    options?.useSecDefResolver ?? process.env.RLS_PUBLIC_ATA_SECDEF_RESOLVER === "true";
+
+  let minuteLocator: { id: string; schoolId: string } | null = null;
+  if (useSecDefResolver) {
+    const rows = await dbClient.$queryRaw<Array<{ id: string; schoolId: string }>>`
+      SELECT "id", "schoolId"
+      FROM public.resolve_public_ata_by_code(${cleanCode})
+    `;
+    const first = rows[0];
+    if (first?.id && first?.schoolId) {
+      minuteLocator = { id: first.id, schoolId: first.schoolId };
+    }
+  } else {
+    const found = await dbClient.pedagogicalMinute.findUnique({
+      where: { verificationCode: cleanCode },
+      select: {
+        id: true,
+        schoolId: true,
+        verificationCode: true,
+      },
+    });
+    if (found?.id && found?.schoolId) {
+      minuteLocator = { id: found.id, schoolId: found.schoolId };
+    }
+  }
 
   if (!minuteLocator?.id || !minuteLocator.schoolId) {
     return null;
   }
 
-  return withTenantContext(prisma, minuteLocator.schoolId, async (tx) => {
+  return withTenantContext(dbClient, minuteLocator.schoolId, async (tx) => {
     const minute = await tx.pedagogicalMinute.findUnique({
       where: {
         id: minuteLocator.id,
