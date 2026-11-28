@@ -7,13 +7,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 export const DEFAULT_PHASE_B_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_candidate.sql");
 export const PHASE_B_SCHEMA_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_schema.sql");
+export const PHASE_B_RESOLVERS_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_resolvers.sql");
 export const PHASE_B_POLICIES_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_policies.sql");
 
 export function resolvePhaseBStageSqlPath(stage = "all") {
   if (stage === "schema") return PHASE_B_SCHEMA_SQL_PATH;
+  if (stage === "resolvers") return PHASE_B_RESOLVERS_SQL_PATH;
   if (stage === "policies") return PHASE_B_POLICIES_SQL_PATH;
   if (stage === "all") return DEFAULT_PHASE_B_SQL_PATH;
-  throw new Error(`Estágio inválido (${stage}): use 'schema', 'policies' ou 'all'.`);
+  throw new Error(`Estágio inválido (${stage}): use 'schema', 'resolvers', 'policies' ou 'all'.`);
 }
 
 /**
@@ -83,7 +85,7 @@ export function splitSqlStatements(sql) {
  *
  * @param {import("@prisma/client").PrismaClient} migratorPrisma
  * @param {{
- *   stage?: "schema" | "policies" | "all";
+ *   stage?: "schema" | "resolvers" | "policies" | "all";
  *   sqlPath?: string;
  *   sqlText?: string;
  *   onAfterStatement?: (ctx: { index: number; statement: string; tx: unknown }) => Promise<void> | void;
@@ -123,6 +125,30 @@ async function runCli() {
   const migratorPrisma = new PrismaClient({ datasources: { db: { url: migratorUrl } } });
   try {
     await migratorPrisma.$connect();
+    if (process.env.RLS_STAGING_TARGET_CONFIRMED === "staging" || process.env.RLS_STAGING_EXPECTED_DB) {
+      const expectedDb = String(process.env.RLS_STAGING_EXPECTED_DB || "").trim();
+      const rows = await migratorPrisma.$queryRaw`
+        SELECT
+          current_database() AS db,
+          current_user AS role,
+          shobj_description(
+            (SELECT oid FROM pg_database WHERE datname = current_database()),
+            'pg_database'
+          ) AS db_comment
+      `;
+      const info = rows[0];
+      const comment = String(info?.db_comment || "").trim().toLowerCase();
+      if (
+        !info ||
+        info.role !== "app_migrator" ||
+        (expectedDb && info.db !== expectedDb) ||
+        (comment !== "staging" && comment !== "rls_staging_authorized")
+      ) {
+        throw new Error(
+          `STAGING_TARGET_CHECK_FAILED: alvo não confirmado como staging autorizado (db=${info?.db}, role=${info?.role}).`
+        );
+      }
+    }
     const { statementCount } = await applyWave1PhaseBCandidateInSingleTx(migratorPrisma, { stage });
     console.log(
       `[wave1_phase_b:${stage}] Aplicado em transação única (${statementCount} instruções).`
