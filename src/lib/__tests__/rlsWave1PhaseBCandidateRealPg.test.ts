@@ -570,9 +570,11 @@ describe.skipIf(!SHOULD_RUN)(
         const [
           alphaLogs,
           alphaStudents,
+          alphaClassGroups,
           alphaTemplates,
           betaLogs,
           betaStudents,
+          betaClassGroups,
           betaTemplates,
           users,
           userSchools,
@@ -585,6 +587,12 @@ describe.skipIf(!SHOULD_RUN)(
           ),
           withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
             tx.student.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, name: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-alpha", (tx) =>
+            tx.classGroup.findMany({
               orderBy: { id: "asc" },
               select: { id: true, schoolId: true, name: true },
             })
@@ -603,6 +611,12 @@ describe.skipIf(!SHOULD_RUN)(
           ),
           withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
             tx.student.findMany({
+              orderBy: { id: "asc" },
+              select: { id: true, schoolId: true, name: true },
+            })
+          ),
+          withTenantContext(runtimePrisma, "phaseb-beta", (tx) =>
+            tx.classGroup.findMany({
               orderBy: { id: "asc" },
               select: { id: true, schoolId: true, name: true },
             })
@@ -625,9 +639,11 @@ describe.skipIf(!SHOULD_RUN)(
         return {
           alphaLogs,
           alphaStudents,
+          alphaClassGroups,
           alphaTemplates,
           betaLogs,
           betaStudents,
+          betaClassGroups,
           betaTemplates,
           users,
           userSchools,
@@ -641,6 +657,12 @@ describe.skipIf(!SHOULD_RUN)(
       const crossOriginPath = path.join(tmpDir, "cross-origin-beta.json");
       const contradictoryIdPath = path.join(tmpDir, "contradictory-id.json");
       const contradictoryInepPath = path.join(tmpDir, "contradictory-inep.json");
+      const numericDivergentMetaInepPath = path.join(tmpDir, "numeric-divergent-meta-inep.json");
+      const invalidOriginTypePath = path.join(tmpDir, "invalid-origin-type.json");
+      const validNumericInepPath = path.join(tmpDir, "valid-numeric-inep.json");
+      const sameSegHomonymPath = path.join(tmpDir, "same-seg-homonym.json");
+      const crossSegHomonymPath = path.join(tmpDir, "cross-seg-homonym.json");
+      const dbHomonymLogPath = path.join(tmpDir, "db-homonym-log.json");
       const noLogsReplacePath = path.join(tmpDir, "no-logs-replace.json");
       const allMissingStudentsPath = path.join(tmpDir, "all-missing-students.json");
       const mixedMissingStudentPath = path.join(tmpDir, "mixed-missing-student.json");
@@ -836,6 +858,105 @@ describe.skipIf(!SHOULD_RUN)(
           "utf8"
         );
 
+        // INEP numérico divergente em meta (99150102) com raiz coincidente ("99150101")
+        fs.writeFileSync(
+          numericDivergentMetaInepPath,
+          JSON.stringify({
+            sourceInepCode: "99150101",
+            meta: { schoolId: "phaseb-alpha", inepCode: 99150102 },
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Aluno Alpha", phone: "41999991601", turma: "6º Ano A" }],
+              logs: [{ student_name: "Aluno Alpha", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // Campo de origem com tipo inválido (meta.schoolId numérico)
+        fs.writeFileSync(
+          invalidOriginTypePath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            meta: { schoolId: 12345 },
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Aluno Alpha", phone: "41999991601", turma: "6º Ano A" }],
+              logs: [{ student_name: "Aluno Alpha", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // INEP numérico válido e coerente
+        fs.writeFileSync(
+          validNumericInepPath,
+          JSON.stringify({
+            sourceInepCode: 99150101,
+            meta: { schoolId: "phaseb-alpha", inepCode: 99150101 },
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Aluno Alpha", phone: "41999991601", turma: "6º Ano A" }],
+              logs: [{ student_name: "Aluno Alpha", reason: "Aviso INEP Numérico", date: "2026-11-28T11:45:00.000Z" }],
+            },
+          }),
+          "utf8"
+        );
+        // Dois estudantes novos homônimos com dados conflitantes no mesmo segmento
+        fs.writeFileSync(
+          sameSegHomonymPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [],
+              students: [
+                { name: "Homônimo Mesmo Seg", phone: "41999991901", turma: "6º Ano A" },
+                { name: "Homônimo Mesmo Seg", phone: "41999991902", turma: "7º Ano A" },
+              ],
+              logs: [
+                { student_name: "Homônimo Mesmo Seg", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" },
+              ],
+            },
+          }),
+          "utf8"
+        );
+        // Dois estudantes novos homônimos com dados conflitantes em segmentos diferentes
+        fs.writeFileSync(
+          crossSegHomonymPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [],
+              students: [{ name: "Homônimo Multi Seg", phone: "41999991903", turma: "8º Ano A" }],
+              logs: [
+                { student_name: "Homônimo Multi Seg", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" },
+              ],
+            },
+            MEDIO: {
+              templates: [],
+              students: [{ name: "Homônimo Multi Seg", phone: "41999991904", turma: "1º Ano A" }],
+              logs: [],
+            },
+          }),
+          "utf8"
+        );
+        // Log apontando para homônimo já cadastrado no banco
+        fs.writeFileSync(
+          dbHomonymLogPath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [],
+              students: [],
+              logs: [
+                { student_name: "Homônimo Banco", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" },
+              ],
+            },
+          }),
+          "utf8"
+        );
+
         // Todos os cenários negativos pelo CLI `npm run seed` com `--replace-school-logs`
         const negativeCases: Array<[string[], RegExp]> = [
           [["--school-id=phaseb-alpha", "--replace-school-logs"], /SEED_EXPLICIT_DATA_FILE_REQUIRED/],
@@ -846,6 +967,10 @@ describe.skipIf(!SHOULD_RUN)(
           [[`--school-id=phaseb-alpha`, `--data-file=${crossOriginPath}`, "--replace-school-logs"], /SEED_ORIGIN_SCHOOL_MISMATCH/],
           [[`--school-id=phaseb-alpha`, `--data-file=${contradictoryIdPath}`, "--replace-school-logs"], /SEED_CONTRADICTORY_ORIGIN/],
           [[`--school-id=phaseb-alpha`, `--data-file=${contradictoryInepPath}`, "--replace-school-logs"], /SEED_CONTRADICTORY_ORIGIN/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${numericDivergentMetaInepPath}`, "--replace-school-logs"], /SEED_CONTRADICTORY_ORIGIN/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${invalidOriginTypePath}`, "--replace-school-logs"], /SEED_INVALID_ORIGIN_FIELD/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${sameSegHomonymPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_AMBIGUOUS/],
+          [[`--school-id=phaseb-alpha`, `--data-file=${crossSegHomonymPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_AMBIGUOUS/],
           [[`--school-id=phaseb-alpha`, `--data-file=${noLogsReplacePath}`, "--replace-school-logs"], /SEED_REPLACE_LOGS_EMPTY/],
           [[`--school-id=phaseb-alpha`, `--data-file=${allMissingStudentsPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_NOT_FOUND/],
           [[`--school-id=phaseb-alpha`, `--data-file=${mixedMissingStudentPath}`, "--replace-school-logs"], /SEED_LOG_STUDENT_NOT_FOUND/],
@@ -858,6 +983,40 @@ describe.skipIf(!SHOULD_RUN)(
           expect(`${res.stdout}\n${res.stderr}`).toMatch(pattern);
           expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
         }
+
+        // Homônimos já cadastrados no banco da escola de destino são recusados antes de deleteMany
+        await adminPrisma.student.createMany({
+          data: [
+            {
+              id: "pb-stu-alpha-hom-1",
+              schoolId: "phaseb-alpha",
+              classGroupId: "pb-cg-alpha",
+              name: "Homônimo Banco",
+              phone: "41999991911",
+              active: true,
+            },
+            {
+              id: "pb-stu-alpha-hom-2",
+              schoolId: "phaseb-alpha",
+              classGroupId: "pb-cg-alpha",
+              name: "Homônimo Banco",
+              phone: "41999991912",
+              active: true,
+            },
+          ],
+        });
+        const stateWithDbHomonyms = await snapshotSeedState();
+        const dbHomRes = runSeedCli(runtimeDbUrl, [
+          "--school-id=phaseb-alpha",
+          `--data-file=${dbHomonymLogPath}`,
+          "--replace-school-logs",
+        ]);
+        expect(dbHomRes.status).not.toBe(0);
+        expect(`${dbHomRes.stdout}\n${dbHomRes.stderr}`).toMatch(/SEED_LOG_STUDENT_AMBIGUOUS/);
+        expect(await snapshotSeedState()).toEqual(stateWithDbHomonyms);
+        await adminPrisma.student.deleteMany({
+          where: { id: { in: ["pb-stu-alpha-hom-1", "pb-stu-alpha-hom-2"] } },
+        });
 
         // Falha no meio da escrita após deleteMany reverte a transação e preserva histórico
         await expect(
@@ -873,6 +1032,16 @@ describe.skipIf(!SHOULD_RUN)(
         ).rejects.toThrow("FORCED_SEED_ROLLBACK");
         expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
 
+        // Execução válida com INEP numérico coerente como `app_runtime`
+        const okNumericInep = runSeedCli(runtimeDbUrl, [
+          "--school-id=phaseb-alpha",
+          `--data-file=${validNumericInepPath}`,
+        ]);
+        expect(okNumericInep.status).toBe(0);
+        const afterNumericInep = await snapshotSeedState();
+        expect(afterNumericInep.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 1);
+        expect(afterNumericInep.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+
         // Execução sem substituição com origem apenas em `meta` como `app_runtime`
         const okMetaOnly = runSeedCli(runtimeDbUrl, [
           "--school-id=phaseb-alpha",
@@ -880,7 +1049,7 @@ describe.skipIf(!SHOULD_RUN)(
         ]);
         expect(okMetaOnly.status).toBe(0);
         const afterMetaOnly = await snapshotSeedState();
-        expect(afterMetaOnly.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 1);
+        expect(afterMetaOnly.alphaLogs.length).toBe(stateBeforeSeed.alphaLogs.length + 2);
         expect(afterMetaOnly.betaLogs).toEqual(stateBeforeSeed.betaLogs);
 
         // Substituição válida pelo CLI `npm run seed` como `app_runtime` sob `FORCE RLS` (inclui templateId: null)

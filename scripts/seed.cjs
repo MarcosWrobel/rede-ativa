@@ -7,6 +7,32 @@ function resolveCliArg(prefix) {
   return arg ? arg.slice(prefix.length).trim() : '';
 }
 
+function parseProvidedSchoolId(rawValue, fieldName) {
+  if (rawValue === undefined) return null;
+  if (typeof rawValue !== 'string' || !rawValue.trim()) {
+    throw new Error(`SEED_INVALID_ORIGIN_FIELD: ${fieldName} deve ser uma string não vazia.`);
+  }
+  return rawValue.trim();
+}
+
+function parseProvidedInepCode(rawValue, fieldName) {
+  if (rawValue === undefined) return null;
+  if (typeof rawValue === 'number') {
+    if (!Number.isSafeInteger(rawValue) || rawValue <= 0) {
+      throw new Error(`SEED_INVALID_ORIGIN_FIELD: ${fieldName} numérico inválido.`);
+    }
+    return String(rawValue);
+  }
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (!trimmed || !/^\d+$/.test(trimmed)) {
+      throw new Error(`SEED_INVALID_ORIGIN_FIELD: ${fieldName} deve conter apenas dígitos numéricos.`);
+    }
+    return trimmed;
+  }
+  throw new Error(`SEED_INVALID_ORIGIN_FIELD: ${fieldName} possui tipo inválido.`);
+}
+
 function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {}) {
   const replaceSchoolLogs = options.replaceSchoolLogs === true;
   if (!fs.existsSync(resolvedDataPath)) {
@@ -29,10 +55,14 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
     throw new Error('SEED_INVALID_JSON: raiz do arquivo deve ser um objeto JSON.');
   }
 
-  const rootSchoolId = typeof data.sourceSchoolId === 'string' ? data.sourceSchoolId.trim() : '';
-  const metaSchoolId = typeof data.meta?.schoolId === 'string' ? data.meta.schoolId.trim() : '';
-  const rootInepCode = typeof data.sourceInepCode === 'string' ? data.sourceInepCode.trim() : '';
-  const metaInepCode = typeof data.meta?.inepCode === 'string' ? data.meta.inepCode.trim() : '';
+  if (data.meta !== undefined && (!data.meta || typeof data.meta !== 'object' || Array.isArray(data.meta))) {
+    throw new Error('SEED_INVALID_ORIGIN_FIELD: meta deve ser um objeto.');
+  }
+
+  const rootSchoolId = parseProvidedSchoolId(data.sourceSchoolId, 'sourceSchoolId');
+  const metaSchoolId = parseProvidedSchoolId(data.meta?.schoolId, 'meta.schoolId');
+  const rootInepCode = parseProvidedInepCode(data.sourceInepCode, 'sourceInepCode');
+  const metaInepCode = parseProvidedInepCode(data.meta?.inepCode, 'meta.inepCode');
 
   if (rootSchoolId && metaSchoolId && rootSchoolId !== metaSchoolId) {
     throw new Error(
@@ -75,6 +105,9 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
 
   let totalRecords = 0;
   let totalLogs = 0;
+  const fileStudentsByName = new Map();
+  const ambiguousFileStudentNames = new Set();
+
   for (const seg of segments) {
     const segData = data[seg];
     if (!segData || typeof segData !== 'object' || Array.isArray(segData)) {
@@ -107,6 +140,24 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
       ) {
         throw new Error(`SEED_INVALID_RECORD: estudante inválido em ${seg}.`);
       }
+      const normName = s.name.trim();
+      const normPhone = s.phone.trim();
+      const normTurma = s.turma.trim();
+      const normGuardian = typeof s.guardian === 'string' ? s.guardian.trim() : '';
+      const prev = fileStudentsByName.get(normName);
+      if (!prev) {
+        fileStudentsByName.set(normName, {
+          phone: normPhone,
+          turma: normTurma,
+          guardian: normGuardian,
+        });
+      } else if (
+        prev.phone !== normPhone ||
+        prev.turma !== normTurma ||
+        (prev.guardian && normGuardian && prev.guardian !== normGuardian)
+      ) {
+        ambiguousFileStudentNames.add(normName);
+      }
       totalRecords += 1;
     }
 
@@ -137,7 +188,7 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
     );
   }
 
-  return { data, segments };
+  return { data, segments, ambiguousFileStudentNames };
 }
 
 /**
@@ -203,9 +254,11 @@ async function runSeed(options = {}) {
       process.env.SEED_REPLACE_SCHOOL_LOGS === 'true' ||
       process.argv.includes('--replace-school-logs');
 
-    const { data, segments } = validateAndParseSeedPayload(resolvedDataPath, targetSchool, {
-      replaceSchoolLogs,
-    });
+    const { data, segments, ambiguousFileStudentNames } = validateAndParseSeedPayload(
+      resolvedDataPath,
+      targetSchool,
+      { replaceSchoolLogs }
+    );
 
     return await prisma.$transaction(
       async (tx) => {
@@ -264,11 +317,13 @@ async function runSeed(options = {}) {
 
         const existingStudents = await tx.student.findMany({
           where: { schoolId: targetSchool.id },
+          include: { classGroup: { select: { name: true } } },
         });
         const studentMap = {};
         const studentNameCounts = new Map();
         for (const s of existingStudents) {
-          const k = `${targetSchool.id}:${s.name}`;
+          const normName = s.name.trim();
+          const k = `${targetSchool.id}:${normName}`;
           studentMap[k] = s;
           studentNameCounts.set(k, (studentNameCounts.get(k) || 0) + 1);
         }
@@ -277,8 +332,21 @@ async function runSeed(options = {}) {
         for (const seg of segments) {
           const students = data[seg].students || [];
           for (const s of students) {
-            const studentKey = `${targetSchool.id}:${s.name}`;
-            if (studentMap[studentKey]) continue;
+            const normName = s.name.trim();
+            const studentKey = `${targetSchool.id}:${normName}`;
+            if (ambiguousFileStudentNames.has(normName)) {
+              continue;
+            }
+            const existing = studentMap[studentKey];
+            if (existing) {
+              if (
+                existing.phone.trim() !== s.phone.trim() ||
+                existing.classGroup?.name?.trim() !== s.turma.trim()
+              ) {
+                ambiguousFileStudentNames.add(normName);
+              }
+              continue;
+            }
             const cg =
               classGroupMap[`${targetSchool.id}:${seg}:${s.turma}`] ||
               classGroupMap[`${targetSchool.id}:${s.turma}`];
@@ -287,9 +355,9 @@ async function runSeed(options = {}) {
             const created = await tx.student.create({
               data: {
                 schoolId: targetSchool.id,
-                name: s.name,
+                name: normName,
                 guardianName: s.guardian || 'Responsável',
-                phone: s.phone,
+                phone: s.phone.trim(),
                 classGroupId: cg.id,
               },
             });
@@ -303,22 +371,25 @@ async function runSeed(options = {}) {
         for (const seg of segments) {
           const logs = data[seg].logs || [];
           for (const l of logs) {
-            const studentKey = `${targetSchool.id}:${l.student_name}`;
+            const normStudentName = l.student_name.trim();
+            const studentKey = `${targetSchool.id}:${normStudentName}`;
             const matchCount = studentNameCounts.get(studentKey) || 0;
             const student = studentMap[studentKey];
+            const isAmbiguous =
+              matchCount > 1 || ambiguousFileStudentNames.has(normStudentName);
 
             if (replaceSchoolLogs) {
-              if (matchCount > 1) {
+              if (isAmbiguous) {
                 throw new Error(
-                  `SEED_LOG_STUDENT_AMBIGUOUS: estudante ambíguo na escola (${l.student_name}).`
+                  `SEED_LOG_STUDENT_AMBIGUOUS: estudante ambíguo na escola ou no arquivo (${normStudentName}).`
                 );
               }
               if (!student) {
                 throw new Error(
-                  `SEED_LOG_STUDENT_NOT_FOUND: estudante não localizado para log de reposição (${l.student_name}).`
+                  `SEED_LOG_STUDENT_NOT_FOUND: estudante não localizado para log de reposição (${normStudentName}).`
                 );
               }
-            } else if (!student || matchCount > 1) {
+            } else if (!student || isAmbiguous) {
               continue;
             }
 
