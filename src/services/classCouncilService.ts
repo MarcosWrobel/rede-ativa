@@ -2793,11 +2793,12 @@ export async function getTeacherPortalCouncilContext(params: {
     // Leitura estritamente sem gravações (sem criar trimestres nem fichas no POST ou pós-PUT)
     const rosterStudents = tx.student?.findMany
       ? await tx.student.findMany({
-          where: { schoolId, classGroupId: boardHeader.classGroupId, active: true },
+          where: { schoolId, classGroupId: boardHeader.classGroupId },
           select: {
             id: true,
             name: true,
             cgm: true,
+            active: true,
             lowAttendanceRecord: {
               select: { attendancePercent: true },
             },
@@ -2936,7 +2937,7 @@ export async function getTeacherPortalCouncilContext(params: {
         studentId: st.id,
         name: st.name,
         cgm: includeCgm ? (st.cgm ?? null) : null,
-        enrollmentStatus: "ATIVO",
+        enrollmentStatus: st.active === false ? "TRANSFERIDO" : "ATIVO",
         attendancePercent: st.lowAttendanceRecord?.attendancePercent ?? null,
         subjectEntries: [],
       });
@@ -3547,6 +3548,7 @@ export async function getPreCouncilTeacherPortalContext(params: {
     const sid = (c.subjectId || "").trim();
     return !sid || subjectById.has(sid);
   };
+  const hasOutOfScopeConversations = preCouncil.conversations.some((c) => !isConvSubjectInScope(c));
 
   let visibleConversations = preCouncil.conversations;
   if (lockedConversationId) {
@@ -3646,9 +3648,10 @@ export async function getPreCouncilTeacherPortalContext(params: {
         digitalAckAt: c.digitalAckAt,
       };
     }),
-    synthesis: allConversationsOwnedByOthers
-      ? createEmptyPreCouncilSynthesis()
-      : preCouncil.synthesis,
+    synthesis:
+      allConversationsOwnedByOthers || hasOutOfScopeConversations
+        ? createEmptyPreCouncilSynthesis()
+        : preCouncil.synthesis,
   };
   });
 }

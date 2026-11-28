@@ -14548,11 +14548,49 @@ describe.skipIf(!SHOULD_RUN)(
             conversationDate: "2026-11-20",
           },
         ],
-        synthesis: { mainDifficulties: "Sintese", priorityStudents: "", attendanceIssues: "", behaviorIssues: "", pedagogicalActions: "" },
+        synthesis: {
+          mainDifficulties: "SINTESE_CONFIDENCIAL_DIVERGENTE",
+          priorityStudents: "ALUNO_SINTESE_DIVERGENTE",
+          attendanceIssues: "FALTA_SINTESE_DIVERGENTE",
+          behaviorIssues: "COMPORTAMENTO_DIVERGENTE",
+          pedagogicalActions: "ACAO_DIVERGENTE",
+        },
       });
 
-      await prisma.classCouncilTrimester.create({
-        data: { id: "tp2-trim-a1", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", trimester: 1, preCouncilJson: initialPreJson },
+      const authorizedOnlyT2Json = JSON.stringify({
+        version: 1,
+        periodLabel: "2º Trimestre",
+        objectiveText: "Alinhamento T2",
+        responsiblePedagogueName: "Pedagoga TP2",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "tp2-conv-t2-valid",
+            subjectId: "tp2-subj-a1",
+            subjectName: "Ciências",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp2-stu-a1"],
+            monitoredStudentsNotes: "Nota T2",
+            agreements: "Combinado T2",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+        ],
+        synthesis: {
+          mainDifficulties: "SINTESE_AUTORIZADA_T2",
+          priorityStudents: "ALUNO_AUTORIZADO_T2",
+          attendanceIssues: "",
+          behaviorIssues: "",
+          pedagogicalActions: "ACAO_AUTORIZADA_T2",
+        },
+      });
+
+      await prisma.classCouncilTrimester.createMany({
+        data: [
+          { id: "tp2-trim-a1", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", trimester: 1, preCouncilJson: initialPreJson },
+          { id: "tp2-trim-a2", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", trimester: 2, preCouncilJson: authorizedOnlyT2Json },
+        ],
       });
 
       const { token: generalToken } = createPreCouncilTeacherToken({
@@ -14601,6 +14639,20 @@ describe.skipIf(!SHOULD_RUN)(
       expect(rawGeneralText).not.toContain("SEGREDO_OUTRO_QUADRO");
       expect(rawGeneralText).not.toContain("NOTA_OUTRA_ESCOLA");
       expect(rawGeneralText).not.toContain("SEGREDO_OUTRA_ESCOLA");
+      expect(rawGeneralText).not.toContain("SINTESE_CONFIDENCIAL_DIVERGENTE");
+      expect(rawGeneralText).not.toContain("ALUNO_SINTESE_DIVERGENTE");
+      expect(rawGeneralText).not.toContain("FALTA_SINTESE_DIVERGENTE");
+      expect(rawGeneralText).not.toContain("COMPORTAMENTO_DIVERGENTE");
+      expect(rawGeneralText).not.toContain("ACAO_DIVERGENTE");
+      expect(generalJson.preCouncil.synthesis).toEqual({
+        mainDifficulties: "",
+        priorityStudents: "",
+        attendanceIssues: "",
+        behaviorIssues: "",
+        pedagogicalActions: "",
+      });
+      const trimAfterPost = await prisma.classCouncilTrimester.findUnique({ where: { id: "tp2-trim-a1" } });
+      expect(trimAfterPost?.preCouncilJson).toBe(initialPreJson);
 
       // 2. Link específico com subjectId fora do escopo (outro quadro e outra escola) falha no SSR, POST e PUT sem mutar ou auditar
       vi.mocked(logAudit).mockClear();
@@ -14669,6 +14721,17 @@ describe.skipIf(!SHOULD_RUN)(
           { params: Promise.resolve({ token: generalToken }) }
         );
         expect(ackRes.status).toBe(200);
+        const ackJson = await ackRes.json();
+        const rawAckText = JSON.stringify(ackJson);
+        expect(rawAckText).not.toContain("SINTESE_CONFIDENCIAL_DIVERGENTE");
+        expect(rawAckText).not.toContain("ACAO_DIVERGENTE");
+        expect(ackJson.preCouncil.synthesis).toEqual({
+          mainDifficulties: "",
+          priorityStudents: "",
+          attendanceIssues: "",
+          behaviorIssues: "",
+          pedagogicalActions: "",
+        });
         expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
           expect.objectContaining({
             schoolId: "tp2-school-alpha",
@@ -14676,6 +14739,30 @@ describe.skipIf(!SHOULD_RUN)(
           })
         );
       }
+
+      // 4. Trimestre 2 sem conversas divergentes preserva a síntese autorizada
+      const { token: t2Token } = createPreCouncilTeacherToken({
+        schoolId: "tp2-school-alpha",
+        boardId: "tp2-board-a1",
+        trimester: 2,
+        expiresInDays: 7,
+      });
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const t2Post = await postPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${t2Token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: t2Token }) }
+      );
+      expect(t2Post.status).toBe(200);
+      const t2Json = await t2Post.json();
+      expect(t2Json.preCouncil.synthesis.mainDifficulties).toBe("SINTESE_AUTORIZADA_T2");
+      expect(t2Json.preCouncil.synthesis.pedagogicalActions).toBe("ACAO_AUTORIZADA_T2");
     } finally {
       await prisma.classCouncilTrimester.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
       await prisma.studentCouncilCard.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
@@ -14689,16 +14776,25 @@ describe.skipIf(!SHOULD_RUN)(
 
   it("mantém consulta docente sem gravações em quadro incompleto e limita inicialização na escrita ao trimestre e fichas necessárias", async () => {
     try {
-      await prisma.school.create({
-        data: { id: "tp3-school-alpha", name: "Colégio Alpha 3", inepCode: "99120301", active: true },
+      await prisma.school.createMany({
+        data: [
+          { id: "tp3-school-alpha", name: "Colégio Alpha 3", inepCode: "99120301", active: true },
+          { id: "tp3-school-beta", name: "Colégio Beta 3", inepCode: "99120302", active: true },
+        ],
       });
-      await prisma.classGroup.create({
-        data: { id: "tp3-cg-alpha", schoolId: "tp3-school-alpha", name: "9º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "tp3-cg-alpha", schoolId: "tp3-school-alpha", name: "9º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "tp3-cg-beta", schoolId: "tp3-school-beta", name: "9º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+        ],
       });
       await prisma.student.createMany({
         data: [
           { id: "tp3-stu-1", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Ana TP3", phone: "41999991301", active: true },
-          { id: "tp3-stu-2", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Bruno TP3", phone: "41999991302", active: true },
+          { id: "tp3-stu-2", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Bruno TP3", phone: "41999991302", active: false },
+          { id: "tp3-stu-3", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Carla TP3", phone: "41999991303", active: true },
+          { id: "tp3-stu-4", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Diego TP3", phone: "41999991304", active: false },
+          { id: "tp3-stu-beta", schoolId: "tp3-school-beta", classGroupId: "tp3-cg-beta", name: "Zeca Beta", phone: "41999991399", active: false },
         ],
       });
       await prisma.classCouncilBoard.create({
@@ -14714,6 +14810,23 @@ describe.skipIf(!SHOULD_RUN)(
           teacherEmail: "prof.alpha@escola.pr.gov.br",
         },
       });
+      // Fichas pré-existentes apenas para Carla (REMANEJADO) e Diego (ABANDONO)
+      await prisma.studentCouncilCard.createMany({
+        data: [
+          { id: "tp3-card-3", schoolId: "tp3-school-alpha", boardId: "tp3-board-alpha", studentId: "tp3-stu-3", enrollmentStatus: "REMANEJADO" },
+          { id: "tp3-card-4", schoolId: "tp3-school-alpha", boardId: "tp3-board-alpha", studentId: "tp3-stu-4", enrollmentStatus: "ABANDONO" },
+        ],
+      });
+      await prisma.studentCouncilSubjectEntry.create({
+        data: {
+          id: "tp3-entry-4",
+          schoolId: "tp3-school-alpha",
+          cardId: "tp3-card-4",
+          subjectId: "tp3-subj-alpha",
+          trimester: 1,
+          descriptorCodes: [3],
+        },
+      });
 
       const { token: teacherToken } = createCouncilTeacherToken({
         schoolId: "tp3-school-alpha",
@@ -14723,11 +14836,11 @@ describe.skipIf(!SHOULD_RUN)(
         expiresInDays: 7,
       });
 
-      // Quadro incompleto: 0 trimestres e 0 fichas antes da consulta
+      // Quadro incompleto: 0 trimestres e apenas as 2 fichas pré-existentes antes da consulta
       expect(await prisma.classCouncilTrimester.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
-      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
+      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(2);
 
-      // 1. SSR e POST não gravam trimestres nem fichas
+      // 1. SSR e POST não gravam trimestres nem fichas, e exibem ativos e inativos (com e sem ficha) sem duplicatas ou aluno de outra escola
       vi.mocked(logAudit).mockClear();
       const ssrHtml = renderToStaticMarkup(
         await ProfessorConselhoPage({ params: Promise.resolve({ token: teacherToken }) })
@@ -14750,17 +14863,26 @@ describe.skipIf(!SHOULD_RUN)(
       const postJson = await postRes.json();
       expect(postJson.council.trimester).toBe(1);
       expect(postJson.council.trimesterStatus).toBe("IN_PROGRESS");
-      expect(postJson.council.students.map((s: { studentId: string }) => s.studentId)).toEqual([
-        "tp3-stu-1",
-        "tp3-stu-2",
+      expect(
+        postJson.council.students.map((s: { studentId: string; enrollmentStatus: string }) => ({
+          studentId: s.studentId,
+          enrollmentStatus: s.enrollmentStatus,
+        }))
+      ).toEqual([
+        { studentId: "tp3-stu-1", enrollmentStatus: "ATIVO" },
+        { studentId: "tp3-stu-2", enrollmentStatus: "TRANSFERIDO" },
+        { studentId: "tp3-stu-3", enrollmentStatus: "REMANEJADO" },
+        { studentId: "tp3-stu-4", enrollmentStatus: "ABANDONO" },
       ]);
+      const d4Post = postJson.council.students.find((s: { studentId: string }) => s.studentId === "tp3-stu-4");
+      expect(d4Post.subjectEntries[0].descriptorCodes).toEqual([3]);
 
       expect(await prisma.classCouncilTrimester.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
-      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
-      expect(await prisma.studentCouncilSubjectEntry.count({ where: { schoolId: "tp3-school-alpha" } })).toBe(0);
+      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(2);
+      expect(await prisma.studentCouncilSubjectEntry.count({ where: { schoolId: "tp3-school-alpha" } })).toBe(1);
       expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
 
-      // 2. PUT legítimo para tp3-stu-1 inicializa apenas trimestre 1 e ficha de tp3-stu-1 (mantendo trimestres 2 e 3 e ficha de tp3-stu-2 ausentes)
+      // 2. PUT legítimo para tp3-stu-1 inicializa apenas trimestre 1 e ficha de tp3-stu-1 (mantendo trimestres 2 e 3 e ausência de ficha para tp3-stu-2)
       vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
         ok: true,
         tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
@@ -14779,9 +14901,16 @@ describe.skipIf(!SHOULD_RUN)(
       );
       expect(putRes.status).toBe(200);
       const putJson = await putRes.json();
-      expect(putJson.council.students.map((s: { studentId: string }) => s.studentId)).toEqual([
-        "tp3-stu-1",
-        "tp3-stu-2",
+      expect(
+        putJson.council.students.map((s: { studentId: string; enrollmentStatus: string }) => ({
+          studentId: s.studentId,
+          enrollmentStatus: s.enrollmentStatus,
+        }))
+      ).toEqual([
+        { studentId: "tp3-stu-1", enrollmentStatus: "ATIVO" },
+        { studentId: "tp3-stu-2", enrollmentStatus: "TRANSFERIDO" },
+        { studentId: "tp3-stu-3", enrollmentStatus: "REMANEJADO" },
+        { studentId: "tp3-stu-4", enrollmentStatus: "ABANDONO" },
       ]);
 
       const trimestersAfter = await prisma.classCouncilTrimester.findMany({
@@ -14792,18 +14921,23 @@ describe.skipIf(!SHOULD_RUN)(
 
       const cardsAfter = await prisma.studentCouncilCard.findMany({
         where: { boardId: "tp3-board-alpha" },
+        orderBy: { studentId: "asc" },
         select: { studentId: true, schoolId: true },
       });
-      expect(cardsAfter).toEqual([{ studentId: "tp3-stu-1", schoolId: "tp3-school-alpha" }]);
+      expect(cardsAfter).toEqual([
+        { studentId: "tp3-stu-1", schoolId: "tp3-school-alpha" },
+        { studentId: "tp3-stu-3", schoolId: "tp3-school-alpha" },
+        { studentId: "tp3-stu-4", schoolId: "tp3-school-alpha" },
+      ]);
     } finally {
-      await prisma.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.classCouncilTrimester.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.studentCouncilCard.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.classCouncilSubject.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.classCouncilBoard.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.student.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.classGroup.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
-      await prisma.school.deleteMany({ where: { id: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.classCouncilTrimester.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.studentCouncilCard.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.classCouncilSubject.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.classCouncilBoard.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.student.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.classGroup.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+      await prisma.school.deleteMany({ where: { id: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
     }
   });
 
