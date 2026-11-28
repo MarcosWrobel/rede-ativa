@@ -56,3 +56,19 @@ ALTER TABLE public."ClassGroup" OWNER TO app_migrator;
 ALTER TABLE public."Student" OWNER TO app_migrator;
 ALTER TABLE public."MessageTemplate" OWNER TO app_migrator;
 ALTER TABLE public."MessageLog" OWNER TO app_migrator;
+
+-- Permissões para o migrador semear e limpar fixtures da suíte de homologação em tabelas fora da Onda 1
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  public."User",
+  public."UserSchool",
+  public."AuditLog"
+TO app_migrator;
+
+-- Permissões mínimas em tabelas de autenticação/auditoria fora da Onda 1
+GRANT SELECT ON
+  public."User",
+  public."UserSchool",
+  public."UserNetwork",
+  public."EducationNetwork"
+TO app_runtime;
+GRANT SELECT, INSERT ON public."AuditLog" TO app_runtime;

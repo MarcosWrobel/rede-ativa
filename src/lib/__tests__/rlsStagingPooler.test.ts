@@ -26,6 +26,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { POST as whatsappWebhookPost } from "@/app/api/webhooks/whatsapp/route";
+import { resolveServerUserAuthSnapshot } from "@/lib/serverAuthContext";
 
 const SHOULD_RUN = process.env.RUN_RLS_STAGING_POOLER_TEST === "true";
 
@@ -88,10 +89,14 @@ describe.skipIf(!SHOULD_RUN)(
     let runtimePrisma: PrismaClient;
     let allowLocalVerify = false;
     let expectedDb = "";
+    let targetConfirmed = false;
 
     const runId = crypto.randomBytes(6).toString("hex");
     const ALPHA_ID = `rls-stg-alpha-${runId}`;
     const BETA_ID = `rls-stg-beta-${runId}`;
+    const authUserId = `stg-${runId}-user`;
+    const authUserEmail = `stg.${runId}@escola.pr.gov.br`;
+    const authUserSchoolId = `stg-${runId}-us`;
 
     const trackedIds = {
       alphaClassGroups: [] as string[],
@@ -102,6 +107,10 @@ describe.skipIf(!SHOULD_RUN)(
       betaStudents: [] as string[],
       betaTemplates: [] as string[],
       betaLogs: [] as string[],
+      auditEntityIds: [] as string[],
+      userSchoolIds: [] as string[],
+      userIds: [] as string[],
+      schoolIds: [] as string[],
     };
 
     const cgAlphaId = `stg-${runId}-cg-alpha`;
@@ -131,6 +140,7 @@ describe.skipIf(!SHOULD_RUN)(
         runtimeClient: runtimePrisma,
         expectedDb,
       });
+      targetConfirmed = true;
 
       hoisted.runtimePrismaRef.current = runtimePrisma;
 
@@ -140,73 +150,118 @@ describe.skipIf(!SHOULD_RUN)(
           { id: BETA_ID, name: `Staging Beta ${runId}`, inepCode: `98${runId.slice(0, 6)}`, active: true },
         ],
       });
+      trackedIds.schoolIds.push(ALPHA_ID, BETA_ID);
+
+      await adminPrisma.user.create({
+        data: {
+          id: authUserId,
+          email: authUserEmail,
+          name: `Docente Staging ${runId}`,
+          role: "PEDAGOGA",
+          active: true,
+          schoolId: ALPHA_ID,
+        },
+      });
+      trackedIds.userIds.push(authUserId);
+
+      await adminPrisma.userSchool.create({
+        data: {
+          id: authUserSchoolId,
+          userId: authUserId,
+          schoolId: ALPHA_ID,
+          role: "PEDAGOGA",
+          active: true,
+        },
+      });
+      trackedIds.userSchoolIds.push(authUserSchoolId);
     });
 
     afterAll(async () => {
       hoisted.runtimePrismaRef.current = null;
       const cleanupErrors: string[] = [];
 
-      try {
-        if (runtimePrisma) {
-          await withTenantContext(runtimePrisma, ALPHA_ID, async (tx) => {
-            if (trackedIds.alphaLogs.length > 0) {
-              await tx.messageLog.deleteMany({ where: { id: { in: trackedIds.alphaLogs } } });
-            }
-            if (trackedIds.alphaTemplates.length > 0) {
-              await tx.messageTemplate.deleteMany({ where: { id: { in: trackedIds.alphaTemplates } } });
-            }
-            if (trackedIds.alphaStudents.length > 0) {
-              await tx.student.deleteMany({ where: { id: { in: trackedIds.alphaStudents } } });
-            }
-            if (trackedIds.alphaClassGroups.length > 0) {
-              await tx.classGroup.deleteMany({ where: { id: { in: trackedIds.alphaClassGroups } } });
-            }
-            const leftoverLogs = await tx.messageLog.count();
-            const leftoverStudents = await tx.student.count();
-            if (leftoverLogs !== 0 || leftoverStudents !== 0) {
-              throw new Error(
-                `CLEANUP_LEFTOVER_ALPHA: logs=${leftoverLogs}, students=${leftoverStudents}`
-              );
-            }
-          });
+      if (targetConfirmed) {
+        try {
+          if (runtimePrisma) {
+            await withTenantContext(runtimePrisma, ALPHA_ID, async (tx) => {
+              if (trackedIds.alphaLogs.length > 0) {
+                await tx.messageLog.deleteMany({ where: { id: { in: trackedIds.alphaLogs } } });
+              }
+              if (trackedIds.alphaTemplates.length > 0) {
+                await tx.messageTemplate.deleteMany({ where: { id: { in: trackedIds.alphaTemplates } } });
+              }
+              if (trackedIds.alphaStudents.length > 0) {
+                await tx.student.deleteMany({ where: { id: { in: trackedIds.alphaStudents } } });
+              }
+              if (trackedIds.alphaClassGroups.length > 0) {
+                await tx.classGroup.deleteMany({ where: { id: { in: trackedIds.alphaClassGroups } } });
+              }
+              const leftoverLogs = await tx.messageLog.count();
+              const leftoverStudents = await tx.student.count();
+              if (leftoverLogs !== 0 || leftoverStudents !== 0) {
+                throw new Error(
+                  `CLEANUP_LEFTOVER_ALPHA: logs=${leftoverLogs}, students=${leftoverStudents}`
+                );
+              }
+            });
 
-          await withTenantContext(runtimePrisma, BETA_ID, async (tx) => {
-            if (trackedIds.betaLogs.length > 0) {
-              await tx.messageLog.deleteMany({ where: { id: { in: trackedIds.betaLogs } } });
-            }
-            if (trackedIds.betaTemplates.length > 0) {
-              await tx.messageTemplate.deleteMany({ where: { id: { in: trackedIds.betaTemplates } } });
-            }
-            if (trackedIds.betaStudents.length > 0) {
-              await tx.student.deleteMany({ where: { id: { in: trackedIds.betaStudents } } });
-            }
-            if (trackedIds.betaClassGroups.length > 0) {
-              await tx.classGroup.deleteMany({ where: { id: { in: trackedIds.betaClassGroups } } });
-            }
-            const leftoverLogs = await tx.messageLog.count();
-            const leftoverStudents = await tx.student.count();
-            if (leftoverLogs !== 0 || leftoverStudents !== 0) {
-              throw new Error(
-                `CLEANUP_LEFTOVER_BETA: logs=${leftoverLogs}, students=${leftoverStudents}`
-              );
-            }
-          });
-        }
-      } catch (err) {
-        cleanupErrors.push(`tenantCleanup: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      try {
-        if (adminPrisma) {
-          const delSchools = await adminPrisma.school.deleteMany({
-            where: { id: { in: [ALPHA_ID, BETA_ID] } },
-          });
-          if (delSchools.count !== 2) {
-            throw new Error(`Expected 2 synthetic schools deleted, got ${delSchools.count}`);
+            await withTenantContext(runtimePrisma, BETA_ID, async (tx) => {
+              if (trackedIds.betaLogs.length > 0) {
+                await tx.messageLog.deleteMany({ where: { id: { in: trackedIds.betaLogs } } });
+              }
+              if (trackedIds.betaTemplates.length > 0) {
+                await tx.messageTemplate.deleteMany({ where: { id: { in: trackedIds.betaTemplates } } });
+              }
+              if (trackedIds.betaStudents.length > 0) {
+                await tx.student.deleteMany({ where: { id: { in: trackedIds.betaStudents } } });
+              }
+              if (trackedIds.betaClassGroups.length > 0) {
+                await tx.classGroup.deleteMany({ where: { id: { in: trackedIds.betaClassGroups } } });
+              }
+              const leftoverLogs = await tx.messageLog.count();
+              const leftoverStudents = await tx.student.count();
+              if (leftoverLogs !== 0 || leftoverStudents !== 0) {
+                throw new Error(
+                  `CLEANUP_LEFTOVER_BETA: logs=${leftoverLogs}, students=${leftoverStudents}`
+                );
+              }
+            });
           }
+        } catch (err) {
+          cleanupErrors.push(`tenantCleanup: ${err instanceof Error ? err.message : String(err)}`);
         }
-      } catch (err) {
-        cleanupErrors.push(`schoolCleanup: ${err instanceof Error ? err.message : String(err)}`);
+
+        try {
+          if (adminPrisma) {
+            if (trackedIds.auditEntityIds.length > 0) {
+              await adminPrisma.auditLog.deleteMany({
+                where: { entityId: { in: trackedIds.auditEntityIds } },
+              });
+            }
+            if (trackedIds.userSchoolIds.length > 0) {
+              await adminPrisma.userSchool.deleteMany({
+                where: { id: { in: trackedIds.userSchoolIds } },
+              });
+            }
+            if (trackedIds.userIds.length > 0) {
+              await adminPrisma.user.deleteMany({
+                where: { id: { in: trackedIds.userIds } },
+              });
+            }
+            if (trackedIds.schoolIds.length > 0) {
+              const delSchools = await adminPrisma.school.deleteMany({
+                where: { id: { in: trackedIds.schoolIds } },
+              });
+              if (delSchools.count !== trackedIds.schoolIds.length) {
+                throw new Error(
+                  `Expected ${trackedIds.schoolIds.length} synthetic schools deleted, got ${delSchools.count}`
+                );
+              }
+            }
+          }
+        } catch (err) {
+          cleanupErrors.push(`schoolCleanup: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       await runtimePrisma?.$disconnect().catch((err) => {
@@ -526,6 +581,10 @@ describe.skipIf(!SHOULD_RUN)(
         expect(afterCommit[0].val).toBeNull();
         expect(afterCommit[0].count).toBe(0n);
 
+        console.log(
+          `[pooler-pid-commit] mode=${allowLocalVerify ? "local_direct" : "pooler"} attempt=${attempt + 1} alphaPid=${alphaTx.pid}(${alphaTx.val}) betaPid=${betaTx.pid}(${betaTx.val}) afterCommitPid=${afterCommit[0].pid}(${afterCommit[0].val})`
+        );
+
         if (afterCommit[0].pid === alphaTx.pid || afterCommit[0].pid === betaTx.pid) {
           commitPidReused = true;
         }
@@ -545,11 +604,7 @@ describe.skipIf(!SHOULD_RUN)(
           })
         ).rejects.toThrow("FORCED_STAGING_ROLLBACK");
 
-        const persistedAborted = await withTenantContext(runtimePrisma, ALPHA_ID, (tx) =>
-          tx.classGroup.findUnique({ where: { id: rollbackCgId } })
-        );
-        expect(persistedAborted).toBeNull();
-
+        // PRIMEIRA consulta após ROLLBACK deve ser sem contexto escolar!
         const afterRollback = await runtimePrisma.$queryRaw<
           Array<{ pid: number; val: string | null; count: bigint }>
         >`
@@ -559,6 +614,16 @@ describe.skipIf(!SHOULD_RUN)(
         `;
         expect(afterRollback[0].val).toBeNull();
         expect(afterRollback[0].count).toBe(0n);
+
+        console.log(
+          `[pooler-pid-rollback] mode=${allowLocalVerify ? "local_direct" : "pooler"} attempt=${attempt + 1} rollbackPid=${rollbackPid}(${ALPHA_ID}) afterRollbackPid=${afterRollback[0].pid}(${afterRollback[0].val})`
+        );
+
+        // Somente DEPOIS verifica em withTenantContext que a linha abortada não persistiu
+        const persistedAborted = await withTenantContext(runtimePrisma, ALPHA_ID, (tx) =>
+          tx.classGroup.findUnique({ where: { id: rollbackCgId } })
+        );
+        expect(persistedAborted).toBeNull();
 
         if (afterRollback[0].pid === rollbackPid) {
           rollbackPidReused = true;
@@ -609,14 +674,25 @@ describe.skipIf(!SHOULD_RUN)(
       expect(await runtimePrisma.classGroup.count()).toBe(0);
     });
 
-    it("12. executa handler real do webhook WhatsApp e populateGlobalTakenCgms sob app_runtime + FORCE RLS", async () => {
+    it("12. executa auth snapshot, handler real do webhook WhatsApp (com AuditLog) e populateGlobalTakenCgms sob app_runtime + FORCE RLS", async () => {
       const prevWebhookSecret = process.env.WHATSAPP_WEBHOOK_SECRET;
       const prevResolverFlag = process.env.RLS_WAVE1_SECDEF_RESOLVER;
+      const prevStrictAuth = process.env.FORCE_STRICT_DB_AUTH;
       process.env.WHATSAPP_WEBHOOK_SECRET = "staging-webhook-secret-synthetic";
       process.env.RLS_WAVE1_SECDEF_RESOLVER = "true";
+      process.env.FORCE_STRICT_DB_AUTH = "true";
 
       try {
-        // 12a. CGM global via SECURITY DEFINER retorna apenas CGM ocupado
+        // 12a. Revalidação de sessão real (User + UserSchool) sob app_runtime
+        const authSnapshot = await resolveServerUserAuthSnapshot({
+          user: { id: authUserId, email: authUserEmail, role: "PEDAGOGA", active: true },
+        });
+        expect(authSnapshot).not.toBeNull();
+        expect(authSnapshot?.active).toBe(true);
+        expect(authSnapshot?.schools.some((s) => s.schoolId === ALPHA_ID && s.role === "PEDAGOGA")).toBe(true);
+        expect(authSnapshot?.schools.some((s) => s.schoolId === BETA_ID)).toBe(false);
+
+        // 12b. CGM global via SECURITY DEFINER retorna apenas CGM ocupado
         const takenCgms = new Set<string>();
         await populateGlobalTakenCgms(
           runtimePrisma,
@@ -626,7 +702,8 @@ describe.skipIf(!SHOULD_RUN)(
         expect(takenCgms.has(`9881${runId.slice(0, 6)}`)).toBe(true);
         expect(takenCgms.has(`9999${runId.slice(0, 6)}`)).toBe(false);
 
-        // 12b. Handler real POST /api/webhooks/whatsapp com logId válido altera apenas Alpha
+        // 12c. Handler real POST /api/webhooks/whatsapp com logId válido altera apenas Alpha e persiste AuditLog
+        trackedIds.auditEntityIds.push(logAlphaWebhookId, logAlphaId, logBetaId);
         const validReq = new Request("http://localhost:3000/api/webhooks/whatsapp", {
           method: "POST",
           headers: {
@@ -653,7 +730,21 @@ describe.skipIf(!SHOULD_RUN)(
         expect(alphaWhLog?.guardianReplied).toBe(true);
         expect(alphaWhLog?.replyNotes).toContain("Confirmado recebimento");
 
-        // 12c. Handler real POST /api/webhooks/whatsapp com telefone compartilhado (Alpha e Beta) ignora sem gravar
+        const persistedAudit = await runtimePrisma.auditLog.findFirst({
+          where: {
+            schoolId: ALPHA_ID,
+            entityId: logAlphaWebhookId,
+            action: "WEBHOOK_REPLY",
+          },
+          select: { id: true, schoolId: true, entityId: true, action: true },
+        });
+        expect(persistedAudit).toMatchObject({
+          schoolId: ALPHA_ID,
+          entityId: logAlphaWebhookId,
+          action: "WEBHOOK_REPLY",
+        });
+
+        // 12d. Handler real POST /api/webhooks/whatsapp com telefone compartilhado (Alpha e Beta) ignora sem gravar nem auditar
         const ambiguousReq = new Request("http://localhost:3000/api/webhooks/whatsapp", {
           method: "POST",
           headers: {
@@ -670,21 +761,30 @@ describe.skipIf(!SHOULD_RUN)(
         const ambiguousBody = await ambiguousRes.json();
         expect(ambiguousBody.ignored).toBe(true);
 
-        const [alphaSharedLog, betaSharedLog] = await Promise.all([
+        const [alphaSharedLog, betaSharedLog, ambiguousAudits] = await Promise.all([
           withTenantContext(runtimePrisma, ALPHA_ID, (tx) =>
             tx.messageLog.findUnique({ where: { id: logAlphaId }, select: { guardianReplied: true } })
           ),
           withTenantContext(runtimePrisma, BETA_ID, (tx) =>
             tx.messageLog.findUnique({ where: { id: logBetaId }, select: { guardianReplied: true } })
           ),
+          runtimePrisma.auditLog.findMany({
+            where: {
+              entityId: { in: [logAlphaId, logBetaId] },
+              action: "WEBHOOK_REPLY",
+            },
+          }),
         ]);
         expect(alphaSharedLog?.guardianReplied).toBe(false);
         expect(betaSharedLog?.guardianReplied).toBe(false);
+        expect(ambiguousAudits).toEqual([]);
       } finally {
         if (prevWebhookSecret === undefined) delete process.env.WHATSAPP_WEBHOOK_SECRET;
         else process.env.WHATSAPP_WEBHOOK_SECRET = prevWebhookSecret;
         if (prevResolverFlag === undefined) delete process.env.RLS_WAVE1_SECDEF_RESOLVER;
         else process.env.RLS_WAVE1_SECDEF_RESOLVER = prevResolverFlag;
+        if (prevStrictAuth === undefined) delete process.env.FORCE_STRICT_DB_AUTH;
+        else process.env.FORCE_STRICT_DB_AUTH = prevStrictAuth;
       }
     });
   }

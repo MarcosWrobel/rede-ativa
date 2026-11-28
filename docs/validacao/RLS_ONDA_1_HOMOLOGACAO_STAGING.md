@@ -180,8 +180,8 @@ SELECT
   shobj_description((SELECT oid FROM pg_database WHERE datname = current_database()), 'pg_database') AS "dbComment";
 ```
 1. O banco de staging deve possuir `COMMENT ON DATABASE "<staging-db>" IS 'staging';` (ou `'rls_staging_authorized'`), ausente em produção.
-2. `RLS_STAGING_TARGET_CONFIRMED=staging` e `RLS_STAGING_EXPECTED_DB=<staging-db>` são obrigatórios tanto na suíte quanto nos comandos de DDL.
-3. A conexão direta (`app_migrator`, sem `-pooler`) e a poolada (`app_runtime`, com `-pooler` e `?pgbouncer=true`) devem coincidir em `db`, `startTime` e `pgVersion`, comprovando mesma branch/instância.
+2. `RLS_STAGING_TARGET_CONFIRMED=staging` e `RLS_STAGING_EXPECTED_DB=<staging-db>` são **sempre obrigatórios** tanto em `rlsStagingPooler.test.ts` quanto em `apply_wave1_phase_b_candidate.mjs` (mesmo omitindo `--stage` ou usando `--stage=all`; apenas o ensaio local aceita `RLS_PHASE_B_ALLOW_LOCAL_VERIFY=true` restrito a loopback + banco sintético).
+3. A conexão direta (`app_migrator`, sem `-pooler`) e a poolada (`app_runtime`, com `-pooler` e `?pgbouncer=true`) devem coincidir em `db`, `startTime` e `pgVersion`, comprovando mesma branch/instância. Em `rlsStagingPooler.test.ts`, a limpeza em `afterAll` só é executada quando `targetConfirmed === true` (após confirmação somente leitura).
 
 ### 8.4 Sequência Reproduzível de Execução em Staging (Sem Janela Intermediária Incompatível)
 1. **Retirar escritores legados** e garantir `MessageLog.schoolId` preenchido em 100% da aplicação.
@@ -201,39 +201,39 @@ SELECT
    RLS_PHASE_B_MIGRATOR_URL="<staging-direct-url-app-migrator>" \
      node lab/rls-pilot/apply_wave1_phase_b_candidate.mjs --stage=resolvers
    ```
-   *Motivo:* garante que `resolve_taken_cgms`, `resolve_whatsapp_webhook_by_log_id`, `resolve_whatsapp_webhook_by_phone` e seus `GRANT EXECUTE TO app_runtime` já existam no banco antes de habilitar `RLS_WAVE1_SECDEF_RESOLVER=true`.
-6. **Implantar App Onda 1 em staging** com `RLS_WAVE1_SECDEF_RESOLVER=true` (ainda antes da janela de troca de credencial).
-7. **Janela controlada de tráfego (drenagem/manutenção):**
-   - Ativar **Políticas RLS (`ENABLE` + `FORCE ROW LEVEL SECURITY`)**:
+   *Motivo:* instala `resolve_taken_cgms`, `resolve_whatsapp_webhook_by_log_id`, `resolve_whatsapp_webhook_by_phone` e seus `GRANT EXECUTE TO app_runtime` antes de qualquer instância da App ligar `RLS_WAVE1_SECDEF_RESOLVER=true`.
+6. **Janela controlada de tráfego (drenagem/manutenção):**
+   - Ativar **Políticas RLS (`ENABLE` + `FORCE ROW LEVEL SECURITY`) e permissões mínimas de `app_runtime`** (`AuditLog` `SELECT, INSERT`; `User`, `UserSchool`, `UserNetwork`, `EducationNetwork` `SELECT`; 4 tabelas da Onda 1):
      ```bash
      RLS_STAGING_TARGET_CONFIRMED=staging \
      RLS_STAGING_EXPECTED_DB="<staging-db>" \
      RLS_PHASE_B_MIGRATOR_URL="<staging-direct-url-app-migrator>" \
        node lab/rls-pilot/apply_wave1_phase_b_candidate.mjs --stage=policies
      ```
-   - Imediatamente na mesma janela, **trocar `DATABASE_URL` da aplicação em staging para `app_runtime`** no endpoint `-pooler` (`?pgbouncer=true`) e encerrar a janela de manutenção, evitando tráfego contra estado intermediário incompatível.
-8. **Executar a suíte de homologação do pooler (sem skips):**
-   ```bash
-   RUN_RLS_STAGING_POOLER_TEST=true \
-   RLS_STAGING_TARGET_CONFIRMED=staging \
-   RLS_STAGING_EXPECTED_DB="<staging-db>" \
-   RLS_STAGING_ADMIN_URL="<staging-direct-url-app-migrator>" \
-   RLS_STAGING_RUNTIME_POOLER_URL="<staging-pooler-url-app-runtime>" \
-     npx vitest run src/lib/__tests__/rlsStagingPooler.test.ts
-   ```
-   *Critério de aceite do reúso:* em modo `-pooler`, se `pg_backend_pid()` não repetir após `COMMIT` e `ROLLBACK` dentro de 8 tentativas, a suíte falha com `PENDENTE_REUSO_PID_POOLER` (distinguindo ausência de evidência de reúso de falha de isolamento).
+   - Imediatamente na mesma janela, **implantar/reiniciar App Onda 1 com `RLS_WAVE1_SECDEF_RESOLVER=true` e `DATABASE_URL` apontando para `app_runtime`** no endpoint `-pooler` (`?pgbouncer=true`).
+   - **Antes de reabrir o tráfego**, validar os fluxos essenciais ainda dentro da janela de manutenção executando a suíte de homologação do pooler (sem skips):
+     ```bash
+     RUN_RLS_STAGING_POOLER_TEST=true \
+     RLS_STAGING_TARGET_CONFIRMED=staging \
+     RLS_STAGING_EXPECTED_DB="<staging-db>" \
+     RLS_STAGING_ADMIN_URL="<staging-direct-url-app-migrator>" \
+     RLS_STAGING_RUNTIME_POOLER_URL="<staging-pooler-url-app-runtime>" \
+       npx vitest run src/lib/__tests__/rlsStagingPooler.test.ts
+     ```
+   - Somente após aprovação integral (`0` falhas, `0` skips, `AuditLog` e `resolveServerUserAuthSnapshot` aprovados e repetição de `pg_backend_pid()` observada após `COMMIT` e `ROLLBACK`), reabrir o tráfego de staging.
+   - *Condição de reversão na janela:* se qualquer verificação falhar antes da reabertura, manter tráfego fechado, suspender policies (`DISABLE ROW LEVEL SECURITY`) ou reverter o deploy mantendo `requireAuthorizedSchool` + `assertTenantOwnership` ativos.
 
 ### 8.5 Permissões Mínimas, Critérios de Interrupção e Reversão Segura
 - **Permissões esperadas para `app_runtime` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`, sem posse e bloqueado em `SET ROLE app_migrator`):**
-  - Autenticação/infraestrutura (fora da Onda 1): `SELECT`/`UPDATE`/`INSERT` mínimos exigidos pelos fluxos em `User`, `UserSchool`, `UserNetwork`, `School` (`SELECT`), `EducationNetwork` (`SELECT`), `RateLimitBucket`, `AuditLog` (`INSERT`).
+  - Autenticação/auditoria (fora da Onda 1): `SELECT` em `User`, `UserSchool`, `UserNetwork`, `School`, `EducationNetwork`; `SELECT, INSERT` em `AuditLog` (versionado em [wave1_phase_b_roles_setup.sql](../../lab/rls-pilot/wave1_phase_b_roles_setup.sql)).
   - Onda 1 (`ENABLE` + `FORCE RLS`): `SELECT, INSERT, UPDATE, DELETE` em `ClassGroup`, `Student`, `MessageTemplate`, `MessageLog` sob policy fail-closed, mais `EXECUTE` nas funções `SECURITY DEFINER` de `wave1_lookup_owner`.
   - Demais módulos (Ondas 2 e 3): `PedagogicalMinute*`, `ClassCouncil*`, `LowAttendanceRecord`, `AttendanceSnapshot`, `AbsenceJustification`.
-- **Interromper imediatamente** se: `verifyStagingTargetsReadOnly` falhar, `readyForPhaseB !== true`, ocorrer erro em `--stage=schema`/`resolvers`/`policies` (rollback integral), ou qualquer caso de `rlsStagingPooler.test.ts` falhar ou for ignorado.
+- **Interromper imediatamente** se: `verifyStagingTargetsReadOnly` ou `assertMigratorTargetConfirmedReadOnly` falhar, `readyForPhaseB !== true`, ocorrer erro em `--stage=schema`/`resolvers`/`policies` (rollback integral), ou qualquer caso de `rlsStagingPooler.test.ts` falhar ou for ignorado.
 - **Reversão permitida em staging:** abrir janela controlada, manter App Onda 1, suspender temporariamente as policies RLS mantendo `requireAuthorizedSchool` + `assertTenantOwnership`. **Nunca** apontar `DATABASE_URL` de runtime para `neondb_owner`/`app_migrator` nem conceder `BYPASSRLS`/`SUPERUSER` a `app_runtime`.
 
 ### 8.6 Matriz dos Três Bloqueios (Local vs Staging Neon)
 | Bloqueio | Prova Local (PG 16) | Pendente no Pooler do Neon (`-pooler`) |
 | :--- | :--- | :--- |
-| **1. Alvo somente leitura e limpeza por IDs da execução** | `verifyStagingTargetsReadOnly` bloqueia DB/papel/marcador divergente sem escrever (`rlsStagingPooler.test.ts` caso `0`); limpeza usa `runId` exclusivo sob `FORCE RLS` sem afetar preexistentes | Confirmar `COMMENT ON DATABASE`, `RLS_STAGING_EXPECTED_DB` e paridade direta vs `-pooler` em staging |
-| **2. Comprovação de reúso de `pg_backend_pid()` e concorrência** | `COMMIT`/`ROLLBACK` com limpeza de contexto, concorrência intercalada e falha explícita `PENDENTE_REUSO_PID_POOLER` (`rlsStagingPooler.test.ts` casos `7-11`, PG16 direto) | Observar repetição real de `pg_backend_pid()` sob PgBouncer `-pooler` em staging |
-| **3. Ordem segura + execução real dos fluxos sob `app_runtime`** | `--stage=schema` -> `--stage=resolvers` -> `--stage=policies`; handler real `POST /api/webhooks/whatsapp` (válido + telefone ambíguo) e `populateGlobalTakenCgms` sob `app_runtime` + `FORCE RLS` (`rlsStagingPooler.test.ts` caso `12`) | Executar o roteiro completo e a suíte contra o staging Neon autorizado (13º marco) |
+| **1. Bloqueio de DDL e limpeza sem confirmação do alvo** | `apply_wave1_phase_b_candidate.mjs` recusa ausência total/parcial de confirmação, `-pooler` ou DB/marcador divergente (inclusive sem `--stage` / `--stage=all`) antes do DDL; `rlsStagingPooler.test.ts` separa `targetConfirmed` da criação dos clientes e preserva preexistentes | Confirmar `COMMENT ON DATABASE`, `RLS_STAGING_EXPECTED_DB` e paridade direta vs `-pooler` em staging |
+| **2. Observação imediata após `ROLLBACK` e reúso no pooler** | Primeira consulta pós-`ROLLBACK` lê `pg_backend_pid()`, contexto e visibilidade sem definir escola; registra pares de PID (`[pooler-pid-commit]`, `[pooler-pid-rollback]`) e falha com `PENDENTE_REUSO_PID_POOLER` se PID não repetir | Observar repetição real de `pg_backend_pid()` após `COMMIT` e `ROLLBACK` sob PgBouncer `-pooler` em staging |
+| **3. Auditoria, autenticação e ordem de ativação** | `wave1_phase_b_policies.sql` concede `SELECT, INSERT` em `AuditLog` e `SELECT` em `User`/`UserSchool`/`UserNetwork`/`EducationNetwork` para `app_runtime`; `rlsStagingPooler.test.ts` caso `12` comprova `resolveServerUserAuthSnapshot` (`FORCE_STRICT_DB_AUTH=true`), `POST /api/webhooks/whatsapp` com `AuditLog` (`WEBHOOK_REPLY`) no válido e zero gravação/auditoria no ambíguo | Executar a janela controlada e a suíte contra o staging Neon autorizado (13º marco) |

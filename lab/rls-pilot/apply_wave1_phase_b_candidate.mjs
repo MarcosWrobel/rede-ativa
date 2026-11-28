@@ -113,6 +113,69 @@ export async function applyWave1PhaseBCandidateInSingleTx(migratorPrisma, option
   return { statementCount: statements.length };
 }
 
+async function assertMigratorTargetConfirmedReadOnly(migratorPrisma, migratorUrl) {
+  const parsedUrl = new URL(migratorUrl);
+  const host = parsedUrl.hostname.toLowerCase();
+  const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+  const allowLocalVerify = process.env.RLS_PHASE_B_ALLOW_LOCAL_VERIFY === "true";
+
+  const rows = await migratorPrisma.$queryRaw`
+    SELECT
+      current_database() AS db,
+      current_user AS role,
+      shobj_description(
+        (SELECT oid FROM pg_database WHERE datname = current_database()),
+        'pg_database'
+      ) AS db_comment
+  `;
+  const info = rows[0];
+  if (!info) {
+    throw new Error("STAGING_TARGET_CHECK_FAILED: falha ao consultar identidade do banco.");
+  }
+
+  if (info.role !== "app_migrator") {
+    throw new Error(
+      `STAGING_TARGET_CHECK_FAILED: conexão direta deve usar 'app_migrator' (recebido '${info.role}').`
+    );
+  }
+
+  if (allowLocalVerify) {
+    const dbLower = String(info.db || "").toLowerCase();
+    const isSyntheticLocalDb =
+      dbLower.includes("rls_wave1_phase_b") || dbLower.includes("rls_staging_local_verify");
+    if (!isLoopback || !isSyntheticLocalDb) {
+      throw new Error(
+        `LOCAL_VERIFY_REJECTED: RLS_PHASE_B_ALLOW_LOCAL_VERIFY=true exige loopback e banco sintético (host=${host}, db=${info.db}).`
+      );
+    }
+    return;
+  }
+
+  const targetConfirmed = process.env.RLS_STAGING_TARGET_CONFIRMED === "staging";
+  const expectedDb = String(process.env.RLS_STAGING_EXPECTED_DB || "").trim();
+  if (!targetConfirmed || !expectedDb) {
+    throw new Error(
+      "STAGING_TARGET_CONFIRMATION_REQUIRED: defina RLS_STAGING_TARGET_CONFIRMED=staging e RLS_STAGING_EXPECTED_DB=<db> antes de aplicar DDL."
+    );
+  }
+
+  if (host.includes("-pooler") || parsedUrl.searchParams.get("pgbouncer") === "true") {
+    throw new Error(
+      "STAGING_DIRECT_URL_REQUIRED: RLS_PHASE_B_MIGRATOR_URL deve usar conexão direta (sem '-pooler' ou 'pgbouncer=true')."
+    );
+  }
+
+  const comment = String(info.db_comment || "").trim().toLowerCase();
+  if (
+    info.db !== expectedDb ||
+    (comment !== "staging" && comment !== "rls_staging_authorized")
+  ) {
+    throw new Error(
+      `STAGING_TARGET_CHECK_FAILED: alvo não confirmado como staging autorizado (db=${info.db}, expected=${expectedDb}, comment=${info.db_comment}).`
+    );
+  }
+}
+
 async function runCli() {
   const migratorUrl = process.env.RLS_PHASE_B_MIGRATOR_URL;
   if (!migratorUrl) {
@@ -125,30 +188,7 @@ async function runCli() {
   const migratorPrisma = new PrismaClient({ datasources: { db: { url: migratorUrl } } });
   try {
     await migratorPrisma.$connect();
-    if (process.env.RLS_STAGING_TARGET_CONFIRMED === "staging" || process.env.RLS_STAGING_EXPECTED_DB) {
-      const expectedDb = String(process.env.RLS_STAGING_EXPECTED_DB || "").trim();
-      const rows = await migratorPrisma.$queryRaw`
-        SELECT
-          current_database() AS db,
-          current_user AS role,
-          shobj_description(
-            (SELECT oid FROM pg_database WHERE datname = current_database()),
-            'pg_database'
-          ) AS db_comment
-      `;
-      const info = rows[0];
-      const comment = String(info?.db_comment || "").trim().toLowerCase();
-      if (
-        !info ||
-        info.role !== "app_migrator" ||
-        (expectedDb && info.db !== expectedDb) ||
-        (comment !== "staging" && comment !== "rls_staging_authorized")
-      ) {
-        throw new Error(
-          `STAGING_TARGET_CHECK_FAILED: alvo não confirmado como staging autorizado (db=${info?.db}, role=${info?.role}).`
-        );
-      }
-    }
+    await assertMigratorTargetConfirmedReadOnly(migratorPrisma, migratorUrl);
     const { statementCount } = await applyWave1PhaseBCandidateInSingleTx(migratorPrisma, { stage });
     console.log(
       `[wave1_phase_b:${stage}] Aplicado em transação única (${statementCount} instruções).`
