@@ -533,6 +533,21 @@ export async function listSchoolCouncilBoards(
   );
 }
 
+function filterLegacyBelowAvgSummaryJson(
+  rawJson: string | null | undefined,
+  validSubjectIds: Set<string>
+): string | null {
+  if (!rawJson) return rawJson ?? null;
+  const parsed = parseBelowAverageJson(rawJson);
+  const filtered = parsed.filter(
+    (item) => !item.subjectId || validSubjectIds.has(item.subjectId)
+  );
+  if (filtered.length === parsed.length) {
+    return rawJson;
+  }
+  return filtered.length > 0 ? JSON.stringify(filtered) : null;
+}
+
 export async function getCouncilBoardDetail(
   schoolId: string,
   boardId: string,
@@ -560,14 +575,14 @@ export async function getCouncilBoardDetail(
         return null;
       }
 
-      return db.classCouncilBoard.findUnique({
+      const board = await db.classCouncilBoard.findUnique({
         where: { id: boardId },
         include: {
           classGroup: {
             select: { id: true, name: true, segment: true, shift: true },
           },
           subjects: {
-            where: { schoolId },
+            where: { schoolId, boardId },
             orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
           },
           trimesters: {
@@ -604,6 +619,28 @@ export async function getCouncilBoardDetail(
           },
         },
       });
+
+      if (!board) return null;
+
+      const validSubjectIds = new Set(board.subjects.map((s) => s.id));
+      return {
+        ...board,
+        studentCards: board.studentCards.map((card) => ({
+          ...card,
+          trimester1BelowAvgJson: filterLegacyBelowAvgSummaryJson(
+            card.trimester1BelowAvgJson,
+            validSubjectIds
+          ),
+          trimester2BelowAvgJson: filterLegacyBelowAvgSummaryJson(
+            card.trimester2BelowAvgJson,
+            validSubjectIds
+          ),
+          trimester3BelowAvgJson: filterLegacyBelowAvgSummaryJson(
+            card.trimester3BelowAvgJson,
+            validSubjectIds
+          ),
+        })),
+      };
     },
     txClient
   );
@@ -1869,8 +1906,11 @@ export async function saveCouncilMatrixBatch(params: {
         return saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail });
       });
     } catch (err) {
-      if (attempt < 2 && isPrismaUniqueConstraintError(err)) {
-        continue;
+      if (isPrismaUniqueConstraintError(err)) {
+        if (attempt < 2) {
+          continue;
+        }
+        throw new CouncilDomainError("Não foi possível concluir a gravação da matriz por concorrência.", 409);
       }
       throw err;
     }

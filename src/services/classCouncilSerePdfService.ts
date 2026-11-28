@@ -525,77 +525,22 @@ export async function applyCouncilSerePdfImport(params: {
             active: true,
           });
         } else {
-          try {
-            const created = await tx.classCouncilSubject.create({
-              data: {
-                schoolId,
-                boardId: board.id,
-                name: subj.name,
-                displayOrder: nextDisplayOrder++,
-                active: true,
-              },
-              select: { id: true, name: true, displayOrder: true },
-            });
-            subjectsCreated += 1;
-            resolvedSubjectByMatchKey.set(subj.matchKey, created);
-            subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
-              ...created,
+          const created = await tx.classCouncilSubject.create({
+            data: {
+              schoolId,
+              boardId: board.id,
+              name: subj.name,
+              displayOrder: nextDisplayOrder++,
               active: true,
-            });
-          } catch (err) {
-            if ((err as { code?: string })?.code !== "P2002") {
-              throw err;
-            }
-            const conflicted =
-              (await tx.classCouncilSubject.findUnique?.({
-                where: { boardId_name: { boardId: board.id, name: subj.name } },
-                select: {
-                  id: true,
-                  schoolId: true,
-                  name: true,
-                  displayOrder: true,
-                  active: true,
-                },
-              })) ??
-              (await tx.classCouncilSubject.findFirst?.({
-                where: { boardId: board.id, schoolId, name: subj.name },
-                select: {
-                  id: true,
-                  schoolId: true,
-                  name: true,
-                  displayOrder: true,
-                  active: true,
-                },
-              })) ??
-              null;
-
-            if (!conflicted) {
-              throw err;
-            }
-            if (conflicted.schoolId && conflicted.schoolId !== schoolId) {
-              throw new CouncilDomainError(
-                "Conflito de instituição ao registrar componente curricular.",
-                409
-              );
-            }
-            if (!conflicted.active) {
-              await tx.classCouncilSubject.update({
-                where: { id: conflicted.id },
-                data: { active: true },
-              });
-            }
-            subjectsMatched += 1;
-            const resolvedConflicted = {
-              id: conflicted.id,
-              name: conflicted.name,
-              displayOrder: conflicted.displayOrder,
-            };
-            resolvedSubjectByMatchKey.set(subj.matchKey, resolvedConflicted);
-            subjectLookup.set(toCouncilSubjectMatchKey(conflicted.name), {
-              ...resolvedConflicted,
-              active: true,
-            });
-          }
+            },
+            select: { id: true, name: true, displayOrder: true },
+          });
+          subjectsCreated += 1;
+          resolvedSubjectByMatchKey.set(subj.matchKey, created);
+          subjectLookup.set(toCouncilSubjectMatchKey(created.name), {
+            ...created,
+            active: true,
+          });
         }
       }
     }
@@ -1021,8 +966,14 @@ export async function applyCouncilSerePdfImport(params: {
       txOutcome = await runApplyTx();
       break;
     } catch (err) {
-      if (attempt < 2 && (err as { code?: string } | null)?.code === "P2002") {
-        continue;
+      if ((err as { code?: string } | null)?.code === "P2002") {
+        if (attempt < 2) {
+          continue;
+        }
+        throw new CouncilDomainError(
+          "Conflito de concorrência ao registrar componente curricular ou avaliação.",
+          409
+        );
       }
       throw err;
     }

@@ -13060,6 +13060,579 @@ describe.skipIf(!SHOULD_RUN)(
     }
   });
 
+  it("Aceite final 3: filtra resumos legados em leitura sem gravar e comprova contenção real de bloqueio entre matriz e SERE PDF", async () => {
+    const { cookies } = await import("next/headers");
+    const { logAudit } = await import("@/lib/audit");
+    const { GET: getBoardRoute } = await import("@/app/api/conselho-classe/[boardId]/route");
+    const { PUT: putMatrixRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/matrix/route"
+    );
+    const { POST: postImportPdfRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/import-pdf/route"
+    );
+    const { default: ConselhoTurmaPage } = await import(
+      "@/app/conselho-classe/[boardId]/page"
+    );
+    const { default: ConselhoPrintPage } = await import(
+      "@/app/conselho-classe/[boardId]/imprimir/page"
+    );
+    const { applyCouncilSerePdfImport } = await import("@/services/classCouncilSerePdfService");
+
+    const buildSerePdf = (opts: {
+      subjects: string[];
+      rows: Array<{ nro: number; name: string; grades: Array<[string, string, string]> }>;
+    }): Uint8Array => {
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const yFromBottom = (pdfY: number) => doc.internal.pageSize.getHeight() - pdfY;
+      doc.setFontSize(8);
+      doc.text("GOVERNO DO ESTADO DO PARANÁ", 28.3, yFromBottom(573.5));
+      doc.text("DATA: 18/11/2026", 748, yFromBottom(573.5));
+      doc.text("SECRETARIA DE ESTADO DA EDUCAÇÃO - SEED", 28.3, yFromBottom(562.5));
+      doc.text("SISTEMA ESCOLA", 743.5, yFromBottom(562.5));
+      doc.text("ESCOLA SINTÉTICA", 28.3, yFromBottom(539.5));
+      doc.text("2026", 802, yFromBottom(539.5));
+      doc.text("Curso: ENSINO FUNDAMENTAL", 28.3, yFromBottom(528.5));
+      doc.text("Seriação: 8º Ano", 247.7, yFromBottom(528.5));
+      doc.text("Turno: Manhã", 359.5, yFromBottom(528.5));
+      doc.text("Turma: C5", 783.5, yFromBottom(528.5));
+      doc.setFontSize(10);
+      doc.text("RELATÓRIO DE ACOMPANHAMENTO TRIMESTRAL", 318.3, yFromBottom(503));
+      doc.setFontSize(7);
+      doc.text("Disciplinas", 300, yFromBottom(475));
+      doc.text("Nro.", 31.1, yFromBottom(453.5));
+      doc.text("Nome", 48.4, yFromBottom(453.5));
+      const firstT1X = 164.2;
+      const tStep = 18.4;
+      const subjectStep = 73.7;
+      opts.subjects.forEach((subj, sIdx) => {
+        const baseX = firstT1X + sIdx * subjectStep;
+        doc.text(subj, baseX + 5, yFromBottom(458));
+        doc.text("T1", baseX, yFromBottom(445));
+        doc.text("T2", baseX + tStep, yFromBottom(445));
+        doc.text("T3", baseX + tStep * 2, yFromBottom(445));
+      });
+      let currentY = 432;
+      for (const row of opts.rows) {
+        doc.text(String(row.nro), 31.4, yFromBottom(currentY));
+        doc.text(row.name, 48.4, yFromBottom(currentY));
+        row.grades.forEach(([t1, t2, t3], sIdx) => {
+          const baseX = firstT1X + sIdx * subjectStep;
+          doc.text(t1, baseX - 2, yFromBottom(currentY));
+          doc.text(t2, baseX + tStep - 2, yFromBottom(currentY));
+          doc.text(t3, baseX + tStep * 2 - 2, yFromBottom(currentY));
+          doc.text("--", baseX + tStep * 3 + 1.4, yFromBottom(currentY));
+        });
+        currentY -= 20;
+      }
+      return new Uint8Array(doc.output("arraybuffer"));
+    };
+
+    const legacySummaryPayload = JSON.stringify([
+      { subjectId: "cc5-sub-a1-lp", subjectName: "Língua Portuguesa", grade: 5.2 },
+      { subjectName: "Projeto Manual C5", grade: 4.1 },
+      { subjectId: "cc5-sub-a2-otherboard", subjectName: "História Outro Quadro", grade: 3.5 },
+      { subjectId: "cc5-sub-b1-foreign", subjectName: "Física Outra Escola", grade: 2.5 },
+    ]);
+
+    await prisma.classGroup.createMany({
+      data: [
+        {
+          id: "cc5-cg-a1",
+          schoolId: "school-alpha",
+          name: "8º Ano C5",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "cc5-cg-a2",
+          schoolId: "school-alpha",
+          name: "8º Ano C5 Outro",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "cc5-cg-b1",
+          schoolId: "school-beta",
+          name: "8º Ano C5",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.student.createMany({
+      data: [
+        {
+          id: "cc5-stu-a1-mat",
+          schoolId: "school-alpha",
+          classGroupId: "cc5-cg-a1",
+          cgm: "9600011",
+          name: "ESTUDANTE CC5 MATRIZ",
+          phone: "41999960011",
+          active: true,
+        },
+        {
+          id: "cc5-stu-a1-sere",
+          schoolId: "school-alpha",
+          classGroupId: "cc5-cg-a1",
+          cgm: "9600012",
+          name: "ESTUDANTE CC5 SERE",
+          phone: "41999960012",
+          active: true,
+        },
+        {
+          id: "cc5-stu-b1",
+          schoolId: "school-beta",
+          classGroupId: "cc5-cg-b1",
+          cgm: "9600021",
+          name: "ESTUDANTE CC5 BETA",
+          phone: "41999960021",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilBoard.createMany({
+      data: [
+        { id: "cc5-board-a1", schoolId: "school-alpha", classGroupId: "cc5-cg-a1", year: 2026 },
+        { id: "cc5-board-a2", schoolId: "school-alpha", classGroupId: "cc5-cg-a2", year: 2026 },
+        { id: "cc5-board-b1", schoolId: "school-beta", classGroupId: "cc5-cg-b1", year: 2026 },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilSubject.createMany({
+      data: [
+        {
+          id: "cc5-sub-a1-lp",
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a1",
+          name: "Língua Portuguesa",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "cc5-sub-a1-mat",
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a1",
+          name: "Matemática",
+          displayOrder: 2,
+          active: true,
+        },
+        {
+          id: "cc5-sub-a2-otherboard",
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a2",
+          name: "História Outro Quadro",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "cc5-sub-b1-foreign",
+          schoolId: "school-beta",
+          boardId: "cc5-board-b1",
+          name: "Física Outra Escola",
+          displayOrder: 1,
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.studentCouncilCard.createMany({
+      data: [
+        {
+          id: "cc5-card-a1-mat",
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a1",
+          studentId: "cc5-stu-a1-mat",
+          trimester1BelowAvgJson: legacySummaryPayload,
+        },
+        {
+          id: "cc5-card-a1-sere",
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a1",
+          studentId: "cc5-stu-a1-sere",
+          trimester1BelowAvgJson: legacySummaryPayload,
+        },
+        {
+          id: "cc5-card-b1",
+          schoolId: "school-beta",
+          boardId: "cc5-board-b1",
+          studentId: "cc5-stu-b1",
+          trimester1BelowAvgJson: JSON.stringify([
+            { subjectId: "cc5-sub-b1-foreign", subjectName: "Física Outra Escola", grade: 2.5 },
+          ]),
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.user.createMany({
+      data: [
+        {
+          id: "cc5-usr-ped",
+          email: "cc5.ped@redeativa.local",
+          name: "Pedagoga CC5",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    await prisma.userSchool.createMany({
+      data: [
+        {
+          id: "cc5-us-ped",
+          userId: "cc5-usr-ped",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    testAuthState.useRealPermissions = true;
+    testAuthState.useRealCurrentSchool = true;
+    testAuthState.pendingSessionUser = {
+      id: "cc5-usr-ped",
+      email: "cc5.ped@redeativa.local",
+      schoolId: "school-alpha",
+      active: true,
+    };
+    vi.mocked(cookies).mockResolvedValue({
+      get: (name: string) =>
+        name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+    } as never);
+
+    const blockerClient = new PrismaClient({
+      datasources: { db: { url: process.env.RLS_PHASE_A_DB_URL } },
+    });
+
+    try {
+      // --- CRITÉRIO 1: Leitura filtra resumos legados sem gravar no banco ---
+      vi.mocked(logAudit).mockClear();
+      const getRes = await getBoardRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc5-board-a1"),
+        { params: Promise.resolve({ boardId: "cc5-board-a1" }) }
+      );
+      expect(getRes.status).toBe(200);
+      const getBody = await getRes.json();
+      for (const cardId of ["cc5-card-a1-mat", "cc5-card-a1-sere"]) {
+        const readCard = getBody.board.studentCards.find((c: { id: string }) => c.id === cardId);
+        const parsedRead = JSON.parse(readCard.trimester1BelowAvgJson) as Array<{
+          subjectName: string;
+        }>;
+        expect(parsedRead.map((i) => i.subjectName)).toEqual([
+          "Língua Portuguesa",
+          "Projeto Manual C5",
+        ]);
+      }
+
+      // Detalhe SSR e Impressão SSR preservam contrato sem gravar no banco
+      await expect(
+        ConselhoTurmaPage({ params: Promise.resolve({ boardId: "cc5-board-a1" }) })
+      ).resolves.toBeTruthy();
+      await expect(
+        ConselhoPrintPage({ params: Promise.resolve({ boardId: "cc5-board-a1" }) })
+      ).resolves.toBeTruthy();
+
+      // Banco permanece intacto (resumo legado bruto ainda contém os 4 itens) e sem logAudit
+      const rawCardMatBefore = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc5-card-a1-mat" },
+      });
+      const rawCardSereBefore = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc5-card-a1-sere" },
+      });
+      expect(rawCardMatBefore.trimester1BelowAvgJson).toBe(legacySummaryPayload);
+      expect(rawCardSereBefore.trimester1BelowAvgJson).toBe(legacySummaryPayload);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // Matriz e SERE PDF com cenários independentes (cc5-card-a1-mat vs cc5-card-a1-sere)
+      const matSaveRes = await putMatrixRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc5-board-a1/matrix", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 1,
+            entries: [
+              {
+                studentId: "cc5-stu-a1-mat",
+                subjectId: "cc5-sub-a1-mat",
+                descriptorCodes: [1],
+                grade: 4.9,
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "cc5-board-a1" }) }
+      );
+      expect(matSaveRes.status).toBe(200);
+      // Confirma que cc5-card-a1-sere ainda estava intacta antes do SERE
+      expect(
+        (
+          await prisma.studentCouncilCard.findUniqueOrThrow({
+            where: { id: "cc5-card-a1-sere" },
+          })
+        ).trimester1BelowAvgJson
+      ).toBe(legacySummaryPayload);
+
+      const sereFd1 = new FormData();
+      sereFd1.set("mode", "apply");
+      sereFd1.set(
+        "files",
+        new File(
+          [
+            Buffer.from(
+              buildSerePdf({
+                subjects: ["MATEMATICA"],
+                rows: [{ nro: 1, name: "ESTUDANTE CC5 SERE", grades: [["4.4", "--", "--"]] }],
+              })
+            ),
+          ],
+          "sere1.pdf",
+          { type: "application/pdf" }
+        )
+      );
+      const sereSaveRes = await postImportPdfRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc5-board-a1/import-pdf", {
+          method: "POST",
+          body: sereFd1,
+        }),
+        { params: Promise.resolve({ boardId: "cc5-board-a1" }) }
+      );
+      expect(sereSaveRes.status).toBe(200);
+
+      for (const cid of ["cc5-card-a1-mat", "cc5-card-a1-sere"]) {
+        const refreshed = await prisma.studentCouncilCard.findUniqueOrThrow({ where: { id: cid } });
+        const summary = JSON.parse(refreshed.trimester1BelowAvgJson || "[]") as Array<{
+          subjectName: string;
+        }>;
+        expect(summary.map((i) => i.subjectName)).toEqual([
+          "Matemática",
+          "Língua Portuguesa",
+          "Projeto Manual C5",
+        ]);
+      }
+
+      // --- CRITÉRIO 2: Barreira explícita de bloqueio entre PUT /matrix e POST /import-pdf ---
+      let releaseBlocker!: () => void;
+      let signalBlockerReady!: () => void;
+      const blockerReady = new Promise<void>((res) => {
+        signalBlockerReady = res;
+      });
+      const blockerHold = new Promise<void>((res) => {
+        releaseBlocker = res;
+      });
+
+      const blockerPromise = blockerClient.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id" FROM "ClassCouncilBoard"
+          WHERE "id" = 'cc5-board-a1' AND "schoolId" = 'school-alpha'
+          FOR UPDATE
+        `;
+        signalBlockerReady();
+        await blockerHold;
+      });
+
+      await blockerReady;
+
+      // Dispara PUT /matrix (1ª criação em LP T2) e POST /import-pdf (1ª criação em LP T2 + Matemática T2) enquanto o lock está preso
+      const concPdf = buildSerePdf({
+        subjects: ["LINGUA PORTU", "MATEMATICA"],
+        rows: [
+          {
+            nro: 1,
+            name: "ESTUDANTE CC5 MATRIZ",
+            grades: [
+              ["--", "4.3", "--"],
+              ["--", "5.1", "--"],
+            ],
+          },
+        ],
+      });
+      const concFd = new FormData();
+      concFd.set("mode", "apply");
+      concFd.set("files", new File([Buffer.from(concPdf)], "conc.pdf", { type: "application/pdf" }));
+
+      const matrixConcurrentPromise = putMatrixRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc5-board-a1/matrix", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 2,
+            entries: [
+              {
+                studentId: "cc5-stu-a1-mat",
+                subjectId: "cc5-sub-a1-lp",
+                descriptorCodes: [2],
+                grade: 4.7,
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "cc5-board-a1" }) }
+      );
+      const sereConcurrentPromise = postImportPdfRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc5-board-a1/import-pdf", {
+          method: "POST",
+          body: concFd,
+        }),
+        { params: Promise.resolve({ boardId: "cc5-board-a1" }) }
+      );
+
+      // Confirma contenção real em pg_stat_activity (2 sessões aguardando lock do mesmo quadro antes de liberar)
+      let waitingCount = 0;
+      for (let i = 0; i < 40; i++) {
+        const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+          SELECT COUNT(*)::bigint AS waiting
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND cardinality(pg_blocking_pids(pid)) > 0
+        `;
+        waitingCount = Number(rows[0]?.waiting ?? 0n);
+        if (waitingCount >= 2) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waitingCount).toBeGreaterThanOrEqual(2);
+
+      releaseBlocker();
+      const [, matrixConcurrentRes, sereConcurrentRes] = await Promise.all([
+        blockerPromise,
+        matrixConcurrentPromise,
+        sereConcurrentPromise,
+      ]);
+
+      expect(matrixConcurrentRes.status).toBe(200);
+      expect(sereConcurrentRes.status).toBe(200);
+
+      // Unicidade e consistência entre notas persistidas e resumo em T2 (LP + Matemática na mesma ficha)
+      const lpT2Entries = await prisma.studentCouncilSubjectEntry.findMany({
+        where: { cardId: "cc5-card-a1-mat", subjectId: "cc5-sub-a1-lp", trimester: 2 },
+      });
+      const matT2Entries = await prisma.studentCouncilSubjectEntry.findMany({
+        where: { cardId: "cc5-card-a1-mat", subjectId: "cc5-sub-a1-mat", trimester: 2 },
+      });
+      expect(lpT2Entries).toHaveLength(1);
+      expect(matT2Entries).toHaveLength(1);
+
+      const cardAfterT2 = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc5-card-a1-mat" },
+      });
+      const t2Summary = JSON.parse(cardAfterT2.trimester2BelowAvgJson || "[]") as Array<{
+        subjectId: string;
+        grade: number;
+      }>;
+      expect(t2Summary).toEqual([
+        expect.objectContaining({ subjectId: "cc5-sub-a1-lp", grade: lpT2Entries[0].grade }),
+        expect.objectContaining({ subjectId: "cc5-sub-a1-mat", grade: matT2Entries[0].grade }),
+      ]);
+
+      // --- Recuperação de P2002 na criação de disciplina em nova transação withTenantContext ---
+      // Pré-cria "Artes" em cc5-board-a1 fora do snapshot antigo simulando corrida P2002 -> retry revalida e reativa
+      const createdArtes = await prisma.classCouncilSubject.create({
+        data: {
+          schoolId: "school-alpha",
+          boardId: "cc5-board-a1",
+          name: "Arte",
+          displayOrder: 3,
+          active: false,
+        },
+      });
+      const realCreate = prisma.classCouncilSubject.create.bind(prisma.classCouncilSubject);
+      const origFindUnique = prisma.classCouncilSubject.findUnique.bind(prisma.classCouncilSubject);
+      // Simula apenas a 1ª leitura prévia retornando null e create lançando P2002 na transação 1;
+      // na transação 2 (nova withTenantContext), findUnique enxerga a linha real e revalida schoolId === "school-alpha"
+      const p2002 = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+      const findSpy = vi
+        .spyOn(prisma.classCouncilSubject, "findUnique")
+        .mockResolvedValueOnce(null);
+      const createSpy = vi
+        .spyOn(prisma.classCouncilSubject, "create")
+        .mockRejectedValueOnce(p2002);
+      try {
+        const retryResult = await applyCouncilSerePdfImport({
+          boardId: "cc5-board-a1",
+          schoolId: "school-alpha",
+          actor: { email: "cc5.ped@redeativa.local", name: "Pedagoga CC5" },
+          batch: {
+            files: [],
+            warnings: [],
+            totalGrades: 1,
+            belowAverageGrades: 1,
+            subjects: [
+              {
+                rawHeader: "ARTE",
+                name: "Arte",
+                matchKey: "arte",
+                sourceFiles: ["artes.pdf"],
+              },
+            ],
+            students: [
+              {
+                rowNumber: 1,
+                rawName: "ESTUDANTE CC5 MATRIZ",
+                normalizedName: "ESTUDANTE CC5 MATRIZ",
+                isAmbiguousInPdf: false,
+                hasAnyGrade: true,
+                grades: [{ subjectMatchKey: "arte", subjectName: "Arte", trimester: 3, grade: 5.5 }],
+              },
+            ],
+          },
+        });
+        expect(retryResult.summary.subjectsMatched).toBe(1);
+        expect(
+          (await origFindUnique({ where: { id: createdArtes.id } }))?.active
+        ).toBe(true);
+      } finally {
+        findSpy.mockRestore();
+        createSpy.mockRestore();
+        void realCreate;
+      }
+
+      // Escola Beta permanece intacta
+      expect(
+        (await prisma.studentCouncilCard.findUniqueOrThrow({ where: { id: "cc5-card-b1" } }))
+          .trimester1BelowAvgJson
+      ).toContain("cc5-sub-b1-foreign");
+    } finally {
+      await blockerClient.$disconnect().catch(() => {});
+      testAuthState.useRealPermissions = false;
+      testAuthState.useRealCurrentSchool = false;
+      testAuthState.pendingSessionUser = null;
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.userSchool.deleteMany({ where: { id: "cc5-us-ped" } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: "cc5-usr-ped" } }).catch(() => {});
+      await prisma.studentCouncilSubjectEntry
+        .deleteMany({
+          where: { cardId: { in: ["cc5-card-a1-mat", "cc5-card-a1-sere", "cc5-card-b1"] } },
+        })
+        .catch(() => {});
+      await prisma.studentCouncilCard
+        .deleteMany({ where: { id: { in: ["cc5-card-a1-mat", "cc5-card-a1-sere", "cc5-card-b1"] } } })
+        .catch(() => {});
+      await prisma.classCouncilSubject
+        .deleteMany({
+          where: { boardId: { in: ["cc5-board-a1", "cc5-board-a2", "cc5-board-b1"] } },
+        })
+        .catch(() => {});
+      await prisma.classCouncilBoard
+        .deleteMany({ where: { id: { in: ["cc5-board-a1", "cc5-board-a2", "cc5-board-b1"] } } })
+        .catch(() => {});
+      await prisma.student
+        .deleteMany({ where: { id: { in: ["cc5-stu-a1-mat", "cc5-stu-a1-sere", "cc5-stu-b1"] } } })
+        .catch(() => {});
+      await prisma.classGroup
+        .deleteMany({ where: { id: { in: ["cc5-cg-a1", "cc5-cg-a2", "cc5-cg-b1"] } } })
+        .catch(() => {});
+    }
+  });
+
   }
 );
 
