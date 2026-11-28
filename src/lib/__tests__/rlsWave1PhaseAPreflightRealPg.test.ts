@@ -14314,6 +14314,499 @@ describe.skipIf(!SHOULD_RUN)(
     }
   });
 
+  it("rejeita com 409 gravação em ClassCouncilTrimester ocupado por outra escola, preserva lote/atribuição e não audita", async () => {
+    try {
+      await prisma.school.createMany({
+        data: [
+          { id: "tp1-school-alpha", name: "Colégio Alpha 1", inepCode: "99120101", active: true },
+          { id: "tp1-school-beta", name: "Colégio Beta 1", inepCode: "99120102", active: true },
+        ],
+      });
+      await prisma.classGroup.create({
+        data: { id: "tp1-cg-alpha", schoolId: "tp1-school-alpha", name: "7º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+      });
+      await prisma.student.create({
+        data: { id: "tp1-stu-alpha", schoolId: "tp1-school-alpha", classGroupId: "tp1-cg-alpha", name: "Aluno TP1", phone: "41999991201", active: true },
+      });
+      await prisma.classCouncilBoard.create({
+        data: { id: "tp1-board-alpha", schoolId: "tp1-school-alpha", classGroupId: "tp1-cg-alpha", year: 2026 },
+      });
+      await prisma.classCouncilSubject.create({
+        data: {
+          id: "tp1-subj-alpha",
+          schoolId: "tp1-school-alpha",
+          boardId: "tp1-board-alpha",
+          name: "Português",
+          teacherName: "",
+          teacherEmail: "prof.alpha@escola.pr.gov.br",
+        },
+      });
+      await prisma.studentCouncilCard.create({
+        data: { id: "tp1-card-alpha", schoolId: "tp1-school-alpha", boardId: "tp1-board-alpha", studentId: "tp1-stu-alpha" },
+      });
+
+      const originalDivergentJson = JSON.stringify({
+        version: 1,
+        periodLabel: "1º Trimestre",
+        objectiveText: "Beta protegido",
+        responsiblePedagogueName: "Pedagoga Beta",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "tp1-conv-divergent",
+            subjectId: "tp1-subj-alpha",
+            subjectName: "Português",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp1-stu-alpha"],
+            monitoredStudentsNotes: "Registro protegido Beta",
+            agreements: "Combinado protegido Beta",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+        ],
+        synthesis: { mainDifficulties: "", priorityStudents: "", attendanceIssues: "", behaviorIssues: "", pedagogicalActions: "" },
+      });
+
+      // Linha divergente ocupando (boardId = tp1-board-alpha, trimester = 1) com schoolId = tp1-school-beta
+      await prisma.classCouncilTrimester.create({
+        data: {
+          id: "tp1-trim-divergent",
+          schoolId: "tp1-school-beta",
+          boardId: "tp1-board-alpha",
+          trimester: 1,
+          preCouncilJson: originalDivergentJson,
+        },
+      });
+
+      const { token: teacherToken } = createCouncilTeacherToken({
+        schoolId: "tp1-school-alpha",
+        boardId: "tp1-board-alpha",
+        trimester: 1,
+        subjectId: "tp1-subj-alpha",
+        expiresInDays: 7,
+      });
+      const { token: preToken } = createPreCouncilTeacherToken({
+        schoolId: "tp1-school-alpha",
+        boardId: "tp1-board-alpha",
+        trimester: 1,
+        conversationId: "tp1-conv-divergent",
+        expiresInDays: 7,
+      });
+
+      // 1. PUT no Portal da Matriz devolve 409 e faz rollback do lote de notas/atribuição
+      vi.mocked(logAudit).mockClear();
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const putTeacherRes = await putTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherToken}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            subjectId: "tp1-subj-alpha",
+            entries: [{ studentId: "tp1-stu-alpha", descriptorCodes: [1, 2] }],
+            preCouncil: { monitoredStudentIds: ["tp1-stu-alpha"], monitoredStudentsNotes: "Não deve gravar" },
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken }) }
+      );
+      expect(putTeacherRes.status).toBe(409);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 2. PUT no Portal de Pré-Conselho devolve 409 e preserva linha divergente
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const putPreRes = await putPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${preToken}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            conversationId: "tp1-conv-divergent",
+            confirmAck: true,
+          }),
+        }),
+        { params: Promise.resolve({ token: preToken }) }
+      );
+      expect(putPreRes.status).toBe(409);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // Conferência de rollback integral no PG16
+      expect(await prisma.studentCouncilSubjectEntry.count({ where: { card: { boardId: "tp1-board-alpha" } } })).toBe(0);
+      const subjAfter = await prisma.classCouncilSubject.findUnique({ where: { id: "tp1-subj-alpha" } });
+      expect(subjAfter?.teacherName).toBe("");
+      expect(subjAfter?.teacherEmail).toBe("prof.alpha@escola.pr.gov.br");
+      const trimAfter = await prisma.classCouncilTrimester.findUnique({ where: { id: "tp1-trim-divergent" } });
+      expect(trimAfter?.schoolId).toBe("tp1-school-beta");
+      expect(trimAfter?.preCouncilJson).toBe(originalDivergentJson);
+    } finally {
+      await prisma.studentCouncilSubjectEntry.deleteMany({ where: { card: { boardId: "tp1-board-alpha" } } }).catch(() => {});
+      await prisma.classCouncilTrimester.deleteMany({ where: { boardId: "tp1-board-alpha" } }).catch(() => {});
+      await prisma.studentCouncilCard.deleteMany({ where: { boardId: "tp1-board-alpha" } }).catch(() => {});
+      await prisma.classCouncilSubject.deleteMany({ where: { boardId: "tp1-board-alpha" } }).catch(() => {});
+      await prisma.classCouncilBoard.deleteMany({ where: { id: "tp1-board-alpha" } }).catch(() => {});
+      await prisma.student.deleteMany({ where: { id: "tp1-stu-alpha" } }).catch(() => {});
+      await prisma.classGroup.deleteMany({ where: { id: "tp1-cg-alpha" } }).catch(() => {});
+      await prisma.school.deleteMany({ where: { id: { in: ["tp1-school-alpha", "tp1-school-beta"] } } }).catch(() => {});
+    }
+  });
+
+  it("valida subjectId das conversas do Pré-Conselho (outra escola, outro quadro, avulsa e legítima) em SSR, consulta e ciência", async () => {
+    try {
+      await prisma.school.createMany({
+        data: [
+          { id: "tp2-school-alpha", name: "Colégio Alpha 2", inepCode: "99120201", active: true },
+          { id: "tp2-school-beta", name: "Colégio Beta 2", inepCode: "99120202", active: true },
+        ],
+      });
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "tp2-cg-a1", schoolId: "tp2-school-alpha", name: "8º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "tp2-cg-a2", schoolId: "tp2-school-alpha", name: "8º Ano B", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "tp2-cg-b1", schoolId: "tp2-school-beta", name: "8º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+        ],
+      });
+      await prisma.student.create({
+        data: { id: "tp2-stu-a1", schoolId: "tp2-school-alpha", classGroupId: "tp2-cg-a1", name: "Aluno TP2", phone: "41999991202", active: true },
+      });
+      await prisma.classCouncilBoard.createMany({
+        data: [
+          { id: "tp2-board-a1", schoolId: "tp2-school-alpha", classGroupId: "tp2-cg-a1", year: 2026 },
+          { id: "tp2-board-a2", schoolId: "tp2-school-alpha", classGroupId: "tp2-cg-a2", year: 2026 },
+          { id: "tp2-board-b1", schoolId: "tp2-school-beta", classGroupId: "tp2-cg-b1", year: 2026 },
+        ],
+      });
+      await prisma.classCouncilSubject.createMany({
+        data: [
+          { id: "tp2-subj-a1", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", name: "Ciências", teacherName: "Prof. Alpha", teacherEmail: "prof.alpha@escola.pr.gov.br" },
+          { id: "tp2-subj-a2", schoolId: "tp2-school-alpha", boardId: "tp2-board-a2", name: "Artes", teacherName: "Prof. Alpha", teacherEmail: "prof.alpha@escola.pr.gov.br" },
+          { id: "tp2-subj-b1", schoolId: "tp2-school-beta", boardId: "tp2-board-b1", name: "Geografia", teacherName: "Prof. Alpha", teacherEmail: "prof.alpha@escola.pr.gov.br" },
+        ],
+      });
+      await prisma.studentCouncilCard.create({
+        data: { id: "tp2-card-a1", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", studentId: "tp2-stu-a1" },
+      });
+
+      const initialPreJson = JSON.stringify({
+        version: 1,
+        periodLabel: "1º Trimestre",
+        objectiveText: "Alinhamento",
+        responsiblePedagogueName: "Pedagoga TP2",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "tp2-conv-other-board",
+            subjectId: "tp2-subj-a2",
+            subjectName: "Artes Outro Quadro",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp2-stu-a1"],
+            monitoredStudentsNotes: "NOTA_OUTRO_QUADRO",
+            agreements: "SEGREDO_OUTRO_QUADRO",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+          {
+            id: "tp2-conv-other-school",
+            subjectId: "tp2-subj-b1",
+            subjectName: "Geografia Outra Escola",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp2-stu-a1"],
+            monitoredStudentsNotes: "NOTA_OUTRA_ESCOLA",
+            agreements: "SEGREDO_OUTRA_ESCOLA",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+          {
+            id: "tp2-conv-avulsa",
+            subjectId: null,
+            subjectName: "Projeto de Vida (Avulsa)",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp2-stu-a1"],
+            monitoredStudentsNotes: "Nota Avulsa",
+            agreements: "Combinado Avulso",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+          {
+            id: "tp2-conv-valid",
+            subjectId: "tp2-subj-a1",
+            subjectName: "Ciências",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp2-stu-a1"],
+            monitoredStudentsNotes: "Nota Legítima",
+            agreements: "Combinado Legítimo",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+          },
+        ],
+        synthesis: { mainDifficulties: "Sintese", priorityStudents: "", attendanceIssues: "", behaviorIssues: "", pedagogicalActions: "" },
+      });
+
+      await prisma.classCouncilTrimester.create({
+        data: { id: "tp2-trim-a1", schoolId: "tp2-school-alpha", boardId: "tp2-board-a1", trimester: 1, preCouncilJson: initialPreJson },
+      });
+
+      const { token: generalToken } = createPreCouncilTeacherToken({
+        schoolId: "tp2-school-alpha",
+        boardId: "tp2-board-a1",
+        trimester: 1,
+        expiresInDays: 7,
+      });
+      const { token: otherBoardToken } = createPreCouncilTeacherToken({
+        schoolId: "tp2-school-alpha",
+        boardId: "tp2-board-a1",
+        trimester: 1,
+        conversationId: "tp2-conv-other-board",
+        expiresInDays: 7,
+      });
+      const { token: otherSchoolToken } = createPreCouncilTeacherToken({
+        schoolId: "tp2-school-alpha",
+        boardId: "tp2-board-a1",
+        trimester: 1,
+        conversationId: "tp2-conv-other-school",
+        expiresInDays: 7,
+      });
+
+      // 1. Link geral exclui conversas com subjectId de outro quadro ou outra escola (inclusive suggestedConversationId)
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const generalPost = await postPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${generalToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: generalToken }) }
+      );
+      expect(generalPost.status).toBe(200);
+      const generalJson = await generalPost.json();
+      expect(generalJson.preCouncil.conversations.map((c: { id: string }) => c.id)).toEqual([
+        "tp2-conv-avulsa",
+        "tp2-conv-valid",
+      ]);
+      expect(generalJson.suggestedConversationId).toBe("tp2-conv-avulsa");
+      const rawGeneralText = JSON.stringify(generalJson);
+      expect(rawGeneralText).not.toContain("NOTA_OUTRO_QUADRO");
+      expect(rawGeneralText).not.toContain("SEGREDO_OUTRO_QUADRO");
+      expect(rawGeneralText).not.toContain("NOTA_OUTRA_ESCOLA");
+      expect(rawGeneralText).not.toContain("SEGREDO_OUTRA_ESCOLA");
+
+      // 2. Link específico com subjectId fora do escopo (outro quadro e outra escola) falha no SSR, POST e PUT sem mutar ou auditar
+      vi.mocked(logAudit).mockClear();
+      for (const bad of [
+        { token: otherBoardToken, convId: "tp2-conv-other-board" },
+        { token: otherSchoolToken, convId: "tp2-conv-other-school" },
+      ]) {
+        const ssrHtml = renderToStaticMarkup(
+          await ProfessorPreConselhoPage({ params: Promise.resolve({ token: bad.token }) })
+        );
+        expect(ssrHtml).toContain("Componente indisponível");
+
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+        });
+        const postRes = await postPreCouncilPortalRoute(
+          new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${bad.token}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+          }),
+          { params: Promise.resolve({ token: bad.token }) }
+        );
+        expect(postRes.status).toBe(404);
+
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+        });
+        const putRes = await putPreCouncilPortalRoute(
+          new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${generalToken}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              googleIdToken: "valid-google-token",
+              conversationId: bad.convId,
+              confirmAck: true,
+            }),
+          }),
+          { params: Promise.resolve({ token: generalToken }) }
+        );
+        expect(putRes.status).toBe(404);
+      }
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+      const trimBeforeValidAck = await prisma.classCouncilTrimester.findUnique({ where: { id: "tp2-trim-a1" } });
+      expect(trimBeforeValidAck?.preCouncilJson).toBe(initialPreJson);
+
+      // 3. Ciência legítima funciona tanto para conversa avulsa quanto para conversa vinculada
+      for (const validConvId of ["tp2-conv-avulsa", "tp2-conv-valid"]) {
+        vi.mocked(logAudit).mockClear();
+        vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+          ok: true,
+          tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+        });
+        const ackRes = await putPreCouncilPortalRoute(
+          new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${generalToken}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              googleIdToken: "valid-google-token",
+              conversationId: validConvId,
+              confirmAck: true,
+            }),
+          }),
+          { params: Promise.resolve({ token: generalToken }) }
+        );
+        expect(ackRes.status).toBe(200);
+        expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            schoolId: "tp2-school-alpha",
+            action: "TEACHER_ACK_PRE_COUNCIL",
+          })
+        );
+      }
+    } finally {
+      await prisma.classCouncilTrimester.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.studentCouncilCard.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.classCouncilSubject.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.classCouncilBoard.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.student.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.classGroup.deleteMany({ where: { schoolId: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+      await prisma.school.deleteMany({ where: { id: { in: ["tp2-school-alpha", "tp2-school-beta"] } } }).catch(() => {});
+    }
+  });
+
+  it("mantém consulta docente sem gravações em quadro incompleto e limita inicialização na escrita ao trimestre e fichas necessárias", async () => {
+    try {
+      await prisma.school.create({
+        data: { id: "tp3-school-alpha", name: "Colégio Alpha 3", inepCode: "99120301", active: true },
+      });
+      await prisma.classGroup.create({
+        data: { id: "tp3-cg-alpha", schoolId: "tp3-school-alpha", name: "9º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+      });
+      await prisma.student.createMany({
+        data: [
+          { id: "tp3-stu-1", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Ana TP3", phone: "41999991301", active: true },
+          { id: "tp3-stu-2", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", name: "Bruno TP3", phone: "41999991302", active: true },
+        ],
+      });
+      await prisma.classCouncilBoard.create({
+        data: { id: "tp3-board-alpha", schoolId: "tp3-school-alpha", classGroupId: "tp3-cg-alpha", year: 2026 },
+      });
+      await prisma.classCouncilSubject.create({
+        data: {
+          id: "tp3-subj-alpha",
+          schoolId: "tp3-school-alpha",
+          boardId: "tp3-board-alpha",
+          name: "Física",
+          teacherName: "Prof. Alpha",
+          teacherEmail: "prof.alpha@escola.pr.gov.br",
+        },
+      });
+
+      const { token: teacherToken } = createCouncilTeacherToken({
+        schoolId: "tp3-school-alpha",
+        boardId: "tp3-board-alpha",
+        trimester: 1,
+        subjectId: "tp3-subj-alpha",
+        expiresInDays: 7,
+      });
+
+      // Quadro incompleto: 0 trimestres e 0 fichas antes da consulta
+      expect(await prisma.classCouncilTrimester.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
+      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
+
+      // 1. SSR e POST não gravam trimestres nem fichas
+      vi.mocked(logAudit).mockClear();
+      const ssrHtml = renderToStaticMarkup(
+        await ProfessorConselhoPage({ params: Promise.resolve({ token: teacherToken }) })
+      );
+      expect(ssrHtml).toContain("Colégio Alpha 3");
+
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const postRes = await postTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: teacherToken }) }
+      );
+      expect(postRes.status).toBe(200);
+      const postJson = await postRes.json();
+      expect(postJson.council.trimester).toBe(1);
+      expect(postJson.council.trimesterStatus).toBe("IN_PROGRESS");
+      expect(postJson.council.students.map((s: { studentId: string }) => s.studentId)).toEqual([
+        "tp3-stu-1",
+        "tp3-stu-2",
+      ]);
+
+      expect(await prisma.classCouncilTrimester.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
+      expect(await prisma.studentCouncilCard.count({ where: { boardId: "tp3-board-alpha" } })).toBe(0);
+      expect(await prisma.studentCouncilSubjectEntry.count({ where: { schoolId: "tp3-school-alpha" } })).toBe(0);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 2. PUT legítimo para tp3-stu-1 inicializa apenas trimestre 1 e ficha de tp3-stu-1 (mantendo trimestres 2 e 3 e ficha de tp3-stu-2 ausentes)
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const putRes = await putTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherToken}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            subjectId: "tp3-subj-alpha",
+            entries: [{ studentId: "tp3-stu-1", descriptorCodes: [1] }],
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherToken }) }
+      );
+      expect(putRes.status).toBe(200);
+      const putJson = await putRes.json();
+      expect(putJson.council.students.map((s: { studentId: string }) => s.studentId)).toEqual([
+        "tp3-stu-1",
+        "tp3-stu-2",
+      ]);
+
+      const trimestersAfter = await prisma.classCouncilTrimester.findMany({
+        where: { boardId: "tp3-board-alpha" },
+        select: { trimester: true, schoolId: true },
+      });
+      expect(trimestersAfter).toEqual([{ trimester: 1, schoolId: "tp3-school-alpha" }]);
+
+      const cardsAfter = await prisma.studentCouncilCard.findMany({
+        where: { boardId: "tp3-board-alpha" },
+        select: { studentId: true, schoolId: true },
+      });
+      expect(cardsAfter).toEqual([{ studentId: "tp3-stu-1", schoolId: "tp3-school-alpha" }]);
+    } finally {
+      await prisma.studentCouncilSubjectEntry.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.classCouncilTrimester.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.studentCouncilCard.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.classCouncilSubject.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.classCouncilBoard.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.student.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.classGroup.deleteMany({ where: { schoolId: "tp3-school-alpha" } }).catch(() => {});
+      await prisma.school.deleteMany({ where: { id: "tp3-school-alpha" } }).catch(() => {});
+    }
+  });
+
 
   }
 );

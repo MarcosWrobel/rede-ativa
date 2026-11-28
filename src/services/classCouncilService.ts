@@ -443,6 +443,114 @@ async function syncMissingStudentCardsForBoard(
   return true;
 }
 
+async function syncNeededStudentCardsForBoard(
+  client: Prisma.TransactionClient | typeof prisma,
+  schoolId: string,
+  boardId: string,
+  classGroupId: string,
+  studentIds: string[]
+): Promise<boolean> {
+  const uniqueIds = Array.from(new Set(studentIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0 || !client.student?.findMany) return false;
+
+  const students = await client.student.findMany({
+    where: { id: { in: uniqueIds }, schoolId, classGroupId },
+    select: { id: true, active: true, isSpecialNeeds: true },
+  });
+  if (students.length === 0) return false;
+
+  const existingCards = await client.studentCouncilCard.findMany({
+    where: { boardId, schoolId, studentId: { in: students.map((s) => s.id) } },
+    select: { studentId: true },
+  });
+  const existingSet = new Set(existingCards.map((c) => c.studentId));
+  const missingStudents = students.filter((s) => !existingSet.has(s.id));
+  if (missingStudents.length === 0) return false;
+
+  await client.studentCouncilCard.createMany({
+    data: missingStudents.map((s) => ({
+      schoolId,
+      boardId,
+      studentId: s.id,
+      enrollmentStatus: s.active ? "ATIVO" : "TRANSFERIDO",
+      tags: s.isSpecialNeeds ? ["AEE"] : [],
+      hasSensitiveHealthTag: Boolean(s.isSpecialNeeds),
+    })),
+    skipDuplicates: true,
+  });
+  return true;
+}
+
+async function findTrimesterSlotInTx(
+  tx: Prisma.TransactionClient,
+  boardId: string,
+  trimester: number
+): Promise<{ id: string; schoolId: string; trimester: number; preCouncilJson: string | null } | null> {
+  if (tx.classCouncilTrimester?.findUnique) {
+    return tx.classCouncilTrimester.findUnique({
+      where: { boardId_trimester: { boardId, trimester } },
+      select: { id: true, schoolId: true, trimester: true, preCouncilJson: true },
+    });
+  }
+  const rows = await tx.classCouncilTrimester.findMany({
+    where: { boardId, trimester },
+    select: { id: true, schoolId: true, trimester: true, preCouncilJson: true },
+  });
+  return rows[0] ?? null;
+}
+
+async function saveTrimesterPreCouncilInTx(
+  tx: Prisma.TransactionClient,
+  params: {
+    existingSlot: { id: string; schoolId: string } | null;
+    schoolId: string;
+    boardId: string;
+    trimester: number;
+    preCouncilJson: string;
+    cleanName: string;
+    cleanEmail: string;
+  }
+) {
+  const { existingSlot, schoolId, boardId, trimester, preCouncilJson, cleanName, cleanEmail } = params;
+  if (existingSlot) {
+    if (existingSlot.schoolId !== schoolId) {
+      throw new CouncilDomainError("Conflito de titularidade institucional no registro do trimestre.", 409);
+    }
+    return tx.classCouncilTrimester.update({
+      where: { id: existingSlot.id, schoolId },
+      data: { preCouncilJson },
+    });
+  }
+  if (tx.classCouncilTrimester.create) {
+    return tx.classCouncilTrimester.create({
+      data: {
+        schoolId,
+        boardId,
+        trimester,
+        status: "IN_PROGRESS",
+        preCouncilJson,
+        updatedByName: cleanName,
+        updatedByEmail: cleanEmail,
+      },
+    });
+  }
+  return tx.classCouncilTrimester.upsert({
+    where: { boardId_trimester: { boardId, trimester } },
+    create: {
+      schoolId,
+      boardId,
+      trimester,
+      status: "IN_PROGRESS",
+      preCouncilJson,
+      updatedByName: cleanName,
+      updatedByEmail: cleanEmail,
+    },
+    update: {
+      preCouncilJson,
+    },
+  });
+}
+
 export async function initializeCouncilBoardRecordsInTx(
   tx: Prisma.TransactionClient,
   schoolId: string,
@@ -2682,8 +2790,20 @@ export async function getTeacherPortalCouncilContext(params: {
       }
     }
 
-    await ensureTrimestersForBoard(tx, schoolId, boardId);
-    await syncMissingStudentCardsForBoard(tx, schoolId, boardId, boardHeader.classGroupId);
+    // Leitura estritamente sem gravações (sem criar trimestres nem fichas no POST ou pós-PUT)
+    const rosterStudents = tx.student?.findMany
+      ? await tx.student.findMany({
+          where: { schoolId, classGroupId: boardHeader.classGroupId, active: true },
+          select: {
+            id: true,
+            name: true,
+            cgm: true,
+            lowAttendanceRecord: {
+              select: { attendancePercent: true },
+            },
+          },
+        })
+      : [];
 
     const board = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
@@ -2757,9 +2877,10 @@ export async function getTeacherPortalCouncilContext(params: {
       subjects: activeSubjects,
     });
 
-  const validStudentIdSet = new Set(
-    (board.studentCards || []).filter((c) => Boolean(c.student)).map((c) => c.studentId)
-  );
+  const validStudentIdSet = new Set([
+    ...(board.studentCards || []).filter((c) => Boolean(c.student)).map((c) => c.studentId),
+    ...rosterStudents.map((st) => st.id),
+  ]);
   const accessibleSubjectIdSet = new Set<string>(filteredSubjects.map((s) => s.id));
 
   const conversationsBySubjectId: Record<string, TeacherPortalPreCouncilConversationSummary> = {};
@@ -2790,9 +2911,8 @@ export async function getTeacherPortalCouncilContext(params: {
     };
   }
 
-  const students: TeacherPortalStudentItem[] = (board.studentCards || [])
+  const cardStudents: TeacherPortalStudentItem[] = (board.studentCards || [])
     .filter((card) => Boolean(card.student))
-    .sort((a, b) => a.student.name.localeCompare(b.student.name, "pt-BR"))
     .map((card) => ({
       studentId: card.studentId,
       name: card.student.name,
@@ -2808,6 +2928,28 @@ export async function getTeacherPortalCouncilContext(params: {
           updatedByEmail: e.updatedByEmail ?? null,
         })),
     }));
+
+  const cardByStudentId = new Map(cardStudents.map((s) => [s.studentId, s]));
+  for (const st of rosterStudents) {
+    if (!cardByStudentId.has(st.id)) {
+      cardByStudentId.set(st.id, {
+        studentId: st.id,
+        name: st.name,
+        cgm: includeCgm ? (st.cgm ?? null) : null,
+        enrollmentStatus: "ATIVO",
+        attendancePercent: st.lowAttendanceRecord?.attendancePercent ?? null,
+        subjectEntries: [],
+      });
+    }
+  }
+
+  for (const stId of cardByStudentId.keys()) {
+    validStudentIdSet.add(stId);
+  }
+
+  const students: TeacherPortalStudentItem[] = Array.from(cardByStudentId.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR")
+  );
 
   return {
     boardId: board.id,
@@ -3000,8 +3142,29 @@ export async function submitTeacherPortalSubjectEntries(params: {
           throw new CouncilDomainError(teacherAssignmentDenied, 403);
         }
 
-        await ensureTrimestersForBoard(tx, schoolId, boardId, cleanName, cleanEmail);
-        await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
+        // Verifica se a chave única (boardId, trimester) já pertence a outra escola antes de prosseguir
+        const existingSlotPre = await findTrimesterSlotInTx(tx, boardId, trimester);
+        if (existingSlotPre && existingSlotPre.schoolId !== schoolId) {
+          throw new CouncilDomainError(
+            "Conflito de titularidade institucional no registro do trimestre.",
+            409
+          );
+        }
+
+        // Inicializa apenas as fichas necessárias dos estudantes referenciados (sem criar outros trimestres ou todas as fichas)
+        const neededStudentIds = Array.from(
+          new Set([
+            ...entries.map((e) => e.studentId.trim()),
+            ...(preCouncilContribution?.monitoredStudentIds ?? []).map((id) => id.trim()),
+          ].filter(Boolean))
+        );
+        await syncNeededStudentCardsForBoard(
+          tx,
+          schoolId,
+          boardId,
+          board.classGroupId,
+          neededStudentIds
+        );
 
         const matchedSubjects = await tx.classCouncilSubject.findMany({
           where: {
@@ -3178,20 +3341,22 @@ export async function submitTeacherPortalSubjectEntries(params: {
       conversations,
     };
 
-    const savedTrimester = await tx.classCouncilTrimester.upsert({
-      where: { boardId_trimester: { boardId, trimester } },
-      create: {
-        schoolId,
-        boardId,
-        trimester,
-        status: "IN_PROGRESS",
-        preCouncilJson: JSON.stringify(nextPreCouncil),
-        updatedByName: cleanName,
-        updatedByEmail: cleanEmail,
-      },
-      update: {
-        preCouncilJson: JSON.stringify(nextPreCouncil),
-      },
+    const existingSlotAtSave = await findTrimesterSlotInTx(tx, boardId, trimester);
+    if (existingSlotAtSave && existingSlotAtSave.schoolId !== schoolId) {
+      throw new CouncilDomainError(
+        "Conflito de titularidade institucional no registro do trimestre.",
+        409
+      );
+    }
+
+    const savedTrimester = await saveTrimesterPreCouncilInTx(tx, {
+      existingSlot: existingSlotAtSave,
+      schoolId,
+      boardId,
+      trimester,
+      preCouncilJson: JSON.stringify(nextPreCouncil),
+      cleanName,
+      cleanEmail,
     });
 
     return {
@@ -3327,7 +3492,7 @@ export async function getPreCouncilTeacherPortalContext(params: {
       include: {
         classGroup: { select: { id: true, schoolId: true, name: true, segment: true, shift: true } },
         subjects: {
-          where: { active: true, schoolId, boardId },
+          where: { schoolId, boardId },
           select: { id: true, name: true, teacherName: true, teacherEmail: true },
         },
         trimesters: {
@@ -3377,16 +3542,24 @@ export async function getPreCouncilTeacherPortalContext(params: {
     );
   }
 
+  const subjectById = new Map((board.subjects || []).map((s) => [s.id, s]));
+  const isConvSubjectInScope = (c: PreCouncilSubjectConversation): boolean => {
+    const sid = (c.subjectId || "").trim();
+    return !sid || subjectById.has(sid);
+  };
+
   let visibleConversations = preCouncil.conversations;
   if (lockedConversationId) {
     const matched = visibleConversations.find((c) => c.id === lockedConversationId);
-    if (!matched) {
+    if (!matched || !isConvSubjectInScope(matched)) {
       throw new CouncilDomainError(
         "O componente curricular associado a este link não está mais disponível.",
         404
       );
     }
     visibleConversations = [matched];
+  } else {
+    visibleConversations = visibleConversations.filter(isConvSubjectInScope);
   }
 
   const studentNameById = new Map<string, string>();
@@ -3396,7 +3569,6 @@ export async function getPreCouncilTeacherPortalContext(params: {
     }
   }
 
-  const subjectById = new Map((board.subjects || []).map((s) => [s.id, s]));
   const cleanViewerEmail = verifiedEmail ? verifiedEmail.trim().toLowerCase() : null;
 
   const isConvOwnedByOther = (c: PreCouncilSubjectConversation): boolean => {
@@ -3539,6 +3711,14 @@ export async function confirmPreCouncilTeacherAck(params: {
 
     await acquireBoardWriteLockInTx(tx, schoolId, boardId);
 
+    const existingSlot = await findTrimesterSlotInTx(tx, boardId, trimester);
+    if (existingSlot && existingSlot.schoolId !== schoolId) {
+      throw new CouncilDomainError(
+        "Conflito de titularidade institucional no registro do trimestre.",
+        409
+      );
+    }
+
     const trimesters = await tx.classCouncilTrimester.findMany({
       where: { boardId, schoolId },
       select: { trimester: true, preCouncilJson: true },
@@ -3582,6 +3762,12 @@ export async function confirmPreCouncilTeacherAck(params: {
         },
       });
       linkedSubject = matchedSubjects[0] || null;
+      if (!linkedSubject) {
+        throw new CouncilDomainError(
+          "O componente curricular associado a esta conversa não pertence a esta turma ou instituição.",
+          404
+        );
+      }
     }
 
     const subjectTeacherEmail = (linkedSubject?.teacherEmail || "").trim().toLowerCase();
@@ -3651,20 +3837,14 @@ export async function confirmPreCouncilTeacherAck(params: {
       ),
     };
 
-    const savedTrimester = await tx.classCouncilTrimester.upsert({
-      where: { boardId_trimester: { boardId, trimester } },
-      create: {
-        schoolId,
-        boardId,
-        trimester,
-        status: "IN_PROGRESS",
-        preCouncilJson: JSON.stringify(nextPreCouncil),
-        updatedByName: cleanName,
-        updatedByEmail: cleanEmail,
-      },
-      update: {
-        preCouncilJson: JSON.stringify(nextPreCouncil),
-      },
+    const savedTrimester = await saveTrimesterPreCouncilInTx(tx, {
+      existingSlot,
+      schoolId,
+      boardId,
+      trimester,
+      preCouncilJson: JSON.stringify(nextPreCouncil),
+      cleanName,
+      cleanEmail,
     });
 
     return {

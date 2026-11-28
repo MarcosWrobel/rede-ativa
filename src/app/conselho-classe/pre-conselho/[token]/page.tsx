@@ -101,6 +101,19 @@ export default async function ProfessorPreConselhoPage({ params }: Props) {
       if (!matchedConv) {
         return { status: "subject_unavailable" as const };
       }
+      if (matchedConv.subjectId && matchedConv.subjectId.trim()) {
+        const matchedSubjects = await tx.classCouncilSubject.findMany({
+          where: {
+            id: matchedConv.subjectId.trim(),
+            boardId: board.id,
+            schoolId: board.schoolId,
+          },
+          select: { id: true },
+        });
+        if (matchedSubjects.length === 0) {
+          return { status: "subject_unavailable" as const };
+        }
+      }
       lockedSubjectName = matchedConv.subjectName;
     }
 
