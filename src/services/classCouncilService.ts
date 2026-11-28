@@ -593,7 +593,11 @@ export async function getCouncilBoardDetail(
                 },
               },
               subjectEntries: {
-                where: { schoolId, subject: { schoolId } },
+                where: {
+                  schoolId,
+                  card: { schoolId, boardId },
+                  subject: { schoolId, boardId },
+                },
                 orderBy: [{ trimester: "asc" }],
               },
             },
@@ -1577,6 +1581,25 @@ async function validateAndSerializePreCouncilData(params: {
   return JSON.stringify(normalized);
 }
 
+function isPrismaUniqueConstraintError(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "P2002";
+}
+
+async function acquireBoardWriteLockInTx(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  boardId: string
+): Promise<void> {
+  const rawFn = (tx as { $queryRaw?: unknown }).$queryRaw;
+  if (typeof rawFn !== "function") return;
+  await tx.$queryRaw`
+    SELECT "id"
+    FROM "ClassCouncilBoard"
+    WHERE "id" = ${boardId} AND "schoolId" = ${schoolId}
+    FOR UPDATE
+  `;
+}
+
 async function saveCouncilMatrixBatchInTx(
   tx: Prisma.TransactionClient,
   params: {
@@ -1726,8 +1749,9 @@ async function saveCouncilMatrixBatchInTx(
       where: {
         cardId,
         schoolId,
+        card: { schoolId, boardId },
         trimester: payload.trimester,
-        subject: { active: true },
+        subject: { active: true, schoolId, boardId },
       },
       include: {
         subject: { select: { id: true, name: true, displayOrder: true } },
@@ -1751,12 +1775,37 @@ async function saveCouncilMatrixBatchInTx(
 
     const belowFromMatrixSubjectIds = new Set(belowFromMatrix.map((item) => item.subjectId));
 
-    const preservedExistingItems = parseBelowAverageJson(
+    const existingSummaryItems = parseBelowAverageJson(
       cardRecord?.[belowAvgField] as string | null | undefined
-    ).filter(
+    );
+    const candidateExistingSubjectIds = Array.from(
+      new Set(
+        existingSummaryItems
+          .map((item) => item.subjectId)
+          .filter(
+            (id): id is string =>
+              Boolean(id) &&
+              !matrixGradedSubjectIds.has(id!) &&
+              !belowFromMatrixSubjectIds.has(id!)
+          )
+      )
+    );
+    const validExistingSubjectIds = new Set<string>();
+    if (candidateExistingSubjectIds.length > 0 && typeof tx.classCouncilSubject?.findMany === "function") {
+      const matchedBoardSubjects = await tx.classCouncilSubject.findMany({
+        where: { boardId, schoolId, id: { in: candidateExistingSubjectIds } },
+        select: { id: true },
+      });
+      for (const s of matchedBoardSubjects) {
+        validExistingSubjectIds.add(s.id);
+      }
+    }
+
+    const preservedExistingItems = existingSummaryItems.filter(
       (item) =>
         !item.subjectId ||
-        (!matrixGradedSubjectIds.has(item.subjectId) &&
+        (validExistingSubjectIds.has(item.subjectId) &&
+          !matrixGradedSubjectIds.has(item.subjectId) &&
           !belowFromMatrixSubjectIds.has(item.subjectId))
     );
 
@@ -1784,29 +1833,50 @@ export async function saveCouncilMatrixBatch(params: {
 }) {
   const { schoolId, boardId, payload, userEmail } = params;
 
-  return runCouncilTenantTx(schoolId, async (tx) => {
-    const board = await tx.classCouncilBoard.findUnique({
-      where: { id: boardId },
-      select: { id: true, schoolId: true, classGroupId: true, classGroup: { select: { schoolId: true } } },
-    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await runCouncilTenantTx(schoolId, async (tx) => {
+        const board = await tx.classCouncilBoard.findUnique({
+          where: { id: boardId },
+          select: {
+            id: true,
+            schoolId: true,
+            classGroupId: true,
+            classGroup: { select: { schoolId: true } },
+          },
+        });
 
-    if (!board) {
-      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-    }
-    if (board.schoolId !== schoolId || (board.classGroup && board.classGroup.schoolId !== schoolId)) {
-      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-    }
+        if (!board) {
+          throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+        }
+        if (
+          board.schoolId !== schoolId ||
+          (board.classGroup && board.classGroup.schoolId !== schoolId)
+        ) {
+          throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+        }
 
-    if (
-      board.classGroupId &&
-      typeof tx.student?.findMany === "function" &&
-      typeof tx.studentCouncilCard?.findMany === "function"
-    ) {
-      await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
-    }
+        await acquireBoardWriteLockInTx(tx, schoolId, boardId);
 
-    return saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail });
-  });
+        if (
+          board.classGroupId &&
+          typeof tx.student?.findMany === "function" &&
+          typeof tx.studentCouncilCard?.findMany === "function"
+        ) {
+          await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
+        }
+
+        return saveCouncilMatrixBatchInTx(tx, { schoolId, boardId, payload, userEmail });
+      });
+    } catch (err) {
+      if (attempt < 2 && isPrismaUniqueConstraintError(err)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new CouncilDomainError("Não foi possível concluir a gravação da matriz.", 409);
 }
 
 export async function updateStudentCouncilCard(params: {

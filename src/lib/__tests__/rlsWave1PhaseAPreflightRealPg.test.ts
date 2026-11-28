@@ -12602,6 +12602,464 @@ describe.skipIf(!SHOULD_RUN)(
     }
   });
 
+  it("Aceite final 2: isola avaliações e resumo por quadro/escola e serializa primeira gravação concorrente sem HTTP 500", async () => {
+    const { cookies } = await import("next/headers");
+    const { PUT: putMatrixRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/matrix/route"
+    );
+    const { POST: postImportPdfRoute } = await import(
+      "@/app/api/conselho-classe/[boardId]/import-pdf/route"
+    );
+    const { getCouncilBoardDetail } = await import("@/services/classCouncilService");
+
+    const buildSereSinglePdf = (subjectHeader: string, gradeT1: string): Uint8Array => {
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const yFromBottom = (pdfY: number) => doc.internal.pageSize.getHeight() - pdfY;
+      doc.setFontSize(8);
+      doc.text("GOVERNO DO ESTADO DO PARANÁ", 28.3, yFromBottom(573.5));
+      doc.text("DATA: 18/11/2026", 748, yFromBottom(573.5));
+      doc.text("SECRETARIA DE ESTADO DA EDUCAÇÃO - SEED", 28.3, yFromBottom(562.5));
+      doc.text("SISTEMA ESCOLA", 743.5, yFromBottom(562.5));
+      doc.text("ESCOLA SINTÉTICA", 28.3, yFromBottom(539.5));
+      doc.text("2026", 802, yFromBottom(539.5));
+      doc.text("Curso: ENSINO FUNDAMENTAL", 28.3, yFromBottom(528.5));
+      doc.text("Seriação: 7º Ano", 247.7, yFromBottom(528.5));
+      doc.text("Turno: Manhã", 359.5, yFromBottom(528.5));
+      doc.text("Turma: A1", 783.5, yFromBottom(528.5));
+      doc.setFontSize(10);
+      doc.text("RELATÓRIO DE ACOMPANHAMENTO TRIMESTRAL", 318.3, yFromBottom(503));
+      doc.setFontSize(7);
+      doc.text("Disciplinas", 300, yFromBottom(475));
+      doc.text("Nro.", 31.1, yFromBottom(453.5));
+      doc.text("Nome", 48.4, yFromBottom(453.5));
+      doc.text(subjectHeader, 169.2, yFromBottom(458));
+      doc.text("T1", 164.2, yFromBottom(445));
+      doc.text("T2", 182.6, yFromBottom(445));
+      doc.text("T3", 201.0, yFromBottom(445));
+      doc.text("1", 31.4, yFromBottom(432));
+      doc.text("ESTUDANTE CC4 ALPHA", 48.4, yFromBottom(432));
+      doc.text(gradeT1, 162.2, yFromBottom(432));
+      doc.text("--", 180.6, yFromBottom(432));
+      doc.text("--", 199.0, yFromBottom(432));
+      doc.text("--", 220.8, yFromBottom(432));
+      return new Uint8Array(doc.output("arraybuffer"));
+    };
+
+    await prisma.classGroup.createMany({
+      data: [
+        {
+          id: "cc4-cg-a1",
+          schoolId: "school-alpha",
+          name: "7º Ano A1",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "cc4-cg-a2",
+          schoolId: "school-alpha",
+          name: "7º Ano A2",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+        {
+          id: "cc4-cg-b1",
+          schoolId: "school-beta",
+          name: "7º Ano B1",
+          segment: "FUNDAMENTAL",
+          shift: "MANHA",
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.student.createMany({
+      data: [
+        {
+          id: "cc4-stu-a1",
+          schoolId: "school-alpha",
+          classGroupId: "cc4-cg-a1",
+          cgm: "9700011",
+          name: "ESTUDANTE CC4 ALPHA",
+          phone: "41999970011",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilBoard.createMany({
+      data: [
+        {
+          id: "cc4-board-a1",
+          schoolId: "school-alpha",
+          classGroupId: "cc4-cg-a1",
+          year: 2026,
+        },
+        {
+          id: "cc4-board-a2",
+          schoolId: "school-alpha",
+          classGroupId: "cc4-cg-a2",
+          year: 2026,
+        },
+        {
+          id: "cc4-board-b1",
+          schoolId: "school-beta",
+          classGroupId: "cc4-cg-b1",
+          year: 2026,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.classCouncilSubject.createMany({
+      data: [
+        {
+          id: "cc4-sub-a1-lp",
+          schoolId: "school-alpha",
+          boardId: "cc4-board-a1",
+          name: "Língua Portuguesa",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "cc4-sub-a1-mat",
+          schoolId: "school-alpha",
+          boardId: "cc4-board-a1",
+          name: "Matemática",
+          displayOrder: 2,
+          active: true,
+        },
+        {
+          id: "cc4-sub-a2-otherboard",
+          schoolId: "school-alpha",
+          boardId: "cc4-board-a2",
+          name: "Geografia Outro Quadro",
+          displayOrder: 1,
+          active: true,
+        },
+        {
+          id: "cc4-sub-b1-foreign",
+          schoolId: "school-beta",
+          boardId: "cc4-board-b1",
+          name: "Ciências Outra Escola",
+          displayOrder: 1,
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.studentCouncilCard.createMany({
+      data: [
+        {
+          id: "cc4-card-a1",
+          schoolId: "school-alpha",
+          boardId: "cc4-board-a1",
+          studentId: "cc4-stu-a1",
+          trimester1BelowAvgJson: JSON.stringify([
+            { subjectName: "Projeto Manual", grade: 4.5 },
+            {
+              subjectId: "cc4-sub-a2-otherboard",
+              subjectName: "Geografia Outro Quadro",
+              grade: 3.0,
+            },
+            {
+              subjectId: "cc4-sub-b1-foreign",
+              subjectName: "Ciências Outra Escola",
+              grade: 2.0,
+            },
+          ]),
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.studentCouncilSubjectEntry.createMany({
+      data: [
+        {
+          id: "cc4-eval-otherboard",
+          schoolId: "school-alpha",
+          cardId: "cc4-card-a1",
+          subjectId: "cc4-sub-a2-otherboard",
+          trimester: 1,
+          descriptorCodes: [1],
+          grade: 3.0,
+        },
+        {
+          id: "cc4-eval-foreign",
+          schoolId: "school-beta",
+          cardId: "cc4-card-a1",
+          subjectId: "cc4-sub-b1-foreign",
+          trimester: 1,
+          descriptorCodes: [2],
+          grade: 2.0,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    await prisma.user.createMany({
+      data: [
+        {
+          id: "cc4-usr-ped",
+          email: "cc4.ped@redeativa.local",
+          name: "Pedagoga CC4",
+          role: "PEDAGOGA",
+          schoolId: "school-alpha",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    await prisma.userSchool.createMany({
+      data: [
+        {
+          id: "cc4-us-ped",
+          userId: "cc4-usr-ped",
+          schoolId: "school-alpha",
+          role: "PEDAGOGA",
+          active: true,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    testAuthState.useRealPermissions = true;
+    testAuthState.useRealCurrentSchool = true;
+    testAuthState.pendingSessionUser = {
+      id: "cc4-usr-ped",
+      email: "cc4.ped@redeativa.local",
+      schoolId: "school-alpha",
+      active: true,
+    };
+    vi.mocked(cookies).mockResolvedValue({
+      get: (name: string) =>
+        name === "active_school_id" ? { name, value: "school-alpha" } : undefined,
+    } as never);
+
+    try {
+      // 1a. Detalhe exclui avaliações de outro quadro da mesma escola e de outra escola
+      const detail = await getCouncilBoardDetail("school-alpha", "cc4-board-a1");
+      const cardDetail = detail?.studentCards.find((c) => c.id === "cc4-card-a1");
+      expect(cardDetail?.subjectEntries).toHaveLength(0);
+
+      // 1b. Salvar nota legítima recalcula resumo excluindo disciplinas de outro quadro/escola e preservando item manual
+      const saveLegitRes = await putMatrixRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/matrix", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trimester: 1,
+            entries: [
+              {
+                studentId: "cc4-stu-a1",
+                subjectId: "cc4-sub-a1-lp",
+                descriptorCodes: [1],
+                grade: 4.8,
+              },
+            ],
+          }),
+        }),
+        { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+      );
+      expect(saveLegitRes.status).toBe(200);
+
+      const cardAfterMatrix = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc4-card-a1" },
+      });
+      const t1AfterMatrix = JSON.parse(cardAfterMatrix.trimester1BelowAvgJson || "[]") as Array<{
+        subjectId?: string;
+        subjectName: string;
+      }>;
+      expect(t1AfterMatrix.map((i) => i.subjectName)).toEqual([
+        "Língua Portuguesa",
+        "Projeto Manual",
+      ]);
+
+      // Linhas divergentes permanecem intactas no banco
+      expect(
+        await prisma.studentCouncilSubjectEntry.findUnique({
+          where: { id: "cc4-eval-otherboard" },
+          select: { grade: true },
+        })
+      ).toEqual({ grade: 3.0 });
+      expect(
+        await prisma.studentCouncilSubjectEntry.findUnique({
+          where: { id: "cc4-eval-foreign" },
+          select: { schoolId: true, grade: true },
+        })
+      ).toEqual({ schoolId: "school-beta", grade: 2.0 });
+
+      // 1c. SERE PDF apply também preserva manual + LP e exclui itens divergentes
+      const fd = new FormData();
+      fd.set("mode", "apply");
+      fd.set(
+        "files",
+        new File([Buffer.from(buildSereSinglePdf("MATEMATICA", "5.4"))], "sere.pdf", {
+          type: "application/pdf",
+        })
+      );
+      const sereRes = await postImportPdfRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/import-pdf", {
+          method: "POST",
+          body: fd,
+        }),
+        { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+      );
+      expect(sereRes.status).toBe(200);
+
+      const cardAfterSere = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc4-card-a1" },
+      });
+      const t1AfterSere = JSON.parse(cardAfterSere.trimester1BelowAvgJson || "[]") as Array<{
+        subjectName: string;
+      }>;
+      expect(t1AfterSere.map((i) => i.subjectName)).toEqual([
+        "Língua Portuguesa",
+        "Matemática",
+        "Projeto Manual",
+      ]);
+
+      // 2a. Duas gravações concorrentes de avaliação inicialmente inexistente (T2, Matemática)
+      const [concSameA, concSameB] = await Promise.all([
+        putMatrixRoute(
+          new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/matrix", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              trimester: 2,
+              entries: [
+                {
+                  studentId: "cc4-stu-a1",
+                  subjectId: "cc4-sub-a1-mat",
+                  descriptorCodes: [1],
+                  grade: 5.0,
+                },
+              ],
+            }),
+          }),
+          { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+        ),
+        putMatrixRoute(
+          new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/matrix", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              trimester: 2,
+              entries: [
+                {
+                  studentId: "cc4-stu-a1",
+                  subjectId: "cc4-sub-a1-mat",
+                  descriptorCodes: [2],
+                  grade: 4.2,
+                },
+              ],
+            }),
+          }),
+          { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+        ),
+      ]);
+      expect(concSameA.status).toBe(200);
+      expect(concSameB.status).toBe(200);
+
+      const t2Entries = await prisma.studentCouncilSubjectEntry.findMany({
+        where: { cardId: "cc4-card-a1", subjectId: "cc4-sub-a1-mat", trimester: 2 },
+      });
+      expect(t2Entries).toHaveLength(1);
+      const cardAfterT2 = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc4-card-a1" },
+      });
+      const t2Summary = JSON.parse(cardAfterT2.trimester2BelowAvgJson || "[]") as Array<{
+        subjectId: string;
+        grade: number;
+      }>;
+      expect(t2Summary).toEqual([
+        expect.objectContaining({
+          subjectId: "cc4-sub-a1-mat",
+          grade: t2Entries[0].grade,
+        }),
+      ]);
+
+      // 2b. Gravações concorrentes em disciplinas diferentes da mesma ficha (T3: LP e Matemática)
+      const [concDiffA, concDiffB] = await Promise.all([
+        putMatrixRoute(
+          new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/matrix", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              trimester: 3,
+              entries: [
+                {
+                  studentId: "cc4-stu-a1",
+                  subjectId: "cc4-sub-a1-lp",
+                  descriptorCodes: [1],
+                  grade: 4.1,
+                },
+              ],
+            }),
+          }),
+          { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+        ),
+        putMatrixRoute(
+          new Request("http://127.0.0.1/api/conselho-classe/cc4-board-a1/matrix", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              trimester: 3,
+              entries: [
+                {
+                  studentId: "cc4-stu-a1",
+                  subjectId: "cc4-sub-a1-mat",
+                  descriptorCodes: [2],
+                  grade: 5.3,
+                },
+              ],
+            }),
+          }),
+          { params: Promise.resolve({ boardId: "cc4-board-a1" }) }
+        ),
+      ]);
+      expect(concDiffA.status).toBe(200);
+      expect(concDiffB.status).toBe(200);
+
+      const cardAfterT3 = await prisma.studentCouncilCard.findUniqueOrThrow({
+        where: { id: "cc4-card-a1" },
+      });
+      const t3Summary = JSON.parse(cardAfterT3.trimester3BelowAvgJson || "[]") as Array<{
+        subjectId: string;
+      }>;
+      expect(t3Summary.map((i) => i.subjectId).sort()).toEqual([
+        "cc4-sub-a1-lp",
+        "cc4-sub-a1-mat",
+      ]);
+    } finally {
+      testAuthState.useRealPermissions = false;
+      testAuthState.useRealCurrentSchool = false;
+      testAuthState.pendingSessionUser = null;
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.userSchool.deleteMany({ where: { id: "cc4-us-ped" } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: "cc4-usr-ped" } }).catch(() => {});
+      await prisma.studentCouncilSubjectEntry
+        .deleteMany({ where: { cardId: "cc4-card-a1" } })
+        .catch(() => {});
+      await prisma.studentCouncilCard
+        .deleteMany({ where: { id: "cc4-card-a1" } })
+        .catch(() => {});
+      await prisma.classCouncilSubject
+        .deleteMany({
+          where: { boardId: { in: ["cc4-board-a1", "cc4-board-a2", "cc4-board-b1"] } },
+        })
+        .catch(() => {});
+      await prisma.classCouncilBoard
+        .deleteMany({ where: { id: { in: ["cc4-board-a1", "cc4-board-a2", "cc4-board-b1"] } } })
+        .catch(() => {});
+      await prisma.student.deleteMany({ where: { id: "cc4-stu-a1" } }).catch(() => {});
+      await prisma.classGroup
+        .deleteMany({ where: { id: { in: ["cc4-cg-a1", "cc4-cg-a2", "cc4-cg-b1"] } } })
+        .catch(() => {});
+    }
+  });
+
   }
 );
 

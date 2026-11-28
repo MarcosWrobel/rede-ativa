@@ -429,11 +429,22 @@ export async function applyCouncilSerePdfImport(params: {
 }> {
   const { boardId, schoolId, batch, actor, req, confirmShiftUpdate = false } = params;
 
-  const txOutcome = await withTenantContext(prisma, schoolId, async (tx) => {
-    const board = await getCouncilBoardDetail(schoolId, boardId, tx);
-    if (!board) {
-      throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
-    }
+  let txOutcome: Awaited<ReturnType<typeof runApplyTx>> | undefined;
+  const runApplyTx = () =>
+    withTenantContext(prisma, schoolId, async (tx) => {
+      if (typeof (tx as { $queryRaw?: unknown }).$queryRaw === "function") {
+        await tx.$queryRaw`
+          SELECT "id"
+          FROM "ClassCouncilBoard"
+          WHERE "id" = ${boardId} AND "schoolId" = ${schoolId}
+          FOR UPDATE
+        `;
+      }
+
+      const board = await getCouncilBoardDetail(schoolId, boardId, tx);
+      if (!board) {
+        throw new CouncilDomainError("Quadro do conselho de classe não encontrado.", 404);
+      }
 
     const classStudents = await loadAuthorizedClassRosterStudents(
       tx,
@@ -861,6 +872,11 @@ export async function applyCouncilSerePdfImport(params: {
     };
   }> = [];
 
+  const validBoardSubjectIds = new Set<string>([
+    ...board.subjects.map((s) => s.id),
+    ...Array.from(resolvedSubjectByMatchKey.values()).map((s) => s.id),
+  ]);
+
   for (const card of mutableCards) {
     const touchedTris = touchedCardTrimesters.get(card.id);
     if (!touchedTris || touchedTris.size === 0) continue;
@@ -921,7 +937,8 @@ export async function applyCouncilSerePdfImport(params: {
       const preservedExistingItems = parseBelowAverageJson(existingJson).filter(
         (item) =>
           !item.subjectId ||
-          (!matrixGradedSubjectIds.has(item.subjectId) &&
+          (validBoardSubjectIds.has(item.subjectId) &&
+            !matrixGradedSubjectIds.has(item.subjectId) &&
             !belowFromMatrixSubjectIds.has(item.subjectId))
       );
 
@@ -998,6 +1015,21 @@ export async function applyCouncilSerePdfImport(params: {
     refreshedBoard,
   };
   });
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      txOutcome = await runApplyTx();
+      break;
+    } catch (err) {
+      if (attempt < 2 && (err as { code?: string } | null)?.code === "P2002") {
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (!txOutcome) {
+    throw new CouncilDomainError("Não foi possível concluir a importação do SERE PDF.", 409);
+  }
 
   // Auditoria sem PII (apenas contadores agregados e schoolId na raiz) após commit
   await logAudit({
