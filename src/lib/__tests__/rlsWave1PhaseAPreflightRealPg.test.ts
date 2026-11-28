@@ -293,6 +293,9 @@ import {
   createPreCouncilTeacherToken,
 } from "@/lib/councilTeacherToken";
 import { renderToStaticMarkup } from "react-dom/server";
+import { GET as getPublicAtaRoute } from "@/app/api/atas/public/[code]/route";
+import ValidarAtaPage from "@/app/validar/ata/[code]/page";
+import { computeMinuteHash, computeAddendumHash } from "@/lib/ataCrypto";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -14938,6 +14941,464 @@ describe.skipIf(!SHOULD_RUN)(
       await prisma.student.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
       await prisma.classGroup.deleteMany({ where: { schoolId: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
       await prisma.school.deleteMany({ where: { id: { in: ["tp3-school-alpha", "tp3-school-beta"] } } }).catch(() => {});
+    }
+  });
+
+  it("isola consulta pública de Atas por código (GET /api/atas/public/[code] e /validar/ata/[code]) em withTenantContext sem vazamento ou gravação", async () => {
+    const { cookies } = await import("next/headers");
+    const originalWithTenantContext = rlsTenantContext.withTenantContext;
+    const observedContexts: Array<{ schoolId: string; pgSetting: string | null }> = [];
+    const spy = vi
+      .spyOn(rlsTenantContext, "withTenantContext")
+      .mockImplementation(async (client, schoolId, fn) => {
+        return originalWithTenantContext(client, schoolId, async (tx) => {
+          const rows = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT NULLIF(current_setting('app.current_school_id', true), '') AS val
+          `;
+          observedContexts.push({ schoolId, pgSetting: rows[0]?.val ?? null });
+          return fn(tx);
+        });
+      });
+
+    try {
+      await prisma.school.createMany({
+        data: [
+          { id: "pub-school-alpha", name: "Colégio Público Alpha", inepCode: "99130101", city: "Curitiba", state: "PR", nre: "Curitiba", active: true },
+          { id: "pub-school-beta", name: "Colégio Público Beta", inepCode: "99130102", city: "Londrina", state: "PR", nre: "Londrina", active: true },
+        ],
+      });
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "pub-cg-alpha", schoolId: "pub-school-alpha", name: "6º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "pub-cg-beta", schoolId: "pub-school-beta", name: "6º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+        ],
+      });
+      await prisma.student.createMany({
+        data: [
+          { id: "pub-stu-alpha", schoolId: "pub-school-alpha", classGroupId: "pub-cg-alpha", name: "Estudante Sigiloso Alpha", phone: "41999991401", cgm: "111222333", active: true },
+          { id: "pub-stu-beta", schoolId: "pub-school-beta", classGroupId: "pub-cg-beta", name: "Estudante Sigiloso Beta", phone: "41999991402", cgm: "444555666", active: true },
+        ],
+      });
+
+      const attendedAt = new Date("2026-11-20T14:00:00.000Z");
+      const finalizedAt = new Date("2026-11-20T15:00:00.000Z");
+      const addendumCreatedAt = new Date("2026-11-21T10:00:00.000Z");
+
+      const buildSignedMinuteData = (params: {
+        id: string;
+        schoolId: string;
+        ataNumber: number;
+        verificationCode: string;
+        status: "FINALIZED" | "VOIDED";
+        studentId: string;
+        studentName: string;
+        cgm: string;
+        participantId: string;
+        participantName: string;
+        docNum: string;
+        email: string;
+        voidReason?: string | null;
+      }) => {
+        const sigData = `data:image/png;base64,SIG_SECRETA_${params.id}`;
+        const bioData = JSON.stringify([{ x: 12, y: 34, t: 10, p: 0.5 }]);
+        const subject = `Assunto Interno Secreto ${params.id}`;
+        const summary = `Relato Sigiloso ${params.id}`;
+        const agreementsSummary = `Combinado Interno ${params.id}`;
+        const authorEmail = `autora.${params.id}@escola.pr.gov.br`;
+
+        const hash = computeMinuteHash({
+          schoolId: params.schoolId,
+          year: 2026,
+          ataNumber: params.ataNumber,
+          attendedAt: attendedAt.toISOString(),
+          category: "ATENDIMENTO_FAMILIA",
+          isConfidential: false,
+          isExtemporaneous: false,
+          extemporaneousReason: null,
+          subject,
+          summary,
+          agreementsSummary,
+          authorEmail,
+          students: [{ studentId: params.studentId, name: params.studentName, className: "6º Ano A", cgm: params.cgm }],
+          participants: [
+            {
+              role: "MOTHER",
+              name: params.participantName,
+              documentType: "CPF",
+              documentNumber: params.docNum,
+              signatureMode: "DRAW",
+              signatureData: sigData,
+              biometricStrokeData: bioData,
+              biometricVerified: true,
+              verifiedEmail: params.email,
+              refusalReason: null,
+            },
+          ],
+          actionItems: [{ description: `Ação Interna ${params.id}`, responsible: "Equipe", dueDate: null }],
+        });
+
+        const addHash = computeAddendumHash(
+          hash,
+          `Em tempo sigiloso ${params.id}`,
+          authorEmail,
+          addendumCreatedAt.toISOString()
+        );
+
+        return { hash, addHash, sigData, bioData, subject, summary, agreementsSummary, authorEmail };
+      };
+
+      const alphaCrypto = buildSignedMinuteData({
+        id: "pub-ata-alpha",
+        schoolId: "pub-school-alpha",
+        ataNumber: 1,
+        verificationCode: "ATA-PUB-ALPHA-1",
+        status: "FINALIZED",
+        studentId: "pub-stu-alpha",
+        studentName: "Estudante Sigiloso Alpha",
+        cgm: "111222333",
+        participantId: "pub-part-alpha",
+        participantName: "Maria Responsavel Alpha",
+        docNum: "12345678901",
+        email: "responsavel.alpha@escola.pr.gov.br",
+      });
+
+      const betaCrypto = buildSignedMinuteData({
+        id: "pub-ata-beta",
+        schoolId: "pub-school-beta",
+        ataNumber: 1,
+        verificationCode: "ATA-PUB-BETA-1",
+        status: "FINALIZED",
+        studentId: "pub-stu-beta",
+        studentName: "Estudante Sigiloso Beta",
+        cgm: "444555666",
+        participantId: "pub-part-beta",
+        participantName: "Joao Responsavel Beta",
+        docNum: "98765432100",
+        email: "responsavel.beta@escola.pr.gov.br",
+      });
+
+      const voidCrypto = buildSignedMinuteData({
+        id: "pub-ata-void",
+        schoolId: "pub-school-alpha",
+        ataNumber: 2,
+        verificationCode: "ATA-PUB-VOID-2",
+        status: "VOIDED",
+        studentId: "pub-stu-alpha",
+        studentName: "Estudante Sigiloso Alpha",
+        cgm: "111222333",
+        participantId: "pub-part-void",
+        participantName: "Maria Responsavel Void",
+        docNum: "11122233344",
+        email: "void.alpha@escola.pr.gov.br",
+        voidReason: "MOTIVO_INTERNO_ANULACAO_SECRETO",
+      });
+
+      await prisma.pedagogicalMinute.createMany({
+        data: [
+          {
+            id: "pub-ata-alpha",
+            schoolId: "pub-school-alpha",
+            year: 2026,
+            ataNumber: 1,
+            status: "FINALIZED",
+            category: "ATENDIMENTO_FAMILIA",
+            subject: alphaCrypto.subject,
+            summary: alphaCrypto.summary,
+            agreementsSummary: alphaCrypto.agreementsSummary,
+            attendedAt,
+            finalizedAt,
+            authorName: "Ana Pedagoga Alpha",
+            authorRole: "Pedagoga",
+            authorEmail: alphaCrypto.authorEmail,
+            contentHash: alphaCrypto.hash,
+            verificationCode: "ATA-PUB-ALPHA-1",
+          },
+          {
+            id: "pub-ata-beta",
+            schoolId: "pub-school-beta",
+            year: 2026,
+            ataNumber: 1,
+            status: "FINALIZED",
+            category: "ATENDIMENTO_FAMILIA",
+            subject: betaCrypto.subject,
+            summary: betaCrypto.summary,
+            agreementsSummary: betaCrypto.agreementsSummary,
+            attendedAt,
+            finalizedAt,
+            authorName: "Carlos Pedagogo Beta",
+            authorRole: "Pedagogo",
+            authorEmail: betaCrypto.authorEmail,
+            contentHash: betaCrypto.hash,
+            verificationCode: "ATA-PUB-BETA-1",
+          },
+          {
+            id: "pub-ata-void",
+            schoolId: "pub-school-alpha",
+            year: 2026,
+            ataNumber: 2,
+            status: "VOIDED",
+            category: "ATENDIMENTO_FAMILIA",
+            subject: voidCrypto.subject,
+            summary: voidCrypto.summary,
+            agreementsSummary: voidCrypto.agreementsSummary,
+            attendedAt,
+            finalizedAt,
+            voidedAt: finalizedAt,
+            voidReason: "MOTIVO_INTERNO_ANULACAO_SECRETO",
+            authorName: "Ana Pedagoga Alpha",
+            authorRole: "Pedagoga",
+            authorEmail: voidCrypto.authorEmail,
+            contentHash: voidCrypto.hash,
+            verificationCode: "ATA-PUB-VOID-2",
+          },
+          {
+            id: "pub-ata-draft",
+            schoolId: "pub-school-alpha",
+            year: 2026,
+            ataNumber: null,
+            status: "DRAFT",
+            category: "ATENDIMENTO_FAMILIA",
+            subject: "Rascunho Interno",
+            summary: "Rascunho Inelegivel",
+            agreementsSummary: null,
+            attendedAt,
+            authorName: "Ana Pedagoga Alpha",
+            authorRole: "Pedagoga",
+            authorEmail: "autora.draft@escola.pr.gov.br",
+            contentHash: null,
+            verificationCode: "ATA-PUB-DRAFT-3",
+          },
+        ],
+      });
+
+      await prisma.pedagogicalMinuteStudent.createMany({
+        data: [
+          { id: "pub-ms-alpha", minuteId: "pub-ata-alpha", studentId: "pub-stu-alpha", studentNameSnapshot: "Estudante Sigiloso Alpha", classNameSnapshot: "6º Ano A", cgmSnapshot: "111222333" },
+          { id: "pub-ms-beta", minuteId: "pub-ata-beta", studentId: "pub-stu-beta", studentNameSnapshot: "Estudante Sigiloso Beta", classNameSnapshot: "6º Ano A", cgmSnapshot: "444555666" },
+          { id: "pub-ms-void", minuteId: "pub-ata-void", studentId: "pub-stu-alpha", studentNameSnapshot: "Estudante Sigiloso Alpha", classNameSnapshot: "6º Ano A", cgmSnapshot: "111222333" },
+        ],
+      });
+
+      await prisma.pedagogicalMinuteParticipant.createMany({
+        data: [
+          {
+            id: "pub-part-alpha",
+            minuteId: "pub-ata-alpha",
+            role: "MOTHER",
+            name: "Maria Responsavel Alpha",
+            documentType: "CPF",
+            documentNumber: "12345678901",
+            signatureMode: "DRAW",
+            signatureData: alphaCrypto.sigData,
+            biometricStrokeData: alphaCrypto.bioData,
+            biometricVerified: true,
+            verifiedEmail: "responsavel.alpha@escola.pr.gov.br",
+            mobileSignToken: "TOKEN_HASH_SECRETO_ALPHA",
+          },
+          {
+            id: "pub-part-beta",
+            minuteId: "pub-ata-beta",
+            role: "MOTHER",
+            name: "Joao Responsavel Beta",
+            documentType: "CPF",
+            documentNumber: "98765432100",
+            signatureMode: "DRAW",
+            signatureData: betaCrypto.sigData,
+            biometricStrokeData: betaCrypto.bioData,
+            biometricVerified: true,
+            verifiedEmail: "responsavel.beta@escola.pr.gov.br",
+            mobileSignToken: "TOKEN_HASH_SECRETO_BETA",
+          },
+          {
+            id: "pub-part-void",
+            minuteId: "pub-ata-void",
+            role: "MOTHER",
+            name: "Maria Responsavel Void",
+            documentType: "CPF",
+            documentNumber: "11122233344",
+            signatureMode: "DRAW",
+            signatureData: voidCrypto.sigData,
+            biometricStrokeData: voidCrypto.bioData,
+            biometricVerified: true,
+            verifiedEmail: "void.alpha@escola.pr.gov.br",
+            mobileSignToken: "TOKEN_HASH_SECRETO_VOID",
+          },
+        ],
+      });
+
+      await prisma.pedagogicalActionItem.createMany({
+        data: [
+          { id: "pub-ai-alpha", minuteId: "pub-ata-alpha", description: "Ação Interna pub-ata-alpha", responsible: "Equipe" },
+          { id: "pub-ai-beta", minuteId: "pub-ata-beta", description: "Ação Interna pub-ata-beta", responsible: "Equipe" },
+          { id: "pub-ai-void", minuteId: "pub-ata-void", description: "Ação Interna pub-ata-void", responsible: "Equipe" },
+        ],
+      });
+
+      await prisma.pedagogicalMinuteAddendum.createMany({
+        data: [
+          {
+            id: "pub-add-alpha",
+            minuteId: "pub-ata-alpha",
+            content: "Em tempo sigiloso pub-ata-alpha",
+            authorName: "Ana Pedagoga Alpha",
+            authorEmail: alphaCrypto.authorEmail,
+            previousHash: alphaCrypto.hash,
+            addendumHash: alphaCrypto.addHash,
+            createdAt: addendumCreatedAt,
+          },
+          {
+            id: "pub-add-beta",
+            minuteId: "pub-ata-beta",
+            content: "Em tempo sigiloso pub-ata-beta",
+            authorName: "Carlos Pedagogo Beta",
+            authorEmail: betaCrypto.authorEmail,
+            previousHash: betaCrypto.hash,
+            addendumHash: betaCrypto.addHash,
+            createdAt: addendumCreatedAt,
+          },
+          {
+            id: "pub-add-void",
+            minuteId: "pub-ata-void",
+            content: "Em tempo sigiloso pub-ata-void",
+            authorName: "Ana Pedagoga Alpha",
+            authorEmail: voidCrypto.authorEmail,
+            previousHash: voidCrypto.hash,
+            addendumHash: voidCrypto.addHash,
+            createdAt: addendumCreatedAt,
+          },
+        ],
+      });
+
+      const snapshotBefore = await prisma.pedagogicalMinute.findMany({
+        where: { schoolId: { in: ["pub-school-alpha", "pub-school-beta"] } },
+        orderBy: { id: "asc" },
+        select: { id: true, updatedAt: true, verificationCode: true, contentHash: true },
+      });
+
+      // 1. Ata elegível de Alpha com cookie apontando para Beta
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) => (name === "active_school_id" ? { value: "pub-school-beta" } : undefined),
+      } as never);
+      vi.mocked(logAudit).mockClear();
+      observedContexts.length = 0;
+
+      const alphaApiRes = await getPublicAtaRoute(
+        new Request("http://127.0.0.1/api/atas/public/ata-pub-alpha-1?schoolId=pub-school-beta"),
+        { params: Promise.resolve({ code: "ata-pub-alpha-1" }) }
+      );
+      expect(alphaApiRes.status).toBe(200);
+      const alphaApiJson = await alphaApiRes.json();
+      expect(alphaApiJson.data.isAuthentic).toBe(true);
+      expect(alphaApiJson.data.school.name).toBe("Colégio Público Alpha");
+      expect(alphaApiJson.data.school.inepCode).toBe("99130101");
+      expect(alphaApiJson.data.addendumsCount).toBe(1);
+      const alphaRaw = JSON.stringify(alphaApiJson);
+      expect(alphaRaw).not.toContain("Colégio Público Beta");
+      expect(alphaRaw).not.toContain("Estudante Sigiloso Alpha");
+      expect(alphaRaw).not.toContain("SIG_SECRETA");
+      expect(alphaRaw).not.toContain("biometricStrokeData");
+      expect(alphaRaw).not.toContain("TOKEN_HASH_SECRETO");
+      expect(alphaRaw).not.toContain("Relato Sigiloso");
+      expect(alphaRaw).not.toContain("Maria Responsavel Alpha");
+      expect(alphaRaw).not.toContain("12345678901");
+
+      const alphaSsrHtml = renderToStaticMarkup(
+        await ValidarAtaPage({ params: Promise.resolve({ code: "ata-pub-alpha-1" }) })
+      );
+      expect(alphaSsrHtml).toContain("Ata pedagógica íntegra");
+      expect(alphaSsrHtml).toContain("Colégio Público Alpha");
+      expect(alphaSsrHtml).not.toContain("Relato Sigiloso");
+      expect(alphaSsrHtml).not.toContain("SIG_SECRETA");
+      expect(observedContexts.every((c) => c.schoolId === "pub-school-alpha" && c.pgSetting === "pub-school-alpha")).toBe(true);
+
+      // 2. Ata elegível de Beta com cookie apontando para Alpha
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) => (name === "active_school_id" ? { value: "pub-school-alpha" } : undefined),
+      } as never);
+      observedContexts.length = 0;
+
+      const betaApiRes = await getPublicAtaRoute(
+        new Request("http://127.0.0.1/api/atas/public/ATA-PUB-BETA-1?schoolId=pub-school-alpha"),
+        { params: Promise.resolve({ code: "ATA-PUB-BETA-1" }) }
+      );
+      expect(betaApiRes.status).toBe(200);
+      const betaApiJson = await betaApiRes.json();
+      expect(betaApiJson.data.isAuthentic).toBe(true);
+      expect(betaApiJson.data.school.name).toBe("Colégio Público Beta");
+      expect(JSON.stringify(betaApiJson)).not.toContain("Colégio Público Alpha");
+      expect(JSON.stringify(betaApiJson)).not.toContain("Joao Responsavel Beta");
+
+      const betaSsrHtml = renderToStaticMarkup(
+        await ValidarAtaPage({ params: Promise.resolve({ code: "ATA-PUB-BETA-1" }) })
+      );
+      expect(betaSsrHtml).toContain("Ata pedagógica íntegra");
+      expect(betaSsrHtml).toContain("Colégio Público Beta");
+      expect(observedContexts.every((c) => c.schoolId === "pub-school-beta" && c.pgSetting === "pub-school-beta")).toBe(true);
+
+      // 3. Ata VOIDED mantém mensagem genérica de anulação sem vazar voidReason interno
+      const voidApiRes = await getPublicAtaRoute(
+        new Request("http://127.0.0.1/api/atas/public/ATA-PUB-VOID-2"),
+        { params: Promise.resolve({ code: "ATA-PUB-VOID-2" }) }
+      );
+      expect(voidApiRes.status).toBe(200);
+      const voidApiJson = await voidApiRes.json();
+      expect(voidApiJson.data.isAuthentic).toBe(true);
+      expect(voidApiJson.data.isVoided).toBe(true);
+      expect(JSON.stringify(voidApiJson)).not.toContain("MOTIVO_INTERNO_ANULACAO_SECRETO");
+
+      const voidSsrHtml = renderToStaticMarkup(
+        await ValidarAtaPage({ params: Promise.resolve({ code: "ATA-PUB-VOID-2" }) })
+      );
+      expect(voidSsrHtml).toContain("Ata Tornada Sem Efeito");
+      expect(voidSsrHtml).not.toContain("MOTIVO_INTERNO_ANULACAO_SECRETO");
+
+      // 4. Ata DRAFT/inelegível (sem hash/número) sinaliza violação de integridade
+      const draftApiRes = await getPublicAtaRoute(
+        new Request("http://127.0.0.1/api/atas/public/ATA-PUB-DRAFT-3"),
+        { params: Promise.resolve({ code: "ATA-PUB-DRAFT-3" }) }
+      );
+      expect(draftApiRes.status).toBe(200);
+      const draftApiJson = await draftApiRes.json();
+      expect(draftApiJson.data.isAuthentic).toBe(false);
+      expect(draftApiJson.data.minuteHashValid).toBe(false);
+
+      const draftSsrHtml = renderToStaticMarkup(
+        await ValidarAtaPage({ params: Promise.resolve({ code: "ATA-PUB-DRAFT-3" }) })
+      );
+      expect(draftSsrHtml).toContain("Violação de integridade detectada");
+
+      // 5. Código inválido/inexistente devolve 404 / Documento não encontrado sem abrir withTenantContext
+      observedContexts.length = 0;
+      const notFoundRes = await getPublicAtaRoute(
+        new Request("http://127.0.0.1/api/atas/public/ATA-INEXISTENTE-999"),
+        { params: Promise.resolve({ code: "ATA-INEXISTENTE-999" }) }
+      );
+      expect(notFoundRes.status).toBe(404);
+      const notFoundSsr = renderToStaticMarkup(
+        await ValidarAtaPage({ params: Promise.resolve({ code: "ATA-INEXISTENTE-999" }) })
+      );
+      expect(notFoundSsr).toContain("Documento não encontrado");
+      expect(observedContexts).toHaveLength(0);
+
+      // 6. Zero gravações ou auditorias após todas as consultas
+      const snapshotAfter = await prisma.pedagogicalMinute.findMany({
+        where: { schoolId: { in: ["pub-school-alpha", "pub-school-beta"] } },
+        orderBy: { id: "asc" },
+        select: { id: true, updatedAt: true, verificationCode: true, contentHash: true },
+      });
+      expect(snapshotAfter).toEqual(snapshotBefore);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.pedagogicalMinuteAddendum.deleteMany({ where: { minuteId: { in: ["pub-ata-alpha", "pub-ata-beta", "pub-ata-void", "pub-ata-draft"] } } }).catch(() => {});
+      await prisma.pedagogicalActionItem.deleteMany({ where: { minuteId: { in: ["pub-ata-alpha", "pub-ata-beta", "pub-ata-void", "pub-ata-draft"] } } }).catch(() => {});
+      await prisma.pedagogicalMinuteParticipant.deleteMany({ where: { minuteId: { in: ["pub-ata-alpha", "pub-ata-beta", "pub-ata-void", "pub-ata-draft"] } } }).catch(() => {});
+      await prisma.pedagogicalMinuteStudent.deleteMany({ where: { minuteId: { in: ["pub-ata-alpha", "pub-ata-beta", "pub-ata-void", "pub-ata-draft"] } } }).catch(() => {});
+      await prisma.pedagogicalMinute.deleteMany({ where: { schoolId: { in: ["pub-school-alpha", "pub-school-beta"] } } }).catch(() => {});
+      await prisma.student.deleteMany({ where: { schoolId: { in: ["pub-school-alpha", "pub-school-beta"] } } }).catch(() => {});
+      await prisma.classGroup.deleteMany({ where: { schoolId: { in: ["pub-school-alpha", "pub-school-beta"] } } }).catch(() => {});
+      await prisma.school.deleteMany({ where: { id: { in: ["pub-school-alpha", "pub-school-beta"] } } }).catch(() => {});
     }
   });
 
