@@ -15695,6 +15695,8 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       // 10: logsWithCrossSchoolTemplate (else branch)
+      .mockResolvedValueOnce([])
+      // 11: templatesMissingSchoolId
       .mockResolvedValueOnce([]);
 
     const report = await runRlsWave1Preflight({ $queryRaw: queryRaw as unknown as PrismaClient["$queryRaw"] });
@@ -15734,6 +15736,8 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       .mockResolvedValueOnce([{ totalCount: 1n, id: "log-missing-school" }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      // 14: templatesMissingSchoolId
       .mockResolvedValueOnce([]);
 
     const report = await runRlsWave1Preflight({ $queryRaw: queryRaw as unknown as PrismaClient["$queryRaw"] });

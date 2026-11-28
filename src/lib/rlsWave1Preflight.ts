@@ -24,6 +24,7 @@ export interface RlsWave1PreflightReport {
     logsDivergentSchoolId: RlsWave1PreflightFinding;
     logsWithMissingTemplate: RlsWave1PreflightFinding;
     logsWithCrossSchoolTemplate: RlsWave1PreflightFinding;
+    templatesMissingSchoolId: RlsWave1PreflightFinding;
     studentsWithMissingClassGroup: RlsWave1PreflightFinding;
     studentsWithCrossSchoolClassGroup: RlsWave1PreflightFinding;
   };
@@ -39,8 +40,8 @@ function toNumber(value: bigint | number | undefined | null): number {
   return typeof value === "bigint" ? Number(value) : Number(value);
 }
 
-function extractCountAndIds(rows: CountAndSampleRow[]): { count: number; sampleIds: string[] } {
-  if (!rows.length) {
+function extractCountAndIds(rows: CountAndSampleRow[] | undefined): { count: number; sampleIds: string[] } {
+  if (!rows || !rows.length) {
     return { count: 0, sampleIds: [] };
   }
   const count = toNumber(rows[0].totalCount);
@@ -237,10 +238,23 @@ export async function runRlsWave1Preflight(
     `;
   }
 
+  const templatesMissingSchoolIdRows = await prismaClient.$queryRaw<CountAndSampleRow[]>`
+    WITH bad AS (
+      SELECT tpl."id"
+      FROM "MessageTemplate" tpl
+      WHERE tpl."schoolId" IS NULL
+    )
+    SELECT (SELECT COUNT(*)::bigint FROM bad) AS "totalCount", b."id"
+    FROM bad b
+    ORDER BY b."id" ASC
+    LIMIT ${sampleLimit}
+  `;
+
   const studentsWithoutSchool = extractCountAndIds(studentsWithoutSchoolRows);
   const logsWithoutStudent = extractCountAndIds(logsWithoutStudentRows);
   const logsWithMissingTemplate = extractCountAndIds(logsWithMissingTemplateRows);
   const logsWithCrossSchoolTemplate = extractCountAndIds(logsWithCrossSchoolTemplateRows);
+  const templatesMissingSchoolId = extractCountAndIds(templatesMissingSchoolIdRows);
   const studentsWithMissingClassGroup = extractCountAndIds(studentsWithMissingClassGroupRows);
   const studentsWithCrossSchoolClassGroup = extractCountAndIds(
     studentsWithCrossSchoolClassGroupRows
@@ -300,6 +314,14 @@ export async function runRlsWave1Preflight(
       description:
         "MessageLog referenciando MessageTemplate de outra escola (impede FK composta).",
     },
+    templatesMissingSchoolId: {
+      ...templatesMissingSchoolId,
+      blockingForPhaseA: false,
+      blockingForPhaseB: true,
+      transitionExpectedDuringPhaseA: false,
+      description:
+        "MessageTemplate com schoolId nulo (sem uso, uso cruzado, referência incoerente ou pendente de materialização na piloto; bloqueia NOT NULL da Fase B).",
+    },
     studentsWithMissingClassGroup: {
       ...studentsWithMissingClassGroup,
       blockingForPhaseA: false,
@@ -355,8 +377,10 @@ export async function reconcileMessageLogSchoolId(
 /**
  * Materializa modelos globais legados (`MessageTemplate.schoolId IS NULL`) para a
  * Escola Piloto Fundadora (INEP `41042730` ou id `default-leopoldina`) antes da Fase B,
- * preservando o `templateId` histórico nos logs. Modelos globais referenciados por outras
- * escolas NÃO são auto-corrigidos e permanecem visíveis ao pré-flight para correção explícita.
+ * exclusivamente quando comprovado uso único pela escola piloto e coerência entre
+ * `MessageLog.schoolId` (quando preenchido) e `Student.schoolId`.
+ * Modelos sem uso, de uso cruzado, com referências incoerentes ou sem piloto identificável
+ * NÃO são auto-corrigidos e permanecem pendentes no pré-flight (`templatesMissingSchoolId`).
  */
 export async function materializePilotGlobalTemplatesForPhaseB(
   prismaClient: Pick<PrismaClient, "$executeRaw">
@@ -372,12 +396,24 @@ export async function materializePilotGlobalTemplatesForPhaseB(
       LIMIT 1
     ) AS pilot
     WHERE tpl."schoolId" IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM "MessageLog" ml
+        INNER JOIN "Student" st ON st."id" = ml."studentId"
+        WHERE ml."templateId" = tpl."id"
+          AND st."schoolId" = pilot."id"
+          AND (ml."schoolId" IS NULL OR ml."schoolId" = pilot."id")
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM "MessageLog" ml
         LEFT JOIN "Student" st ON st."id" = ml."studentId"
         WHERE ml."templateId" = tpl."id"
-          AND COALESCE(ml."schoolId", st."schoolId") IS DISTINCT FROM pilot."id"
+          AND (
+            st."id" IS NULL
+            OR st."schoolId" IS DISTINCT FROM pilot."id"
+            OR (ml."schoolId" IS NOT NULL AND ml."schoolId" IS DISTINCT FROM pilot."id")
+          )
       )
   `;
   return { materializedCount: Number(materializedCount) };

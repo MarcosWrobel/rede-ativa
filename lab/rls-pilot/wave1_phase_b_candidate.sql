@@ -4,11 +4,19 @@
 -- 1. Validação atômica pré-condição (aborta transação sem alterações parciais se houver divergências)
 DO $$
 DECLARE
+  v_null_school_templates bigint;
   v_null_school_logs bigint;
   v_cross_student_cg bigint;
   v_cross_log_student bigint;
   v_cross_log_template bigint;
 BEGIN
+  SELECT COUNT(*) INTO v_null_school_templates
+  FROM public."MessageTemplate"
+  WHERE "schoolId" IS NULL;
+  IF v_null_school_templates > 0 THEN
+    RAISE EXCEPTION 'PREFLIGHT_BLOCKED_PHASE_B: MessageTemplate possui % modelo(s) com schoolId NULL (sem uso, uso cruzado ou pendente de materializacao).', v_null_school_templates;
+  END IF;
+
   SELECT COUNT(*) INTO v_null_school_logs
   FROM public."MessageLog"
   WHERE "schoolId" IS NULL;
