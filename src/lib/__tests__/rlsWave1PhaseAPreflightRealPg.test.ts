@@ -278,6 +278,21 @@ import GestaoPage from "@/app/gestao/page";
 import VisaoGeralPage from "@/app/visao-geral/page";
 import AtestadosPage from "@/app/atestados/page";
 import EncaminhamentosPage from "@/app/encaminhamentos/page";
+import ProfessorConselhoPage from "@/app/conselho-classe/professor/[token]/page";
+import ProfessorPreConselhoPage from "@/app/conselho-classe/pre-conselho/[token]/page";
+import {
+  POST as postTeacherPortalRoute,
+  PUT as putTeacherPortalRoute,
+} from "@/app/api/conselho-classe/teacher-portal/[token]/route";
+import {
+  POST as postPreCouncilPortalRoute,
+  PUT as putPreCouncilPortalRoute,
+} from "@/app/api/conselho-classe/pre-council-portal/[token]/route";
+import {
+  createCouncilTeacherToken,
+  createPreCouncilTeacherToken,
+} from "@/lib/councilTeacherToken";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const SHOULD_RUN = process.env.RUN_RLS_PHASE_A_TEST === "true";
 
@@ -13741,6 +13756,565 @@ describe.skipIf(!SHOULD_RUN)(
     }
   });
 
+  it("isola os portais docentes por token (Matriz e Pré-Conselho) com withTenantContext, cookie divergente ignorado, rejeições e preservação entre escolas", async () => {
+    const { cookies } = await import("next/headers");
+    const originalWithTenantContext = rlsTenantContext.withTenantContext;
+    const observedContexts: Array<{ schoolId: string; pgSetting: string | null }> = [];
+    const spy = vi
+      .spyOn(rlsTenantContext, "withTenantContext")
+      .mockImplementation(async (client, schoolId, fn) => {
+        return originalWithTenantContext(client, schoolId, async (tx) => {
+          const rows = await tx.$queryRaw<Array<{ val: string | null }>>`
+            SELECT NULLIF(current_setting('app.current_school_id', true), '') AS val
+          `;
+          observedContexts.push({ schoolId, pgSetting: rows[0]?.val ?? null });
+          return fn(tx);
+        });
+      });
+
+    try {
+      await prisma.school.createMany({
+        data: [
+          { id: "tp-school-alpha", name: "Colégio Alpha", inepCode: "99110101", active: true },
+          { id: "tp-school-beta", name: "Colégio Beta", inepCode: "99110102", active: true },
+          { id: "tp-school-inactive", name: "Colégio Inativo", inepCode: "99110103", active: false },
+        ],
+      });
+
+      await prisma.classGroup.createMany({
+        data: [
+          { id: "tp-cg-alpha", schoolId: "tp-school-alpha", name: "6º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "tp-cg-beta", schoolId: "tp-school-beta", name: "6º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+          { id: "tp-cg-inactive", schoolId: "tp-school-inactive", name: "6º Ano A", shift: "Manhã", segment: "FUNDAMENTAL" },
+        ],
+      });
+
+      await prisma.student.createMany({
+        data: [
+          { id: "tp-stu-alpha", schoolId: "tp-school-alpha", classGroupId: "tp-cg-alpha", name: "Aluno Alpha 1", phone: "41999990101", active: true },
+          { id: "tp-stu-beta", schoolId: "tp-school-beta", classGroupId: "tp-cg-beta", name: "Aluno Beta 1", phone: "41999990102", active: true },
+          { id: "tp-stu-inactive", schoolId: "tp-school-inactive", classGroupId: "tp-cg-inactive", name: "Aluno Inativo 1", phone: "41999990103", active: true },
+        ],
+      });
+
+      await prisma.classCouncilBoard.createMany({
+        data: [
+          { id: "tp-board-alpha", schoolId: "tp-school-alpha", classGroupId: "tp-cg-alpha", year: 2026 },
+          { id: "tp-board-beta", schoolId: "tp-school-beta", classGroupId: "tp-cg-beta", year: 2026 },
+          { id: "tp-board-inactive", schoolId: "tp-school-inactive", classGroupId: "tp-cg-inactive", year: 2026 },
+        ],
+      });
+
+      await prisma.classCouncilSubject.createMany({
+        data: [
+          {
+            id: "tp-subj-alpha",
+            schoolId: "tp-school-alpha",
+            boardId: "tp-board-alpha",
+            name: "Matemática",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+          },
+          {
+            id: "tp-subj-alpha-other",
+            schoolId: "tp-school-alpha",
+            boardId: "tp-board-alpha",
+            name: "História",
+            teacherName: "Prof. Outro",
+            teacherEmail: "prof.outro@escola.pr.gov.br",
+          },
+          {
+            id: "tp-subj-beta",
+            schoolId: "tp-school-beta",
+            boardId: "tp-board-beta",
+            name: "Matemática",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+          },
+          {
+            id: "tp-subj-inactive",
+            schoolId: "tp-school-inactive",
+            boardId: "tp-board-inactive",
+            name: "Matemática",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+          },
+        ],
+      });
+
+      await prisma.studentCouncilCard.createMany({
+        data: [
+          { id: "tp-card-alpha", schoolId: "tp-school-alpha", boardId: "tp-board-alpha", studentId: "tp-stu-alpha" },
+          { id: "tp-card-beta", schoolId: "tp-school-beta", boardId: "tp-board-beta", studentId: "tp-stu-beta" },
+        ],
+      });
+
+      const preCouncilAlphaJson = JSON.stringify({
+        version: 1,
+        periodLabel: "1º Trimestre",
+        objectiveText: "Alinhamento prévio",
+        responsiblePedagogueName: "Pedagoga Teste",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "tp-conv-alpha",
+            subjectId: "tp-subj-alpha",
+            subjectName: "Matemática",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp-stu-alpha"],
+            monitoredStudentsNotes: "Acompanhamento inicial Alpha",
+            agreements: "Combinado pedagógico Alpha",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+            digitalAckEmail: null,
+            digitalAckName: null,
+            digitalAckAt: null,
+          },
+          {
+            id: "tp-conv-alpha-other",
+            subjectId: "tp-subj-alpha-other",
+            subjectName: "História",
+            teacherName: "Prof. Outro",
+            teacherEmail: "prof.outro@escola.pr.gov.br",
+            monitoredStudentIds: ["tp-stu-alpha"],
+            monitoredStudentsNotes: "Nota privada Outro",
+            agreements: "Combinado privado Outro",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+            digitalAckEmail: null,
+            digitalAckName: null,
+            digitalAckAt: null,
+          },
+        ],
+        synthesis: {
+          mainDifficulties: "Frequência",
+          priorityStudents: "Aluno Alpha 1",
+          attendanceIssues: "Poucas faltas",
+          behaviorIssues: "",
+          pedagogicalActions: "Contato semanal",
+        },
+      });
+
+      const preCouncilBetaJson = JSON.stringify({
+        version: 1,
+        periodLabel: "1º Trimestre",
+        objectiveText: "Alinhamento Beta",
+        responsiblePedagogueName: "Pedagoga Beta",
+        responsiblePedagogueRole: "Pedagoga Responsável",
+        conversations: [
+          {
+            id: "tp-conv-beta",
+            subjectId: "tp-subj-beta",
+            subjectName: "Matemática",
+            teacherName: "Prof. Alpha",
+            teacherEmail: "prof.alpha@escola.pr.gov.br",
+            monitoredStudentIds: ["tp-stu-beta"],
+            monitoredStudentsNotes: "Nota Beta intacta",
+            agreements: "Combinado Beta intacto",
+            conversationStatus: "COMPLETED",
+            conversationDate: "2026-11-20",
+            digitalAckEmail: null,
+            digitalAckName: null,
+            digitalAckAt: null,
+          },
+        ],
+        synthesis: {
+          mainDifficulties: "Beta",
+          priorityStudents: "",
+          attendanceIssues: "",
+          behaviorIssues: "",
+          pedagogicalActions: "",
+        },
+      });
+
+      await prisma.classCouncilTrimester.createMany({
+        data: [
+          {
+            id: "tp-trim-alpha-1",
+            schoolId: "tp-school-alpha",
+            boardId: "tp-board-alpha",
+            trimester: 1,
+            preCouncilJson: preCouncilAlphaJson,
+          },
+          {
+            id: "tp-trim-beta-1",
+            schoolId: "tp-school-beta",
+            boardId: "tp-board-beta",
+            trimester: 1,
+            preCouncilJson: preCouncilBetaJson,
+          },
+        ],
+      });
+
+      // Cookie tentando apontar para school-beta NÃO pode sobrescrever o escopo do token de school-alpha
+      vi.mocked(cookies).mockResolvedValue({
+        get: (name: string) => (name === "active_school_id" ? { value: "tp-school-beta" } : undefined),
+      } as never);
+
+      const { token: teacherTokenAlpha } = createCouncilTeacherToken({
+        schoolId: "tp-school-alpha",
+        boardId: "tp-board-alpha",
+        trimester: 1,
+        subjectId: "tp-subj-alpha",
+        expiresInDays: 7,
+      });
+
+      const { token: preCouncilTokenAlpha } = createPreCouncilTeacherToken({
+        schoolId: "tp-school-alpha",
+        boardId: "tp-board-alpha",
+        trimester: 1,
+        conversationId: "tp-conv-alpha",
+        expiresInDays: 7,
+      });
+
+      // 1. SSR legítimo do Portal da Matriz (professor/[token])
+      observedContexts.length = 0;
+      const teacherSsrHtml = renderToStaticMarkup(
+        await ProfessorConselhoPage({ params: Promise.resolve({ token: teacherTokenAlpha }) })
+      );
+      expect(teacherSsrHtml).toContain("Colégio Alpha");
+      expect(teacherSsrHtml).toContain("6º Ano A");
+      expect(teacherSsrHtml).not.toContain("Colégio Beta");
+      expect(observedContexts.length).toBeGreaterThan(0);
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+
+      // 2. POST legítimo no Portal da Matriz (tentando forçar schoolId=tp-school-beta na query)
+      observedContexts.length = 0;
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const postTeacherRes = await postTeacherPortalRoute(
+        new Request(
+          `http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherTokenAlpha}?schoolId=tp-school-beta&boardId=tp-board-beta`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+          }
+        ),
+        { params: Promise.resolve({ token: teacherTokenAlpha }) }
+      );
+      expect(postTeacherRes.status).toBe(200);
+      const postTeacherJson = await postTeacherRes.json();
+      expect(postTeacherJson.council.schoolName).toBe("Colégio Alpha");
+      expect(postTeacherJson.council.subjects.map((s: { id: string }) => s.id)).toEqual(["tp-subj-alpha"]);
+      expect(Object.keys(postTeacherJson.council.preCouncil.conversationsBySubjectId)).toEqual(["tp-subj-alpha"]);
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+
+      // 3. PUT legítimo no Portal da Matriz + logAudit pós-commit
+      observedContexts.length = 0;
+      vi.mocked(logAudit).mockClear();
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const putTeacherRes = await putTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherTokenAlpha}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            subjectId: "tp-subj-alpha",
+            entries: [
+              {
+                studentId: "tp-stu-alpha",
+                descriptorCodes: [1, 2],
+              },
+            ],
+            preCouncil: {
+              monitoredStudentIds: ["tp-stu-alpha"],
+              monitoredStudentsNotes: "Atualizado pelo docente",
+            },
+            confirmAck: false,
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherTokenAlpha }) }
+      );
+      expect(putTeacherRes.status).toBe(200);
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+      expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schoolId: "tp-school-alpha",
+          entityId: "tp-board-alpha",
+          action: "TEACHER_SUBMIT_COUNCIL_SUBJECT",
+        })
+      );
+
+      const persistedEntry = await prisma.studentCouncilSubjectEntry.findFirst({
+        where: { cardId: "tp-card-alpha", subjectId: "tp-subj-alpha", trimester: 1 },
+      });
+      expect(persistedEntry?.schoolId).toBe("tp-school-alpha");
+      expect(persistedEntry?.descriptorCodes).toEqual([1, 2]);
+
+      // 4. SSR legítimo do Portal de Pré-Conselho (pre-conselho/[token])
+      observedContexts.length = 0;
+      const preCouncilSsrHtml = renderToStaticMarkup(
+        await ProfessorPreConselhoPage({ params: Promise.resolve({ token: preCouncilTokenAlpha }) })
+      );
+      expect(preCouncilSsrHtml).toContain("Colégio Alpha");
+      expect(preCouncilSsrHtml).not.toContain("Colégio Beta");
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+
+      // 5. POST e PUT legítimos no Portal de Pré-Conselho + logAudit pós-commit
+      observedContexts.length = 0;
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const postPreCouncilRes = await postPreCouncilPortalRoute(
+        new Request(
+          `http://127.0.0.1/api/conselho-classe/pre-council-portal/${preCouncilTokenAlpha}?schoolId=tp-school-beta`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+          }
+        ),
+        { params: Promise.resolve({ token: preCouncilTokenAlpha }) }
+      );
+      expect(postPreCouncilRes.status).toBe(200);
+      const postPreCouncilJson = await postPreCouncilRes.json();
+      expect(postPreCouncilJson.preCouncil.schoolName).toBe("Colégio Alpha");
+      expect(postPreCouncilJson.preCouncil.conversations.map((c: { id: string }) => c.id)).toEqual(["tp-conv-alpha"]);
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+
+      observedContexts.length = 0;
+      vi.mocked(logAudit).mockClear();
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const putPreCouncilRes = await putPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${preCouncilTokenAlpha}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            conversationId: "tp-conv-alpha",
+            confirmAck: true,
+          }),
+        }),
+        { params: Promise.resolve({ token: preCouncilTokenAlpha }) }
+      );
+      expect(putPreCouncilRes.status).toBe(200);
+      expect(observedContexts.every((c) => c.schoolId === "tp-school-alpha" && c.pgSetting === "tp-school-alpha")).toBe(true);
+      expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schoolId: "tp-school-alpha",
+          entityId: "tp-trim-alpha-1",
+          action: "TEACHER_ACK_PRE_COUNCIL",
+        })
+      );
+
+      // 6. Token inválido/expirado não consulta conteúdo nem audita
+      observedContexts.length = 0;
+      vi.mocked(logAudit).mockClear();
+      const invalidTeacherSsr = renderToStaticMarkup(
+        await ProfessorConselhoPage({ params: Promise.resolve({ token: "token-invalido-123" }) })
+      );
+      expect(invalidTeacherSsr).toContain("Link Inválido");
+      const invalidPreSsr = renderToStaticMarkup(
+        await ProfessorPreConselhoPage({ params: Promise.resolve({ token: "token-invalido-123" }) })
+      );
+      expect(invalidPreSsr).toContain("Link Inválido");
+      expect(observedContexts).toHaveLength(0);
+
+      const invalidPostTeacher = await postTeacherPortalRoute(
+        new Request("http://127.0.0.1/api/conselho-classe/teacher-portal/token-invalido-123", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: "token-invalido-123" }) }
+      );
+      expect(invalidPostTeacher.status).toBe(401);
+
+      const { token: expiredPreToken } = createPreCouncilTeacherToken({
+        schoolId: "tp-school-alpha",
+        boardId: "tp-board-alpha",
+        trimester: 1,
+        expiresInDays: 1,
+        nowMs: Date.now() - 10 * 24 * 60 * 60 * 1000,
+      });
+      const expiredPostPre = await postPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${expiredPreToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: expiredPreToken }) }
+      );
+      expect(expiredPostPre.status).toBe(401);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // 7. Vínculos divergentes (escola x quadro, escola inativa, trimestre ausente, body adulterado e docente não atribuído)
+      vi.mocked(logAudit).mockClear();
+      const { token: crossSchoolToken } = createCouncilTeacherToken({
+        schoolId: "tp-school-beta",
+        boardId: "tp-board-alpha",
+        trimester: 1,
+        expiresInDays: 7,
+      });
+      const crossSsr = renderToStaticMarkup(
+        await ProfessorConselhoPage({ params: Promise.resolve({ token: crossSchoolToken }) })
+      );
+      expect(crossSsr).toContain("Conselho não encontrado");
+
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const crossPost = await postTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${crossSchoolToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: crossSchoolToken }) }
+      );
+      expect(crossPost.status).toBe(403);
+
+      const { token: inactiveSchoolToken } = createPreCouncilTeacherToken({
+        schoolId: "tp-school-inactive",
+        boardId: "tp-board-inactive",
+        trimester: 1,
+        expiresInDays: 7,
+      });
+      const inactiveSsr = renderToStaticMarkup(
+        await ProfessorPreConselhoPage({ params: Promise.resolve({ token: inactiveSchoolToken }) })
+      );
+      expect(inactiveSsr).toContain("Conselho não encontrado");
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const inactivePost = await postPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${inactiveSchoolToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: inactiveSchoolToken }) }
+      );
+      expect(inactivePost.status).toBe(403);
+
+      // Trimestre divergente / conversa inexistente
+      const { token: wrongTrimToken } = createPreCouncilTeacherToken({
+        schoolId: "tp-school-alpha",
+        boardId: "tp-board-alpha",
+        trimester: 2,
+        conversationId: "tp-conv-alpha",
+        expiresInDays: 7,
+      });
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const wrongTrimPost = await postPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${wrongTrimToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: wrongTrimToken }) }
+      );
+      expect(wrongTrimPost.status).toBe(404);
+
+      // Tentativa de adulterar subjectId/conversationId para school-beta no PUT
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const tamperedTeacherPut = await putTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherTokenAlpha}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            subjectId: "tp-subj-beta",
+            entries: [{ studentId: "tp-stu-beta", descriptorCodes: [1] }],
+          }),
+        }),
+        { params: Promise.resolve({ token: teacherTokenAlpha }) }
+      );
+      expect(tamperedTeacherPut.status).toBe(403);
+
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.alpha@escola.pr.gov.br", name: "Prof. Alpha" } as never,
+      });
+      const tamperedPrePut = await putPreCouncilPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/pre-council-portal/${preCouncilTokenAlpha}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            googleIdToken: "valid-google-token",
+            conversationId: "tp-conv-beta",
+            confirmAck: true,
+          }),
+        }),
+        { params: Promise.resolve({ token: preCouncilTokenAlpha }) }
+      );
+      expect(tamperedPrePut.status).toBe(403);
+
+      // Docente sem atribuição no quadro
+      vi.mocked(verifyEscolaGoogleIdToken).mockResolvedValueOnce({
+        ok: true,
+        tokenInfo: { email: "prof.intruso@escola.pr.gov.br", name: "Prof. Intruso" } as never,
+      });
+      const unassignedPost = await postTeacherPortalRoute(
+        new Request(`http://127.0.0.1/api/conselho-classe/teacher-portal/${teacherTokenAlpha}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ googleIdToken: "valid-google-token" }),
+        }),
+        { params: Promise.resolve({ token: teacherTokenAlpha }) }
+      );
+      expect(unassignedPost.status).toBe(403);
+      expect(vi.mocked(logAudit)).not.toHaveBeenCalled();
+
+      // Preservação integral de school-beta após todas as tentativas
+      const betaEntries = await prisma.studentCouncilSubjectEntry.findMany({
+        where: { schoolId: "tp-school-beta" },
+      });
+      expect(betaEntries).toHaveLength(0);
+      const betaTrim = await prisma.classCouncilTrimester.findUnique({
+        where: { id: "tp-trim-beta-1" },
+      });
+      expect(betaTrim?.preCouncilJson).toBe(preCouncilBetaJson);
+    } finally {
+      spy.mockRestore();
+      vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as never);
+      await prisma.studentCouncilSubjectEntry
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.classCouncilTrimester
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.studentCouncilCard
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.classCouncilSubject
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.classCouncilBoard
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.student
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.classGroup
+        .deleteMany({ where: { schoolId: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+      await prisma.school
+        .deleteMany({ where: { id: { in: ["tp-school-alpha", "tp-school-beta", "tp-school-inactive"] } } })
+        .catch(() => {});
+    }
+  });
+
+
   }
 );
 
@@ -13894,9 +14468,9 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
                 name: "Estudante Piloto",
               }
             : {
-                id: "stu-alpha",
-                schoolId: "school-alpha",
-                classGroupId: "cg-alpha",
+                id: "tp-stu-alpha",
+                schoolId: "tp-school-alpha",
+                classGroupId: "tp-cg-alpha",
                 phone: "41999991111",
                 name: "Estudante Alpha",
               }
@@ -13906,7 +14480,7 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
         findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
           where.id === "cg-piloto"
             ? { id: "cg-piloto", schoolId: "default-leopoldina", name: "7º Ano A" }
-            : { id: "cg-alpha", schoolId: "school-alpha", name: "6º Ano A" }
+            : { id: "tp-cg-alpha", schoolId: "tp-school-alpha", name: "6º Ano A" }
         ),
       },
       messageTemplate: {
@@ -13973,14 +14547,14 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       );
 
       // 3. Outra escola (school-alpha) rejeita modelo global (403) sem criar log
-      testAuthState.schoolId = "school-alpha";
+      testAuthState.schoolId = "tp-school-alpha";
       testAuthState.inepCode = "99000101";
       const resAlphaGlobal = await sendMessageHandler(
         new Request("http://127.0.0.1/api/messages/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            studentId: "stu-alpha",
+            studentId: "tp-stu-alpha",
             templateId: "tpl-global",
             reasonTitle: "Tentativa global",
             messageContent: "Não deve gravar",
@@ -13995,5 +14569,6 @@ describe("RLS Onda 1 — Pré-flight unitário (escolas inexistentes pré e pós
       testAuthState.inepCode = prevInep;
     }
   });
+
 
 });

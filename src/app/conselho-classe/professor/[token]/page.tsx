@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { withTenantContext } from "@/lib/rlsTenantContext";
 import { verifyCouncilTeacherToken } from "@/lib/councilTeacherToken";
 import { checkRateLimit, hashIp, RATE_LIMIT_POLICIES } from "@/lib/rateLimit";
 import { formatSegmentLabel, formatShiftLabel } from "@/components/conselho/types";
@@ -61,43 +62,61 @@ export default async function ProfessorConselhoPage({ params }: Props) {
     );
   }
 
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: tokenCheck.payload.boardId },
-    select: {
-      id: true,
-      schoolId: true,
-      year: true,
-      school: { select: { name: true } },
-      classGroup: { select: { name: true, segment: true, shift: true } },
-    },
+  const portalData = await withTenantContext(prisma, tokenCheck.payload.schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: tokenCheck.payload.boardId },
+      select: {
+        id: true,
+        schoolId: true,
+        year: true,
+        school: { select: { name: true, active: true } },
+        classGroup: { select: { schoolId: true, name: true, segment: true, shift: true } },
+      },
+    });
+
+    if (
+      !board ||
+      board.schoolId !== tokenCheck.payload.schoolId ||
+      board.school?.active === false ||
+      (board.classGroup?.schoolId && board.classGroup.schoolId !== board.schoolId)
+    ) {
+      return { status: "not_found" as const };
+    }
+
+    let lockedSubjectName: string | null = null;
+    if (tokenCheck.payload.subjectId) {
+      const matchedSubjects = await tx.classCouncilSubject.findMany({
+        where: {
+          id: { in: [tokenCheck.payload.subjectId] },
+          boardId: board.id,
+          schoolId: board.schoolId,
+          active: true,
+        },
+        select: { id: true, name: true },
+      });
+      if (matchedSubjects.length === 0) {
+        return { status: "subject_unavailable" as const };
+      }
+      lockedSubjectName = matchedSubjects[0].name;
+    }
+
+    return { status: "ok" as const, board, lockedSubjectName };
   });
 
-  if (!board || board.schoolId !== tokenCheck.payload.schoolId) {
+  if (portalData.status === "not_found") {
     return renderStatusCard(
       "Conselho não encontrado",
       "Este link não corresponde a uma turma ativa na instituição. Solicite um novo link à coordenação pedagógica."
     );
   }
-
-  let lockedSubjectName: string | null = null;
-  if (tokenCheck.payload.subjectId) {
-    const matchedSubjects = await prisma.classCouncilSubject.findMany({
-      where: {
-        id: { in: [tokenCheck.payload.subjectId] },
-        boardId: board.id,
-        schoolId: board.schoolId,
-        active: true,
-      },
-      select: { id: true, name: true },
-    });
-    if (matchedSubjects.length === 0) {
-      return renderStatusCard(
-        "Componente indisponível",
-        "O componente curricular associado a este link não está mais ativo nesta turma."
-      );
-    }
-    lockedSubjectName = matchedSubjects[0].name;
+  if (portalData.status === "subject_unavailable") {
+    return renderStatusCard(
+      "Componente indisponível",
+      "O componente curricular associado a este link não está mais ativo nesta turma."
+    );
   }
+
+  const { board, lockedSubjectName } = portalData;
 
   const enableDevAuth =
     process.env.NODE_ENV !== "production" &&

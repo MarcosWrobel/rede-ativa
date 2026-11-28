@@ -59,8 +59,12 @@ vi.mock("@/lib/rateLimit", async () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prismaMock: any = {
+    $executeRaw: vi.fn(async () => 1),
+    $transaction: vi.fn(async (arg: any) =>
+      typeof arg === "function" ? arg(prismaMock) : Promise.all(arg)
+    ),
     school: {
       findUnique: vi.fn(async () => hoisted.prismaSchool),
     },
@@ -73,8 +77,9 @@ vi.mock("@/lib/prisma", () => ({
     classCouncilTrimester: {
       findMany: vi.fn(async () => hoisted.prismaTrimesters),
     },
-  },
-}));
+  };
+  return { prisma: prismaMock };
+});
 
 const serviceMocks = vi.hoisted(() => ({
   resolveAuthorizedSchoolForCouncil: vi.fn(async () => hoisted.authorizedSchool),

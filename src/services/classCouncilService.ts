@@ -2578,148 +2578,152 @@ export async function getTeacherPortalCouncilContext(params: {
     verifiedEmail = null,
   } = params;
 
-  const [boardHeader, schoolRecord] = await Promise.all([
-    prisma.classCouncilBoard.findUnique({
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const boardHeader = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
       select: { id: true, schoolId: true, classGroupId: true },
-    }),
-    prisma.school?.findUnique
-      ? prisma.school.findUnique({
+    });
+    const schoolRecord = tx.school?.findUnique
+      ? await tx.school.findUnique({
           where: { id: schoolId },
           select: { id: true, name: true, active: true },
         })
-      : Promise.resolve(null),
-  ]);
+      : null;
 
-  if (!boardHeader) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (boardHeader.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-  if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
-    throw new CouncilDomainError("Instituição de ensino inativa.", 403);
-  }
-
-  if (prisma.classGroup?.findMany) {
-    const matchedClassGroups = await prisma.classGroup.findMany({
-      where: { id: boardHeader.classGroupId, schoolId },
-      select: { id: true },
-    });
-    if (matchedClassGroups.length === 0) {
-      throw new CouncilDomainError("Turma não pertence à instituição de ensino informada.", 403);
+    if (!boardHeader) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
     }
-  }
+    if (boardHeader.schoolId !== schoolId) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+    if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
+      throw new CouncilDomainError("Instituição de ensino inativa.", 403);
+    }
 
-  const [preSubjects, preTrimesters] = await Promise.all([
-    prisma.classCouncilSubject.findMany({
+    if (tx.classGroup?.findMany) {
+      const matchedClassGroups = await tx.classGroup.findMany({
+        where: { id: boardHeader.classGroupId, schoolId },
+        select: { id: true },
+      });
+      if (matchedClassGroups.length === 0) {
+        throw new CouncilDomainError("Turma não pertence à instituição de ensino informada.", 403);
+      }
+    }
+
+    const preSubjects = await tx.classCouncilSubject.findMany({
       where: { boardId, schoolId, active: true },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.classCouncilTrimester.findMany({
+    });
+    const preTrimesters = await tx.classCouncilTrimester.findMany({
       where: { boardId, schoolId, trimester },
-    }),
-  ]);
-
-  const activeSubjectsPre = [...preSubjects].sort(
-    (a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name, "pt-BR")
-  );
-
-  let candidateSubjectsPre = activeSubjectsPre;
-  if (lockedSubjectId) {
-    const locked = activeSubjectsPre.find((s) => s.id === lockedSubjectId);
-    if (!locked) {
-      throw new CouncilDomainError(
-        "O componente curricular indicado neste link não está ativo ou não pertence a esta turma.",
-        404
-      );
-    }
-    candidateSubjectsPre = [locked];
-  }
-
-  const preTriRecord = preTrimesters.find((t) => t.trimester === trimester) || null;
-  const preParsedPreCouncil =
-    parsePreCouncilData(preTriRecord?.preCouncilJson) ??
-    buildInitialPreCouncilData({
-      trimester,
-      subjects: activeSubjectsPre,
     });
 
-  const cleanViewerEmail = verifiedEmail ? verifiedEmail.trim().toLowerCase() : null;
-  const authorizedSubjectIdSet = new Set<string>();
+    const activeSubjectsPre = [...preSubjects].sort(
+      (a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name, "pt-BR")
+    );
 
-  if (cleanViewerEmail) {
-    for (const subj of candidateSubjectsPre) {
-      const conversationIndex = findTeacherPortalConversationIndex(
-        preParsedPreCouncil.conversations, subj, activeSubjectsPre
-      );
-      const matchedConv = preParsedPreCouncil.conversations[conversationIndex];
-      const authResult = isTeacherAuthorizedForCouncilSubject({
-        subjectTeacherEmail: subj.teacherEmail,
-        conversationTeacherEmail: matchedConv?.teacherEmail ?? null,
-        viewerEmail: cleanViewerEmail,
+    let candidateSubjectsPre = activeSubjectsPre;
+    if (lockedSubjectId) {
+      const locked = activeSubjectsPre.find((s) => s.id === lockedSubjectId);
+      if (!locked) {
+        throw new CouncilDomainError(
+          "O componente curricular indicado neste link não está ativo ou não pertence a esta turma.",
+          404
+        );
+      }
+      candidateSubjectsPre = [locked];
+    }
+
+    const preTriRecord = preTrimesters.find((t) => t.trimester === trimester) || null;
+    const preParsedPreCouncil =
+      parsePreCouncilData(preTriRecord?.preCouncilJson) ??
+      buildInitialPreCouncilData({
+        trimester,
+        subjects: activeSubjectsPre,
       });
-      if (authResult.authorized) {
+
+    const cleanViewerEmail = verifiedEmail ? verifiedEmail.trim().toLowerCase() : null;
+    const authorizedSubjectIdSet = new Set<string>();
+
+    if (cleanViewerEmail) {
+      for (const subj of candidateSubjectsPre) {
+        const conversationIndex = findTeacherPortalConversationIndex(
+          preParsedPreCouncil.conversations,
+          subj,
+          activeSubjectsPre
+        );
+        const matchedConv = preParsedPreCouncil.conversations[conversationIndex];
+        const authResult = isTeacherAuthorizedForCouncilSubject({
+          subjectTeacherEmail: subj.teacherEmail,
+          conversationTeacherEmail: matchedConv?.teacherEmail ?? null,
+          viewerEmail: cleanViewerEmail,
+        });
+        if (authResult.authorized) {
+          authorizedSubjectIdSet.add(subj.id);
+        }
+      }
+
+      if (lockedSubjectId && !authorizedSubjectIdSet.has(lockedSubjectId)) {
+        throw new CouncilDomainError(
+          "Seu e-mail institucional não está atribuído a este componente curricular. Solicite a vinculação à equipe pedagógica.",
+          403
+        );
+      }
+
+      if (authorizedSubjectIdSet.size === 0) {
+        throw new CouncilDomainError(
+          "Nenhum componente curricular desta turma possui atribuição confirmada para o seu e-mail institucional.",
+          403
+        );
+      }
+    } else {
+      for (const subj of candidateSubjectsPre) {
         authorizedSubjectIdSet.add(subj.id);
       }
     }
 
-    if (lockedSubjectId && !authorizedSubjectIdSet.has(lockedSubjectId)) {
-      throw new CouncilDomainError(
-        "Seu e-mail institucional não está atribuído a este componente curricular. Solicite a vinculação à equipe pedagógica.",
-        403
-      );
-    }
+    await ensureTrimestersForBoard(tx, schoolId, boardId);
+    await syncMissingStudentCardsForBoard(tx, schoolId, boardId, boardHeader.classGroupId);
 
-    if (authorizedSubjectIdSet.size === 0) {
-      throw new CouncilDomainError(
-        "Nenhum componente curricular desta turma possui atribuição confirmada para o seu e-mail institucional.",
-        403
-      );
-    }
-  } else {
-    for (const subj of candidateSubjectsPre) {
-      authorizedSubjectIdSet.add(subj.id);
-    }
-  }
-
-  await ensureTrimestersForBoard(prisma, schoolId, boardId);
-  await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, boardHeader.classGroupId);
-
-  const board = await prisma.classCouncilBoard.findUnique({
-    where: { id: boardId },
-    include: {
-      classGroup: { select: { id: true, name: true, segment: true, shift: true, schoolId: true } },
-      subjects: {
-        where: { active: true, schoolId },
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      },
-      trimesters: {
-        where: { trimester, schoolId },
-      },
-      studentCards: {
-        where: { schoolId, student: { schoolId } },
-        orderBy: { student: { name: "asc" } },
-        include: {
-          student: {
-            select: {
-              id: true,
-              schoolId: true,
-              name: true,
-              cgm: true,
-              active: true,
-              lowAttendanceRecord: {
-                select: { attendancePercent: true },
+    const board = await tx.classCouncilBoard.findUnique({
+      where: { id: boardId },
+      include: {
+        classGroup: { select: { id: true, name: true, segment: true, shift: true, schoolId: true } },
+        subjects: {
+          where: { active: true, schoolId, boardId },
+          orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+        },
+        trimesters: {
+          where: { trimester, schoolId, boardId },
+        },
+        studentCards: {
+          where: { schoolId, boardId, student: { schoolId } },
+          orderBy: { student: { name: "asc" } },
+          include: {
+            student: {
+              select: {
+                id: true,
+                schoolId: true,
+                name: true,
+                cgm: true,
+                active: true,
+                lowAttendanceRecord: {
+                  select: { attendancePercent: true },
+                },
+              },
+            },
+            subjectEntries: {
+              where: {
+                trimester,
+                schoolId,
+                card: { schoolId, boardId },
+                subject: { schoolId, boardId },
               },
             },
           },
-          subjectEntries: {
-            where: { trimester, schoolId },
-          },
         },
       },
-    },
-  });
+    });
 
   if (!board || board.schoolId !== schoolId) {
     throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
@@ -2836,6 +2840,7 @@ export async function getTeacherPortalCouncilContext(params: {
       conversationsBySubjectId,
     },
   };
+  });
 }
 
 /**
@@ -2914,112 +2919,114 @@ export async function submitTeacherPortalSubjectEntries(params: {
     throw new CouncilDomainError("Este link é exclusivo para outro componente curricular.", 403);
   }
 
-  const [board, schoolRecord] = await Promise.all([
-    prisma.classCouncilBoard.findUnique({
-      where: { id: boardId },
-      select: { id: true, schoolId: true, classGroupId: true },
-    }),
-    prisma.school?.findUnique
-      ? prisma.school.findUnique({
-          where: { id: schoolId },
-          select: { id: true, active: true },
-        })
-      : Promise.resolve(null),
-  ]);
-
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
-  if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
-    throw new CouncilDomainError("Instituição de ensino inativa.", 403);
-  }
-
-  if (prisma.classGroup?.findMany) {
-    const matchedClassGroups = await prisma.classGroup.findMany({
-      where: { id: board.classGroupId, schoolId },
-      select: { id: true },
-    });
-    if (matchedClassGroups.length === 0) {
-      throw new CouncilDomainError("Turma não pertence à instituição de ensino informada.", 403);
-    }
-  }
-
   const cleanEmail = verifiedEmail.trim().toLowerCase();
   const cleanName = verifiedName.trim() || cleanEmail.split("@")[0];
-
-  // Validação prévia estrita de vínculo docente antes de criar registros auxiliares ou carregar alunos
-  const [preSubjects, preTrimesters] = await Promise.all([
-    prisma.classCouncilSubject.findMany({ where: { boardId, schoolId, active: true } }),
-    prisma.classCouncilTrimester.findMany({
-      where: { boardId, schoolId, trimester },
-      select: { trimester: true, preCouncilJson: true },
-    }),
-  ]);
-  const preSubject = preSubjects.find((subject) => subject.id === subjectId);
-  if (!preSubject) {
-    throw new CouncilDomainError(
-      "Componente curricular não encontrado ou inativo nesta turma.",
-      404
-    );
-  }
-  const preTri = preTrimesters.find((t) => t.trimester === trimester) || null;
-  const preParsed = parsePreCouncilData(preTri?.preCouncilJson);
-  const preConversations = preParsed?.conversations ?? [];
-  const preMatchedConv = preConversations[
-    findTeacherPortalConversationIndex(preConversations, preSubject, preSubjects)
-  ];
-
-  const preAuth = isTeacherAuthorizedForCouncilSubject({
-    subjectTeacherEmail: preSubject.teacherEmail,
-    conversationTeacherEmail: preMatchedConv?.teacherEmail ?? null,
-    viewerEmail: cleanEmail,
-  });
-  if (!preAuth.authorized) {
-    if (!preAuth.assignedEmail && !preAuth.conflict) {
-      throw new CouncilDomainError(
-        "Este componente curricular não possui docente atribuído no servidor. Solicite a vinculação à equipe pedagógica.",
-        403
-      );
-    }
-    throw new CouncilDomainError(teacherAssignmentDenied, 403);
-  }
-
-  await ensureTrimestersForBoard(prisma, schoolId, boardId, cleanName, cleanEmail);
-  await syncMissingStudentCardsForBoard(prisma, schoolId, boardId, board.classGroupId);
-
   const nowIso = new Date().toISOString();
   const todayYmd = getTodayYmdSaoPaulo();
 
-  const outcome = await prisma.$transaction(async (tx) => {
-    const matchedSubjects = await tx.classCouncilSubject.findMany({
-      where: {
-        id: { in: [subjectId] },
-        boardId,
-        schoolId,
-        active: true,
-      },
-    });
-    const subject = matchedSubjects[0];
-    if (!subject) {
-      throw new CouncilDomainError(
-        "Componente curricular não encontrado ou inativo nesta turma.",
-        404
-      );
-    }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await runCouncilTenantTx(schoolId, async (tx) => {
+        const board = await tx.classCouncilBoard.findUnique({
+          where: { id: boardId },
+          select: { id: true, schoolId: true, classGroupId: true },
+        });
+        const schoolRecord = tx.school?.findUnique
+          ? await tx.school.findUnique({
+              where: { id: schoolId },
+              select: { id: true, active: true },
+            })
+          : null;
 
-    const [trimesters, activeSubjects] = await Promise.all([
-      tx.classCouncilTrimester.findMany({
-        where: { boardId, schoolId },
-        select: { trimester: true, preCouncilJson: true },
-      }),
-      tx.classCouncilSubject.findMany({
-        where: { boardId, schoolId, active: true },
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      }),
-    ]);
+        if (!board) {
+          throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+        }
+        if (board.schoolId !== schoolId) {
+          throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+        }
+        if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
+          throw new CouncilDomainError("Instituição de ensino inativa.", 403);
+        }
+
+        if (tx.classGroup?.findMany) {
+          const matchedClassGroups = await tx.classGroup.findMany({
+            where: { id: board.classGroupId, schoolId },
+            select: { id: true },
+          });
+          if (matchedClassGroups.length === 0) {
+            throw new CouncilDomainError("Turma não pertence à instituição de ensino informada.", 403);
+          }
+        }
+
+        await acquireBoardWriteLockInTx(tx, schoolId, boardId);
+
+        // Validação prévia estrita de vínculo docente antes de criar registros auxiliares
+        const preSubjects = await tx.classCouncilSubject.findMany({
+          where: { boardId, schoolId, active: true },
+          orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+        });
+        const preTrimesters = await tx.classCouncilTrimester.findMany({
+          where: { boardId, schoolId },
+          select: { trimester: true, preCouncilJson: true },
+        });
+
+        const preSubject = preSubjects.find((s) => s.id === subjectId);
+        if (!preSubject) {
+          throw new CouncilDomainError(
+            "Componente curricular não encontrado ou inativo nesta turma.",
+            404
+          );
+        }
+        const preTri = preTrimesters.find((t) => t.trimester === trimester) || null;
+        const preParsed = parsePreCouncilData(preTri?.preCouncilJson);
+        const preConversations = preParsed?.conversations ?? [];
+        const preMatchedConv =
+          preConversations[
+            findTeacherPortalConversationIndex(preConversations, preSubject, preSubjects)
+          ];
+
+        const preAuth = isTeacherAuthorizedForCouncilSubject({
+          subjectTeacherEmail: preSubject.teacherEmail,
+          conversationTeacherEmail: preMatchedConv?.teacherEmail ?? null,
+          viewerEmail: cleanEmail,
+        });
+        if (!preAuth.authorized) {
+          if (!preAuth.assignedEmail && !preAuth.conflict) {
+            throw new CouncilDomainError(
+              "Este componente curricular não possui docente atribuído no servidor. Solicite a vinculação à equipe pedagógica.",
+              403
+            );
+          }
+          throw new CouncilDomainError(teacherAssignmentDenied, 403);
+        }
+
+        await ensureTrimestersForBoard(tx, schoolId, boardId, cleanName, cleanEmail);
+        await syncMissingStudentCardsForBoard(tx, schoolId, boardId, board.classGroupId);
+
+        const matchedSubjects = await tx.classCouncilSubject.findMany({
+          where: {
+            id: { in: [subjectId] },
+            boardId,
+            schoolId,
+            active: true,
+          },
+        });
+        const subject = matchedSubjects[0];
+        if (!subject) {
+          throw new CouncilDomainError(
+            "Componente curricular não encontrado ou inativo nesta turma.",
+            404
+          );
+        }
+
+        const trimesters = await tx.classCouncilTrimester.findMany({
+          where: { boardId, schoolId },
+          select: { trimester: true, preCouncilJson: true },
+        });
+        const activeSubjects = await tx.classCouncilSubject.findMany({
+          where: { boardId, schoolId, active: true },
+          orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+        });
 
     const currentTri = trimesters.find((t) => t.trimester === trimester) || null;
     const basePreCouncil =
@@ -3199,9 +3206,19 @@ export async function submitTeacherPortalSubjectEntries(params: {
       ackConfirmed: confirmAck,
       digitalAckAt: updatedConv.digitalAckAt,
     };
-  });
+      });
+    } catch (err) {
+      if (isPrismaUniqueConstraintError(err)) {
+        if (attempt < 2) {
+          continue;
+        }
+        throw new CouncilDomainError("Conflito de concorrência ao registrar lançamento docente.", 409);
+      }
+      throw err;
+    }
+  }
 
-  return outcome;
+  throw new CouncilDomainError("Não foi possível concluir o lançamento docente.", 409);
 }
 
 export interface PreCouncilTeacherPortalConversation {
@@ -3304,19 +3321,20 @@ export async function getPreCouncilTeacherPortalContext(params: {
 }): Promise<PreCouncilTeacherPortalContext> {
   const { schoolId, boardId, trimester, lockedConversationId, verifiedEmail = null } = params;
 
-  const [board, schoolRecord] = await Promise.all([
-    prisma.classCouncilBoard.findUnique({
+  return runCouncilTenantTx(schoolId, async (tx) => {
+    const board = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
       include: {
-        classGroup: { select: { id: true, name: true, segment: true, shift: true } },
+        classGroup: { select: { id: true, schoolId: true, name: true, segment: true, shift: true } },
         subjects: {
-          where: { active: true },
+          where: { active: true, schoolId, boardId },
           select: { id: true, name: true, teacherName: true, teacherEmail: true },
         },
         trimesters: {
-          where: { trimester },
+          where: { trimester, schoolId, boardId },
         },
         studentCards: {
+          where: { schoolId, boardId, student: { schoolId } },
           orderBy: { student: { name: "asc" } },
           include: {
             student: {
@@ -3328,21 +3346,26 @@ export async function getPreCouncilTeacherPortalContext(params: {
           },
         },
       },
-    }),
-    prisma.school?.findUnique
-      ? prisma.school.findUnique({
+    });
+    const schoolRecord = tx.school?.findUnique
+      ? await tx.school.findUnique({
           where: { id: schoolId },
-          select: { id: true, name: true },
+          select: { id: true, name: true, active: true },
         })
-      : Promise.resolve(null),
-  ]);
+      : null;
 
-  if (!board) {
-    throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
-  }
-  if (board.schoolId !== schoolId) {
-    throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
-  }
+    if (!board) {
+      throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
+    }
+    if (
+      board.schoolId !== schoolId ||
+      (board.classGroup?.schoolId && board.classGroup.schoolId !== schoolId)
+    ) {
+      throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
+    }
+    if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
+      throw new CouncilDomainError("Instituição de ensino inativa.", 403);
+    }
 
   const trimesterRecord = (board.trimesters || []).find((t) => t.trimester === trimester) || null;
   const preCouncil = parsePreCouncilData(trimesterRecord?.preCouncilJson);
@@ -3455,6 +3478,7 @@ export async function getPreCouncilTeacherPortalContext(params: {
       ? createEmptyPreCouncilSynthesis()
       : preCouncil.synthesis,
   };
+  });
 }
 
 /**
@@ -3488,18 +3512,32 @@ export async function confirmPreCouncilTeacherAck(params: {
   const ackAtIso = new Date().toISOString();
   const todayYmd = getTodayYmdSaoPaulo();
 
-  return prisma.$transaction(async (tx) => {
+  return runCouncilTenantTx(schoolId, async (tx) => {
     const board = await tx.classCouncilBoard.findUnique({
       where: { id: boardId },
-      select: { id: true, schoolId: true },
+      select: { id: true, schoolId: true, classGroup: { select: { schoolId: true } } },
     });
+    const schoolRecord = tx.school?.findUnique
+      ? await tx.school.findUnique({
+          where: { id: schoolId },
+          select: { id: true, active: true },
+        })
+      : null;
 
     if (!board) {
       throw new CouncilDomainError("Conselho de classe não encontrado.", 404);
     }
-    if (board.schoolId !== schoolId) {
+    if (
+      board.schoolId !== schoolId ||
+      (board.classGroup?.schoolId && board.classGroup.schoolId !== schoolId)
+    ) {
       throw new CouncilDomainError("Acesso negado a registro de outra instituição de ensino.", 403);
     }
+    if (schoolRecord && (schoolRecord as { active?: boolean }).active === false) {
+      throw new CouncilDomainError("Instituição de ensino inativa.", 403);
+    }
+
+    await acquireBoardWriteLockInTx(tx, schoolId, boardId);
 
     const trimesters = await tx.classCouncilTrimester.findMany({
       where: { boardId, schoolId },
