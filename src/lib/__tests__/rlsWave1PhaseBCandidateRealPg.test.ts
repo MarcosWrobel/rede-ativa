@@ -1018,6 +1018,53 @@ describe.skipIf(!SHOULD_RUN)(
           where: { id: { in: ["pb-stu-alpha-hom-1", "pb-stu-alpha-hom-2"] } },
         });
 
+        // Todas as 6 permutações de 3 ocorrências (1 sem responsável + 2 com responsáveis diferentes) devem falhar
+        const guardianPermutations: Array<[string, string, string]> = [
+          ["", "Resp A", "Resp B"],
+          ["", "Resp B", "Resp A"],
+          ["Resp A", "", "Resp B"],
+          ["Resp A", "Resp B", ""],
+          ["Resp B", "", "Resp A"],
+          ["Resp B", "Resp A", ""],
+        ];
+        for (let idx = 0; idx < guardianPermutations.length; idx += 1) {
+          const [g1, g2, g3] = guardianPermutations[idx];
+          const permPath = path.join(tmpDir, `guardian-perm-${idx}.json`);
+          fs.writeFileSync(
+            permPath,
+            JSON.stringify({
+              sourceSchoolId: "phaseb-alpha",
+              sourceInepCode: "99150101",
+              FUNDAMENTAL: {
+                templates: [],
+                students: [
+                  { name: "Homônimo Resp Ordem", guardian: g1, phone: "41999991950", turma: "7º Ano Resp" },
+                  { name: "Homônimo Resp Ordem", guardian: g2, phone: "41999991950", turma: "7º Ano Resp" },
+                ],
+                logs: [
+                  { student_name: "Homônimo Resp Ordem", reason: "Aviso", date: "2026-11-28T12:00:00.000Z" },
+                ],
+              },
+              MEDIO: {
+                templates: [],
+                students: [
+                  { name: "Homônimo Resp Ordem", guardian: g3, phone: "41999991950", turma: "7º Ano Resp" },
+                ],
+                logs: [],
+              },
+            }),
+            "utf8"
+          );
+          const permRes = runSeedCli(runtimeDbUrl, [
+            "--school-id=phaseb-alpha",
+            `--data-file=${permPath}`,
+            "--replace-school-logs",
+          ]);
+          expect(permRes.status).not.toBe(0);
+          expect(`${permRes.stdout}\n${permRes.stderr}`).toMatch(/SEED_LOG_STUDENT_AMBIGUOUS/);
+          expect(await snapshotSeedState()).toEqual(stateBeforeSeed);
+        }
+
         // Falha no meio da escrita após deleteMany reverte a transação e preserva histórico
         await expect(
           runSeed({
@@ -1073,6 +1120,44 @@ describe.skipIf(!SHOULD_RUN)(
         ]);
         expect(afterReplaceSeed.alphaLogs.some((l) => l.templateId === null)).toBe(true);
 
+        // Controle positivo: uma ocorrência sem responsável e demais com o mesmo responsável sob app_runtime (FORCE RLS)
+        const guardianPositivePath = path.join(tmpDir, "guardian-positive.json");
+        fs.writeFileSync(
+          guardianPositivePath,
+          JSON.stringify({
+            sourceSchoolId: "phaseb-alpha",
+            sourceInepCode: "99150101",
+            FUNDAMENTAL: {
+              templates: [],
+              students: [
+                { name: "Aluno Resp Único", guardian: "", phone: "41999991960", turma: "7º Ano Resp Pos" },
+                { name: "Aluno Resp Único", guardian: "Resp Único", phone: "41999991960", turma: "7º Ano Resp Pos" },
+              ],
+              logs: [
+                { student_name: "Aluno Resp Único", reason: "Aviso Resp Único", date: "2026-11-28T12:10:00.000Z" },
+              ],
+            },
+            MEDIO: {
+              templates: [],
+              students: [
+                { name: "Aluno Resp Único", guardian: "Resp Único", phone: "41999991960", turma: "7º Ano Resp Pos" },
+              ],
+              logs: [],
+            },
+          }),
+          "utf8"
+        );
+        const okGuardianPos = runSeedCli(runtimeDbUrl, [
+          "--school-id=phaseb-alpha",
+          `--data-file=${guardianPositivePath}`,
+          "--replace-school-logs",
+        ]);
+        expect(okGuardianPos.status).toBe(0);
+        const afterGuardianPos = await snapshotSeedState();
+        expect(afterGuardianPos.betaLogs).toEqual(stateBeforeSeed.betaLogs);
+        expect(afterGuardianPos.betaStudents).toEqual(stateBeforeSeed.betaStudents);
+        expect(afterGuardianPos.alphaLogs.map((l) => l.reasonTitle)).toEqual(["Aviso Resp Único"]);
+
         // Execução válida pelo CLI `npm run seed` com credencial com escrita em `User` (sem mutar User/UserSchool!)
         const okAdmin = runSeedCli(adminDbUrl, [
           "--school-id=phaseb-alpha",
@@ -1087,7 +1172,7 @@ describe.skipIf(!SHOULD_RUN)(
         expect(afterAdminSeed.betaTemplates).toEqual(stateBeforeSeed.betaTemplates);
         expect(afterAdminSeed.users).toEqual(stateBeforeSeed.users);
         expect(afterAdminSeed.userSchools).toEqual(stateBeforeSeed.userSchools);
-        expect(afterAdminSeed.alphaLogs.length).toBe(3);
+        expect(afterAdminSeed.alphaLogs.length).toBe(2);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
@@ -1134,7 +1219,7 @@ describe.skipIf(!SHOULD_RUN)(
       expect(
         await adminPrisma.classGroup.findUnique({ where: { id: "pb-cg-rollback" } })
       ).toBeNull();
-    });
+    }, 60_000);
 
     it("valida piloto ausente no preflight/materialização e instalação limpa (banco vazio pós-Fase A) com app_runtime", async () => {
       const cleanUrl = assertSafeLocalPhaseBDbUrl(

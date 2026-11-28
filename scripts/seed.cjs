@@ -149,14 +149,19 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
         fileStudentsByName.set(normName, {
           phone: normPhone,
           turma: normTurma,
-          guardian: normGuardian,
+          guardians: new Set(normGuardian ? [normGuardian] : []),
         });
-      } else if (
-        prev.phone !== normPhone ||
-        prev.turma !== normTurma ||
-        (prev.guardian && normGuardian && prev.guardian !== normGuardian)
-      ) {
-        ambiguousFileStudentNames.add(normName);
+      } else {
+        if (normGuardian) {
+          prev.guardians.add(normGuardian);
+        }
+        if (
+          prev.phone !== normPhone ||
+          prev.turma !== normTurma ||
+          prev.guardians.size > 1
+        ) {
+          ambiguousFileStudentNames.add(normName);
+        }
       }
       totalRecords += 1;
     }
@@ -188,7 +193,7 @@ function validateAndParseSeedPayload(resolvedDataPath, targetSchool, options = {
     );
   }
 
-  return { data, segments, ambiguousFileStudentNames };
+  return { data, segments, ambiguousFileStudentNames, fileStudentsByName };
 }
 
 /**
@@ -254,11 +259,8 @@ async function runSeed(options = {}) {
       process.env.SEED_REPLACE_SCHOOL_LOGS === 'true' ||
       process.argv.includes('--replace-school-logs');
 
-    const { data, segments, ambiguousFileStudentNames } = validateAndParseSeedPayload(
-      resolvedDataPath,
-      targetSchool,
-      { replaceSchoolLogs }
-    );
+    const { data, segments, ambiguousFileStudentNames, fileStudentsByName } =
+      validateAndParseSeedPayload(resolvedDataPath, targetSchool, { replaceSchoolLogs });
 
     return await prisma.$transaction(
       async (tx) => {
@@ -352,14 +354,18 @@ async function runSeed(options = {}) {
               classGroupMap[`${targetSchool.id}:${s.turma}`];
             if (!cg) continue;
 
+            const knownGuardian = Array.from(
+              fileStudentsByName.get(normName)?.guardians || []
+            )[0];
             const created = await tx.student.create({
               data: {
                 schoolId: targetSchool.id,
                 name: normName,
-                guardianName: s.guardian || 'Responsável',
+                guardianName: knownGuardian || s.guardian || 'Responsável',
                 phone: s.phone.trim(),
                 classGroupId: cg.id,
               },
+              include: { classGroup: { select: { name: true } } },
             });
             studentMap[studentKey] = created;
             studentNameCounts.set(studentKey, (studentNameCounts.get(studentKey) || 0) + 1);
