@@ -12,6 +12,7 @@ interface CgmLookupPrisma {
     updateMany?: (args: any) => Promise<{ count: number }>;
   };
   $transaction: (arg: any) => Promise<any>;
+  $queryRaw?: <T = unknown>(query: TemplateStringsArray, ...values: any[]) => Promise<T>;
 }
 
 /**
@@ -19,13 +20,15 @@ interface CgmLookupPrisma {
  * Consulta no banco apenas os CGMs já atribuídos globalmente (inclusive a estudantes inativos
  * ou de outras escolas) para impedir violação da restrição @unique em `Student.cgm`.
  * O retorno é restrito exclusivamente ao campo `cgm` (sem `id`, `schoolId` ou dados pessoais).
- * Na Fase B sob FORCE RLS, deverá operar via função SECURITY DEFINER dedicada que retorne
- * apenas a lista de CGMs ocupados.
+ * Na Fase B sob FORCE RLS (`RLS_CGM_SECDEF_RESOLVER=true` / `RLS_WAVE1_SECDEF_RESOLVER=true`),
+ * opera via função SECURITY DEFINER dedicada (`public.resolve_taken_cgms`) que retorna apenas
+ * a lista de CGMs ocupados.
  */
 export async function populateGlobalTakenCgms(
-  prismaClient: Pick<CgmLookupPrisma, "student">,
+  prismaClient: Pick<CgmLookupPrisma, "student"> & Partial<Pick<CgmLookupPrisma, "$queryRaw">>,
   incomingCgms: Array<string | null | undefined>,
-  usedCgms: Set<string>
+  usedCgms: Set<string>,
+  options?: { useSecDefResolver?: boolean }
 ): Promise<void> {
   const candidates = Array.from(
     new Set(
@@ -37,13 +40,23 @@ export async function populateGlobalTakenCgms(
 
   if (candidates.length === 0) return;
 
+  const useSecDefResolver =
+    options?.useSecDefResolver ??
+    (process.env.RLS_CGM_SECDEF_RESOLVER === "true" ||
+      process.env.RLS_WAVE1_SECDEF_RESOLVER === "true");
+
   const CHUNK = 1000;
   for (let i = 0; i < candidates.length; i += CHUNK) {
     const slice = candidates.slice(i, i + CHUNK);
-    const existingRows = await prismaClient.student.findMany({
-      where: { cgm: { in: slice } },
-      select: { cgm: true },
-    });
+    const existingRows =
+      useSecDefResolver && typeof prismaClient.$queryRaw === "function"
+        ? await prismaClient.$queryRaw<Array<{ cgm: string | null }>>`
+            SELECT "cgm" FROM public.resolve_taken_cgms(${slice}::text[])
+          `
+        : await prismaClient.student.findMany({
+            where: { cgm: { in: slice } },
+            select: { cgm: true },
+          });
 
     for (const row of existingRows) {
       const clean = row.cgm?.trim();

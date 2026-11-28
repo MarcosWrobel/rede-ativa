@@ -87,26 +87,65 @@ export async function POST(req: Request) {
 
     let resolvedSchoolId: string | null = explicitSchoolId;
     let resolvedLogId: string | null = null;
+    const useSecDefResolver =
+      process.env.RLS_WEBHOOK_SECDEF_RESOLVER === "true" ||
+      process.env.RLS_WAVE1_SECDEF_RESOLVER === "true";
 
     // 1. Identificação inicial mínima pré-escola:
     //    Se houver ID interno explícito (logId / messageLogId), valida existência e correlação sem redirecionar.
     if (explicitLogId) {
-      const preLog = await prisma.messageLog.findUnique({
-        where: { id: explicitLogId },
-        select: {
-          id: true,
-          schoolId: true,
-          studentId: true,
-          phoneUsed: true,
-          student: {
-            select: {
-              id: true,
-              schoolId: true,
-              cgm: true,
+      let preLog: {
+        id: string;
+        schoolId: string | null;
+        studentId: string;
+        phoneUsed: string;
+        student: { id: string; schoolId: string; cgm: string | null } | null;
+      } | null = null;
+
+      if (useSecDefResolver) {
+        const rows = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            schoolId: string | null;
+            studentId: string;
+            phoneUsed: string;
+            studentSchoolId: string | null;
+            studentCgm: string | null;
+          }>
+        >`
+          SELECT "id", "schoolId", "studentId", "phoneUsed", "studentSchoolId", "studentCgm"
+          FROM public.resolve_whatsapp_webhook_by_log_id(${explicitLogId})
+        `;
+        const row = rows[0];
+        if (row) {
+          preLog = {
+            id: row.id,
+            schoolId: row.schoolId,
+            studentId: row.studentId,
+            phoneUsed: row.phoneUsed,
+            student: row.studentSchoolId
+              ? { id: row.studentId, schoolId: row.studentSchoolId, cgm: row.studentCgm }
+              : null,
+          };
+        }
+      } else {
+        preLog = await prisma.messageLog.findUnique({
+          where: { id: explicitLogId },
+          select: {
+            id: true,
+            schoolId: true,
+            studentId: true,
+            phoneUsed: true,
+            student: {
+              select: {
+                id: true,
+                schoolId: true,
+                cgm: true,
+              },
             },
           },
-        },
-      });
+        });
+      }
 
       if (!preLog) {
         return NextResponse.json({
@@ -141,24 +180,56 @@ export async function POST(req: Request) {
     } else if (!resolvedSchoolId) {
       // 2. Busca por telefone sem escola explícita:
       //    Avalia ambiguidade entre escolas em TODO o conjunto elegível antes de ordenar ou limitar.
-      const eligiblePreRows = await prisma.messageLog.findMany({
-        where: {
-          phoneUsed: { endsWith: phoneSuffix },
-          sentAt: { gte: cutoff },
-          ...(explicitStudentId ? { studentId: explicitStudentId } : {}),
-          ...(explicitCgm ? { student: { cgm: explicitCgm } } : {}),
-        },
-        select: {
-          id: true,
-          schoolId: true,
-          studentId: true,
-          student: {
-            select: {
-              schoolId: true,
+      let eligiblePreRows: Array<{
+        id: string;
+        schoolId: string | null;
+        studentId: string;
+        student: { schoolId: string } | null;
+      }>;
+
+      if (useSecDefResolver) {
+        const rows = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            schoolId: string | null;
+            studentId: string;
+            studentSchoolId: string | null;
+          }>
+        >`
+          SELECT "id", "schoolId", "studentId", "studentSchoolId"
+          FROM public.resolve_whatsapp_webhook_by_phone(
+            ${phoneSuffix},
+            ${cutoff},
+            ${explicitStudentId},
+            ${explicitCgm}
+          )
+        `;
+        eligiblePreRows = rows.map((r: (typeof rows)[number]) => ({
+          id: r.id,
+          schoolId: r.schoolId,
+          studentId: r.studentId,
+          student: r.studentSchoolId ? { schoolId: r.studentSchoolId } : null,
+        }));
+      } else {
+        eligiblePreRows = await prisma.messageLog.findMany({
+          where: {
+            phoneUsed: { endsWith: phoneSuffix },
+            sentAt: { gte: cutoff },
+            ...(explicitStudentId ? { studentId: explicitStudentId } : {}),
+            ...(explicitCgm ? { student: { cgm: explicitCgm } } : {}),
+          },
+          select: {
+            id: true,
+            schoolId: true,
+            studentId: true,
+            student: {
+              select: {
+                schoolId: true,
+              },
             },
           },
-        },
-      });
+        });
+      }
 
       const coherentSchoolIds = Array.from(
         new Set(

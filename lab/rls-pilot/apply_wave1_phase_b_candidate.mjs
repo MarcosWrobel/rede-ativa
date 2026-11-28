@@ -6,6 +6,15 @@ import { PrismaClient } from "@prisma/client";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 export const DEFAULT_PHASE_B_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_candidate.sql");
+export const PHASE_B_SCHEMA_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_schema.sql");
+export const PHASE_B_POLICIES_SQL_PATH = path.resolve(__dirname, "wave1_phase_b_policies.sql");
+
+export function resolvePhaseBStageSqlPath(stage = "all") {
+  if (stage === "schema") return PHASE_B_SCHEMA_SQL_PATH;
+  if (stage === "policies") return PHASE_B_POLICIES_SQL_PATH;
+  if (stage === "all") return DEFAULT_PHASE_B_SQL_PATH;
+  throw new Error(`Estágio inválido (${stage}): use 'schema', 'policies' ou 'all'.`);
+}
 
 /**
  * Divide um script SQL em instruções individuais preservando blocos `$$ ... $$`,
@@ -74,6 +83,7 @@ export function splitSqlStatements(sql) {
  *
  * @param {import("@prisma/client").PrismaClient} migratorPrisma
  * @param {{
+ *   stage?: "schema" | "policies" | "all";
  *   sqlPath?: string;
  *   sqlText?: string;
  *   onAfterStatement?: (ctx: { index: number; statement: string; tx: unknown }) => Promise<void> | void;
@@ -81,8 +91,8 @@ export function splitSqlStatements(sql) {
  * @returns {Promise<{ statementCount: number }>}
  */
 export async function applyWave1PhaseBCandidateInSingleTx(migratorPrisma, options = {}) {
-  const sqlText =
-    options.sqlText ?? fs.readFileSync(options.sqlPath ?? DEFAULT_PHASE_B_SQL_PATH, "utf8");
+  const targetSqlPath = options.sqlPath ?? resolvePhaseBStageSqlPath(options.stage ?? "all");
+  const sqlText = options.sqlText ?? fs.readFileSync(targetSqlPath, "utf8");
   const statements = splitSqlStatements(sqlText);
 
   await migratorPrisma.$transaction(
@@ -107,12 +117,15 @@ async function runCli() {
     throw new Error("RLS_PHASE_B_MIGRATOR_URL é obrigatório (conexão direta de app_migrator).");
   }
 
+  const stageArg = process.argv.find((arg) => arg.startsWith("--stage="));
+  const stage = stageArg ? stageArg.slice("--stage=".length).trim() : "all";
+
   const migratorPrisma = new PrismaClient({ datasources: { db: { url: migratorUrl } } });
   try {
     await migratorPrisma.$connect();
-    const { statementCount } = await applyWave1PhaseBCandidateInSingleTx(migratorPrisma);
+    const { statementCount } = await applyWave1PhaseBCandidateInSingleTx(migratorPrisma, { stage });
     console.log(
-      `[wave1_phase_b_candidate] Aplicado em transação única (${statementCount} instruções).`
+      `[wave1_phase_b:${stage}] Aplicado em transação única (${statementCount} instruções).`
     );
   } finally {
     await migratorPrisma.$disconnect();

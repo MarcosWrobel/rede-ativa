@@ -37,11 +37,19 @@ BEGIN
       v_runtime_pw
     );
   END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'wave1_lookup_owner') THEN
+    CREATE ROLE wave1_lookup_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+  ELSE
+    ALTER ROLE wave1_lookup_owner WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+  END IF;
 END
 $$;
 
-GRANT USAGE ON SCHEMA public TO app_migrator, app_runtime;
-GRANT CREATE ON SCHEMA public TO app_migrator;
+GRANT wave1_lookup_owner TO app_migrator;
+
+GRANT USAGE ON SCHEMA public TO app_migrator, app_runtime, wave1_lookup_owner;
+GRANT CREATE ON SCHEMA public TO app_migrator, wave1_lookup_owner;
 
 ALTER TABLE public."School" OWNER TO app_migrator;
 ALTER TABLE public."ClassGroup" OWNER TO app_migrator;
